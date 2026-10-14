@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useCharSwapStore } from "../useCharSwapStore";
 import { readLocalClip, validateReference } from "../services/localMedia";
+import { createLocalId } from "../utils/createLocalId";
 
 export function useLocalAssets() {
   const urls = useRef(new Set<string>());
@@ -105,7 +106,7 @@ export function useLocalAssets() {
           )
       ) {
         useCharSwapStore.getState().assignReference(targetId, {
-          id: crypto.randomUUID(),
+          id: createLocalId(),
           name: file.name,
           url,
         });

@@ -18,6 +18,7 @@ import type { DemoManifest, SamplePerson } from "../services/demo";
 import { boxAtTime } from "../services/demo";
 import { captureAnchor } from "../services/localMedia";
 import type { NormalizedPoint } from "../utils/videoGeometry";
+import { createLocalId } from "../utils/createLocalId";
 import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
 
@@ -91,7 +92,7 @@ export function PeopleStep({ demo }: PeopleStepProps) {
           !targets.some((target) => target.name === `Person ${number}`),
       ) ?? targets.length + 1;
     choose({
-      id: crypto.randomUUID(),
+      id: createLocalId(),
       name: `Person ${index}`,
       color: ["#75baff", "#d3a3ff", "#80d5ba"][index - 1] ?? "#80d5ba",
       anchor: { ...point, time: video.currentTime },

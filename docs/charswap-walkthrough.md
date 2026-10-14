@@ -13,6 +13,15 @@ npm run dev --prefix frontend -- --host 127.0.0.1
 
 Visit **http://127.0.0.1:5173/charswap.html**. The existing VLO editor remains at `/`. The production build includes both HTML entry points.
 
+For a phone on the same LAN, build the preview and bind a separate server to the Mac's current LAN address:
+
+```sh
+npm run build --prefix frontend
+npm run preview --prefix frontend -- --host <mac-lan-ip> --port 5174 --strictPort
+```
+
+Open `http://<mac-lan-ip>:5174/charswap.html` on the phone. On a Mac using `en0`, `ipconfig getifaddr en0` shows that address. Keep the Mac awake and the preview server running. This separate server leaves the localhost development preview available. No Firebase deployment is involved. Local IDs support HTTP LAN addresses, and the preview server supports the byte-range video requests needed for mobile playback.
+
 The local five-second sample can be prepared separately:
 
 ```sh

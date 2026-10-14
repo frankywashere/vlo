@@ -1,5 +1,6 @@
 import type { ClipAsset } from "../model/model";
 import type { NormalizedPoint } from "../utils/videoGeometry";
+import { createLocalId } from "../utils/createLocalId";
 
 const MAX_FILE_BYTES = 300 * 1024 * 1024;
 
@@ -43,7 +44,7 @@ export async function readLocalClip(
       throw new Error("Choose a playable clip at least one second long.");
     }
     return {
-      id: crypto.randomUUID(),
+      id: createLocalId(),
       name: file.name,
       url,
       duration: video.duration,
