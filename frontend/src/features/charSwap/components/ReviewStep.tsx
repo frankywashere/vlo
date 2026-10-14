@@ -2,12 +2,23 @@ import { useShallow } from "zustand/react/shallow";
 import { Alert, Avatar, Box, Button, Stack, Typography } from "@mui/material";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import DownloadRounded from "@mui/icons-material/DownloadRounded";
+import KeyOutlined from "@mui/icons-material/KeyOutlined";
 import { useCharSwapStore } from "../useCharSwapStore";
 import { formatTime } from "../utils/videoGeometry";
 import { PersonBadge } from "./PersonBadge";
 import { PANEL } from "./stepStyles";
 
-export function ReviewStep() {
+interface ReviewStepProps {
+  hasPreviewKey: boolean;
+  isSampleKey: boolean;
+  onApiSettings: () => void;
+}
+
+export function ReviewStep({
+  hasPreviewKey,
+  isSampleKey,
+  onApiSettings,
+}: ReviewStepProps) {
   const {
     clip,
     trim,
@@ -82,6 +93,46 @@ export function ReviewStep() {
             Edit clip
           </Button>
         </Stack>
+      </Box>
+      <Box sx={PANEL}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          spacing={2}
+        >
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="center"
+            sx={{ minWidth: 0 }}
+          >
+            <KeyOutlined sx={{ color: "#9abbdc" }} />
+            <Box>
+              <Typography fontWeight={600}>Your reAPI account</Typography>
+              <Typography variant="body2" color="text.secondary">
+                MiniMax H3 ·{" "}
+                {hasPreviewKey
+                  ? isSampleKey
+                    ? "Sample key added"
+                    : "Key entered, unverified"
+                  : "No API key added"}
+              </Typography>
+            </Box>
+          </Stack>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onApiSettings}
+            sx={{ flexShrink: 0 }}
+          >
+            {hasPreviewKey ? "Edit key" : "Add key"}
+          </Button>
+        </Stack>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+          API setup is optional in this preview. When connected, video
+          generation uses your reAPI credit balance.
+        </Typography>
       </Box>
       <Box sx={PANEL}>
         <Stack

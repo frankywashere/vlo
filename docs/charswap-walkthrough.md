@@ -40,6 +40,8 @@ The helper requires FFmpeg, Pillow, and numpy. It copies an existing proof clip,
 
 The desktop uses a left step rail; mobile uses a compact horizontal step indicator and a fixed Back/Continue bar with safe-area spacing. Main actions and selection surfaces use at least 44 px touch targets. Step changes focus the heading for screen readers. Earlier stages remain editable; incomplete prerequisites block forward navigation.
 
+**API settings** is available in the header and through the final review's reAPI account card. It demonstrates entering, masking/revealing, saving, editing, and clearing a reAPI key, with a clearly fake sample key for testing. No validation request or paid call is made. Status says sample/unverified rather than connected. The raw value exists only in React memory in the current browser tab, survives starting another swap, and disappears when cleared or reloaded. Cancel discards unsaved edits. Keys are excluded from the setup download, browser storage, logs, and source assets. Use the sample key while testing this LAN HTTP preview; live credential entry requires a secure hosting/integration design.
+
 ## What is functional today
 
 - Local video/image import and validation, video playback, scrubbing, trim selection.

@@ -24,6 +24,7 @@ import PeopleAltOutlined from "@mui/icons-material/PeopleAltOutlined";
 import ImageOutlined from "@mui/icons-material/ImageOutlined";
 import FactCheckOutlined from "@mui/icons-material/FactCheckOutlined";
 import AutoAwesomeOutlined from "@mui/icons-material/AutoAwesomeOutlined";
+import KeyOutlined from "@mui/icons-material/KeyOutlined";
 import { darkTheme } from "../../shared/theme/darkTheme";
 import { useCharSwapStore, STEPS } from "./useCharSwapStore";
 import {
@@ -35,6 +36,8 @@ import {
 import { loadDemo, sampleReviewIssues } from "./services/demo";
 import type { DemoManifest } from "./services/demo";
 import { useLocalAssets } from "./hooks/useLocalAssets";
+import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
+import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
 import {
   ClipStep,
   PeopleStep,
@@ -253,6 +256,14 @@ export function CharSwapWalkthrough() {
   const [demo, setDemo] = useState<DemoManifest | null>(null);
   const [loadingDemo, setLoadingDemo] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
+  const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
+  const {
+    key: previewKey,
+    hasKey,
+    isSampleKey,
+    saveKey,
+    clearKey,
+  } = useApiKeyPreview();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const sampleRequest = useRef(0);
   const {
@@ -390,14 +401,38 @@ export function CharSwapWalkthrough() {
                 }}
               />
             </Stack>
-            <Button
-              size="small"
-              variant="text"
-              sx={{ color: "text.secondary" }}
-              onClick={() => (clip ? setResetDialog(true) : startNewSwap())}
+            <Stack
+              direction="row"
+              spacing={{ xs: 0.5, sm: 1 }}
+              alignItems="center"
             >
-              New swap
-            </Button>
+              <Button
+                aria-label="API settings"
+                onClick={() => setApiSettingsOpen(true)}
+                sx={{
+                  minWidth: { xs: 44, sm: 120 },
+                  px: { xs: 1, sm: 1.5 },
+                  color: "text.secondary",
+                  gap: 1,
+                }}
+              >
+                <KeyOutlined fontSize="small" />
+                <Box
+                  component="span"
+                  sx={{ display: { xs: "none", sm: "inline" } }}
+                >
+                  API settings
+                </Box>
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                sx={{ color: "text.secondary" }}
+                onClick={() => (clip ? setResetDialog(true) : startNewSwap())}
+              >
+                New swap
+              </Button>
+            </Stack>
           </Stack>
         </Box>
         <Box
@@ -550,7 +585,13 @@ export function CharSwapWalkthrough() {
                 />
               )}
               {step === "matches" && <MatchesStep demo={demo} />}
-              {step === "review" && <ReviewStep />}
+              {step === "review" && (
+                <ReviewStep
+                  hasPreviewKey={hasKey}
+                  isSampleKey={isSampleKey}
+                  onApiSettings={() => setApiSettingsOpen(true)}
+                />
+              )}
               {step !== "review" && (
                 <Box
                   component="footer"
@@ -612,6 +653,13 @@ export function CharSwapWalkthrough() {
             </Box>
           </Box>
         </Box>
+        <ApiKeySettingsDialog
+          open={apiSettingsOpen}
+          apiKey={previewKey}
+          onSave={saveKey}
+          onClear={clearKey}
+          onClose={() => setApiSettingsOpen(false)}
+        />
         <Dialog
           open={resetDialog}
           onClose={() => setResetDialog(false)}

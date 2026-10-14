@@ -47,9 +47,70 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("CharSwap walkthrough", () => {
+  it("shows the entered key status without sending or exporting the key", async () => {
+    const user = userEvent.setup();
+    const store = useCharSwapStore.getState();
+    store.loadClip(sample.clip);
+    store.selectTarget({
+      id: "person-1",
+      name: "Person 1",
+      color: "#75baff",
+      anchor: { x: 0.5, y: 0.5, time: 0 },
+    });
+    store.assignReference("person-1", sample.reference);
+    store.reviewTracking([]);
+    store.visit("review");
+    let savedBlob: Blob | undefined;
+    const OriginalURL = globalThis.URL;
+    vi.stubGlobal(
+      "URL",
+      class extends OriginalURL {
+        static createObjectURL(blob: Blob | MediaSource) {
+          if (blob instanceof Blob) savedBlob = blob;
+          return "blob:test-export";
+        }
+        static revokeObjectURL() {
+          /* No browser resource is allocated in this test. */
+        }
+      },
+    );
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+    render(<CharSwapWalkthrough />);
+    await user.click(screen.getByRole("button", { name: "API settings" }));
+    await user.type(
+      screen.getByLabelText("reAPI API key"),
+      "preview-only-private-token",
+    );
+    await user.click(screen.getByRole("button", { name: "Save for preview" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Key entered, unverified/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Generate replacements" }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Save setup" }));
+    expect(savedBlob).toBeDefined();
+    const exported = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Could not read exported setup"));
+      reader.readAsText(savedBlob!);
+    });
+    expect(exported).not.toContain("preview-only-private-token");
+    expect(JSON.parse(exported)).toMatchObject({
+      previewOnly: true,
+      submitted: false,
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it("takes two selected people through assignment and review without submitting a paid job", async () => {
     const user = userEvent.setup();
     render(<CharSwapWalkthrough />);
