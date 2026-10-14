@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { CharSwapWalkthrough } from "./index";
+import { SwapMeinApp } from "./SwapMeinApp";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <CharSwapWalkthrough />
+    <SwapMeinApp />
   </StrictMode>,
 );

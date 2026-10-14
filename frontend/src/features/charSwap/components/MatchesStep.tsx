@@ -130,7 +130,7 @@ export function MatchesStep({ demo }: MatchesStepProps) {
                       height: `${box.height * 100}%`,
                       border: `2px solid ${selected ? person.color : "#ffffff90"}`,
                       bgcolor: selected ? `${person.color}22` : "transparent",
-                      borderRadius: 1,
+                      borderRadius: "5px",
                       cursor: "pointer",
                       minWidth: 44,
                       minHeight: 44,
@@ -143,7 +143,7 @@ export function MatchesStep({ demo }: MatchesStepProps) {
                         left: 4,
                         top: 4,
                         p: 0.75,
-                        borderRadius: 1,
+                        borderRadius: "5px",
                         bgcolor: selected ? person.color : "#111d",
                         color: selected ? "#112" : "#fff",
                         fontSize: 12,
@@ -199,7 +199,7 @@ export function MatchesStep({ demo }: MatchesStepProps) {
         </Stack>
       </Box>
       {decision && (
-        <Typography variant="body2" sx={{ color: "#8acdb1" }}>
+        <Typography variant="body2" sx={{ color: "success.main" }}>
           {decision.candidateId === null
             ? "This person won’t be replaced in this section."
             : "Match confirmed for this section."}

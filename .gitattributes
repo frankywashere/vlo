@@ -364,3 +364,6 @@
 /frontend/src/features/generation/utils/__tests__/mediaInputThumbnail.test.ts extension-surface=host
 
 /frontend/src/features/generation/utils/capturedMedia.ts extension-surface=host
+
+# swapMEin uses the shared descriptor-driven account menu renderer.
+/frontend/src/features/charSwap/SwapMeinApp.tsx extension-surface=adapter

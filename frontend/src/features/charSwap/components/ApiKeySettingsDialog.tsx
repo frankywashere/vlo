@@ -7,8 +7,6 @@ import {
   Box,
   Button,
   Dialog,
-  DialogActions,
-  DialogContent,
   DialogTitle,
   IconButton,
   InputAdornment,
@@ -22,19 +20,28 @@ import CloseRounded from "@mui/icons-material/CloseRounded";
 import VisibilityOutlined from "@mui/icons-material/VisibilityOutlined";
 import VisibilityOffOutlined from "@mui/icons-material/VisibilityOffOutlined";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
+import {
+  GENERATION_PROVIDERS,
+  isGenerationProvider,
+} from "../services/providers";
+import type { GenerationProvider } from "../services/providers";
 
-interface ApiKeySettingsDialogProps {
+export interface ApiKeySettingsFormProps {
   enhancedCharacterMasking?: boolean;
   maskingLocked?: boolean;
   onMaskingChange?: (enabled: boolean) => void;
-  provider?: "reAPI" | "ToAPIs";
-  onProviderChange?: (provider: "reAPI" | "ToAPIs") => void;
-  open: boolean;
+  provider?: GenerationProvider;
+  onProviderChange?: (provider: GenerationProvider) => void;
   live?: boolean;
   apiKey: string;
   onSave: (key: string) => void;
   onClear: () => void;
   onClose: () => void;
+  page?: boolean;
+}
+
+interface ApiKeySettingsDialogProps extends ApiKeySettingsFormProps {
+  open: boolean;
 }
 
 export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
@@ -58,12 +65,12 @@ export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
         },
       }}
     >
-      {props.open && <ApiKeyPreviewEditor {...props} />}
+      {props.open && <ApiKeySettingsForm {...props} />}
     </Dialog>
   );
 }
 
-function ApiKeyPreviewEditor({
+export function ApiKeySettingsForm({
   enhancedCharacterMasking = false,
   maskingLocked = false,
   onMaskingChange,
@@ -74,14 +81,17 @@ function ApiKeyPreviewEditor({
   onSave,
   onClear,
   onClose,
-}: ApiKeySettingsDialogProps) {
+  page = false,
+}: ApiKeySettingsFormProps) {
   const [draft, setDraft] = useState(apiKey);
   const [visible, setVisible] = useState(false);
+  const [saved, setSaved] = useState(false);
   function save() {
     const trimmed = draft.trim();
     if (!trimmed) return;
     onSave(trimmed);
-    onClose();
+    setSaved(true);
+    if (!page) onClose();
   }
   return (
     <Box
@@ -92,7 +102,7 @@ function ApiKeyPreviewEditor({
       }}
       sx={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}
     >
-      <DialogTitle
+      {!page && <DialogTitle
         id="charswap-api-settings-title"
         aria-label="Settings"
         sx={{
@@ -110,8 +120,8 @@ function ApiKeyPreviewEditor({
         >
           <CloseRounded />
         </IconButton>
-      </DialogTitle>
-      <DialogContent dividers sx={{ py: 3 }}>
+      </DialogTitle>}
+      <Box sx={{ py: page ? 0 : 3, px: page ? 0 : 3, overflowY: page ? "visible" : "auto" }}>
         <Stack spacing={3}>
           <Box>
             <FormControlLabel
@@ -147,15 +157,19 @@ function ApiKeyPreviewEditor({
                 disabled={maskingLocked}
                 onChange={(event) => {
                   const value = event.target.value;
-                  if (value === "reAPI" || value === "ToAPIs") {
+                  if (isGenerationProvider(value)) {
                     setDraft("");
                     setVisible(false);
+                    setSaved(false);
                     onProviderChange?.(value);
                   }
                 }}
               >
-                <MenuItem value="reAPI">reAPI</MenuItem>
-                <MenuItem value="ToAPIs">ToAPIs</MenuItem>
+                {GENERATION_PROVIDERS.map((item) => (
+                  <MenuItem key={item} value={item}>
+                    {item}
+                  </MenuItem>
+                ))}
               </TextField>
             </Box>
             <Box>
@@ -168,10 +182,14 @@ function ApiKeyPreviewEditor({
           <TextField
             label={`${provider} API key`}
             value={draft}
+            disabled={maskingLocked}
             type={visible ? "text" : "password"}
             fullWidth
             autoComplete="off"
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setSaved(false);
+            }}
             helperText="Saved in memory for this tab only. Refreshing or closing the tab clears it."
             slotProps={{
               htmlInput: { autoCapitalize: "none", spellCheck: false },
@@ -200,9 +218,11 @@ function ApiKeyPreviewEditor({
             <Box>
               <Button
                 variant="outlined"
+                disabled={maskingLocked}
                 onClick={() => {
                   setDraft(DEMO_API_KEY);
                   setVisible(false);
+                  setSaved(false);
                 }}
                 sx={{ minHeight: 44 }}
               >
@@ -220,44 +240,53 @@ function ApiKeyPreviewEditor({
             </Box>
           )}
           <Typography variant="body2" color="text.secondary">
-            Generation uses your {provider} credit balance. H3 generates at
-            768p; your download keeps that resolution.
+            Generation uses your {provider} credits. MiniMax H3 generates at
+            {provider === "OpenRouter" ? " 2K" : " 768p"}; your download keeps
+            that resolution.
+            {(provider === "fal" || provider === "OpenRouter") &&
+              " Choose a 5–15-second clip."}
+            {provider === "fal" &&
+              " Your fal key needs inference access and billing:usage:read permission."}
             {provider === "ToAPIs" &&
               " Your token must allow MiniMax-H3 and have enough daily, monthly and remaining credits."}
           </Typography>
         </Stack>
-      </DialogContent>
-      <DialogActions
+      </Box>
+      <Stack
+        direction="row"
         sx={{
-          p: 2,
+          p: page ? 0 : 2,
+          mt: page ? 3 : 0,
           gap: 1,
           flexWrap: "wrap",
           pb: "max(16px, env(safe-area-inset-bottom))",
         }}
       >
         <Button
-          disabled={!draft.trim() && !apiKey.trim()}
+          disabled={maskingLocked || (!draft.trim() && !apiKey.trim())}
           onClick={() => {
             setDraft("");
             setVisible(false);
             onClear();
+            setSaved(false);
           }}
           sx={{ minHeight: 44, mr: "auto" }}
         >
           Clear key
         </Button>
-        <Button onClick={onClose} sx={{ minHeight: 44 }}>
+        {!page && <Button onClick={onClose} sx={{ minHeight: 44 }}>
           Cancel
-        </Button>
+        </Button>}
+        {saved && <Typography role="status" variant="body2" color="text.secondary" sx={{ alignSelf: "center" }}>Key saved for this tab.</Typography>}
         <Button
           variant="contained"
           type="submit"
-          disabled={!draft.trim()}
+          disabled={maskingLocked || !draft.trim()}
           sx={{ minHeight: 44 }}
         >
           {live ? "Save key" : "Save for preview"}
         </Button>
-      </DialogActions>
+      </Stack>
     </Box>
   );
 }

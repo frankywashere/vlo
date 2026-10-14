@@ -46,8 +46,14 @@ function defaultRequest(input: RequestInfo | URL): Promise<Response> {
   if (path === "/api/session") return Promise.resolve(json({
     token: SESSION_TOKEN, expires_at: Math.floor(Date.now() / 1000) + 3600, balance: 10000,
   }));
-  if (path === "blob:source") return Promise.resolve(new Response("source", { headers: { "Content-Type": "video/mp4" } }));
-  if (path === "blob:reference") return Promise.resolve(new Response("reference", { headers: { "Content-Type": "image/png" } }));
+  // Node's Response creates Node Blobs; jsdom File stringifies that foreign
+  // Blob as "[object Blob]". Return this realm's Blob to model a browser fetch.
+  if (path === "blob:source" || path === "blob:reference") {
+    const source = path === "blob:source";
+    const response = new Response(null, { headers: { "Content-Type": source ? "video/mp4" : "image/png" } });
+    response.blob = async () => new Blob([source ? "source" : "reference"], { type: source ? "video/mp4" : "image/png" });
+    return Promise.resolve(response);
+  }
   if (path === "/api/preparation-capacity") return Promise.resolve(json({available: true}));
   if (path === "/api/uploads") return Promise.resolve(json({
     id: "job-1",

@@ -2,27 +2,24 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
   FormControlLabel,
   Radio,
   RadioGroup,
   Stack,
   Typography,
 } from "@mui/material";
-import AddRounded from "@mui/icons-material/AddRounded";
-import KeyOutlined from "@mui/icons-material/KeyOutlined";
-import AccountBalanceWalletOutlined from "@mui/icons-material/AccountBalanceWalletOutlined";
 import { PANEL } from "./stepStyles";
+import type { GenerationProvider } from "../services/livePipeline";
 
 interface AccessStepProps {
-  provider?: "reAPI" | "ToAPIs";
+  provider?: GenerationProvider;
   accessMode: "api-key" | "credits";
   onAccessModeChange: (mode: "api-key" | "credits") => void;
   hasKey: boolean;
   isSampleKey: boolean;
   onApiSettings: () => void;
-  sampleCreditBalance: number;
-  onAddSampleCredits: () => void;
+  creditBalance: number;
+  onManageCredits: () => void;
 }
 
 export function AccessStep({
@@ -32,8 +29,8 @@ export function AccessStep({
   hasKey,
   isSampleKey,
   onApiSettings,
-  sampleCreditBalance,
-  onAddSampleCredits,
+  creditBalance,
+  onManageCredits,
 }: AccessStepProps) {
   return (
     <Stack spacing={2.5}>
@@ -66,7 +63,7 @@ export function AccessStep({
             ...PANEL,
             m: 0,
             alignItems: "flex-start",
-            borderColor: accessMode === "api-key" ? "#75baff" : "#30343b",
+            borderColor: accessMode === "api-key" ? "primary.main" : "divider",
             "& .MuiFormControlLabel-label": { pt: 1 },
           }}
         />
@@ -85,7 +82,7 @@ export function AccessStep({
             ...PANEL,
             m: 0,
             alignItems: "flex-start",
-            borderColor: accessMode === "credits" ? "#75baff" : "#30343b",
+            borderColor: accessMode === "credits" ? "primary.main" : "divider",
             "& .MuiFormControlLabel-label": { pt: 1 },
           }}
         />
@@ -100,7 +97,6 @@ export function AccessStep({
             alignItems={{ xs: "stretch", sm: "center" }}
           >
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <KeyOutlined sx={{ color: "#9abbdc" }} />
               <Box>
                 <Typography fontWeight={600}>
                   Your {provider} API key
@@ -142,30 +138,26 @@ export function AccessStep({
             alignItems={{ xs: "stretch", sm: "center" }}
           >
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <AccountBalanceWalletOutlined sx={{ color: "#9abbdc" }} />
               <Box>
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography fontWeight={600}>Sample balance</Typography>
-                  <Chip label="Preview" size="small" />
+                  <Typography fontWeight={600}>Available credits</Typography>
                 </Stack>
                 <Typography variant="body2" color="text.secondary">
-                  {sampleCreditBalance.toLocaleString()} sample credits
+                  {creditBalance.toLocaleString()} credits
                 </Typography>
               </Box>
             </Stack>
             <Button
               variant="outlined"
-              startIcon={<AddRounded />}
-              onClick={onAddSampleCredits}
+              onClick={onManageCredits}
               sx={{ minHeight: 44, flexShrink: 0 }}
             >
-              Add sample credits
+              Manage credits
             </Button>
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            App credit purchases are coming soon. This balance and top-up are a
-            preview; no payment is taken and these credits cannot generate
-            videos yet.
+            Credit purchases are coming soon. Use your own API key to generate
+            videos for now.
           </Typography>
         </Box>
       )}

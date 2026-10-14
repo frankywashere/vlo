@@ -1,8 +1,5 @@
 import { useRef, useState } from "react";
 import { Box, Button, Stack, Typography } from "@mui/material";
-import UploadRounded from "@mui/icons-material/UploadRounded";
-import MovieOutlined from "@mui/icons-material/MovieOutlined";
-import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { DemoManifest } from "../services/demo";
 import { formatTime } from "../utils/videoGeometry";
@@ -57,39 +54,27 @@ export function ClipStep({
             if (file && !busy) onImport(file);
           }}
           sx={{
-            minHeight: 320,
-            border: `1px dashed ${dragging ? "#75baff" : "#4a515d"}`,
-            borderRadius: 3,
+            minHeight: 330,
+            border: "1.5px dashed",
+            borderColor: dragging ? "primary.main" : "divider",
+            borderRadius: "5px",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
             gap: 1.5,
             p: 3,
-            bgcolor: dragging ? "#182b40" : "#1c1f25",
+            bgcolor: dragging ? "action.selected" : "action.hover",
+            transition: "background-color .2s, border-color .2s",
           }}
         >
-          <Box
-            sx={{
-              p: 2,
-              display: "grid",
-              placeItems: "center",
-              borderRadius: 3,
-              bgcolor: "#25364b",
-              color: "#8ac6ff",
-              mb: 1,
-            }}
-          >
-            <MovieOutlined sx={{ fontSize: 32 }} />
-          </Box>
-          <Typography variant="h6">Start with your clip</Typography>
+          <Typography variant="h6">Drop your video here</Typography>
           <Typography color="text.secondary" textAlign="center">
-            Drop a video here or choose one from your device.
+            Or choose a file from your device.
           </Typography>
           <Button
             variant="contained"
             size="large"
-            startIcon={<UploadRounded />}
             disabled={busy}
             onClick={() => inputRef.current?.click()}
             sx={{ mt: 1 }}
@@ -125,8 +110,7 @@ export function ClipStep({
               </Typography>
             </Box>
             <Button variant="outlined" onClick={onDemo} disabled={busy}>
-              Try sample clip{" "}
-              <ArrowForwardRounded sx={{ ml: 1, fontSize: 18 }} />
+              Try sample clip
             </Button>
           </Box>
         )}

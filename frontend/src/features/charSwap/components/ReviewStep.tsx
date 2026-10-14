@@ -11,7 +11,7 @@ import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
 
 interface ReviewStepProps {
-  provider?: "reAPI" | "ToAPIs";
+  provider?: import("../services/livePipeline").GenerationProvider;
   live?: boolean;
   job?: LivePipelineJob | null;
   generating?: boolean;
@@ -19,7 +19,7 @@ interface ReviewStepProps {
   onGenerate?: () => void;
   onRefresh?: () => void;
   accessMode?: "api-key" | "credits";
-  sampleCreditBalance?: number;
+  creditBalance?: number;
   hasPreviewKey: boolean;
   isSampleKey: boolean;
   onApiSettings: () => void;
@@ -34,7 +34,7 @@ export function ReviewStep({
   onGenerate,
   onRefresh,
   accessMode = "api-key",
-  sampleCreditBalance = 100,
+  creditBalance = 0,
   hasPreviewKey,
   isSampleKey,
   onApiSettings,
@@ -147,7 +147,7 @@ export function ReviewStep({
             alignItems="center"
             sx={{ minWidth: 0 }}
           >
-            <KeyOutlined sx={{ color: "#9abbdc" }} />
+            <KeyOutlined sx={{ color: "primary.main" }} />
             <Box>
               <Typography fontWeight={600}>
                 {accessMode === "credits"
@@ -156,7 +156,7 @@ export function ReviewStep({
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {accessMode === "credits" ? (
-                  `${sampleCreditBalance} sample credits · Coming soon`
+                  `${creditBalance} credits · Coming soon`
                 ) : (
                   <>
                     MiniMax H3 ·{" "}
@@ -190,7 +190,7 @@ export function ReviewStep({
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {accessMode === "credits"
-            ? "Sample credits demonstrate the flow. Buying credits and generating with app credits are coming later."
+            ? "Credit purchases are coming soon. Use your own API key to generate videos for now."
             : `When connected, video generation uses your ${provider} credit balance.`}
         </Typography>
       </Box>
@@ -229,7 +229,7 @@ export function ReviewStep({
                 <Box sx={{ minWidth: 0 }}>
                   <PersonBadge person={person} compact stackedOnMobile />
                 </Box>
-                <ArrowForwardRounded sx={{ color: "#758293" }} />
+                <ArrowForwardRounded sx={{ color: "text.secondary" }} />
                 <Stack
                   direction={{ xs: "column", sm: "row" }}
                   alignItems="center"
@@ -309,7 +309,8 @@ export function ReviewStep({
             {provider === "ToAPIs"
               ? "Based on the US$0.80 five-second test; not a price quote."
               : "Provider pricing can change."}{" "}
-            H3 generates at 768p; the download keeps that resolution.
+            H3 generates at {provider === "OpenRouter" ? "2K" : "768p"}; the
+            download keeps that resolution.
           </Typography>
         )}
       {job?.status === "completed" && job.output_url && (

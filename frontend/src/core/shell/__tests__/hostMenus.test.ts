@@ -7,6 +7,10 @@ declareHostMenus();
 describe("Wave 3 host menu subjects", () => {
   it.each([
     [
+      "charswap.account",
+      { slot: "charswap.account", account: { signedIn: true } },
+    ],
+    [
       "masks.add.options",
       {
         slot: "masks.add.options",

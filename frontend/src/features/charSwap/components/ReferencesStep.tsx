@@ -70,16 +70,20 @@ function ReferenceCard({
             height: 164,
             minWidth: 44,
             minHeight: 44,
-            borderRadius: 1.5,
-            bgcolor: "#14171c",
-            border: "1px dashed #49515d",
+            borderRadius: "5px",
+            bgcolor: "action.hover",
+            border: "1px dashed",
+            borderColor: "divider",
             display: "grid",
             placeItems: "center",
             overflow: "hidden",
             transition: "border-color .15s, background-color .15s",
-            "&:hover": { borderColor: "#75baff", bgcolor: "#1c2938" },
+            "&:hover": {
+              borderColor: "primary.main",
+              bgcolor: "action.selected",
+            },
             "&.Mui-focusVisible": {
-              outline: "2px solid #a3d1ff",
+              outline: "2px solid #dc302f",
               outlineOffset: 3,
             },
             "&.Mui-disabled": { opacity: 0.6 },
@@ -94,7 +98,7 @@ function ReferenceCard({
             />
           ) : (
             <AddPhotoAlternateOutlined
-              sx={{ color: "#768497", fontSize: 38 }}
+              sx={{ color: "text.secondary", fontSize: 38 }}
             />
           )}
         </ButtonBase>
@@ -155,7 +159,7 @@ function ReferenceCard({
           direction="row"
           spacing={1}
           alignItems="center"
-          sx={{ mt: 2, color: "#8acdb1" }}
+          sx={{ mt: 2, color: "success.main" }}
         >
           <CheckRounded fontSize="small" />
           <Typography variant="body2">Assigned to {person.name}</Typography>

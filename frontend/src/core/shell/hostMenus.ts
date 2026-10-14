@@ -25,6 +25,10 @@ import { hostMenuCatalog } from "./hostMenuCatalog";
  * extension boundary as `JsonValue`.
  */
 export interface HostMenuSubjectMap {
+  readonly "charswap.account": {
+    readonly slot: "charswap.account";
+    readonly account: { readonly signedIn: boolean };
+  };
   readonly "timeline.clip.context": {
     readonly slot: "timeline.clip.context";
     readonly clip: ExtensionTimelineClipSnapshot;
@@ -413,6 +417,11 @@ function validateProjectsItemSubject(subject: unknown): boolean {
 // Exhaustive over HostMenuSubjectMap: a subject-map entry without a validator
 // (or a validator for an unmapped menu) fails to compile.
 const HOST_MENU_SUBJECT_VALIDATORS = {
+  "charswap.account": (subject: unknown) =>
+    isRecord(subject) &&
+    subject.slot === "charswap.account" &&
+    isRecord(subject.account) &&
+    typeof subject.account.signedIn === "boolean",
   "timeline.clip.context": validateClipContextSubject,
   "timeline.marker.context": validateMarkerContextSubject,
   "timeline.track.context": validateTrackContextSubject,
@@ -446,6 +455,10 @@ const CLIP_SNAPSHOT_SCHEMA = {
 // discovery. Documentation-grade (field path → type name); the validators
 // above are authoritative.
 const HOST_MENU_SUBJECT_SCHEMAS = {
+  "charswap.account": {
+    slot: "'charswap.account'",
+    account: { signedIn: "boolean" },
+  },
   "timeline.clip.context": {
     slot: "'timeline.clip.context'",
     clip: CLIP_SNAPSHOT_SCHEMA,

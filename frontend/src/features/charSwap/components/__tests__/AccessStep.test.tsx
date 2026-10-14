@@ -11,8 +11,8 @@ function setup(overrides: Partial<Parameters<typeof AccessStep>[0]> = {}) {
     hasKey: false,
     isSampleKey: false,
     onApiSettings: vi.fn(),
-    sampleCreditBalance: 0,
-    onAddSampleCredits: vi.fn(),
+    creditBalance: 0,
+    onManageCredits: vi.fn(),
     ...overrides,
   };
   render(<AccessStep {...props} />);
@@ -40,14 +40,14 @@ describe("generation access choice", () => {
     expect(props.onApiSettings).toHaveBeenCalledOnce();
   });
 
-  it("labels top-up as simulation without presenting a payment or live balance", () => {
-    const props = setup({ accessMode: "credits", sampleCreditBalance: 25 });
-    expect(screen.getByText("25 sample credits")).toBeInTheDocument();
+  it("shows the account balance and opens credit settings without claiming purchases are available", () => {
+    const props = setup({ accessMode: "credits", creditBalance: 25 });
+    expect(screen.getByText("25 credits")).toBeInTheDocument();
     expect(
-      screen.getByText(/no payment is taken and these credits cannot generate/),
+      screen.getByText(/Credit purchases are coming soon/),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add sample credits" }));
-    expect(props.onAddSampleCredits).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Manage credits" }));
+    expect(props.onManageCredits).toHaveBeenCalledOnce();
     expect(props.onApiSettings).not.toHaveBeenCalled();
     expect(
       screen.queryByRole("button", { name: /API key/ }),

@@ -2,6 +2,7 @@
 from functools import lru_cache
 from pathlib import Path
 import secrets
+import math
 import tempfile
 import time
 import uuid
@@ -22,7 +23,7 @@ from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
 from .media import Setup, normalize_reference
 from .pipeline import Pipeline
-from .provider import Provider, ToAPIsProvider, estimate, generation_payload
+from .provider import Provider, ToAPIsProvider, FalProvider, OpenRouterProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
 from .storage import Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation
@@ -105,12 +106,33 @@ def toapis_service():
 
 
 def selected_provider(provider_name: str):
-    return toapis_service() if provider_name == "ToAPIs" else services()[2]
+    if provider_name == "reAPI":
+        return services()[2]
+    if provider_name == "ToAPIs":
+        return toapis_service()
+    if provider_name == "fal":
+        return fal_service()
+    if provider_name == "OpenRouter":
+        return openrouter_service()
+    raise PublicError("Unknown generation provider.", 422)
+
+
+@lru_cache
+def fal_service():
+    return FalProvider()
+
+
+@lru_cache
+def openrouter_service():
+    return OpenRouterProvider()
 
 
 def job_estimate(job):
     # ToAPIs estimate scales the verified US$0.80 five-second reference test.
-    return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
+    rates = {"ToAPIs": .16, "fal": .06, "OpenRouter": .13}
+    if job.get("provider") in rates:
+        return math.ceil(job["duration"] * rates[job["provider"]] * 1000) / 1000
+    return estimate(job["duration"], settings.h3_price_per_second_usd)
 
 
 def authenticate(authorization: str | None):
@@ -146,6 +168,9 @@ def view(job: dict):
     if job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
+    if job.get("provider") in {"fal", "OpenRouter"}:
+        result["estimate_note"] = "Published H3 output-rate estimate, not a quote; preparation costs and any input charges are separate."
+        result["estimate_source"] = "https://fal.ai/models/minimax/h3/reference-to-video" if job["provider"] == "fal" else "https://openrouter.ai/minimax/hailuo-3"
     for field in ["width", "height", "selected_label"]:
         if field in job:
             result[field] = job[field]
@@ -159,7 +184,7 @@ def view(job: dict):
 
 @app.get("/api/config")
 def config():
-    return {"live": True, "providers": ["reAPI", "ToAPIs"], "provider": "reAPI", "model": "minimax-h3", "delivery": "native",
+    return {"live": True, "providers": ["reAPI", "ToAPIs", "fal", "OpenRouter"], "provider": "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "single-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES}
 
 
@@ -170,7 +195,12 @@ def health():
 
 class ProviderSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    provider: Literal["reAPI", "ToAPIs"] = "reAPI"
+    provider: Literal["reAPI", "ToAPIs", "fal", "OpenRouter"] = "reAPI"
+
+
+def check_provider_duration(provider_name: str, setup: Setup):
+    if provider_name in {"fal", "OpenRouter"} and setup.trim[1] - setup.trim[0] < 4.99:
+        raise PublicError("This provider requires a whole-second clip between 5 and 15 seconds.", 422)
 
 
 @app.post("/api/session")
@@ -211,6 +241,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         options = Setup.model_validate_json(setup)
     except ValidationError:
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
+    check_provider_duration(active_session.get("provider", "reAPI"), options)
     job_id = uuid.uuid4().hex
     await run_in_threadpool(records.update, "control/preparation.json", lambda current: reserve_preparation(
         current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
@@ -274,6 +305,7 @@ def preparation_capacity(authorization: str | None = Header(default=None)):
 @app.post("/api/uploads", status_code=201)
 def start_upload(options: UploadRequest, authorization: str | None = Header(default=None)):
     owner, active_session = authenticate(authorization)
+    check_provider_duration(active_session.get("provider", "reAPI"), options.setup)
     records, cloud, _ = services()
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
@@ -398,8 +430,16 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     anchor["time"] -= options.trim[0]
     anchor = job.get("normalized_anchor", anchor)
     payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor)
+    if job.get("provider") in {"fal", "OpenRouter"} and not 5 <= job["duration"] <= 15:
+        raise PublicError("This provider requires a whole-second clip between 5 and 15 seconds.", 422)
+    if job.get("provider") == "OpenRouter":
+        # OpenRouter requires an explicit supported ratio; choose from the
+        # normalized guide dimensions rather than forcing landscape footage.
+        ratios = {"21:9": 21/9, "16:9": 16/9, "4:3": 4/3, "1:1": 1, "3:4": 3/4, "9:16": 9/16}
+        ratio = job.get("width", 854) / max(1, job.get("height", 480))
+        payload["output_aspect_ratio"] = min(ratios, key=lambda item: abs(ratios[item] - ratio))
     balance = provider.balance(key)
-    if balance < round(job_estimate(job) * 1000):
+    if balance is not None and balance < round(job_estimate(job) * 1000):
         raise PublicError("Your provider allowance is below the current estimate. Check credits and token limits before generating.", 402)
     try:
         records.update(f"jobs/{job_id}.json", lambda current: claim_job(current, {"ready"}, "submitting"))
@@ -446,15 +486,25 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
         return view(updated)
     if body.get("status") != "completed":
         return view(job)
-    try:
-        output_url = body["output"]["video_urls"][0]
-        validate_media_url(output_url)
-    except (KeyError, IndexError, TypeError):
-        raise PublicError("The provider did not return a usable result link.", 502) from None
+    output_uri = None
+    output_url = None
+    if job.get("provider") == "OpenRouter" and body.get("requires_download"):
+        # Download while the caller supplies its key; background export stores
+        # only a private object URI and never needs a persisted credential.
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "provider.mp4"
+            provider.download_result(key, job["provider_task"], target)
+            output_uri = cloud.upload(settings.app_bucket, f"provider-results/{job_id}/{uuid.uuid4().hex}.mp4", target, "video/mp4")
+    else:
+        try:
+            output_url = body["output"]["video_urls"][0]
+            validate_media_url(output_url)
+        except (KeyError, IndexError, TypeError):
+            raise PublicError("The provider did not return a usable result link.", 502) from None
     usage = body.get("usage", {}).get("credits")
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
-            **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url,
+            **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url, "provider_output_uri": output_uri,
             "actual_credits": usage if isinstance(usage, (int, float)) else None,
             "message": "Restoring the original soundtrack and preserving the generated resolution."})
     except PublicError as error:

@@ -25,7 +25,7 @@ export function PreparationProgress({
       : undefined;
 
   return (
-    <Box sx={{ ...PANEL, borderColor: "#42617c" }}>
+    <Box sx={{ ...PANEL, borderColor: "primary.main" }}>
       <Stack spacing={1.5}>
         <Stack
           direction="row"
@@ -58,7 +58,7 @@ export function PreparationProgress({
             }
             variant={uploadPercent !== undefined ? "determinate" : "indeterminate"}
             value={uploadPercent}
-            sx={{ flex: 1, height: 5, borderRadius: 1 }}
+            sx={{ flex: 1, height: 5, borderRadius: "5px" }}
           />
           {uploadPercent !== undefined && (
             <Typography

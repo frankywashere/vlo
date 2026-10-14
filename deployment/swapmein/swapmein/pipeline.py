@@ -109,7 +109,10 @@ class Pipeline:
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 raw, original, uploaded, output = root / "generated.mp4", root / "source.mp4", root / "upload.bin", root / "swapMEin.mp4"
-                self.cloud.download_provider(job["provider_output"], raw)
+                if job.get("provider_output_uri"):
+                    self.cloud.download(job["provider_output_uri"], raw)
+                else:
+                    self.cloud.download_provider(job["provider_output"], raw)
                 self.cloud.download(job["normalized_uri"], original)
                 self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
                 output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded, audio_start=job["setup"]["trim"][0])

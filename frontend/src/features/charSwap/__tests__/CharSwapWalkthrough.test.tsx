@@ -114,6 +114,9 @@ describe("CharSwap walkthrough", () => {
   it("takes two selected people through assignment and review without submitting a paid job", async () => {
     const user = userEvent.setup();
     render(<CharSwapWalkthrough />);
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/STEP \d+ OF \d+/)).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Wizard progress" })).toHaveAttribute("aria-valuenow", "1");
     expect(
       screen.getByRole("button", { name: "Trim clip" }),
     ).toBeDisabled();
@@ -124,6 +127,8 @@ describe("CharSwap walkthrough", () => {
       ).toBeEnabled(),
     );
     await user.click(screen.getByRole("button", { name: "Trim clip" }));
+    expect(screen.getByRole("button", { name: "Back" })).toBeEnabled();
+    expect(screen.getByRole("progressbar", { name: "Wizard progress" })).toHaveAttribute("aria-valuenow", "2");
     await user.click(screen.getByRole("button", { name: "Select people" }));
     await user.click(screen.getByRole("button", { name: "Select Person 1" }));
     await user.click(screen.getByRole("button", { name: "Select Person 2" }));

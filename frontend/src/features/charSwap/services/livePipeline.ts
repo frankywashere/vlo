@@ -3,7 +3,9 @@ import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
-export type GenerationProvider = "reAPI" | "ToAPIs";
+import { isGenerationProvider } from "./providers";
+import type { GenerationProvider } from "./providers";
+export type { GenerationProvider } from "./providers";
 
 export interface LivePipelineConfig {
   live: boolean;
@@ -119,20 +121,45 @@ function requestMessage(status: number): string {
 function capacityMessage(value: unknown): string | null {
   if (!isRecord(value) || typeof value.code !== "string") return null;
   const messages: Record<string, string> = {
-    preparation_busy: "Another clip is being checked. Wait for it to finish before starting yours.",
-    preparation_daily_limit: "Today's cloud-preparation limit has been reached.",
-    preparation_monthly_limit: "This month's cloud-preparation limit has been reached.",
+    preparation_busy:
+      "Another clip is being checked. Wait for it to finish before starting yours.",
+    preparation_daily_limit:
+      "Today's cloud-preparation limit has been reached.",
+    preparation_monthly_limit:
+      "This month's cloud-preparation limit has been reached.",
     upload_daily_limit: "Today's upload limit has been reached.",
     upload_monthly_limit: "This month's upload limit has been reached.",
-    preparation_recovery: "Cloud preparation is paused while a previous job is checked. The site operator needs to restore availability.",
+    preparation_recovery:
+      "Cloud preparation is paused while a previous job is checked. The site operator needs to restore availability.",
   };
-  const message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
+  const message = Object.hasOwn(messages, value.code)
+    ? messages[value.code]
+    : undefined;
   if (!message) return null;
   const seconds = value.retry_after;
-  const reset = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && seconds <= 32 * 86400
-    ? new Date(Date.now() + seconds * 1000).toLocaleString(undefined, {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short"})
-    : null;
-  return message + (reset ? value.code === "preparation_busy" ? " Current processing deadline: " + reset + "." : " Resets " + reset + "." : "") + " No generation was submitted.";
+  const reset =
+    typeof seconds === "number" &&
+    Number.isFinite(seconds) &&
+    seconds > 0 &&
+    seconds <= 32 * 86400
+      ? new Date(Date.now() + seconds * 1000).toLocaleString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZoneName: "short",
+        })
+      : null;
+  return (
+    message +
+    (reset
+      ? value.code === "preparation_busy"
+        ? " Current processing deadline: " + reset + "."
+        : " Resets " + reset + "."
+      : "") +
+    " No generation was submitted."
+  );
 }
 
 async function requestJson(
@@ -156,8 +183,15 @@ async function requestJson(
     signal.throwIfAborted();
     if (!response.ok) {
       let detail: unknown;
-      try { detail = await response.json(); } catch { /* Never echo raw error bodies. */ }
-      throw new LivePipelineError(capacityMessage(detail) ?? requestMessage(response.status), response.status);
+      try {
+        detail = await response.json();
+      } catch {
+        /* Never echo raw error bodies. */
+      }
+      throw new LivePipelineError(
+        capacityMessage(detail) ?? requestMessage(response.status),
+        response.status,
+      );
     }
     return await response.json();
   } catch (error) {
@@ -194,7 +228,9 @@ function readJob(value: unknown): LivePipelineJob {
     );
   }
   const job: LivePipelineJob = {
-    ...(value.provider === "ToAPIs" || value.provider === "reAPI" ? {provider: value.provider} : {}),
+    ...(isGenerationProvider(value.provider)
+      ? { provider: value.provider }
+      : {}),
     id: value.id,
     status: value.status as LiveJobStatus,
   };
@@ -269,8 +305,11 @@ export async function createLiveSession(
     "/api/session",
     {
       method: "POST",
-      headers: { "X-Reapi-Key": key.trim(), "Content-Type": "application/json" },
-      body: JSON.stringify({provider}),
+      headers: {
+        "X-Reapi-Key": key.trim(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ provider }),
     },
     signal,
   );
@@ -388,15 +427,28 @@ async function assetFile(
 }
 
 async function uploadAsset(value: unknown, file: File, signal: AbortSignal) {
-  if (!isRecord(value) || typeof value.url !== "string" || !isRecord(value.headers)) {
-    throw new LivePipelineError("The upload could not be started. Try again later.");
+  if (
+    !isRecord(value) ||
+    typeof value.url !== "string" ||
+    !isRecord(value.headers)
+  ) {
+    throw new LivePipelineError(
+      "The upload could not be started. Try again later.",
+    );
   }
   const url = new URL(value.url);
-  if (url.protocol !== "https:" || url.hostname !== "storage.googleapis.com" ||
-      url.username || url.password || url.port ||
-      value.headers["Content-Type"] !== "application/octet-stream" ||
-      value.headers["x-goog-if-generation-match"] !== "0") {
-    throw new LivePipelineError("The upload destination could not be verified.");
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "storage.googleapis.com" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    value.headers["Content-Type"] !== "application/octet-stream" ||
+    value.headers["x-goog-if-generation-match"] !== "0"
+  ) {
+    throw new LivePipelineError(
+      "The upload destination could not be verified.",
+    );
   }
   signal.throwIfAborted();
   const controller = new AbortController();
@@ -419,7 +471,9 @@ async function uploadAsset(value: unknown, file: File, signal: AbortSignal) {
     if (!response.ok) throw new Error("Upload rejected");
   } catch (error) {
     if (signal.aborted) throw error;
-    throw new LivePipelineError("The media upload did not finish. Check your connection and prepare again. No generation was submitted.");
+    throw new LivePipelineError(
+      "The media upload did not finish. Check your connection and prepare again. No generation was submitted.",
+    );
   } finally {
     globalThis.clearTimeout(timer);
     signal.removeEventListener("abort", abort);
@@ -434,8 +488,15 @@ export async function createLiveJob(
 ): Promise<LivePipelineJob> {
   assertSecureOrigin();
   const { clip, reference, target } = validateLiveSetup(state);
-  onProgress?.({phase: "checking_capacity", message: "Checking cloud availability before uploading your clip…"});
-  await requestJson("/api/preparation-capacity", {headers: sessionHeaders(token)}, signal);
+  onProgress?.({
+    phase: "checking_capacity",
+    message: "Checking cloud availability before uploading your clip…",
+  });
+  await requestJson(
+    "/api/preparation-capacity",
+    { headers: sessionHeaders(token) },
+    signal,
+  );
   const [sourceFile, referenceFile] = await Promise.all([
     assetFile(clip.url, clip.name, MAX_SOURCE_BYTES, "source", signal),
     assetFile(
@@ -464,16 +525,24 @@ export async function createLiveJob(
     },
     signal,
   );
-  if (!isRecord(ticket) || typeof ticket.id !== "string" ||
-      !/^[a-zA-Z0-9_-]{1,128}$/.test(ticket.id)) {
-    throw new LivePipelineError("The upload could not be started. Try again later.");
+  if (
+    !isRecord(ticket) ||
+    typeof ticket.id !== "string" ||
+    !/^[a-zA-Z0-9_-]{1,128}$/.test(ticket.id)
+  ) {
+    throw new LivePipelineError(
+      "The upload could not be started. Try again later.",
+    );
   }
   const uploads = new AbortController();
   const abortUploads = () => uploads.abort();
-  signal.addEventListener("abort", abortUploads, {once: true});
+  signal.addEventListener("abort", abortUploads, { once: true });
   try {
     signal.throwIfAborted();
-    onProgress?.({phase: "uploading", message: "Uploading your video and reference to private storage…"});
+    onProgress?.({
+      phase: "uploading",
+      message: "Uploading your video and reference to private storage…",
+    });
     await Promise.all([
       uploadAsset(ticket.source, sourceFile, uploads.signal),
       uploadAsset(ticket.reference, referenceFile, uploads.signal),
@@ -484,19 +553,34 @@ export async function createLiveJob(
   } finally {
     signal.removeEventListener("abort", abortUploads);
   }
-  onProgress?.({phase: "confirming", message: "Verifying your uploads and queuing the scene check…"});
+  onProgress?.({
+    phase: "confirming",
+    message: "Verifying your uploads and queuing the scene check…",
+  });
   try {
-    return readJob(await requestJson(
-      `/api/uploads/${encodeURIComponent(ticket.id)}/complete`,
-      { method: "POST", headers: sessionHeaders(token) },
-      signal,
-    ));
+    return readJob(
+      await requestJson(
+        `/api/uploads/${encodeURIComponent(ticket.id)}/complete`,
+        { method: "POST", headers: sessionHeaders(token) },
+        signal,
+      ),
+    );
   } catch (error) {
     if (signal.aborted) throw error;
-    if (error instanceof LivePipelineError && error.status !== null && error.status < 500) throw error;
+    if (
+      error instanceof LivePipelineError &&
+      error.status !== null &&
+      error.status < 500
+    )
+      throw error;
     // Confirmation may already have queued work. Retain its known ID and poll;
     // never start another upload just because the acknowledgement was lost.
-    return {id: ticket.id, status: "queued", message: "Upload confirmation is pending. Check this job's status before preparing another clip."};
+    return {
+      id: ticket.id,
+      status: "queued",
+      message:
+        "Upload confirmation is pending. Check this job's status before preparing another clip.",
+    };
   }
 }
 

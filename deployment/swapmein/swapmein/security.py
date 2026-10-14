@@ -13,7 +13,7 @@ from google.oauth2 import id_token
 from .errors import PublicError
 
 ID_PATTERN = re.compile(r"[a-f0-9]{32}")
-MEDIA_HOSTS = {"cdn.reapi.ai", "reapiflexible.b-cdn.net", "reapi.ai", "files.toapis.xyz"}
+MEDIA_HOSTS = {"cdn.reapi.ai", "reapiflexible.b-cdn.net", "reapi.ai", "files.toapis.xyz", "fal.media", "v3.fal.media", "v3b.fal.media"}
 
 
 def digest(value: str):

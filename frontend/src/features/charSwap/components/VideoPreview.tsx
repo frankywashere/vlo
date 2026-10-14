@@ -58,7 +58,7 @@ export function VideoPreview({
       sx={{
         bgcolor: "#0d0f12",
         border: "1px solid #30343b",
-        borderRadius: 2,
+        borderRadius: "5px",
         overflow: "hidden",
       }}
     >
