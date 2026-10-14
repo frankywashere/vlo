@@ -42,12 +42,14 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
         assert audio_source.read_bytes() == b"original-upload"
         assert audio_start == 1.25 and duration == 5
         output.write_bytes(b"exported")
+        return {"width": 1344, "height": 768}
     monkeypatch.setattr("swapmein.pipeline.finish", finish)
     records, cloud = Records(), Cloud()
     pipeline = Pipeline(replace(Settings(), app_bucket="private-app"), records, cloud)
     pipeline.finalize(job_id)
     first_uri = records.data[path]["output_uri"]
     assert records.data[path]["status"] == "completed"
+    assert (records.data[path]["width"], records.data[path]["height"]) == (1344, 768)
     pipeline.finalize(job_id)
     assert len(cloud.uploads) == 1  # A task retry cannot repeat a claimed export.
     records.data[path]["status"] = "finalizing"  # Explicit operator re-export.

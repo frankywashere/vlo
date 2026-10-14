@@ -624,7 +624,7 @@ export function CharSwapWalkthrough() {
                   color="text.secondary"
                   sx={{ mt: 0.75 }}
                 >
-                  480p delivery
+                  Native resolution
                 </Typography>
                 <Typography
                   variant="body2"

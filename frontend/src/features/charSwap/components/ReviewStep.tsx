@@ -86,7 +86,7 @@ export function ReviewStep({
         decision: decisions[issue.id],
         simulated: clip!.mode === "demo",
       })),
-      output: { deliveryResolution: "480p", restoreOriginalAudio: true },
+      output: { deliveryResolution: "native", restoreOriginalAudio: true },
       submitted: Boolean(
         job &&
         [
@@ -278,7 +278,7 @@ export function ReviewStep({
             ✓ Original soundtrack restored on export
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            ✓ Final video delivered at 480p
+            ✓ Final video keeps its generated resolution
           </Typography>
         </Stack>
       </Box>
@@ -309,7 +309,7 @@ export function ReviewStep({
             {provider === "ToAPIs"
               ? "Based on the US$0.80 five-second test; not a price quote."
               : "Provider pricing can change."}{" "}
-            H3 generates at 768p; your download is 480p.
+            H3 generates at 768p; the download keeps that resolution.
           </Typography>
         )}
       {job?.status === "completed" && job.output_url && (
@@ -317,6 +317,8 @@ export function ReviewStep({
           <VideoPreview
             clip={{
               ...clip,
+              width: job.width ?? clip.width,
+              height: job.height ?? clip.height,
               url: job.output_url,
               duration: job.duration ?? trim[1] - trim[0],
             }}
@@ -330,7 +332,7 @@ export function ReviewStep({
             variant="contained"
             startIcon={<DownloadRounded />}
           >
-            Open 480p video
+            Open video
           </Button>
         </>
       )}

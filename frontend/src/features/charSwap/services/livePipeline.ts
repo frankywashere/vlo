@@ -8,7 +8,7 @@ export interface LivePipelineConfig {
   available: boolean;
   provider: "reAPI";
   model: "minimax-h3";
-  delivery: "480p";
+  delivery: "native" | "480p";
   beta: "single-person";
 }
 
@@ -223,7 +223,7 @@ export async function getLiveConfig(
     !isRecord(value) ||
     value.provider !== "reAPI" ||
     value.model !== "minimax-h3" ||
-    value.delivery !== "480p" ||
+    (value.delivery !== "480p" && value.delivery !== "native") ||
     value.beta !== "single-person"
   ) {
     throw new LivePipelineError(
@@ -235,7 +235,7 @@ export async function getLiveConfig(
     available: value.available === true,
     provider: "reAPI",
     model: "minimax-h3",
-    delivery: "480p",
+    delivery: value.delivery,
     beta: "single-person",
   };
 }

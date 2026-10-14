@@ -10,7 +10,7 @@ swapMEin is a standalone React/MUI/Zustand application using VLO’s charcoal an
 4. **References:** upload a replacement inside that person’s card. The image tile and Upload/Change button open the same picker. Reuse and remove remain available. The live reference must be a single JPG/PNG/WebP, no more than 5 MiB, with sides 256–5760 pixels and aspect ratio 0.4–2.5.
 5. **Matches:** the live backend runs SAM on the original video, finds the label under the clicked point, and checks that the label exists in every frame. It then shows the actual gray guide for visual confirmation. Confirmation is blocked until the guide can play; a preview error clears approval. A new job requires new approval. Clips with cuts, missing masks or missed clicks are rejected with a request to trim or reselect. This beta does not claim automatic cross-shot identity matching or measured confidence scores. The local sample’s uncertain sections remain explicitly simulated.
 6. **Access:** choose a personal reAPI key or swapMEin credits. A key can also be entered from the header when cloud preparation needs account validation. Personal-key generation uses that reAPI account’s balance. App credits, their sample balance and sample top-up are a UI preview; purchases, balances and generating with app credits are not implemented.
-7. **Review:** check the mapping, guide approval and provider estimate, then explicitly generate. The backend submits one MiniMax H3 reference request, polls status and exports the result at 480p with the source soundtrack. Status and media links can be refreshed without submitting another paid request.
+7. **Review:** check the mapping, guide approval and provider estimate, then explicitly generate. The backend submits one MiniMax H3 reference request, polls status and exports the result at its native generated resolution with the source soundtrack. Status and media links can be refreshed without submitting another paid request.
 
 Main controls use 44 px or larger touch targets. Mobile navigation scrolls the current step into view; its Back/Continue bar respects safe areas. Step changes focus the heading. Forward navigation respects prerequisites. Key and selection editing are locked while jobs are active. An unknown paid submission remains locked until status resolves or the user explicitly confirms they checked their provider history before starting over.
 
@@ -27,10 +27,10 @@ The deployed sequence is:
 ```
 private upload → trim/normalize → SAM on RGB → clicked label + coverage check
 → Demucs vocals + three semitones → gray composite → user guide approval
-→ MiniMax H3/reAPI → timing check → original soundtrack → 480p output
+→ MiniMax H3/reAPI → timing check → original soundtrack → native-resolution output
 ```
 
-Depth Anything and face mesh are omitted. MiniMax H3’s reference mode generates at 768P; 480p is the final delivery resolution. Motion and lip-sync quality still require the user’s creative review.
+Depth Anything and face mesh are omitted. MiniMax H3’s reference mode generates at 768P; the final download preserves the generated resolution. Motion and lip-sync quality still require the user’s creative review.
 
 The existing `proof-gpu` and `proof-audio` services remain private, at MANUAL 0 between calls. The gateway activates them serially under one durable preparation lock, registers a backup shutdown first, and verifies zero scaling and cancellation afterward. If shutdown/cancellation or task registration has an ambiguous outcome, later preparation stays blocked for operator recovery. There are no automatic paid submission retries. Session/job/asset cleanup applies after two days; persistent quota and lock records are excluded from lifecycle deletion.
 
@@ -40,7 +40,7 @@ Detailed API, dependencies, IAM, failure handling and operator recovery: [gatewa
 
 ## Live validation on 14 October 2026
 
-Read-only checks confirmed that [the deployed site](https://charswap-franky-20261013.web.app) and `/api/config` return HTTP 200. Configuration reports live processing available through reAPI’s MiniMax H3, a single-person beta, and 480p delivery. API responses use `Cache-Control: no-store`; the root page uses `Cache-Control: no-cache`, and the site supplies its configured security headers.
+Read-only checks confirmed that [the deployed site](https://charswap-franky-20261013.web.app) and `/api/config` return HTTP 200. Configuration reports live processing available through reAPI’s MiniMax H3, a single-person beta, and native-resolution delivery. API responses use `Cache-Control: no-store`; the root page uses `Cache-Control: no-cache`, and the site supplies its configured security headers.
 
 The five-second live proof completed cloud preparation in approximately 177 seconds and waited 775 seconds for MiniMax generation. The provider reported 366 credits, equivalent to US$0.366; the displayed estimate had been US$0.74. These are one proof’s measured timings and charge, not a promised runtime or fixed per-clip price.
 
@@ -116,6 +116,8 @@ Settings includes **Use enhanced character masking**, on by default. On paints t
 
 Settings offers reAPI or ToAPIs with a user-entered key. Changing providers clears the key, session, guide and approval; active and uncertain submissions lock the selector. Sessions store only the provider name and key fingerprint. The compatibility header `X-Reapi-Key` carries either provider key only on HTTPS requests, never in saved setup JSON or static files. The provider choice is bound to the session and inherited by its job.
 
-ToAPIs uses `POST /v1/videos/generations` with model `MiniMax-H3`, fixed integer duration, `768p`, and explicit `reference_image`/`reference_video` roles; polling uses `GET /v1/videos/generations/{id}`. Signed private Google media URLs supply references. Its documented API does not expose reAPI's content-filter toggle, so that field is not forwarded. Completed media is constrained to `files.toapis.xyz` and passes the same timing, 480p and original-audio export checks. No automatic paid retry or provider fallback is made.
+ToAPIs uses `POST /v1/videos/generations` with model `MiniMax-H3`, fixed integer duration, `768p`, and explicit `reference_image`/`reference_video` roles; polling uses `GET /v1/videos/generations/{id}`. Signed private Google media URLs supply references. Its documented API does not expose reAPI's content-filter toggle, so that field is not forwarded. Completed media is constrained to `files.toapis.xyz` and passes the same timing, native-resolution and original-audio export checks. No automatic paid retry or provider fallback is made.
 
 The approved five-second proof replaced the performer with the teddy in sampled frames; raw output had 124 frames and was trimmed to 120 at 24fps. Token usage increased by 160 ToAPIs credits (US$0.80). Site estimates scale that measured five-second charge and are not quotes; Google preparation is separate. No operator key is bundled or used as a site fallback. Provider integration is tested with mocked HTTP responses; the paid proof used vendor-uploaded reference URLs. The site uses signed Google URLs as supported by the vendor URL-reference schema, without another paid integration proof. Motion/lip sync require user review.
+
+Export resolution correction (2026-10-14): retain generated pixels at their native dimensions while trimming small extra tail frames and restoring original audio. Guide preparation stays at 480p. The ToAPIs proof was re-exported at 1344×768, without another generation; its prior 480p copy remains preserved.

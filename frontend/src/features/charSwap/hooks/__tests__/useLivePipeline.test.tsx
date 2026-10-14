@@ -10,7 +10,7 @@ const USER_KEY = "test-user-private-key";
 const SESSION_TOKEN = "test-private-session-token";
 const CONFIG = {
   live: true, available: true, provider: "reAPI", model: "minimax-h3",
-  delivery: "480p", beta: "single-person",
+  delivery: "native", beta: "single-person",
 };
 
 function setup(): WalkthroughState {

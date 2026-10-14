@@ -206,15 +206,17 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
          "-protocol_whitelist", "file,pipe", "-ss", str(audio_start), "-i", str(soundtrack),
          # A global video frame cap can end muxing before an independent audio
          # input is drained. Trim inside the video filter to retain the soundtrack.
-         "-map", "0:v:0", "-map", "1:a:0", "-vf", f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,scale={out_w}:{out_h},setsar=1",
+         "-map", "0:v:0", "-map", "1:a:0", "-vf", f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,setsar=1",
          "-t", str(duration), "-c:v", "libx264", "-threads", "2",
          "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags",
          "+faststart", str(output)])
     checked = probe(output)
     final_video = next(s for s in checked["streams"] if s["codec_type"] == "video")
-    if (int(final_video.get("nb_frames", 0)) != duration * 24
+    if ((final_video["width"], final_video["height"]) != (width, height)
+            or int(final_video.get("nb_frames", 0)) != duration * 24
             or not any(s["codec_type"] == "audio" for s in checked["streams"])):
         raise PublicError("The final video did not retain its frames and soundtrack.")
     require_audio_duration(checked, duration)
     if decoded_audio_samples(output) < math.floor((duration - .05) * 44100):
         raise PublicError("The exported soundtrack lost audio samples. The result needs review.")
+    return {"width": width, "height": height}

@@ -221,7 +221,7 @@ function ApiKeyPreviewEditor({
           )}
           <Typography variant="body2" color="text.secondary">
             Generation uses your {provider} credit balance. H3 generates at
-            768p; your download is 480p.
+            768p; your download keeps that resolution.
             {provider === "ToAPIs" &&
               " Your token must allow MiniMax-H3 and have enough daily, monthly and remaining credits."}
           </Typography>

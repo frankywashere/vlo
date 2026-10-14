@@ -111,6 +111,7 @@ def test_five_second_dual_input_export_restores_audio_through_the_last_frame(tmp
     video = next(stream for stream in checked["streams"] if stream["codec_type"] == "video")
     audio = next(stream for stream in checked["streams"] if stream["codec_type"] == "audio")
     assert video["nb_frames"] == "120"
+    assert (video["width"], video["height"]) == (1280, 720)
     assert float(audio["duration"]) >= 4.99
     assert decoded_audio_samples(normalized) >= 220500
     assert 220500 <= decoded_audio_samples(result) <= 220500 + 1024

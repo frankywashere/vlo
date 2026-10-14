@@ -111,9 +111,10 @@ class Pipeline:
                 self.cloud.download_provider(job["provider_output"], raw)
                 self.cloud.download(job["normalized_uri"], original)
                 self.cloud.download(job["source_uri"], uploaded, 25 * 1024 * 1024)
-                finish(raw, original, output, job["duration"], audio_source=uploaded, audio_start=job["setup"]["trim"][0])
+                output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded, audio_start=job["setup"]["trim"][0])
                 output_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/swapMEin-{uuid.uuid4().hex}.mp4", output, "video/mp4")
-                self.update_job(job_id, status="completed", message="Your 480p video is ready, with the original soundtrack.", output_uri=output_uri)
+                self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
+                    width=output_dimensions["width"], height=output_dimensions["height"])
         except PublicError as error:
             self.update_job(job_id, status="failed", message=error.message)
         except Exception:

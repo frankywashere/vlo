@@ -152,7 +152,7 @@ def view(job: dict):
 
 @app.get("/api/config")
 def config():
-    return {"live": True, "providers": ["reAPI", "ToAPIs"], "provider": "reAPI", "model": "minimax-h3", "delivery": "480p",
+    return {"live": True, "providers": ["reAPI", "ToAPIs"], "provider": "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "single-person", "available": settings.available}
 
 
@@ -347,7 +347,7 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
             **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url,
             "actual_credits": usage if isinstance(usage, (int, float)) else None,
-            "message": "Restoring the original soundtrack and exporting 480p."})
+            "message": "Restoring the original soundtrack and preserving the generated resolution."})
     except PublicError as error:
         if error.status_code == 409:
             current, _ = records.read(f"jobs/{job_id}.json")
