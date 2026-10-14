@@ -13,7 +13,7 @@ from google.oauth2 import id_token
 from .errors import PublicError
 
 ID_PATTERN = re.compile(r"[a-f0-9]{32}")
-MEDIA_HOSTS = {"cdn.reapi.ai", "reapiflexible.b-cdn.net", "reapi.ai"}
+MEDIA_HOSTS = {"cdn.reapi.ai", "reapiflexible.b-cdn.net", "reapi.ai", "files.toapis.xyz"}
 
 
 def digest(value: str):
@@ -22,7 +22,7 @@ def digest(value: str):
 
 def provider_key(value: str | None):
     if not value or not 8 <= len(value.strip()) <= 512 or any(c.isspace() for c in value.strip()):
-        raise PublicError("Enter a valid reAPI API key.", 401)
+        raise PublicError("Enter a valid provider API key.", 401)
     return value.strip()
 
 

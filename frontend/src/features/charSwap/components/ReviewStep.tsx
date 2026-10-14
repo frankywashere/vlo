@@ -11,6 +11,7 @@ import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
 
 interface ReviewStepProps {
+  provider?: "reAPI" | "ToAPIs";
   live?: boolean;
   job?: LivePipelineJob | null;
   generating?: boolean;
@@ -25,6 +26,7 @@ interface ReviewStepProps {
 }
 
 export function ReviewStep({
+  provider = "reAPI",
   live = false,
   job = null,
   generating = false,
@@ -65,6 +67,7 @@ export function ReviewStep({
     // Local object URLs and thumbnail data are deliberately excluded from the handoff.
     const setup = {
       version: 1,
+      provider,
       enhancedCharacterMasking: enhancedCharacterMasking ?? true,
       previewOnly: !live,
       clip: { name: clip!.name, duration: clip!.duration, trim },
@@ -149,7 +152,7 @@ export function ReviewStep({
               <Typography fontWeight={600}>
                 {accessMode === "credits"
                   ? "swapMEin credits"
-                  : "Your reAPI account"}
+                  : `Your ${provider} account`}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {accessMode === "credits" ? (
@@ -188,7 +191,7 @@ export function ReviewStep({
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {accessMode === "credits"
             ? "Sample credits demonstrate the flow. Buying credits and generating with app credits are coming later."
-            : "When connected, video generation uses your reAPI credit balance."}
+            : `When connected, video generation uses your ${provider} credit balance.`}
         </Typography>
       </Box>
       <Box sx={PANEL}>
@@ -284,7 +287,7 @@ export function ReviewStep({
           ? accessMode === "credits"
             ? "App credits are coming soon. Choose your own API key in Access to generate."
             : job?.message ||
-              "Review the prepared guide before generating. This uses your own reAPI credits."
+              `Review the prepared guide before generating. This uses your own ${provider} credits.`
           : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
       </Alert>
       {live && job && (
@@ -294,7 +297,7 @@ export function ReviewStep({
       )}
       {live && job?.actual_provider_credits !== undefined && (
         <Typography variant="body2" color="text.secondary">
-          reAPI reported charge: US$
+          {provider} reported charge: US$
           {(job.actual_provider_credits / 1000).toFixed(3)}.
         </Typography>
       )}
@@ -302,9 +305,11 @@ export function ReviewStep({
         job?.actual_provider_credits === undefined &&
         job?.estimated_cost_usd !== undefined && (
           <Typography variant="body2" color="text.secondary">
-            Conservative reAPI estimate: US${job.estimated_cost_usd.toFixed(2)}.
-            Provider pricing can change. H3 generates at 768p; your download is
-            480p.
+            {provider} estimate: US${job.estimated_cost_usd.toFixed(2)}.
+            {provider === "ToAPIs"
+              ? "Based on the US$0.80 five-second test; not a price quote."
+              : "Provider pricing can change."}{" "}
+            H3 generates at 768p; your download is 480p.
           </Typography>
         )}
       {job?.status === "completed" && job.output_url && (

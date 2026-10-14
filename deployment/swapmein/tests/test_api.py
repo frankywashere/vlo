@@ -239,3 +239,22 @@ def test_original_visible_mode_uses_stored_selection_without_gray_instructions(a
     assert "gray" not in prompt and "60%" in prompt and "40%" in prompt and "2.00 seconds" in prompt
     assert "Keep all other people unchanged" in prompt
     assert provider.submissions[0]["reference_video_urls"][0].startswith("https://storage.googleapis.com/")
+
+
+def test_provider_choice_is_bound_to_session_and_job_and_key_is_not_persisted(api, monkeypatch):
+    client, records, _, provider = api
+    monkeypatch.setattr(gateway, "toapis_service", lambda: provider)
+    response = client.post("/api/session", headers={"X-Reapi-Key": "example-toapis-key"}, json={"provider": "ToAPIs"})
+    assert response.status_code == 200
+    owner = digest(response.json()["token"])
+    assert records.data[f"sessions/{owner}.json"]["provider"] == "ToAPIs"
+    assert "example-toapis-key" not in json.dumps(records.data)
+    job_id = ready_job(records, owner)
+    records.data[f"jobs/{job_id}.json"]["provider"] = "ToAPIs"
+    generated = client.post(f"/api/jobs/{job_id}/generate", headers={"Authorization": "Bearer " + response.json()["token"],
+        "X-Reapi-Key": "example-toapis-key"}, json={"approved": True})
+    assert generated.status_code == 200
+    assert generated.json()["provider"] == "ToAPIs"
+    assert generated.json()["estimated_cost_usd"] == .8
+    assert len(provider.submissions) == 1
+    assert client.post("/api/session", headers={"X-Reapi-Key": "example-key"}, json={"provider": "untrusted"}).status_code == 422

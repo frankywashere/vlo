@@ -1,6 +1,8 @@
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
+export type GenerationProvider = "reAPI" | "ToAPIs";
+
 export interface LivePipelineConfig {
   live: boolean;
   available: boolean;
@@ -21,6 +23,7 @@ export type LiveJobStatus =
   | "submission_unknown";
 
 export interface LivePipelineJob {
+  provider?: GenerationProvider;
   id: string;
   status: LiveJobStatus;
   message?: string;
@@ -85,7 +88,7 @@ function assertSecureOrigin() {
 export function assertLiveKey(key: string) {
   if (!key.trim() || key.trim() === DEMO_API_KEY) {
     throw new LivePipelineError(
-      "Add your own reAPI key before preparing a live swap.",
+      "Add your own provider key before preparing a live swap.",
     );
   }
 }
@@ -97,9 +100,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requestMessage(status: number): string {
   switch (status) {
     case 401:
-      return "Your access has expired or the reAPI key was refused. Check the key in Access.";
+      return "Your access has expired or the provider key was refused. Check the key in Access.";
     case 402:
-      return "There are not enough reAPI credits for this generation.";
+      return "There are not enough provider credits for this generation.";
     case 403:
       return "This session cannot access the job. Start a new setup with your own key.";
     case 413:
@@ -172,6 +175,7 @@ function readJob(value: unknown): LivePipelineJob {
     );
   }
   const job: LivePipelineJob = {
+    ...(value.provider === "ToAPIs" || value.provider === "reAPI" ? {provider: value.provider} : {}),
     id: value.id,
     status: value.status as LiveJobStatus,
   };
@@ -239,19 +243,21 @@ export async function getLiveConfig(
 export async function createLiveSession(
   key: string,
   signal: AbortSignal,
+  provider: GenerationProvider = "reAPI",
 ): Promise<LivePipelineSession> {
   assertLiveKey(key);
   const value = await requestJson(
     "/api/session",
     {
       method: "POST",
-      headers: { "X-Reapi-Key": key.trim() },
+      headers: { "X-Reapi-Key": key.trim(), "Content-Type": "application/json" },
+      body: JSON.stringify({provider}),
     },
     signal,
   );
   if (!isRecord(value) || typeof value.token !== "string" || !value.token) {
     throw new LivePipelineError(
-      "Access could not be established. Check your reAPI key.",
+      "Access could not be established. Check your provider key.",
     );
   }
   const expiry = value.expires_at;
@@ -263,7 +269,7 @@ export async function createLiveSession(
         : NaN;
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     throw new LivePipelineError(
-      "The service returned expired access. Check your reAPI key.",
+      "The service returned expired access. Check your provider key.",
     );
   }
   return { token: value.token, expiresAt };

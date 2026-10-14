@@ -3,6 +3,7 @@ import {
   Alert,
   FormControlLabel,
   Switch,
+  MenuItem,
   Box,
   Button,
   Dialog,
@@ -26,6 +27,8 @@ interface ApiKeySettingsDialogProps {
   enhancedCharacterMasking?: boolean;
   maskingLocked?: boolean;
   onMaskingChange?: (enabled: boolean) => void;
+  provider?: "reAPI" | "ToAPIs";
+  onProviderChange?: (provider: "reAPI" | "ToAPIs") => void;
   open: boolean;
   live?: boolean;
   apiKey: string;
@@ -64,6 +67,8 @@ function ApiKeyPreviewEditor({
   enhancedCharacterMasking = true,
   maskingLocked = false,
   onMaskingChange,
+  provider = "reAPI",
+  onProviderChange,
   apiKey,
   live = false,
   onSave,
@@ -130,7 +135,7 @@ function ApiKeyPreviewEditor({
           </Box>
           <Alert severity="info" id="charswap-api-settings-notice">
             {live
-              ? "Your key is used only for this tab and sent securely through swapMEin to reAPI. Video generation starts only after your final review."
+              ? `Your key is used only for this tab and sent securely through swapMEin to ${provider}. Video generation starts only after your final review.`
               : "Use the sample key to try this step. This preview sends no requests and does not verify API keys."}
           </Alert>
           <Stack direction="row" spacing={3}>
@@ -138,7 +143,23 @@ function ApiKeyPreviewEditor({
               <Typography variant="caption" color="text.secondary">
                 Provider
               </Typography>
-              <Typography fontWeight={600}>reAPI</Typography>
+              <TextField
+                select
+                label="Generation provider"
+                value={provider}
+                disabled={maskingLocked}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "reAPI" || value === "ToAPIs") {
+                    setDraft("");
+                    setVisible(false);
+                    onProviderChange?.(value);
+                  }
+                }}
+              >
+                <MenuItem value="reAPI">reAPI</MenuItem>
+                <MenuItem value="ToAPIs">ToAPIs</MenuItem>
+              </TextField>
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
@@ -148,7 +169,7 @@ function ApiKeyPreviewEditor({
             </Box>
           </Stack>
           <TextField
-            label="reAPI API key"
+            label={`${provider} API key`}
             value={draft}
             type={visible ? "text" : "password"}
             fullWidth
@@ -202,7 +223,10 @@ function ApiKeyPreviewEditor({
             </Box>
           )}
           <Typography variant="body2" color="text.secondary">
-            When connected, video generation uses your reAPI credit balance.
+            Generation uses your {provider} credit balance. H3 generates at
+            768p; your download is 480p.
+            {provider === "ToAPIs" &&
+              " Your token must allow MiniMax-H3 and have enough daily, monthly and remaining credits."}
           </Typography>
         </Stack>
       </DialogContent>

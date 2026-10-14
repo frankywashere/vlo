@@ -313,7 +313,8 @@ export function CharSwapWalkthrough() {
     saveKey,
     clearKey,
   } = useApiKeyPreview();
-  const pipeline = useLivePipeline(previewKey);
+  const [provider, setProvider] = useState<"reAPI" | "ToAPIs">("reAPI");
+  const pipeline = useLivePipeline(previewKey, provider);
   const { reset: resetPipeline } = pipeline;
   const secureSite = isSecureLiveOrigin();
   const live = pipeline.enabled && clip?.mode !== "demo";
@@ -409,7 +410,7 @@ export function CharSwapWalkthrough() {
     if (step === "references" && live) {
       if (!hasKey || isSampleKey) {
         setError(
-          "Add your reAPI key before cloud preparation. Generation starts only after Review.",
+          `Add your ${provider} key before cloud preparation. Generation starts only after Review.`,
         );
         setApiSettingsOpen(true);
         return;
@@ -764,6 +765,7 @@ export function CharSwapWalkthrough() {
                 ))}
               {step === "access" && (
                 <AccessStep
+                  provider={provider}
                   accessMode={accessMode}
                   onAccessModeChange={setAccessMode}
                   hasKey={hasKey}
@@ -777,6 +779,7 @@ export function CharSwapWalkthrough() {
               )}
               {step === "review" && (
                 <ReviewStep
+                  provider={provider}
                   live={live}
                   job={pipeline.job}
                   generating={pipeline.busy}
@@ -881,6 +884,16 @@ export function CharSwapWalkthrough() {
         <ApiKeySettingsDialog
           open={apiSettingsOpen}
           live={secureSite}
+          provider={provider}
+          onProviderChange={(value) => {
+            if (lockedAccess) return;
+            clearKey();
+            pipeline.clear();
+            invalidateTracking();
+            setProvider(value);
+            if (["matches", "access", "review"].includes(step))
+              visit("references");
+          }}
           enhancedCharacterMasking={enhancedCharacterMasking}
           maskingLocked={lockedAccess}
           onMaskingChange={setEnhancedCharacterMasking}
@@ -899,7 +912,7 @@ export function CharSwapWalkthrough() {
           <DialogContent>
             <Typography color="text.secondary">
               {unknownSubmission
-                ? "The provider submission outcome is unknown. Check your reAPI task history first; starting another generation could duplicate a charge. Only continue after you have confirmed the outcome."
+                ? "The provider submission outcome is unknown. Check your provider task history first; starting another generation could duplicate a charge. Only continue after you have confirmed the outcome."
                 : "This clears your current clip, selected people, and reference assignments from this tab."}
             </Typography>
           </DialogContent>

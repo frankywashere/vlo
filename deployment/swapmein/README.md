@@ -228,3 +228,11 @@ not a VLO SDK/extension-owned service. No new extension surface is exposed; the
 repository extension-surface check still applies before handoff.
 
 The job setup accepts strict boolean `enhanced_character_masking` (default `true` for existing clients). The CPU compose call uses `gray` when on and `original` when off. SAM and audio preparation remain active in both modes. Generation reads the saved job option and normalized selection coordinates; the final export remains 480p with original audio.
+
+### ToAPIs MiniMax H3
+
+Settings offers reAPI or ToAPIs with a user-entered key. Changing providers clears the key, session, guide and approval; active and uncertain submissions lock the selector. Sessions store only the provider name and key fingerprint. The compatibility header `X-Reapi-Key` carries either provider key only on HTTPS requests, never in saved setup JSON or static files. The provider choice is bound to the session and inherited by its job.
+
+ToAPIs uses `POST /v1/videos/generations` with model `MiniMax-H3`, fixed integer duration, `768p`, and explicit `reference_image`/`reference_video` roles; polling uses `GET /v1/videos/generations/{id}`. Signed private Google media URLs supply references. Its documented API does not expose reAPI's content-filter toggle, so that field is not forwarded. Completed media is constrained to `files.toapis.xyz` and passes the same timing, 480p and original-audio export checks. No automatic paid retry or provider fallback is made.
+
+The approved five-second proof replaced the performer with the teddy in sampled frames; raw output had 124 frames and was trimmed to 120 at 24fps. Token usage increased by 160 ToAPIs credits (US$0.80). Site estimates scale that measured five-second charge and are not quotes; Google preparation is separate. No operator key is bundled or used as a site fallback. Provider integration is tested with mocked HTTP responses; the paid proof used vendor-uploaded reference URLs. The site uses signed Google URLs as supported by the vendor URL-reference schema, without another paid integration proof. Motion/lip sync require user review.

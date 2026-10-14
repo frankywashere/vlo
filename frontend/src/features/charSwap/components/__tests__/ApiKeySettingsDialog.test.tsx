@@ -141,4 +141,13 @@ describe("API settings preview dialog", () => {
     expect(toggle).toBeDisabled();
     expect(props.onSave).not.toHaveBeenCalled();
   });
+  it("clears an unsaved key when switching providers", () => {
+    const onProviderChange = vi.fn();
+    render(<ApiKeySettingsDialog open apiKey="example-reapi-key" onSave={vi.fn()} onClear={vi.fn()} onClose={vi.fn()} onProviderChange={onProviderChange} />);
+    fireEvent.mouseDown(screen.getByRole("combobox", {name: "Generation provider"}));
+    fireEvent.click(screen.getByRole("option", {name: "ToAPIs"}));
+    expect(onProviderChange).toHaveBeenCalledWith("ToAPIs");
+    expect(screen.getByLabelText("reAPI API key")).toHaveValue("");
+  });
+
 });

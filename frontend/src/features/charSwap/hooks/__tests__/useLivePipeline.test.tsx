@@ -1,4 +1,4 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createInitialState } from "../../model/model";
 import type { WalkthroughState } from "../../model/model";
@@ -93,7 +93,7 @@ describe("live BYOK pipeline", () => {
   it("never uses the sample key to create a session or submit a job", async () => {
     const { result } = await renderLive(DEMO_API_KEY);
     await act(async () => { await result.current.prepare(setup()); });
-    expect(result.current.error).toContain("own reAPI key");
+    expect(result.current.error).toContain("own provider key");
     expect(calls("/api/session")).toHaveLength(0);
     expect(calls("/api/jobs")).toHaveLength(0);
     expect(JSON.stringify(requests.mock.calls)).not.toContain(DEMO_API_KEY);
@@ -115,7 +115,7 @@ describe("live BYOK pipeline", () => {
     const { result } = await renderLive();
     await act(async () => { await result.current.prepare(setup()); });
     expect(result.current.job).toEqual({ id: "job-1", status: "queued" });
-    expect(calls("/api/session")[0][1]?.headers).toEqual({ "X-Reapi-Key": USER_KEY });
+    expect(calls("/api/session")[0][1]?.headers).toEqual({ "X-Reapi-Key": USER_KEY, "Content-Type": "application/json" });
     const upload = calls("/api/jobs")[0][1];
     expect(upload?.headers).toEqual({ Authorization: `Bearer ${SESSION_TOKEN}` });
     const form = upload?.body as FormData;
@@ -201,7 +201,7 @@ describe("live BYOK pipeline", () => {
     expect(result.current.job).toBeNull();
     await act(async () => { await result.current.prepare(setup()); });
     expect(calls("/api/session")).toHaveLength(2);
-    expect(calls("/api/session")[1][1]?.headers).toEqual({ "X-Reapi-Key": "different-test-key" });
+    expect(calls("/api/session")[1][1]?.headers).toEqual({ "X-Reapi-Key": "different-test-key", "Content-Type": "application/json" });
   });
 
   it("retains jobs through status errors, uses provider polling, and finishes without a duplicate POST", async () => {
@@ -311,4 +311,15 @@ describe("live BYOK pipeline", () => {
     expect(calls("/api/jobs/job-1/provider")).toHaveLength(1);
     expect(result.current.error).toBeNull();
   });
+  it("binds provider to access and drops the previous job when it changes", async () => {
+    const { result, rerender } = renderHook(({provider}: {provider: "reAPI" | "ToAPIs"}) => useLivePipeline(USER_KEY, provider), {initialProps: {provider: "reAPI" as "reAPI" | "ToAPIs"}});
+    await waitFor(() => expect(result.current.enabled).toBe(true));
+    await act(async () => {await result.current.prepare(setup());});
+    expect(JSON.parse(String(calls("/api/session")[0][1]?.body))).toEqual({provider: "reAPI"});
+    rerender({provider: "ToAPIs"});
+    expect(result.current.job).toBeNull();
+    await act(async () => {await result.current.prepare(setup());});
+    expect(JSON.parse(String(calls("/api/session")[1][1]?.body))).toEqual({provider: "ToAPIs"});
+  });
+
 });

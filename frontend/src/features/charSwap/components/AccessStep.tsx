@@ -15,6 +15,7 @@ import AccountBalanceWalletOutlined from "@mui/icons-material/AccountBalanceWall
 import { PANEL } from "./stepStyles";
 
 interface AccessStepProps {
+  provider?: "reAPI" | "ToAPIs";
   accessMode: "api-key" | "credits";
   onAccessModeChange: (mode: "api-key" | "credits") => void;
   hasKey: boolean;
@@ -25,6 +26,7 @@ interface AccessStepProps {
 }
 
 export function AccessStep({
+  provider = "reAPI",
   accessMode,
   onAccessModeChange,
   hasKey,
@@ -56,7 +58,7 @@ export function AccessStep({
             <Box>
               <Typography fontWeight={600}>Use my API key</Typography>
               <Typography variant="body2" color="text.secondary">
-                Pay with your own reAPI account.
+                Pay with your own {provider} account.
               </Typography>
             </Box>
           }
@@ -100,7 +102,9 @@ export function AccessStep({
             <Stack direction="row" spacing={1.5} alignItems="center">
               <KeyOutlined sx={{ color: "#9abbdc" }} />
               <Box>
-                <Typography fontWeight={600}>Your reAPI API key</Typography>
+                <Typography fontWeight={600}>
+                  Your {provider} API key
+                </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {hasKey
                     ? isSampleKey
@@ -119,8 +123,8 @@ export function AccessStep({
             </Button>
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Generation uses your reAPI credit balance. You’ll review the clip
-            and replacements before submitting.
+            Generation uses your {provider} credit balance. You’ll review the
+            clip and replacements before submitting.
           </Typography>
           {hasKey && isSampleKey && (
             <Alert severity="info" role="note" sx={{ mt: 2 }}>

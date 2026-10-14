@@ -13,6 +13,7 @@ import {
   validateLiveSetup,
 } from "../services/livePipeline";
 import type {
+  GenerationProvider,
   LivePipelineConfig,
   LivePipelineJob,
   LivePipelineSession,
@@ -44,7 +45,7 @@ function safeMessage(message: string, key: string, token?: string): string {
 }
 
 /** Credentials, session tokens and outstanding work belong to this mount. */
-export function useLivePipeline(apiKey: string): LivePipelineHandle {
+export function useLivePipeline(apiKey: string, provider: GenerationProvider = "reAPI"): LivePipelineHandle {
   const [config, setConfig] = useState<LivePipelineConfig | null>(null);
   const [job, setJob] = useState<LivePipelineJob | null>(null);
   const [working, setWorking] = useState(false);
@@ -107,7 +108,7 @@ export function useLivePipeline(apiKey: string): LivePipelineHandle {
     setJob(null);
     setWorking(false);
     setError(null);
-  }, [apiKey, cancelRequests]);
+  }, [apiKey, provider, cancelRequests]);
 
   const publishJob = useCallback((next: LivePipelineJob) => {
     const previous = currentJob.current;
@@ -148,11 +149,11 @@ export function useLivePipeline(apiKey: string): LivePipelineHandle {
       return session.current;
     }
     if (session.current && session.current.expiresAt > Date.now() + 30000) return session.current;
-    const created = await createLiveSession(apiKey, signal);
+    const created = await createLiveSession(apiKey, signal, provider);
     signal.throwIfAborted();
     session.current = created;
     return created;
-  }, [apiKey]);
+  }, [apiKey, provider]);
 
   useEffect(() => {
     if (!enabled || !jobId || !jobStatus || !POLL_STATUSES.has(jobStatus)) return;
@@ -251,7 +252,7 @@ export function useLivePipeline(apiKey: string): LivePipelineHandle {
     try {
       assertLiveKey(apiKey);
     } catch (cause) {
-      setError(cause instanceof LivePipelineError ? cause.message : "Add your own reAPI key first.");
+      setError(cause instanceof LivePipelineError ? cause.message : "Add your own provider key first.");
       return;
     }
     // The guard precedes the request. A lost HTTP response cannot authorize a

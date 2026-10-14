@@ -103,3 +103,69 @@ class Provider:
             raise
         except Exception:
             raise PublicError("Unable to refresh the provider task. Try again shortly.", 502) from None
+
+
+class ToAPIsProvider(Provider):
+    """Translate the verified H3 protocol into the gateway's provider contract."""
+    base = "https://toapis.com"
+
+    def balance(self, key: str):
+        try:
+            response = self.client.get(self.base + "/v1/balance", headers={"Authorization": "Bearer " + key}, timeout=12)
+            response.raise_for_status()
+            body = response.json()
+            balance = body.get("remain_balance")
+            if body.get("success") is False or not isinstance(balance, (float, int)) or isinstance(balance, bool) or not math.isfinite(balance):
+                raise ValueError
+            if balance <= 0:
+                raise PublicError("Add credits or increase your ToAPIs token allowance before preparing a video.", 402)
+            return balance * 1000  # Shared contract is millidollars, not vendor credit units.
+        except PublicError:
+            raise
+        except Exception:
+            raise PublicError("ToAPIs could not validate this key and its allowance. Check your token settings.", 401) from None
+
+    def submit(self, key: str, payload: dict):
+        import uuid
+        translated = {"model": "MiniMax-H3", "prompt": payload["prompt"], "duration": payload["duration"],
+            "resolution": "768p", "aspect_ratio": "adaptive", "client_business_id": "swapmein-" + uuid.uuid4().hex,
+            "image_with_roles": [{"url": url, "role": "reference_image"} for url in payload["reference_image_urls"]],
+            "video_with_roles": [{"url": url, "role": "reference_video"} for url in payload["reference_video_urls"]]}
+        try:
+            response = self.client.post(self.base + "/v1/videos/generations", json=translated,
+                headers={"Authorization": "Bearer " + key}, timeout=35)
+        except httpx.HTTPError:
+            raise PublicError("The ToAPIs submission outcome is unknown. Check its task history before trying again.", 502) from None
+        if response.status_code in {400, 401, 402, 403, 422, 429}:
+            raise PublicError(f"ToAPIs rejected the request (HTTP {response.status_code}). Check token model access, credit limits and balance.", response.status_code)
+        try:
+            response.raise_for_status()
+            task = response.json().get("id")
+            if not isinstance(task, str) or not TASK_ID.fullmatch(task):
+                raise ValueError
+            return task
+        except Exception:
+            raise PublicError("The ToAPIs submission outcome is unknown. Check its task history before trying again.", 502) from None
+
+    def status(self, key: str, task_id: str):
+        if not TASK_ID.fullmatch(task_id):
+            raise PublicError("Invalid provider task.", 500)
+        try:
+            response = self.client.get(self.base + "/v1/videos/generations/" + task_id,
+                headers={"Authorization": "Bearer " + key}, timeout=20)
+            response.raise_for_status()
+            body = response.json()
+            if body.get("id") != task_id or body.get("model") != "MiniMax-H3":
+                raise ValueError
+            status = body.get("status")
+            result = {"id": task_id, "model": "minimax-h3", "status": "failed" if status == "cancelled" else status}
+            if status == "completed":
+                result["output"] = {"video_urls": [body["result"]["data"][0]["url"]]}
+                cost = (body.get("billing") or {}).get("cost_usd")
+                if isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost) and cost >= 0:
+                    result["usage"] = {"credits": cost * 1000}
+            return result
+        except PublicError:
+            raise
+        except Exception:
+            raise PublicError("Unable to refresh the ToAPIs task. Try again shortly.", 502) from None

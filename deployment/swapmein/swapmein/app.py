@@ -6,7 +6,9 @@ import tempfile
 import time
 import uuid
 
-from fastapi import FastAPI, File, Form, Header, Request, UploadFile
+from typing import Literal
+
+from fastapi import Body, FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -19,7 +21,7 @@ from .config import Settings
 from .errors import PublicError
 from .media import Setup, normalize_reference
 from .pipeline import Pipeline
-from .provider import Provider, estimate, generation_payload
+from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
 from .storage import Records, claim_job, reserve_preparation, release_preparation
@@ -90,6 +92,20 @@ def services():
     return records, Cloud(settings, storage_client=records.client), Provider()
 
 
+@lru_cache
+def toapis_service():
+    return ToAPIsProvider()
+
+
+def selected_provider(provider_name: str):
+    return toapis_service() if provider_name == "ToAPIs" else services()[2]
+
+
+def job_estimate(job):
+    # ToAPIs estimate scales the verified US$0.80 five-second reference test.
+    return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
+
+
 def authenticate(authorization: str | None):
     records, _, _ = services()
     session_id = digest(bearer_token(authorization))
@@ -113,13 +129,16 @@ def view(job: dict):
         status = "finalizing"
     if status == "submitting":
         status = "generating"
-    result = {"id": job["id"], "status": status, "message": job.get("message", "")}
+    result = {"provider": job.get("provider", "reAPI"), "id": job["id"], "status": status, "message": job.get("message", "")}
     if "duration" in job:
         result["duration"] = job["duration"]
-        result["estimated_cost_usd"] = estimate(job["duration"], settings.h3_price_per_second_usd)
+        result["estimated_cost_usd"] = job_estimate(job)
         result["estimate_note"] = "Provider estimate only, using rounded published 768P rate; Google preparation costs are separate."
         result["estimate_source"] = "https://reapi.ai/models/minimax-h3"
         result["estimate_verified_at"] = "2026-10-14"
+    if job.get("provider") == "ToAPIs":
+        result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
+        result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
     for field in ["width", "height", "selected_label"]:
         if field in job:
             result[field] = job[field]
@@ -133,7 +152,7 @@ def view(job: dict):
 
 @app.get("/api/config")
 def config():
-    return {"live": True, "provider": "reAPI", "model": "minimax-h3", "delivery": "480p",
+    return {"live": True, "providers": ["reAPI", "ToAPIs"], "provider": "reAPI", "model": "minimax-h3", "delivery": "480p",
             "beta": "single-person", "available": settings.available}
 
 
@@ -142,14 +161,20 @@ def health():
     return {"status": "ready", "available": settings.available}
 
 
+class ProviderSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["reAPI", "ToAPIs"] = "reAPI"
+
+
 @app.post("/api/session")
-def session(x_reapi_key: str | None = Header(default=None)):
+def session(options: ProviderSelection = Body(default=ProviderSelection()), x_reapi_key: str | None = Header(default=None)):
     records, _, provider = services()
     key = provider_key(x_reapi_key)
+    provider = selected_provider(options.provider)
     balance = provider.balance(key)
     token = secrets.token_urlsafe(32)
     expires_at = time.time() + settings.session_seconds
-    records.create("sessions/" + digest(token) + ".json", {"expires_at": expires_at, "key_fingerprint": digest(key)})
+    records.create("sessions/" + digest(token) + ".json", {"expires_at": expires_at, "key_fingerprint": digest(key), "provider": options.provider})
     return {"token": token, "expires_at": expires_at, "balance": balance}
 
 
@@ -171,7 +196,7 @@ async def save_upload(upload: UploadFile, path: Path, maximum: int):
 @app.post("/api/jobs", status_code=202)
 async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), setup: str = Form(),
                      authorization: str | None = Header(default=None)):
-    owner, _ = await run_in_threadpool(authenticate, authorization)
+    owner, active_session = await run_in_threadpool(authenticate, authorization)
     records, cloud, _ = services()
     if len(setup) > 4096:
         raise PublicError("The setup is too large.")
@@ -194,7 +219,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
-               "message": "Your clip is queued for preparation.", "setup": options.model_dump(),
+               "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
                "source_uri": source_uri, "reference_uri": reference_uri}
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
         record_created = True
@@ -231,7 +256,7 @@ def refresh_stale_job(job: dict):
         if current["status"] in {"queued", "preparing", "finalizing", "finishing"} and age > 2100:
             current.update(status="failed", message="Processing timed out. The backup shutdown has been scheduled; no automatic retry is made.")
         elif current["status"] == "submitting" and age > 90:
-            current.update(status="submission_unknown", message="Submission outcome is unknown. Check your reAPI history before creating another generation.")
+            current.update(status="submission_unknown", message="Submission outcome is unknown. Check your provider history before creating another generation.")
         return current
     if ((job["status"] in {"queued", "preparing", "finalizing", "finishing"} and time.time() - job["updated_at"] > 2100)
             or (job["status"] == "submitting" and time.time() - job["updated_at"] > 90)):
@@ -257,6 +282,7 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
         # Idempotent response after any completed/claimed submission; never POST again.
         return view(job)
     records, cloud, provider = services()
+    provider = selected_provider(job.get("provider", "reAPI"))
     image_url, video_url = cloud.signed_url(job["reference_uri"]), cloud.signed_url(job["guide_uri"])
     options = Setup.model_validate(job["setup"])
     anchor = options.anchor.model_dump()
@@ -264,8 +290,8 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     anchor = job.get("normalized_anchor", anchor)
     payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor)
     balance = provider.balance(key)
-    if balance < math_credits(job["duration"]):
-        raise PublicError("Your reAPI balance is below the current provider estimate. Add credits before generating.", 402)
+    if balance < round(job_estimate(job) * 1000):
+        raise PublicError("Your provider allowance is below the current estimate. Check credits and token limits before generating.", 402)
     try:
         records.update(f"jobs/{job_id}.json", lambda current: claim_job(current, {"ready"}, "submitting"))
     except PublicError as error:
@@ -284,7 +310,7 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
             "provider_task": task_id, "message": "MiniMax H3 is generating your replacement.", "updated_at": time.time()})
     except Exception:
         # The durable submitting claim is retained. A caller timeout may not retry the charge.
-        raise PublicError("Submitted to reAPI, but its task could not be saved. Check your provider dashboard; do not submit again.", 502) from None
+        raise PublicError("Submitted to the provider, but its task could not be saved. Check its dashboard; do not submit again.", 502) from None
     return view(updated)
 
 
@@ -302,10 +328,11 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
     if job["status"] != "generating" or not job.get("provider_task"):
         return view(job)
     records, cloud, provider = services()
+    provider = selected_provider(job.get("provider", "reAPI"))
     body = provider.status(key, job["provider_task"])
     if body.get("status") == "failed":
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
-            "message": "reAPI rejected or failed the generation. Check its task details and refund in your dashboard."
+            "message": "The provider rejected or failed the generation. Check its task details and refund in your dashboard."
         } if current["status"] == "generating" and current.get("provider_task") == job["provider_task"] else current)
         return view(updated)
     if body.get("status") != "completed":
@@ -314,7 +341,7 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
         output_url = body["output"]["video_urls"][0]
         validate_media_url(output_url)
     except (KeyError, IndexError, TypeError):
-        raise PublicError("reAPI did not return a usable result link.", 502) from None
+        raise PublicError("The provider did not return a usable result link.", 502) from None
     usage = body.get("usage", {}).get("credits")
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
@@ -330,7 +357,7 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
         cloud.enqueue("finish", job_id)
     except Exception:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
-            **current, "message": "Export queue confirmation is pending. Your generated video also remains in reAPI task history."
+            **current, "message": "Export queue confirmation is pending. Your generated video also remains in provider task history."
         } if current["status"] == "finalizing" else current)
     return view(updated)
 
