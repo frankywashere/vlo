@@ -24,8 +24,9 @@ import { PANEL } from "./stepStyles";
 
 interface PeopleStepProps {
   demo: DemoManifest | null;
+  maxPeople?: number;
 }
-export function PeopleStep({ demo }: PeopleStepProps) {
+export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
   const { clip, trim, targets, selectTarget, renameTarget, setError } =
     useCharSwapStore(
       useShallow((s) => ({
@@ -40,8 +41,15 @@ export function PeopleStep({ demo }: PeopleStepProps) {
   if (!clip) return null;
   const sample = clip.mode === "demo" ? (demo?.people ?? []) : [];
   function choose(person: TargetPerson) {
-    if (targets.length >= 3 && !targets.some((p) => p.id === person.id)) {
-      setError("Choose up to three people in this UI preview.");
+    if (
+      targets.length >= maxPeople &&
+      !targets.some((p) => p.id === person.id)
+    ) {
+      setError(
+        maxPeople === 1
+          ? "The live beta supports one person per swap. Remove the current selection to choose someone else."
+          : "Choose up to three people in this UI preview.",
+      );
       return;
     }
     selectTarget(person);

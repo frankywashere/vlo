@@ -21,7 +21,8 @@
     "test:e2e:smoke": "playwright test --project=chromium --grep @smoke",
     "test:e2e:media": "playwright test --project=browser-media",
     "test:e2e:ui": "playwright test --ui",
-    "measure:export": "playwright test --project=export-measure"
+    "measure:export": "playwright test --project=export-measure",
+    "build:swapmein": "tsc -b && vite build --config vite.swapmein.config.ts"
   },
   "engines": {
     "node": "^20.19.0 || >=22.13.0"

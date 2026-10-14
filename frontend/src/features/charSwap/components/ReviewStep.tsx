@@ -6,15 +6,33 @@ import KeyOutlined from "@mui/icons-material/KeyOutlined";
 import { useCharSwapStore } from "../useCharSwapStore";
 import { formatTime } from "../utils/videoGeometry";
 import { PersonBadge } from "./PersonBadge";
+import type { LivePipelineJob } from "../services/livePipeline";
+import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
 
 interface ReviewStepProps {
+  live?: boolean;
+  job?: LivePipelineJob | null;
+  generating?: boolean;
+  accessLocked?: boolean;
+  onGenerate?: () => void;
+  onRefresh?: () => void;
+  accessMode?: "api-key" | "credits";
+  sampleCreditBalance?: number;
   hasPreviewKey: boolean;
   isSampleKey: boolean;
   onApiSettings: () => void;
 }
 
 export function ReviewStep({
+  live = false,
+  job = null,
+  generating = false,
+  accessLocked = false,
+  onGenerate,
+  onRefresh,
+  accessMode = "api-key",
+  sampleCreditBalance = 100,
   hasPreviewKey,
   isSampleKey,
   onApiSettings,
@@ -45,7 +63,7 @@ export function ReviewStep({
     // Local object URLs and thumbnail data are deliberately excluded from the handoff.
     const setup = {
       version: 1,
-      previewOnly: true,
+      previewOnly: !live,
       clip: { name: clip!.name, duration: clip!.duration, trim },
       people: targets.map((person) => ({
         id: person.id,
@@ -63,14 +81,22 @@ export function ReviewStep({
         simulated: clip!.mode === "demo",
       })),
       output: { deliveryResolution: "480p", restoreOriginalAudio: true },
-      submitted: false,
+      submitted: Boolean(
+        job &&
+        [
+          "generating",
+          "finalizing",
+          "completed",
+          "submission_unknown",
+        ].includes(job.status),
+      ),
     };
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(setup, null, 2)], { type: "application/json" }),
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = "swapmein-setup.json";
+    link.download = "swapMEin-setup.json";
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -89,7 +115,11 @@ export function ReviewStep({
               {(trim[1] - trim[0]).toFixed(1)} seconds
             </Typography>
           </Box>
-          <Button size="small" onClick={() => visit("clip")}>
+          <Button
+            size="small"
+            disabled={generating}
+            onClick={() => visit("trim")}
+          >
             Edit clip
           </Button>
         </Stack>
@@ -109,29 +139,49 @@ export function ReviewStep({
           >
             <KeyOutlined sx={{ color: "#9abbdc" }} />
             <Box>
-              <Typography fontWeight={600}>Your reAPI account</Typography>
+              <Typography fontWeight={600}>
+                {accessMode === "credits"
+                  ? "swapMEin credits"
+                  : "Your reAPI account"}
+              </Typography>
               <Typography variant="body2" color="text.secondary">
-                MiniMax H3 ·{" "}
-                {hasPreviewKey
-                  ? isSampleKey
-                    ? "Sample key added"
-                    : "Key entered, unverified"
-                  : "No API key added"}
+                {accessMode === "credits" ? (
+                  `${sampleCreditBalance} sample credits · Coming soon`
+                ) : (
+                  <>
+                    MiniMax H3 ·{" "}
+                    {hasPreviewKey
+                      ? isSampleKey
+                        ? "Sample key added"
+                        : live && job
+                          ? "Key verified for this job"
+                          : "Key entered, unverified"
+                      : "No API key added"}
+                  </>
+                )}
               </Typography>
             </Box>
           </Stack>
           <Button
             variant="outlined"
+            disabled={accessLocked}
             size="small"
-            onClick={onApiSettings}
+            onClick={
+              accessMode === "credits" ? () => visit("access") : onApiSettings
+            }
             sx={{ flexShrink: 0 }}
           >
-            {hasPreviewKey ? "Edit key" : "Add key"}
+            {accessMode === "credits"
+              ? "Edit access"
+              : hasPreviewKey
+                ? "Edit key"
+                : "Add key"}
           </Button>
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-          API setup is optional in this preview. When connected, video
-          generation uses your reAPI credit balance.
+          {accessMode === "credits"
+            ? "Sample credits demonstrate the flow. Buying credits and generating with app credits are coming later."
+            : "When connected, video generation uses your reAPI credit balance."}
         </Typography>
       </Box>
       <Box sx={PANEL}>
@@ -142,7 +192,11 @@ export function ReviewStep({
           sx={{ mb: 2 }}
         >
           <Typography fontWeight={600}>Your replacements</Typography>
-          <Button size="small" onClick={() => visit("references")}>
+          <Button
+            size="small"
+            disabled={generating}
+            onClick={() => visit("references")}
+          >
             Edit references
           </Button>
         </Stack>
@@ -205,7 +259,9 @@ export function ReviewStep({
             ✓{" "}
             {issues.length
               ? `${issues.length} review ${issues.length === 1 ? "section" : "sections"} confirmed`
-              : "No uncertain sections"}
+              : live
+                ? "Selected person visually confirmed"
+                : "No uncertain sections"}
             {clip.mode === "demo" ? " (sample)" : ""}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -217,12 +273,71 @@ export function ReviewStep({
         </Stack>
       </Box>
       <Alert severity="info" role="note">
-        This is the UI preview. Generation is not connected yet, and nothing has
-        been submitted or charged.
+        {live
+          ? accessMode === "credits"
+            ? "App credits are coming soon. Choose your own API key in Access to generate."
+            : job?.message ||
+              "Review the prepared guide before generating. This uses your own reAPI credits."
+          : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
       </Alert>
+      {live && job && (
+        <Button variant="outlined" onClick={onRefresh}>
+          Refresh status and video links
+        </Button>
+      )}
+      {live && job?.actual_provider_credits !== undefined && (
+        <Typography variant="body2" color="text.secondary">
+          reAPI reported charge: US$
+          {(job.actual_provider_credits / 1000).toFixed(3)}.
+        </Typography>
+      )}
+      {live &&
+        job?.actual_provider_credits === undefined &&
+        job?.estimated_cost_usd !== undefined && (
+          <Typography variant="body2" color="text.secondary">
+            Conservative reAPI estimate: US${job.estimated_cost_usd.toFixed(2)}.
+            Provider pricing can change. H3 generates at 768p; your download is
+            480p.
+          </Typography>
+        )}
+      {job?.status === "completed" && job.output_url && (
+        <>
+          <VideoPreview
+            clip={{
+              ...clip,
+              url: job.output_url,
+              duration: job.duration ?? trim[1] - trim[0],
+            }}
+            trim={[0, job.duration ?? trim[1] - trim[0]]}
+          />
+          <Button
+            component="a"
+            href={job.output_url}
+            target="_blank"
+            rel="noreferrer"
+            variant="contained"
+            startIcon={<DownloadRounded />}
+          >
+            Open 480p video
+          </Button>
+        </>
+      )}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-        <Button variant="contained" size="large" disabled sx={{ flex: 1 }}>
-          Generate replacements
+        <Button
+          variant="contained"
+          size="large"
+          onClick={onGenerate}
+          disabled={
+            !live ||
+            accessMode !== "api-key" ||
+            !hasPreviewKey ||
+            isSampleKey ||
+            generating ||
+            job?.status !== "ready"
+          }
+          sx={{ flex: 1 }}
+        >
+          {generating ? "Processing…" : "Generate replacements"}
         </Button>
         <Button
           variant="outlined"

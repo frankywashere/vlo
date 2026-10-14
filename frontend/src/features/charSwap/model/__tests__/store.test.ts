@@ -81,6 +81,8 @@ describe("walkthrough store readiness", () => {
     expect(useCharSwapStore.getState().step).toBe("matches");
     expect(store.chooseMatch("issue-person-b", null)).toBe(true);
     store.next();
+    expect(useCharSwapStore.getState().step).toBe("access");
+    store.next();
     expect(useCharSwapStore.getState().step).toBe("review");
     expect(useCharSwapStore.getState().error).toBeNull();
   });

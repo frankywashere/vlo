@@ -31,6 +31,7 @@ htmlcov/
 
 
 # Environment Variables
+.secrets/
 .env
 .env.local
 .env.development.local
@@ -79,3 +80,11 @@ frontend/dist-render-worker/
 # CharSwap local preview assets (never commit source clips or references)
 frontend/public/charswap-demo/
 frontend/charSwap-qa/
+
+# Public swapMEin build and local deployment evidence
+frontend/dist-swapmein/
+deployment/swapmein/.venv/
+deployment/swapmein/deployment-report.json
+.firebase/
+firebase-debug.log
+deployment/swapmein/deploy-report.json

@@ -23,9 +23,11 @@ import type {
 
 export const STEPS: Step[] = [
   "clip",
+  "trim",
   "people",
   "references",
   "matches",
+  "access",
   "review",
 ];
 interface CharSwapStore extends WalkthroughState {
@@ -40,6 +42,7 @@ interface CharSwapStore extends WalkthroughState {
   assignReference: (id: string, reference: ReferenceAsset) => void;
   clearReference: (id: string) => void;
   reviewTracking: (issues: MatchIssue[]) => void;
+  invalidateTracking: () => void;
   chooseMatch: (issueId: string, candidateId: string | null) => boolean;
   visit: (step: Step) => void;
   next: () => void;
@@ -117,6 +120,8 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
         error: null,
       };
     }),
+  invalidateTracking: () =>
+    set({ trackingReady: false, issues: [], decisions: {} }),
   reviewTracking: (issues) =>
     set((state) => ({
       ...setIssues(state, issues),
@@ -138,7 +143,10 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   },
   visit: (step) => {
     const state = get();
-    if (canVisitStep(state, step) && (step !== "review" || state.trackingReady))
+    if (
+      canVisitStep(state, step) &&
+      (!["access", "review"].includes(step) || state.trackingReady)
+    )
       set({ step, error: null });
   },
   next: () => {

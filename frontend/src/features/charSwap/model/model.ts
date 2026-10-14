@@ -1,4 +1,5 @@
-export type Step = "clip" | "people" | "references" | "matches" | "review";
+export type Step =
+  "clip" | "trim" | "people" | "references" | "matches" | "access" | "review";
 
 export interface ClipAsset {
   id: string;
@@ -53,7 +54,15 @@ export interface WalkthroughState {
   decisions: Record<string, MatchDecision>;
 }
 
-const STEPS: Step[] = ["clip", "people", "references", "matches", "review"];
+const STEPS: Step[] = [
+  "clip",
+  "trim",
+  "people",
+  "references",
+  "matches",
+  "access",
+  "review",
+];
 const MIN_CLIP_SECONDS = 1;
 const MAX_CLIP_SECONDS = 15;
 
@@ -236,6 +245,12 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
   switch (step) {
     case "clip": {
       if (!state.clip) return "Add a clip to continue.";
+      if (!Number.isFinite(state.clip.duration) || state.clip.duration < 1)
+        return "Add a clip at least one second long.";
+      return null;
+    }
+    case "trim": {
+      if (!state.clip) return "Add a clip to continue.";
       const [start, end] = state.trim;
       if (
         !Number.isFinite(state.clip.duration) ||
@@ -271,6 +286,7 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       }
       return null;
     case "matches":
+    case "access":
     case "review":
       return getUnresolvedIssues(state).length > 0
         ? "Confirm each uncertain match before continuing."

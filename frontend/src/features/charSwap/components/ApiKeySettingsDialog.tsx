@@ -22,6 +22,7 @@ import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
 interface ApiKeySettingsDialogProps {
   open: boolean;
+  live?: boolean;
   apiKey: string;
   onSave: (key: string) => void;
   onClear: () => void;
@@ -56,6 +57,7 @@ export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
 
 function ApiKeyPreviewEditor({
   apiKey,
+  live = false,
   onSave,
   onClear,
   onClose,
@@ -99,8 +101,9 @@ function ApiKeyPreviewEditor({
       <DialogContent dividers sx={{ py: 3 }}>
         <Stack spacing={3}>
           <Alert severity="info" id="charswap-api-settings-notice">
-            Use the sample key to try this step. This preview sends no requests
-            and does not verify API keys.
+            {live
+              ? "Your key is used only for this tab and sent securely through swapMEin to reAPI. Video generation starts only after your final review."
+              : "Use the sample key to try this step. This preview sends no requests and does not verify API keys."}
           </Alert>
           <Stack direction="row" spacing={3}>
             <Box>
@@ -147,23 +150,29 @@ function ApiKeyPreviewEditor({
               },
             }}
           />
-          <Box>
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setDraft(DEMO_API_KEY);
-                setVisible(false);
-              }}
-              sx={{ minHeight: 44 }}
-            >
-              Use sample key
-            </Button>
-            {draft === DEMO_API_KEY && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                This is a fake key for the walkthrough.
-              </Typography>
-            )}
-          </Box>
+          {!live && (
+            <Box>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setDraft(DEMO_API_KEY);
+                  setVisible(false);
+                }}
+                sx={{ minHeight: 44 }}
+              >
+                Use sample key
+              </Button>
+              {draft === DEMO_API_KEY && (
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mt: 1 }}
+                >
+                  This is a fake key for the walkthrough.
+                </Typography>
+              )}
+            </Box>
+          )}
           <Typography variant="body2" color="text.secondary">
             When connected, video generation uses your reAPI credit balance.
           </Typography>
@@ -197,7 +206,7 @@ function ApiKeyPreviewEditor({
           disabled={!draft.trim()}
           sx={{ minHeight: 44 }}
         >
-          Save for preview
+          {live ? "Save key" : "Save for preview"}
         </Button>
       </DialogActions>
     </Box>

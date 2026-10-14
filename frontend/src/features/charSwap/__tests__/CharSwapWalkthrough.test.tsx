@@ -115,14 +115,15 @@ describe("CharSwap walkthrough", () => {
     const user = userEvent.setup();
     render(<CharSwapWalkthrough />);
     expect(
-      screen.getByRole("button", { name: "Select people" }),
+      screen.getByRole("button", { name: "Trim clip" }),
     ).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Try sample clip" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Select people" }),
+        screen.getByRole("button", { name: "Trim clip" }),
       ).toBeEnabled(),
     );
+    await user.click(screen.getByRole("button", { name: "Trim clip" }));
     await user.click(screen.getByRole("button", { name: "Select people" }));
     await user.click(screen.getByRole("button", { name: "Select Person 1" }));
     await user.click(screen.getByRole("button", { name: "Select Person 2" }));
@@ -136,7 +137,7 @@ describe("CharSwap walkthrough", () => {
       await user.click(button);
     await user.click(screen.getByRole("button", { name: "Check matches" }));
     expect(screen.getByText(/Sample review moment/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Review setup" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose access" })).toBeDisabled();
     await user.click(
       screen.getByRole("button", { name: "Match Person 1 to Person 1" }),
     );
@@ -146,8 +147,10 @@ describe("CharSwap walkthrough", () => {
       screen.getByRole("button", { name: "Match Person 1 to Person 2" }),
     );
     expect(screen.getByRole("alert")).toHaveTextContent("already matched");
-    expect(screen.getByRole("button", { name: "Review setup" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose access" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Not visible here" }));
+    await user.click(screen.getByRole("button", { name: "Choose access" }));
+    await user.click(screen.getByRole("radio", { name: /swapMEin credits/ }));
     await user.click(screen.getByRole("button", { name: "Review setup" }));
     expect(
       screen.getByRole("heading", { name: "Review your swap" }),
@@ -170,18 +173,20 @@ describe("CharSwap walkthrough", () => {
     await user.click(screen.getByRole("button", { name: "Try sample clip" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Select people" }),
+        screen.getByRole("button", { name: "Trim clip" }),
       ).toBeEnabled(),
     );
+    await user.click(screen.getByRole("button", { name: "Trim clip" }));
     await user.click(screen.getByRole("button", { name: "Select people" }));
     await user.click(screen.getByRole("button", { name: "Select Person 1" }));
     const navigation = screen.getByRole("navigation", {
       name: "Replacement steps",
     });
-    await user.click(within(navigation).getByRole("button", { name: "Clip" }));
+    await user.click(within(navigation).getByRole("button", { name: "Trim" }));
     const end = screen.getByRole("spinbutton", { name: "End (seconds)" });
     await user.clear(end);
     await user.type(end, "4");
+    await user.tab();
     expect(useCharSwapStore.getState().targets).toHaveLength(0);
     expect(
       within(navigation).getByRole("button", { name: "References" }),

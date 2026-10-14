@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import type { RefObject } from "react";
 import { Button } from "@mui/material";
 import UploadRounded from "@mui/icons-material/UploadRounded";
 import type { TargetPerson } from "../model/model";
@@ -8,21 +8,26 @@ interface ReferenceUploadProps {
   pending: boolean;
   hasReference: boolean;
   onImport: (id: string, file: File) => void;
+  inputRef: RefObject<HTMLInputElement | null>;
 }
 export function ReferenceUpload({
   person,
   pending,
   hasReference,
   onImport,
+  inputRef,
 }: ReferenceUploadProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  function openPicker() {
+    if (!pending) inputRef.current?.click();
+  }
   return (
     <>
       <Button
         variant={hasReference ? "outlined" : "contained"}
         startIcon={<UploadRounded />}
         disabled={pending}
-        onClick={() => inputRef.current?.click()}
+        aria-label={`${hasReference ? "Change image" : "Upload reference"} for ${person.name}`}
+        onClick={openPicker}
         sx={{ minHeight: 44 }}
       >
         {pending
@@ -40,7 +45,7 @@ export function ReferenceUpload({
         aria-label={`Upload reference for ${person.name}`}
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) onImport(person.id, file);
+          if (file && !pending) onImport(person.id, file);
           event.target.value = "";
         }}
       />

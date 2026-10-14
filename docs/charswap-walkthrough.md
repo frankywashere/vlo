@@ -1,82 +1,109 @@
-# swapmein walkthrough on `tasty`
+# swapMEin walkthrough on `tasty`
 
-This is a standalone, responsive frontend preview using VLO's React, MUI, and Zustand stack and charcoal/blue visual language. It does not start the VLO backend, download models, call Google workers, or submit paid generation jobs.
+swapMEin is a standalone React/MUI/Zustand application using VLO’s charcoal and blue interface. Its public build contains only the walkthrough. VLO’s editor remains a separate local entry point; ignored desktop footage, reference images and saved credentials are excluded from the public build.
 
-## Open it
+## The seven steps
 
-From the VLO checkout:
+1. **Clip:** choose a local video. Playback and file validation happen on the device first.
+2. **Trim:** choose the section before selecting people. The live MiniMax H3 beta requires a whole-second length of 4–15 seconds; the local sample supports 1–15 seconds. Changing the section clears dependent selections and tracking approval.
+3. **People:** pause on a clear frame and tap inside the person’s body. A keyboard crosshair provides the same selection. Name the person if helpful. The live beta accepts one person in one continuous shot. The local sample demonstrates up to three selections.
+4. **References:** upload a replacement inside that person’s card. The image tile and Upload/Change button open the same picker. Reuse and remove remain available. The live reference must be a single JPG/PNG/WebP, no more than 5 MiB, with sides 256–5760 pixels and aspect ratio 0.4–2.5.
+5. **Matches:** the live backend runs SAM on the original video, finds the label under the clicked point, and checks that the label exists in every frame. It then shows the actual gray guide for visual confirmation. Confirmation is blocked until the guide can play; a preview error clears approval. A new job requires new approval. Clips with cuts, missing masks or missed clicks are rejected with a request to trim or reselect. This beta does not claim automatic cross-shot identity matching or measured confidence scores. The local sample’s uncertain sections remain explicitly simulated.
+6. **Access:** choose a personal reAPI key or swapMEin credits. A key can also be entered from the header when cloud preparation needs account validation. Personal-key generation uses that reAPI account’s balance. App credits, their sample balance and sample top-up are a UI preview; purchases, balances and generating with app credits are not implemented.
+7. **Review:** check the mapping, guide approval and provider estimate, then explicitly generate. The backend submits one MiniMax H3 reference request, polls status and exports the result at 480p with the source soundtrack. Status and media links can be refreshed without submitting another paid request.
+
+Main controls use 44 px or larger touch targets. Mobile navigation scrolls the current step into view; its Back/Continue bar respects safe areas. Step changes focus the heading. Forward navigation respects prerequisites. Key and selection editing are locked while jobs are active. An unknown paid submission remains locked until status resolves or the user explicitly confirms they checked their provider history before starting over.
+
+## Live deployment
+
+The application uses the existing Google/Firebase project `charswap-franky-20261013`, region `us-east4`, and its default Hosting site. Firebase Hosting serves `frontend/dist-swapmein` and rewrites `/api/**` to `swapmein-api`. Jobs run through Cloud Tasks because Hosting has a 60-second dynamic-request timeout.
+
+The gateway validates a request-only reAPI key against the provider balance endpoint, returns a six-hour random bearer session, and stores only hashes for session ownership and key binding. Keys remain in React memory in the current tab: they are not bundled into the site, put in environment variables, exported, written to browser storage, saved in jobs, or logged. The site requires HTTPS for live calls. Refreshing closes the in-memory session; the beta has no account-based resume history. If a paid task’s outcome is unknown, recover it through the user’s reAPI task history before starting another generation.
+
+Uploads are private and bounded to a 25 MiB source plus a 5 MiB reference. The original upload can contain a longer clip; only the chosen section is processed. Source dimensions are limited to 4096 pixels per side and 16 megapixels. The source must contain audio. The server validates file formats, disallows network protocols in FFmpeg inputs, checks rotation/EXIF, normalizes to 24 fps, detects cuts and enforces media bounds again.
+
+The deployed sequence is:
+
+```
+private upload → trim/normalize → SAM on RGB → clicked label + coverage check
+→ Demucs vocals + three semitones → gray composite → user guide approval
+→ MiniMax H3/reAPI → timing check → original soundtrack → 480p output
+```
+
+Depth Anything and face mesh are omitted. MiniMax H3’s reference mode generates at 768P; 480p is the final delivery resolution. Motion and lip-sync quality still require the user’s creative review.
+
+The existing `proof-gpu` and `proof-audio` services remain private, at MANUAL 0 between calls. The gateway activates them serially under one durable preparation lock, registers a backup shutdown first, and verifies zero scaling and cancellation afterward. If shutdown/cancellation or task registration has an ambiguous outcome, later preparation stays blocked for operator recovery. There are no automatic paid submission retries. Session/job/asset cleanup applies after two days; persistent quota and lock records are excluded from lifecycle deletion.
+
+The native project Cloud Run cap is CAD 7/month, and the project budget is CAD 10/month. The latter is an alert, not a universal hard cap. The site also enforces at most ten preparation reservations per month, three per day, one concurrent preparation and one gateway instance. There is no universal hard CAD 10 ceiling covering the whole setup: builds, registry/object storage, networking and tax remain separate, including the current and retained older Whip Snap container registries. reAPI generation charges go to the entered key’s account and are separate from Google spending. These limits make this a small beta, not an unrestricted public processing service.
+
+Detailed API, dependencies, IAM, failure handling and operator recovery: [gateway README](../deployment/swapmein/README.md).
+
+## Live validation on 14 October 2026
+
+Read-only checks confirmed that [the deployed site](https://charswap-franky-20261013.web.app) and `/api/config` return HTTP 200. Configuration reports live processing available through reAPI’s MiniMax H3, a single-person beta, and 480p delivery. API responses use `Cache-Control: no-store`; the root page uses `Cache-Control: no-cache`, and the site supplies its configured security headers.
+
+The five-second live proof completed cloud preparation in approximately 177 seconds and waited 775 seconds for MiniMax generation. The provider reported 366 credits, equivalent to US$0.366; the displayed estimate had been US$0.74. These are one proof’s measured timings and charge, not a promised runtime or fixed per-clip price.
+
+The repaired, versioned re-export passed technical audiovisual verification: both video and audio last exactly five seconds, with 120 frames at 24 fps and 854×480 delivery. The source and exported soundtrack each contain 220,500 decoded samples. Audio correlation is 0.998452 across the full clip and 0.998331 over the final second. The earlier export was preserved. The repair reused the completed generation without a second provider submission, so the charge remains 366 credits (US$0.366). Motion and lip sync still require creative review. Proof metadata and audio QA are retained in the separate CharSwap workspace at `experiments/site_deployment_proof_v1/proof_metadata.json` and `experiments/site_deployment_proof_v1/audio_reexport_qa.json`.
+
+The public build audit found only `charswap.html` and its JavaScript bundle, with no source clips, reference images or credential files. The owner's API key was not bundled or published. The isolated gateway build contains only its Dockerfile, requirements, Python runtime package and ignore files; tests, browser credentials, `.env`, local secrets and media are excluded. Deployment resource changes are scoped to the gateway and named worker identities. The deployment script does not activate model workers.
+
+Final focused validation passed 80 CharSwap frontend tests and 48 gateway backend tests.
+
+The final resource audit confirmed both model workers at MANUAL 0, empty job and
+shutdown queues, no active preparation lease, and no temporary operator token
+creation grant. The gateway has automatic scaling with minimum 0 and maximum 1
+at both the service and revision levels. The deployment helper verifies these
+limits before public exposure and on later releases; `--service-only` applies
+them without a container build or model-worker changes.
+
+The active Artifact Registry now retains 11.3945 GiB including gateway rollback
+images. At the CAD catalogue rate verified earlier on 14 October, this is about
+CAD 1.61/month before free allowances and tax. The separate older Whip Snap
+registry was 10.7674 GiB in the earlier same-day audit, about CAD 1.53/month; that
+project could not be refreshed in the final check, so its values remain a snapshot.
+Budget roughly CAD 3.20/month to retain both setups while idle, before shared
+allowances, tax and further storage. Hosting/API traffic, active processing,
+builds and reAPI usage add separate charges. This is a storage forecast, not an
+account invoice or a universal CAD 10 ceiling. See
+[Artifact Registry pricing](https://cloud.google.com/artifact-registry/pricing).
+
+## Run locally
 
 ```sh
 npm ci --prefix frontend
 npm run dev --prefix frontend -- --host 127.0.0.1
 ```
 
-Visit **http://127.0.0.1:5173/charswap.html**. The existing VLO editor remains at `/`. The production build includes both HTML entry points.
-
-For a phone on the same LAN, build the preview and bind a separate server to the Mac's current LAN address:
-
-```sh
-npm run build --prefix frontend
-npm run preview --prefix frontend -- --host <mac-lan-ip> --port 5174 --strictPort
-```
-
-Open `http://<mac-lan-ip>:5174/charswap.html` on the phone. On a Mac using `en0`, `ipconfig getifaddr en0` shows that address. Keep the Mac awake and the preview server running. This separate server leaves the localhost development preview available. No Firebase deployment is involved. Local IDs support HTTP LAN addresses, and the preview server supports the byte-range video requests needed for mobile playback.
-
-The local five-second sample can be prepared separately:
+Open `http://127.0.0.1:5173/charswap.html`. Local HTTP previews make no API requests and do not submit paid jobs. Use fake sample keys while testing them. Local media stays in the browser; the desktop sample is prepared separately with:
 
 ```sh
 python3 scripts/prepare-charswap-demo.py /path/to/CharSwap
 ```
 
-The helper requires FFmpeg, Pillow, and numpy. It copies an existing proof clip, teddy reference, and person crops into `frontend/public/charswap-demo/`, an ignored directory. Sample boxes come from the existing SAM masks. Matching-review examples are deliberately simulated and labeled as examples; they are not invented confidence measurements. No images, audio, videos, model weights, API keys, signed URLs, or request logs are committed with this UI.
+Sample assets live in ignored `frontend/public/charswap-demo/`. The public build sets `publicDir:false`, so it cannot accidentally publish this folder. The local editor/demo build remains available through `npm run build --prefix frontend`; its separate LAN preview can still serve the sample.
 
-## The five screens
+## Build and deploy
 
-1. **Clip.** Choose/drop a local video, play it, and trim a 1–15 second section. Show the source filename and duration. Changing the section invalidates person selections and review decisions.
-2. **People.** Pause and tap the people to replace. Each receives a stable ID, color, thumbnail, and editable name. Keep unselected people in the shot. Sample people use existing mask boxes; an uploaded clip saves manual starting points until tracking is connected. A keyboard crosshair uses arrow keys and Enter/Space; sample cards offer another selection method. The UI supports up to three selections, but the proven generation pipeline is currently a single-person beta.
-3. **References.** Place a replacement image directly in each selected person's card. Original and replacement remain visibly paired. Require one image per target. Images can be reused across targets. Keep upload/change/remove actions visible on mobile.
-4. **Matches.** Show only sections that need help. Compare the original target thumbnail with the current short section, tap a visible candidate, or choose **Not visible here**. The latter means no replacement for that target during that interval. Prevent two target identities selecting the same candidate in overlapping intervals. Require every issue to be resolved before generation. Clean tracking results should skip this screen in the connected implementation.
-5. **Review.** Summarize the clip section, original-to-reference mappings, and review decisions. Keep original audio and 480p delivery visible. Preview mode disables generation and can download a JSON setup summary. The summary contains filenames/anchors/decisions, excludes file contents and local object URLs, and cannot be used to restart a job without supplying the media again.
+```sh
+npm run build:swapmein --prefix frontend
+python3 deployment/swapmein/deploy.py --setup-only
+python3 deployment/swapmein/deploy.py
+firebase deploy --only hosting --project charswap-franky-20261013
+```
 
-The desktop uses a left step rail; mobile uses a compact horizontal step indicator and a fixed Back/Continue bar with safe-area spacing. Main actions and selection surfaces use at least 44 px touch targets. Step changes focus the heading for screen readers. Earlier stages remain editable; incomplete prerequisites block forward navigation.
+The deployment script uses the explicit authorized Google account/project/region, verifies the native Run cap, stages only gateway source/dependencies and deploys an immutable container. It does not copy local secrets, media, credentials or the repository into its image. It leaves model workers off. `firebase.json` supplies the API rewrite, cache rules and security headers.
 
-**API settings** is available in the header and through the final review's reAPI account card. It demonstrates entering, masking/revealing, saving, editing, and clearing a reAPI key, with a clearly fake sample key for testing. No validation request or paid call is made. Status says sample/unverified rather than connected. The raw value exists only in React memory in the current browser tab, survives starting another swap, and disappears when cleared or reloaded. Cancel discards unsaved edits. Keys are excluded from the setup download, browser storage, logs, and source assets. Use the sample key while testing this LAN HTTP preview; live credential entry requires a secure hosting/integration design.
-
-## What is functional today
-
-- Local video/image import and validation, video playback, scrubbing, trim selection.
-- Sample mask-box selection and manual uploaded-video point anchors.
-- Per-person labels, reference assignments, multi-target conflict checks.
-- Sample uncertain-section review and explicit no-person decisions.
-- Final setup summary and JSON download.
-- Cancellation of stale file reads and revocation of superseded object URLs.
-
-Uploaded clips cannot advance from matching review to generation yet: no automatic tracker is connected. Refresh clears the session; setup download is a record, not a persistent upload.
-
-## Connect the pipeline next
-
-Use a server-side orchestrator. The browser must never contain Google service credentials or reAPI keys. A future integration should accept uploaded storage asset IDs rather than browser blob URLs or filenames, and validate all media/decisions again on the server.
-
-1. Register/authenticate the session and upload the selected source to private storage.
-2. Normalize the selected section; return stable frame/time metadata.
-3. Run SAM on the original RGB footage using selected anchors. Associate the chosen SAM instance with the target ID. Split at camera cuts.
-4. Re-identify people across shots using appearance/face features as appropriate. SAM segmentation alone does not establish cross-shot identity. Return uncertain intervals and candidate IDs; retain missing/occluded-person states. No LLM is required for this matching interface.
-5. Apply user review decisions. Validate unique target-to-candidate assignments within overlapping intervals and issue/version IDs so edits cannot apply stale tracking.
-6. Produce gray selected-person silhouettes over the original background, prepare the +3 semitone isolated-vocal guide, and submit to MiniMax H3 through reAPI. Depth and face mesh remain omitted. Multiple-target generation needs its own proof before enabling it beyond UI preview.
-7. Keep paid submission behind the final review, quote the actual provider cost, use idempotent jobs, and expose progress/failure/cancel states. Do not show a guessed percentage.
-8. Validate returned timing, restore the original soundtrack, deliver 480p, and show playable output/download/retry controls. H3's current tested generation resolution is 768p; 480p is the final delivery, not a promise of native 480p pricing.
-
-Recommended adapter data: `assetId`, source/trim version, normalized source coordinates, source seconds plus frame indices, stable `targetId`, `referenceAssetId`, shot/interval IDs, candidate instance IDs, review reason, and decisions. Keep source identity, generated character identity, and per-shot detection identity separate. Confidence thresholds belong in the tracking backend; the UI shows the reason and the action the user needs to take.
-
-## Repository contract and validation
-
-This standalone native feature does not register an extension, alter a supported SDK member, or present extension-owned behavior. Its local mechanics live in the `charSwap` feature; the VLO extension surface remains unchanged. If it later becomes an optional editor overlay, use the real extension API as an **Exact API consumer** rather than importing privileged host adapters. Revisit `extensions/extension-development/references/host-contracts.md` before adding orchestration or reusable host services.
+## Verification and repository contract
 
 ```sh
 npm run test:run --prefix frontend -- src/features/charSwap
-npm exec --prefix frontend -- eslint src/features/charSwap
-npm run build --prefix frontend
+cd frontend && npm exec -- eslint src/features/charSwap
+npm run build:swapmein --prefix frontend
 npm run check:extension-surface
+cd deployment/swapmein && .venv/bin/python -m pytest -q
 ```
 
-Also review the sample flow in Chromium at desktop and mobile widths, including two-person assignments, conflicting matches, no-person decisions, backward edits, and keyboard selection.
+This standalone native application and its owner-neutral `charSwap` API client do not register extensions or change VLO’s supported SDK surface. No extension-owned behavior is presented. If shared editor or extension contributions are added later, revisit `extensions/extension-development/references/host-contracts.md` and use the real extension API or a shared host seam. The surface check is required but does not substitute for behavioral tests.
+
+The setup download records filenames, anchors and decisions; it excludes keys, file contents and browser object URLs. It cannot restart a job without supplying media again. Multi-person generation, cross-cut re-identification, automated uncertainty review, persistent user accounts and real app-credit payments remain future work.

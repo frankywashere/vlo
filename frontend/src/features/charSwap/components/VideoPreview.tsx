@@ -17,6 +17,7 @@ interface VideoPreviewProps {
   selectable?: boolean;
   overlay?: (time: number) => ReactNode;
   onPoint?: (point: NormalizedPoint, video: HTMLVideoElement) => void;
+  onPlayableChange?: (playable: boolean) => void;
 }
 
 export function VideoPreview({
@@ -27,6 +28,7 @@ export function VideoPreview({
   selectable,
   overlay,
   onPoint,
+  onPlayableChange,
 }: VideoPreviewProps) {
   const [start, end] = trim;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -97,7 +99,14 @@ export function VideoPreview({
               setFailed(false);
               setTime(seekTo ?? start);
             }}
-            onError={() => setFailed(true)}
+            onLoadedData={() => {
+              setFailed(false);
+              onPlayableChange?.(true);
+            }}
+            onError={() => {
+              setFailed(true);
+              onPlayableChange?.(false);
+            }}
             onTimeUpdate={() => {
               const video = videoRef.current;
               if (!video) return;
@@ -237,7 +246,11 @@ export function VideoPreview({
             const video = videoRef.current;
             if (!video) return;
             if (playing) video.pause();
-            else void video.play().catch(() => setFailed(true));
+            else
+              void video.play().catch(() => {
+                setFailed(true);
+                onPlayableChange?.(false);
+              });
           }}
         >
           {playing ? <PauseRounded /> : <PlayArrowRounded />}
