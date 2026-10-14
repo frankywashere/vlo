@@ -76,7 +76,7 @@ describe("live generation approval", () => {
     useCharSwapStore.getState().setEnhancedCharacterMasking(enhanced);
     useCharSwapStore.getState().visit("trim");
     render(<CharSwapWalkthrough />);
-    expect(screen.getByText(/Choose a whole-second length between 4 and 15 seconds/)).toBeInTheDocument();
+    expect(screen.getByText(/The length snaps to whole seconds/)).toBeInTheDocument();
     const continuityHint = screen.queryByText(/Enhanced character masking requires one continuous shot/);
     if (enhanced) expect(continuityHint).toBeInTheDocument();
     else expect(continuityHint).not.toBeInTheDocument();

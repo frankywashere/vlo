@@ -363,7 +363,7 @@ export function CharSwapWalkthrough() {
     Math.abs(selectedDuration - Math.round(selectedDuration)) < 1e-6;
   const blocker =
     live && step === "trim" && !validLiveTrim
-      ? "Choose a whole-second length between 4 and 15 seconds."
+      ? "The length snaps to whole seconds (4–15). Your start can be between seconds."
       : getStepBlocker(state, step);
   const continueDisabled =
     !canContinue(state, step) ||
@@ -713,7 +713,7 @@ export function CharSwapWalkthrough() {
                 <>
                   {secureSite && (
                     <Alert severity="info" sx={{ mb: 2 }}>
-                      Choose a whole-second length between 4 and 15 seconds.
+                      The length snaps to whole seconds (4–15). Your start can be between seconds.
                       {enhancedCharacterMasking &&
                         " Enhanced character masking requires one continuous shot."}
                     </Alert>

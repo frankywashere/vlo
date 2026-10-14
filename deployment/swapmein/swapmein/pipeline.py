@@ -7,6 +7,7 @@ import uuid
 from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
+from .diagnostics import emit
 from .limits import MAX_SOURCE_BYTES
 from .media import Setup, finish, normalize, original_guide, select_label
 from .storage import Records, claim_job, release_preparation
@@ -20,6 +21,8 @@ class Pipeline:
         return self.records.update(f"jobs/{job_id}.json", lambda current: {**current, **fields, "updated_at": time.time()})
 
     def prepare(self, job_id: str):
+        self.cloud.job_id = job_id
+        emit("preparation_started", job_id=job_id)
         def claim_slot(current):
             if (not current or current.get("active", {}).get("job_id") != job_id or current["active"].get("blocked")
                     or current["active"].get("until", 0) <= time.time()):
@@ -97,10 +100,13 @@ class Pipeline:
                     mask_frames=metadata["frames"], mask_coverage_min=min(coverage), review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous)
         except PublicError as error:
+            emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
             self.update_job(job_id, status="failed", message=error.message)
-        except Exception:
+        except Exception as error:
+            emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="failed", message="Preparation failed. No provider generation was submitted.")
         finally:
+            emit("preparation_cleanup", job_id=job_id, shutdown_verified=self.cloud.shutdown_verified)
             if self.cloud.shutdown_verified:
                 self.records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
             else:
@@ -132,6 +138,8 @@ class Pipeline:
                 self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
                     width=output_dimensions["width"], height=output_dimensions["height"])
         except PublicError as error:
+            emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
             self.update_job(job_id, status="failed", message=error.message)
-        except Exception:
+        except Exception as error:
+            emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="failed", message="The generated video needs manual review and could not be exported.")

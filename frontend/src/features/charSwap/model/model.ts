@@ -87,7 +87,7 @@ export function setClip(
   return {
     ...state,
     clip,
-    trim: [0, Math.min(Math.max(clip.duration, 0), MAX_CLIP_SECONDS)],
+    trim: [0, Math.min(Math.max(Math.floor(clip.duration), 0), MAX_CLIP_SECONDS)],
     targets: [],
     references: [],
     assignments: {},

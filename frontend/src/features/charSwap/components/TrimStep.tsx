@@ -20,7 +20,18 @@ export function TrimStep({ demo }: TrimStepProps) {
     })),
   );
   if (!clip) return null;
-  const minimumLength = Math.min(1, clip.duration);
+  const minimumLength = Math.min(4, clip.duration);
+  const maximumLength = Math.min(15, Math.floor(clip.duration));
+  const changeStart = (value: number) => {
+    const length = Math.min(maximumLength, Math.max(minimumLength, Math.round(trim[1] - trim[0])));
+    const start = Math.max(0, Math.min(value, clip.duration - length));
+    changeTrim([start, start + length]);
+  };
+  const changeEnd = (value: number) => {
+    const available = Math.floor(clip.duration - trim[0] + 1e-6);
+    const length = Math.min(maximumLength, available, Math.max(minimumLength, Math.round(value - trim[0])));
+    changeTrim([trim[0], trim[0] + length]);
+  };
   return (
     <Stack spacing={2.5}>
       <VideoPreview
@@ -50,23 +61,8 @@ export function TrimStep({ demo }: TrimStepProps) {
           disableSwap
           onChange={(_event, value, thumb) => {
             if (!Array.isArray(value)) return;
-            const range = value;
-            const low =
-              thumb === 0
-                ? Math.max(0, Math.min(range[0], trim[1] - minimumLength))
-                : trim[0];
-            const high =
-              thumb === 1
-                ? Math.min(
-                    clip.duration,
-                    Math.max(range[1], trim[0] + minimumLength),
-                  )
-                : trim[1];
-            changeTrim(
-              thumb === 0
-                ? [low, Math.min(high, low + 15)]
-                : [Math.max(low, high - 15), high],
-            );
+            if (thumb === 0) changeStart(value[0]);
+            else changeEnd(value[1]);
           }}
           sx={{ mt: 2, mb: 1 }}
         />
@@ -76,10 +72,10 @@ export function TrimStep({ demo }: TrimStepProps) {
             value={String(Number(trim[0].toFixed(2)))}
             onCommit={(value) => {
               if (value.trim() && Number.isFinite(Number(value))) {
-                changeTrim([Number(value), trim[1]]);
+                changeStart(Number(value));
               }
             }}
-            inputProps={{ min: 0, max: trim[1] - minimumLength, step: 0.1 }}
+            inputProps={{ min: 0, max: clip.duration - (trim[1] - trim[0]), step: 0.1 }}
             sx={{ flex: 1, minWidth: 0 }}
           />
           <BufferedNumberInput
@@ -87,13 +83,13 @@ export function TrimStep({ demo }: TrimStepProps) {
             value={String(Number(trim[1].toFixed(2)))}
             onCommit={(value) => {
               if (value.trim() && Number.isFinite(Number(value))) {
-                changeTrim([trim[0], Number(value)]);
+                changeEnd(Number(value));
               }
             }}
             inputProps={{
               min: trim[0] + minimumLength,
               max: clip.duration,
-              step: 0.1,
+              step: 1,
             }}
             sx={{ flex: 1, minWidth: 0 }}
           />
@@ -101,7 +97,7 @@ export function TrimStep({ demo }: TrimStepProps) {
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {targets.length
             ? "Changing this section clears your selected people and their assignments."
-            : "Keep it between 1 and 15 seconds for the first version."}
+            : "Moving the start keeps the length. The end snaps to whole-second lengths between 4 and 15 seconds."}
         </Typography>
       </Box>
     </Stack>

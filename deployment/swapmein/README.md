@@ -284,6 +284,16 @@ Status reads mark queued/preparing/finalizing work older than 2,100 seconds fail
 and a submitting claim older than 90 seconds unknown. That UI transition does
 not release a blocked worker lease or prove a provider task was canceled.
 
+## Diagnostic logs
+
+The gateway writes structured JSON events to Google Cloud Logging for preparation,
+backup-shutdown registration, worker start/stop, cleanup and pipeline failures.
+Filter on `jsonPayload.job_id` or `jsonPayload.event`. Error records include the
+exception type, Google error code or HTTP status, and stack file/function/line
+locations. Exception messages, request headers/bodies, media URLs and source
+lines are excluded to avoid leaking BYOK credentials and private media. These
+logs do not automatically clear recovery locks or retry generation.
+
 ## Deployment and IAM
 
 | Resource | Verified deployment configuration, 2026-10-14 |

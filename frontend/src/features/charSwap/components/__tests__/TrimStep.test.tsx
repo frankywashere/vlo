@@ -47,7 +47,7 @@ describe("trim step", () => {
       draft: "-2.50",
       commit: "blur",
       initial: [2, 12] as [number, number],
-      expected: [0, 12] as [number, number],
+      expected: [0, 10] as [number, number],
       normalized: "0",
     },
     {
@@ -120,6 +120,19 @@ describe("trim step", () => {
       );
     },
   );
+
+  it("preserves a five-second length when moving the start to 1.3", async () => {
+    useCharSwapStore.getState().changeTrim([0, 5]);
+    render(<TrimStep demo={null} />);
+    const input = screen.getByRole("spinbutton", { name: "Start (seconds)" });
+    fireEvent.change(input, { target: { value: "1.3" } });
+    fireEvent.blur(input);
+    expect(useCharSwapStore.getState().trim).toEqual([1.3, 6.3]);
+    const end = screen.getByRole("spinbutton", { name: "End (seconds)" });
+    fireEvent.change(end, { target: { value: "7.7" } });
+    fireEvent.blur(end);
+    expect(useCharSwapStore.getState().trim).toEqual([1.3, 7.3]);
+  });
 
   it("previews the full uploaded clip without trim controls in the upload step", () => {
     useCharSwapStore.getState().changeTrim([3, 8]);

@@ -16,6 +16,7 @@ from google.protobuf import duration_pb2
 
 from .config import Settings
 from .errors import PublicError
+from .diagnostics import emit
 from .security import validate_media_url
 
 
@@ -41,6 +42,8 @@ def valid_spend_cap(body: dict, project_number: str):
 
 
 class Cloud:
+    job_id = None
+
     def __init__(self, settings: Settings, storage_client=None, task_client=None, http_client=None):
         self.settings = settings
         self.storage = storage_client or storage.Client()
@@ -49,6 +52,7 @@ class Cloud:
         self.shutdown_verified = True
         self.shutdown_deadline = 0.0
         self.shutdown_tasks = []
+        self.job_id = None
 
     def enqueue(self, kind: str, job_id: str):
         settings = self.settings
@@ -194,11 +198,14 @@ class Cloud:
             ),
         )
         task.schedule_time = deadline
+        emit("backup_shutdown_registering", job_id=self.job_id, worker=service, task_name=name)
         try:
             created = self.tasks.create_task(parent=queue, task=task, retry=None, timeout=30)
-        except Exception:
+        except Exception as error:
+            emit("backup_shutdown_registration_failed", error=error, job_id=self.job_id, worker=service, task_name=name)
             self.shutdown_verified = False
             raise PublicError("Backup shutdown registration is unconfirmed. Workers remain off and new preparations are paused for operator recovery.", 503) from None
+        emit("backup_shutdown_registered", job_id=self.job_id, worker=service, task_name=created.name)
         return created.name
 
     @contextmanager
@@ -209,6 +216,7 @@ class Cloud:
         worker_url = self.settings.gpu_url if service == "gpu" else self.settings.audio_url
         try:
             self._scale(service, 1)
+            emit("worker_started", job_id=self.job_id, worker=service)
             token = id_token.fetch_id_token(Request(), worker_url)
             headers = {"Authorization": "Bearer " + token}
             response = self.http.get(worker_url + "/health", headers=headers, timeout=120)
@@ -224,16 +232,19 @@ class Cloud:
         finally:
             try:
                 self._scale(service, 0)
-            except Exception:
+            except Exception as error:
+                emit("worker_shutdown_failed", error=error, job_id=self.job_id, worker=service)
                 self.shutdown_verified = False
                 # Backup remains queued. Caller must preserve the global lease.
                 raise PublicError("Worker shutdown is pending its backup task. New preparations are paused.", 503) from None
             else:
+                emit("worker_stopped", job_id=self.job_id, worker=service)
                 try:
                     self.tasks.delete_task(name=backup)
                 except NotFound:
                     pass
-                except Exception:
+                except Exception as error:
+                    emit("backup_shutdown_cleanup_failed", error=error, job_id=self.job_id, worker=service, task_name=backup)
                     self.shutdown_verified = False
                     raise PublicError("Backup shutdown cleanup is pending. New preparations are paused for operator recovery.", 503) from None
 
