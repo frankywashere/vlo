@@ -1,6 +1,16 @@
 """Explicit deployment configuration, never provider credentials."""
 from dataclasses import dataclass
 import os
+import re
+
+
+def positive_integer_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        raise ValueError(f"{name} must be a positive whole number.")
+    return int(value)
 
 
 @dataclass(frozen=True)
@@ -19,8 +29,9 @@ class Settings:
     gpu_url: str = ""
     audio_url: str = ""
     allowed_origins: tuple[str, ...] = ()
-    monthly_preparations: int = 10
-    daily_preparations: int = 3
+    # The calendar-month allowance accommodates 100 attempts on all 31 days.
+    monthly_preparations: int = 3100
+    daily_preparations: int = 100
     session_seconds: int = 21600
     # Rounded published 768P rate, verified 2026-10-14; an estimate, not a quote.
     h3_price_per_second_usd: float = 0.074
@@ -42,6 +53,8 @@ class Settings:
             gpu_url=os.getenv("GPU_URL", "").rstrip("/"),
             audio_url=os.getenv("AUDIO_URL", "").rstrip("/"),
             allowed_origins=tuple(x.strip() for x in os.getenv("ALLOWED_ORIGINS", "").split(",") if x.strip()),
+            monthly_preparations=positive_integer_env("MONTHLY_PREPARATIONS", cls.monthly_preparations),
+            daily_preparations=positive_integer_env("DAILY_PREPARATIONS", cls.daily_preparations),
         )
 
     @property

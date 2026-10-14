@@ -83,11 +83,11 @@ or account-recovery flow in this initial beta.
    SHA256 key fingerprint is stored, alongside the hashed bearer and six-hour
    expiry. The raw provider key never enters GCS, Cloud Tasks or deployment env.
 2. On completed upload, atomically reserve the global preparation slot and quota in permanent
-   `control/preparation.json`: maximum one active preparation, three preparations
-   per UTC day, ten per UTC calendar month. Failed attempts consume a quota slot.
+   `control/preparation.json`: maximum one active preparation, 100 preparations
+   per UTC day, 3,100 per UTC calendar month. Failed attempts consume a quota slot.
    This is an owner-cost-limited beta; reAPI keys do not pay for Google preparation.
 3. Issue private upload URLs after incrementing a separate permanent
-   `control/uploads.json` ticket quota (three per UTC day, ten per UTC month).
+   `control/uploads.json` ticket quota (100 per UTC day, 3,100 per UTC month).
    Abandoned uploads consume this quota but hold no processing slot. After both
    immutable uploads are verified and the reference is normalized, reserve the
    existing preparation quota, enqueue an authenticated Cloud Task and return
@@ -169,6 +169,8 @@ model workers remain private.
 | `SHUTDOWN_SERVICE_ACCOUNT` | Existing `proof-shutdown` identity |
 | `GPU_URL`, `AUDIO_URL` | Exact existing private Cloud Run worker URLs |
 | `ALLOWED_ORIGINS` | Comma-separated Firebase `web.app` and `firebaseapp.com` HTTPS origins |
+| `DAILY_PREPARATIONS` | Positive whole number; defaults and deploys to `100`, shared by preparations and upload tickets |
+| `MONTHLY_PREPARATIONS` | Positive whole number; defaults and deploys to `3100`, allowing 100/day in a 31-day UTC month |
 
 No provider key is an environment variable. The service image contains only this
 code and its Python dependencies; it must not contain media, local `.secrets`,
@@ -262,6 +264,8 @@ The beta still processes the selected continuous shot. It checks capacity before
 opening/uploading files and rechecks before issuing upload URLs. Controlled
 capacity errors return stable `code`, optional integer `retry_after` seconds and
 `Retry-After`; the UI shows the specific daily/monthly/busy/recovery reason and a
-local reset time when known. The existing three/day, ten/month and one-active
-preparation protections remain. Failed preparation stays on References instead of
+local reset time when known. Preparations and upload tickets each permit 100/day
+and 3,100/month, with one active preparation. These are attempt allowances, not
+spending guarantees: the existing CAD 7/month Cloud Run spend cap is unchanged and
+can stop processing before those allowances are used. Failed preparation stays on References instead of
 advancing into an empty tracking screen. No automatic generation retry is added.

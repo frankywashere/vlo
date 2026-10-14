@@ -8,6 +8,7 @@ import time
 from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.cloud import storage
 
+from .config import Settings
 from .errors import PublicError
 
 
@@ -48,7 +49,8 @@ class Records:
 
 
 def check_preparation_capacity(current: dict | None, now: float,
-                               monthly_limit: int = 10, daily_limit: int = 3, *,
+                               monthly_limit: int = Settings.monthly_preparations,
+                               daily_limit: int = Settings.daily_preparations, *,
                                limit_prefix: str = "preparation"):
     """Read-only preflight; reservation must still check inside its atomic update."""
     current = current or {}
@@ -77,7 +79,8 @@ def check_preparation_capacity(current: dict | None, now: float,
 
 
 def reserve_preparation(current: dict | None, job_id: str, now: float,
-                        monthly_limit: int = 10, daily_limit: int = 3, *,
+                        monthly_limit: int = Settings.monthly_preparations,
+                        daily_limit: int = Settings.daily_preparations, *,
                         limit_prefix: str = "preparation"):
     available = check_preparation_capacity(current, now, monthly_limit, daily_limit, limit_prefix=limit_prefix)
     return {**available, "month_count": available["month_count"] + 1,

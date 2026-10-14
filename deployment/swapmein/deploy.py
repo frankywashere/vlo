@@ -418,6 +418,7 @@ def deployment_env(workers: dict, origins: list[str], service_url: str) -> dict[
         "SERVICE_URL": service_url, "GATEWAY_SERVICE_ACCOUNT": GATEWAY,
         "TASK_SERVICE_ACCOUNT": GATEWAY, "TASK_QUEUE": QUEUE,
         "SHUTDOWN_SERVICE_ACCOUNT": SHUTDOWN, "ALLOWED_ORIGINS": ",".join(origins),
+        "DAILY_PREPARATIONS": "100", "MONTHLY_PREPARATIONS": "3100",
     }
 
 

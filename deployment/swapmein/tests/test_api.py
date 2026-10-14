@@ -90,7 +90,7 @@ def api(monkeypatch):
     monkeypatch.setattr(gateway, "settings", replace(gateway.settings, app_bucket="private-app",
         service_url="https://gateway.run.app", gateway_service_account="gateway@example.com",
         task_service_account="gateway@example.com", gpu_url="https://gpu.run.app", audio_url="https://audio.run.app",
-        allowed_origins=("https://site.web.app",)))
+        allowed_origins=("https://site.web.app",), daily_preparations=3, monthly_preparations=10))
     monkeypatch.setattr(gateway, "services", lambda: (records, cloud, provider))
     monkeypatch.setattr(gateway, "validate_media_url", lambda url: url)
     return TestClient(gateway.app), records, cloud, provider

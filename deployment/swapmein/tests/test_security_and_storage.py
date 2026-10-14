@@ -61,22 +61,27 @@ def test_tasks_need_the_exact_google_email_and_audience(monkeypatch):
         verify_task_identity(None, claims["aud"], claims["email"])
 
 
-def test_global_daily_monthly_caps_and_single_preparation_lease():
+@pytest.fixture
+def small_limits():
+    return {"monthly_limit": 10, "daily_limit": 3}
+
+
+def test_global_daily_monthly_caps_and_single_preparation_lease(small_limits):
     now = datetime(2026, 10, 14, tzinfo=timezone.utc).timestamp()
-    current = reserve_preparation(None, "a", now)
+    current = reserve_preparation(None, "a", now, **small_limits)
     with pytest.raises(PublicError, match="Another clip"):
-        reserve_preparation(current, "b", now + 5)
+        reserve_preparation(current, "b", now + 5, **small_limits)
     assert "active" in release_preparation(current, "wrong-job")
     for i in range(2):
         current = release_preparation(current, chr(97 + i))
-        current = reserve_preparation(current, chr(98 + i), now + i + 10)
+        current = reserve_preparation(current, chr(98 + i), now + i + 10, **small_limits)
     current = release_preparation(current, "c")
     with pytest.raises(PublicError, match="daily"):
-        reserve_preparation(current, "d", now + 30)
+        reserve_preparation(current, "d", now + 30, **small_limits)
     current["month_count"] = 10
     with pytest.raises(PublicError, match="monthly"):
-        reserve_preparation(current, "d", now + 86400)
-    reset = reserve_preparation(current, "d", now + 31 * 86400)
+        reserve_preparation(current, "d", now + 86400, **small_limits)
+    reset = reserve_preparation(current, "d", now + 31 * 86400, **small_limits)
     assert reset["month_count"] == 1
 
 
@@ -112,19 +117,45 @@ def test_capacity_preflight_does_not_reserve_or_reset_stored_counters():
 
 
 @pytest.mark.parametrize("limit_prefix", ["preparation", "upload"])
-def test_capacity_limits_have_distinct_codes_and_utc_reset_delays(limit_prefix):
+def test_capacity_limits_have_distinct_codes_and_utc_reset_delays(limit_prefix, small_limits):
     now = datetime(2026, 12, 31, 23, 59, 59, 500000, tzinfo=timezone.utc).timestamp()
     current = {"month": "2026-12", "day": "2026-12-31", "month_count": 2, "day_count": 3}
     with pytest.raises(PublicError) as error:
-        check_preparation_capacity(current, now, limit_prefix=limit_prefix)
+        check_preparation_capacity(current, now, limit_prefix=limit_prefix, **small_limits)
     assert error.value.code == f"{limit_prefix}_daily_limit"
     assert error.value.retry_after == 1
     current["month_count"] = 10
     with pytest.raises(PublicError) as error:
-        reserve_preparation(current, "not-reserved", now, limit_prefix=limit_prefix)
+        reserve_preparation(current, "not-reserved", now, limit_prefix=limit_prefix, **small_limits)
     assert error.value.code == f"{limit_prefix}_monthly_limit"
     assert error.value.retry_after == 1
     assert current["month_count"] == 10 and current["day_count"] == 3 and "active" not in current
+
+
+@pytest.mark.parametrize("limit_prefix", ["preparation", "upload"])
+def test_default_daily_limit_accepts_100th_then_refuses_101st_without_mutation(limit_prefix):
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc).timestamp()
+    current = {"month": "2026-10", "day": "2026-10-14", "month_count": 99, "day_count": 99}
+    reserved = reserve_preparation(current, "100th", now, limit_prefix=limit_prefix)
+    assert reserved["month_count"] == reserved["day_count"] == 100
+    released = release_preparation(reserved, "100th")
+    original = copy.deepcopy(released)
+    with pytest.raises(PublicError) as error:
+        reserve_preparation(released, "101st", now, limit_prefix=limit_prefix)
+    assert error.value.code == f"{limit_prefix}_daily_limit"
+    assert released == original
+
+
+@pytest.mark.parametrize("limit_prefix", ["preparation", "upload"])
+def test_default_monthly_limit_accepts_3100th_then_refuses_3101st(limit_prefix):
+    now = datetime(2026, 10, 31, tzinfo=timezone.utc).timestamp()
+    current = {"month": "2026-10", "day": "2026-10-31", "month_count": 3099, "day_count": 99}
+    reserved = reserve_preparation(current, "3100th", now, limit_prefix=limit_prefix)
+    assert reserved["month_count"] == 3100 and reserved["day_count"] == 100
+    released = release_preparation(reserved, "3100th")
+    with pytest.raises(PublicError) as error:
+        reserve_preparation(released, "3101st", now + 1, limit_prefix=limit_prefix)
+    assert error.value.code == f"{limit_prefix}_monthly_limit"
 
 
 def test_busy_capacity_reports_lease_wait_but_recovery_does_not_promise_a_retry():
