@@ -1,4 +1,4 @@
-# CharSwap walkthrough on `tasty`
+# swapmein walkthrough on `tasty`
 
 This is a standalone, responsive frontend preview using VLO's React, MUI, and Zustand stack and charcoal/blue visual language. It does not start the VLO backend, download models, call Google workers, or submit paid generation jobs.
 

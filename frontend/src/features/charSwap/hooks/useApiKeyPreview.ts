@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-export const DEMO_API_KEY = "demo-charswap-preview-key";
+export const DEMO_API_KEY = "demo-swapmein-preview-key";
 
 /** Preview credentials live only in this mounted component's memory. */
 export function useApiKeyPreview() {

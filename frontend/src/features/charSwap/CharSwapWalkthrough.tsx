@@ -389,7 +389,7 @@ export function CharSwapWalkthrough() {
               <Typography
                 sx={{ fontSize: 20, fontWeight: 650, letterSpacing: "-.04em" }}
               >
-                CharSwap
+                swapmein
               </Typography>
               <Chip
                 label="UI preview"

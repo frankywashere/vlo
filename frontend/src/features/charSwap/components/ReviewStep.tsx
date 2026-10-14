@@ -70,7 +70,7 @@ export function ReviewStep({
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = "charswap-setup.json";
+    link.download = "swapmein-setup.json";
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
