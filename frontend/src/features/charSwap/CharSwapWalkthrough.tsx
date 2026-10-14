@@ -111,9 +111,9 @@ const STEP_INFO = {
     icon: ImageOutlined,
   },
   matches: {
-    title: "Check the uncertain moments",
-    short: "Matches",
-    description: "Help match your people where tracking needs a second look.",
+    title: "Prepare and review your clip",
+    short: "Prepare",
+    description: "Prepare the audio and check the video guide before generation.",
     icon: FactCheckOutlined,
   },
   access: {
@@ -752,6 +752,7 @@ export function CharSwapWalkthrough() {
                     selectedLabel={pipeline.job?.selected_label}
                     maskStyle={pipeline.job?.mask_style}
                     trackingContinuous={pipeline.job?.tracking_continuous}
+                    trackingPerformed={pipeline.job?.tracking_performed}
                     sceneCutCount={pipeline.job?.scene_cut_count}
                     guideUrl={pipeline.job?.guide_url}
                     trackingUrl={pipeline.job?.tracking_url}

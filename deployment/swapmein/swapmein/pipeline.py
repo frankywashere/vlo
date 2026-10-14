@@ -57,18 +57,21 @@ class Pipeline:
                 metadata = normalize(source, normalized, options)
                 prefix = f"inputs/swapmein-{job_id}/"
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
-                self.update_job(job_id, message="Tracking the selected person.", duration=metadata["duration"],
-                    width=metadata["width"], height=metadata["height"], normalized_uri=source_uri)
-                sam_run = "sm-sam-" + job_id
-                with self.cloud.worker("gpu") as invoke:
-                    result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "sam"}, remaining())
-                masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
-                preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
-                masks = root / "masks.zip"
-                self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
-                label, coverage = select_label(masks, metadata, require_continuous=False)
-                tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
-                preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
+                self.update_job(job_id, duration=metadata["duration"], width=metadata["width"], height=metadata["height"], normalized_uri=source_uri)
+                label, coverage, preview = None, [], None
+                tracking_continuous = False
+                if options.enhanced_character_masking:
+                    self.update_job(job_id, message="Tracking the selected person.")
+                    sam_run = "sm-sam-" + job_id
+                    with self.cloud.worker("gpu") as invoke:
+                        result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "sam"}, remaining())
+                    masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
+                    preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
+                    masks = root / "masks.zip"
+                    self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
+                    label, coverage = select_label(masks, metadata, require_continuous=False)
+                    tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
+                    preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
                 self.update_job(job_id, message="Preparing vocals and the generation guide.")
                 audio_run, guide_run = "sm-audio-" + job_id, "sm-guide-" + job_id
                 with self.cloud.worker("audio") as invoke:
@@ -90,14 +93,12 @@ class Pipeline:
                     guide_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/guide.mp4", guide, "video/mp4")
                 if options.enhanced_character_masking:
                     message = "Review every scene. Only your selected person should have a translucent cyan overlay. Identity across cuts or gaps is not verified."
-                elif not tracking_continuous:
-                    message = "Review every scene in the guide. The selected person's identity is not verified across camera cuts or tracking gaps; generation may change other people."
                 else:
-                    message = f"Review tracking label {label} and confirm it follows your selected person. The guide keeps the original person visible."
+                    message = "Review your prepared clip. SAM tracking was skipped; MiniMax will identify the selected person using your tap position and timestamp."
                 self.update_job(job_id, status="ready", message=message,
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
-                    normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"]["frame"] / 24},
-                    mask_style="cyan_overlay" if options.enhanced_character_masking else "none", mask_frames=metadata["frames"], mask_coverage_min=min(coverage), review_required=True,
+                    normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"].get("time", metadata["anchor"]["frame"] / 24)},
+                    mask_style="cyan_overlay" if options.enhanced_character_masking else "none", tracking_performed=options.enhanced_character_masking, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)

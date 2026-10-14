@@ -37,6 +37,7 @@ export interface LivePipelineJob {
   height?: number;
   selected_label?: number;
   tracking_continuous?: boolean;
+  tracking_performed?: boolean;
   scene_cut_count?: number;
   mask_style?: "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
@@ -208,6 +209,8 @@ function readJob(value: unknown): LivePipelineJob {
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
+  if (typeof value.tracking_performed === "boolean")
+    job.tracking_performed = value.tracking_performed;
   if (typeof value.tracking_continuous === "boolean")
     job.tracking_continuous = value.tracking_continuous;
   if (

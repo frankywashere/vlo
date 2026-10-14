@@ -17,7 +17,7 @@ records its checks and the remaining generation-quality limits.
 - A 4–15-second selection with a whole-second duration; the trim start and target
   timestamp may be fractional. The application does not yet round a fractional
   selection up for generation and trim it back afterward.
-- SAM tracks the original RGB video. Depth Anything and face mesh are omitted.
+- SAM tracks the original RGB video only when enhanced masking is on. With it off, SAM and the GPU worker are skipped. Depth Anything and face mesh are omitted.
 - **Enhanced character masking is off by default.** With it off, the generation
   guide keeps the original person visible. With it on, the CPU compositor blends a 50%-opacity cyan overlay into
   only the selected SAM label, without numbers, and keeps the rest of the original frame.
@@ -50,9 +50,9 @@ may flag strong lighting changes or abrupt motion.
    The gateway verifies their actual sizes, normalizes the image, atomically
    reserves a preparation slot, saves the job, and enqueues its preparation task.
 4. The task trims and normalizes the source, records detected cuts, and allows
-   them in either masking mode. Both modes activate SAM on `proof-gpu`,
-   validate the mask archive and actual label under the clicked point, then shut
-   the GPU worker down. Absent-label frames remain unchanged; identity matching across cuts requires review.
+   them in either masking mode. Only enhanced masking activates SAM on `proof-gpu`,
+   validates the mask archive and actual label under the clicked point, then shuts
+   the GPU worker down. Masking off uses the normalized tap and timestamp directly. Absent-label frames remain unchanged; identity matching across cuts requires review.
 5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Overlay mode calls
    its `/compose` endpoint with `fill_mode: color`; masking-off mode uses gateway CPU FFmpeg to
    remux normalized RGB with those vocals, bypassing mask-based composition. The
@@ -454,3 +454,14 @@ store `mask_style: cyan_overlay`.
 The versioned CPU worker patch is in `worker_patch/`; it overlays the existing
 immutable audio image without reinstalling models. Original gray/original
 composition modes remain available for historical diagnostics.
+
+### Masking-off preparation
+
+New preparations with masking off skip SAM inference, GPU activation, mask
+validation, and the detected-people preview. Only CPU normalization, scene-cut
+inspection, vocal preparation and original-picture guide assembly run. The
+public job records `tracking_performed: false`, with no tracking URL or selected
+SAM label. The review step always shows the actual guide and explains that the
+provider uses the selected coordinates and clip-relative timestamp. Changing
+selection still requires a new preparation/review. The timestamp retains the
+original fractional offset within the trimmed clip.

@@ -117,6 +117,7 @@ def normalize(source: Path, output: Path, setup: Setup):
     scene_cuts = [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
     anchor = {"x": (setup.anchor.x * sw + (width - sw) / 2) / width,
               "y": (setup.anchor.y * sh + (height - sh) / 2) / height,
+              "time": setup.anchor.time - start,
               "frame": min(duration * 24 - 1, round((setup.anchor.time - start) * 24))}
     return {"duration": duration, "width": width, "height": height,
             "frames": duration * 24, "anchor": anchor, "scene_cuts": scene_cuts}

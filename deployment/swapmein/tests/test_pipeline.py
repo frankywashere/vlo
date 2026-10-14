@@ -72,7 +72,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
                 "anchor": {"x": .6, "y": .4, "frame": 24}, "scene_cuts": scene_cuts}
     monkeypatch.setattr("swapmein.pipeline.normalize", lambda *_: metadata)
     def selected(*_, require_continuous):
-        assert require_continuous is False
+        assert enabled and require_continuous is False
         return 2, coverage
     monkeypatch.setattr("swapmein.pipeline.select_label", selected)
     composed_original = []
@@ -110,10 +110,11 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
     records, cloud = Records(enabled), Cloud()
     Pipeline(Settings(), records, cloud).prepare(job_id)
     assert records.data[path]["status"] == "ready"
-    assert records.data[path]["selected_label"] == 2
+    assert records.data[path]["selected_label"] == (2 if enabled else None)
+    assert records.data[path]["tracking_performed"] is enabled
     assert records.data[path]["normalized_anchor"]["time"] == 1
     assert records.data[path]["scene_cut_count"] == len(scene_cuts)
-    assert records.data[path]["tracking_continuous"] is (not scene_cuts and all(coverage))
+    assert records.data[path]["tracking_continuous"] is (enabled and not scene_cuts and all(coverage))
     if enabled:
         assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio", "audio"]
         assert cloud.calls[-1][2]["fill_mode"] == "color"
@@ -121,7 +122,8 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
         assert not composed_original
     else:
-        assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio"]
+        assert [kind for kind, _, _ in cloud.calls] == ["audio"]
+        assert records.data[path]["tracking_uri"] is None
+        assert records.data[path]["mask_frames"] == 0
         assert composed_original == [True]
-        if scene_cuts or not all(coverage):
-            assert "not verified" in records.data[path]["message"]
+        assert "SAM tracking was skipped" in records.data[path]["message"]

@@ -17,7 +17,7 @@ and review-response checks are recorded below.
 
 | Item | Deployed behavior |
 | --- | --- |
-| Target selection | User taps one person in a paused preview; SAM tracks people in the original RGB video |
+| Target selection | User taps one person in a paused preview; SAM tracks people only with enhanced masking on; off uses the tap position and time directly |
 | Depth Anything | Omitted from the default pipeline |
 | Face mesh | Omitted from the default pipeline |
 | Enhanced character masking | **Off by default**; optional translucent cyan overlay of only the selected SAM label |
@@ -78,7 +78,9 @@ flowchart TD
     B --> C[Browser: direct uploads to private GCS]
     C --> D[Gateway: verify uploads and queue preparation]
     D --> E[Cloud Task / gateway CPU: trim and normalize]
-    E --> F[Private L4 worker: SAM on original RGB]
+    E --> M{Enhanced masking}
+    M -->|On| F[Private L4 worker: SAM on original RGB]
+    M -->|Off| H
     F --> G[Gateway: choose clicked label and check coverage]
     G --> H[Private CPU worker: Demucs and pitch shift]
     H --> P{Enhanced masking}
@@ -99,7 +101,7 @@ flowchart TD
 | File transfer | Browser → private application bucket | Signed direct PUTs; large media does not pass through Firebase's API rewrite |
 | Source preparation | Gateway CPU, authenticated Cloud Task | FFmpeg validates, trims, rotates, normalizes to 24 fps, and checks for cuts |
 | Segmentation | `proof-gpu`, NVIDIA L4 | SAM 3 detects/tracks people using text prompt `person`; returns labeled masks for each frame |
-| Target resolution | Gateway CPU | Find the label at the selected position/time; validate every mask frame, allowing selected-label gaps while validating every mask frame |
+| Target resolution | Gateway CPU | With enhanced masking on, find the label at the selected position/time and validate every mask frame, allowing selected-label gaps while validating every mask frame |
 | Audio guidance | `proof-audio` CPU | Demucs vocal separation and +3 semitone guidance |
 | Guide assembly | Gateway CPU when masking off; `proof-audio` CPU when on | Off remuxes unchanged normalized RGB with shifted vocals; on validates/cleans masks and tints only the selected label cyan |
 | Video generation | reAPI or ToAPIs infrastructure | MiniMax H3 receives one guide video, one reference image and the replacement prompt |
@@ -112,19 +114,16 @@ Demucs or FFmpeg.
 
 ### Masks and the optional cyan guide
 
-SAM processes the original RGB clip in both settings. It does not select a named
+SAM processes the original RGB clip only when enhanced masking is on. It does not select a named
 identity automatically. The gateway chooses the numerical label beneath the
 user's tap and checks coverage. Mask integrity and a valid clicked label are
-required in both modes; frames without the selected label are left unchanged. A label can still track the wrong person, merge or drift, so
+required in enhanced mode; frames without the selected label are left unchanged. A label can still track the wrong person, merge or drift, so
 review is required.
 
-With **Use enhanced character masking off**, the guide retains the original
+With **Use enhanced character masking off**, SAM and the GPU worker are skipped. The guide retains the original
 person. The prompt identifies the intended target using the clicked position and
 time. The gateway remuxes the normalized RGB frames with shifted vocals without
-using the overlay compositor. For continuous coverage without detected cuts, the main
-player shows the labeled tracking preview, with a separate guide link. With cuts
-or coverage gaps, it shows the whole generation guide and requires approval after
-warning that cross-scene identity is unverified and other people may change.
+using the overlay compositor. The main player shows the actual generation guide and requires whole-clip review. It explains that the provider identifies the person from the selected coordinates and timestamp; no SAM tracking or numbered preview is produced in this mode.
 The pitch filter may leave the guide vocals under 100 ms short; the remux pads
 only that bounded tail to the selected duration, without shifting or stretching
 the vocals. Larger timing differences remain errors.

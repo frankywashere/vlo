@@ -15,6 +15,7 @@ interface LiveTrackingStepProps {
   selectedLabel?: number;
   maskStyle?: "cyan_overlay" | "gray" | "none";
   trackingContinuous?: boolean;
+  trackingPerformed?: boolean;
   sceneCutCount?: number;
   status: string;
   message?: string;
@@ -35,6 +36,7 @@ export function LiveTrackingStep({
   selectedLabel,
   maskStyle,
   trackingContinuous,
+  trackingPerformed = true,
   sceneCutCount,
   status,
   message,
@@ -51,7 +53,7 @@ export function LiveTrackingStep({
 }: LiveTrackingStepProps) {
   const ready = status === "ready";
   const wholeClipReview =
-    (trackingContinuous === false || (sceneCutCount ?? 0) > 0);
+    (!trackingPerformed || trackingContinuous === false || (sceneCutCount ?? 0) > 0);
   const [playable, setPlayable] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const failed = status === "failed";
@@ -72,8 +74,9 @@ export function LiveTrackingStep({
       )}
       {ready && wholeClipReview && (
         <Alert severity="warning">
-          Automatic identity matching across scene cuts has not been verified.
-          The model may change other people. Review every scene before approving.
+          {trackingPerformed
+            ? "Automatic identity matching across scene cuts has not been verified. The model may change other people. Review every scene before approving."
+            : "Masking is off, so SAM tracking is skipped. MiniMax uses your selected position and timestamp to identify the person. Review your selection before approving."}
         </Alert>
       )}
       {ready && enhancedCharacterMasking && guideUrl && <Typography variant="body2">

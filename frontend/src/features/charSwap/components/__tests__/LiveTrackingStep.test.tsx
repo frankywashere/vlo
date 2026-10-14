@@ -93,3 +93,11 @@ it("requires whole-clip review for a cyan guide with cuts without rejecting it",
   expect(screen.getByRole("button", { name: "I reviewed the whole clip" })).toBeDisabled();
   expect(screen.queryByText(/older guide uses solid gray/)).not.toBeInTheDocument();
 });
+
+it("reviews the actual guide and explains skipped tracking with masking off", () => {
+  render(<LiveTrackingStep {...properties()} enhancedCharacterMasking={false} trackingPerformed={false} trackingContinuous={false} trackingUrl={undefined} />);
+  expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", guideUrl);
+  expect(screen.getByText(/Masking is off, so SAM tracking is skipped/)).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /detected people/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "I reviewed the whole clip" })).toBeDisabled();
+});

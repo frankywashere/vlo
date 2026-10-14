@@ -127,7 +127,7 @@ function ApiKeyPreviewEditor({
             <Typography variant="body2" color="text.secondary">
               Highlight only the selected person with a translucent cyan overlay before
               generation. Turn off to keep the original person visible. Person
-              tracking stays on.
+              tracking is skipped when masking is off; your tap position and timestamp identify the person.
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Changes apply immediately and require a new guide review.
