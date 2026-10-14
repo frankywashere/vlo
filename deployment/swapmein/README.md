@@ -1,232 +1,369 @@
 # swapMEin cloud gateway
 
-This standalone FastAPI service connects the swapMEin walkthrough to the existing
-private SAM GPU and audio/compositor CPU workers. It supports **one selected person
-in one continuous 4–15-second shot**. The user enters their own reAPI key, reviews
-the actual gray guide, then explicitly approves one MiniMax H3 request. The gateway
-exports an MP4 at the provider's original generated resolution with the source soundtrack restored.
+This FastAPI gateway connects the Firebase-hosted swapMEin walkthrough to the
+private SAM GPU worker, private audio/compositor CPU worker, and the user's
+chosen MiniMax H3 provider. The supported providers are **reAPI and ToAPIs**,
+using a key entered by the user. No owner key is bundled or supplied as a fallback.
 
-Multiple-person generation, identity continuity across camera cuts, app credits,
-payments and automated face re-identification are not implemented in this beta.
-They are rejected or disabled rather than represented as working services. SAM
-returning a label in every frame establishes coverage, not identity correctness;
-the user must review the guide before generation. Scene-cut detection is a
-conservative heuristic and can reject abrupt motion or lighting changes.
+The [pipeline and deployment overview](../../docs/charswap-walkthrough.md) is the
+canonical architecture document. This README is the gateway's API and operator
+runbook, checked against the repository implementation on 2026-10-14.
+
+## Supported beta
+
+- One selected person, one reference image, one continuous shot.
+- A 4–15-second selection with a whole-second duration; the trim start and target
+  timestamp may be fractional. The application does not yet round a fractional
+  selection up for generation and trim it back afterward.
+- SAM tracks the original RGB video. Depth Anything and face mesh are omitted.
+- **Enhanced character masking is off by default.** With it off, the generation
+  guide keeps the original person visible. With it on, the CPU compositor fills
+  the selected SAM label with flat gray and keeps the rest of the original frame.
+- Both modes use Demucs-separated vocals shifted up three semitones, without a
+  timing change. The final export restores the source soundtrack.
+- Preparation uses a normalized guide of at most 854×480 at 24 fps. Standard H3
+  generation requests use 768p. Final export preserves the provider-returned
+  dimensions at 24 fps; it neither downsizes to the guide nor upscales to the
+  uploaded source dimensions.
+
+Multiple-person generation, identity continuity across cuts, automated face
+re-identification, payments and purchased app credits are not implemented.
+The walkthrough may illustrate later capabilities, but the live gateway rejects
+unsupported input. “Check all scenes” is the preparation button label; the beta
+still checks the selected continuous shot, rather than processing a multi-shot
+sequence. SAM coverage is not proof of identity: the user reviews its preview and
+guide before approving generation. The cut detector is a heuristic and may reject
+strong lighting changes or abrupt motion.
+
+## Normal application flow
+
+1. The browser calls `/api/config`, accepts the user's provider and key, and opens
+   a six-hour session with `/api/session`. The gateway validates the key and
+   available allowance through the selected provider.
+2. On “Check all scenes,” the browser checks `/api/preparation-capacity` before
+   opening/uploading media. `/api/uploads` rechecks availability and issues two
+   signed PUT URLs. Files go directly to the private app bucket.
+3. The browser uploads both files and confirms with `/api/uploads/{id}/complete`.
+   The gateway verifies their actual sizes, normalizes the image, atomically
+   reserves a preparation slot, saves the job, and enqueues its preparation task.
+4. The task trims and normalizes the source, rejects strong cuts, then activates
+   SAM on `proof-gpu`. It chooses the actual mask label under the clicked point,
+   verifies that label has pixels in every frame, and shuts the GPU worker down.
+5. The task activates `proof-audio`, obtains `vocals_plus3.wav`, and calls its
+   `/compose` endpoint with `fill_mode: "original"` or `"gray"`. It shuts that
+   worker down, publishes private review links, and sets the job to `ready`.
+6. The user reviews the tracking preview and guide, then explicitly approves one
+   provider submission. The gateway binds that submission to the session's
+   provider and key fingerprint. It never automatically retries the paid POST.
+7. The browser refreshes provider status. On completion, the gateway enqueues
+   export. It downloads and checks the result, removes only permitted extra tail
+   frames, restores audio directly from the original upload at the selected trim
+   start, and publishes the final MP4.
+
+The UI immediately reports access, capacity, upload, confirmation, queued and
+preparation stages with elapsed time. The live path uses an indeterminate bar;
+its upload implementation does not currently supply measured byte percentages.
+Worker feedback is based on actual job messages, not an invented percentage or
+ETA. A failed preparation stays on References. Reloading clears the browser key
+and session; keep the tab open through generation and export.
 
 ## API contract
 
-All browser requests go through the Firebase HTTPS site. API responses use
-`Cache-Control: no-store`. The service only accepts configured website origins;
-command-line clients can omit Origin. CORS is not authentication. Sessions and
-job ownership are authenticated by an unpredictable bearer token.
+The browser uses Firebase Hosting's `/api/**` rewrite to the public gateway.
+API responses set `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
+and `Referrer-Policy: no-referrer`. Configured website origins are enforced;
+CLI clients may omit `Origin`. CORS is not authentication. Session ownership uses
+an unpredictable bearer token, stored only as a SHA256 digest on the server.
 
-| Endpoint | Authentication / input | Response |
+The compatibility header **`X-Reapi-Key` carries either provider's key**. The raw
+key is needed only on session creation, generation, and provider-status requests.
+It is not part of setup JSON, upload URLs, Cloud Tasks, saved records or deployment
+environment variables.
+
+| Endpoint | Authentication and input | Response |
 | --- | --- | --- |
-| `GET /health` | None | `{status:"ready",available:boolean}` |
-| `GET /api/config` | None | `{live:true,provider:"reAPI",model:"minimax-h3",delivery:"native",beta:"single-person",available:boolean}` |
-| `POST /api/session` | `X-Reapi-Key`; no body | `{token,expires_at,balance}`; expiry is Unix seconds, balance is reAPI credits |
-| `GET /api/preparation-capacity` | Session bearer | `{available:true}` or a specific capacity error, before any upload |
-| `POST /api/uploads` | Session bearer; JSON `source_bytes`, `reference_bytes`, `setup` | HTTP 201 upload ID and two short-lived private-storage PUT URLs |
-| `POST /api/uploads/{id}/complete` | Same session bearer after both PUTs succeed | HTTP 202 `{id,status:"queued"}`; validates actual sizes and queues at most once |
-| `POST /api/jobs` (legacy) | `Authorization: Bearer SESSION`; multipart `clip`, `reference`, `setup` | HTTP 202 `{id,status:"queued"}` |
-| `GET /api/jobs/{id}` | Session bearer | Public job status and short-lived review/result links |
-| `POST /api/jobs/{id}/generate` | Session bearer and `X-Reapi-Key`; `{approved:true}` | Current job status; submits at most once |
-| `GET /api/jobs/{id}/provider` | Session bearer and `X-Reapi-Key` | Refreshes provider status; enqueues one export on completion |
-| `POST /internal/prepare` | Exact Google OIDC task identity and audience; `{job_id}` | Private Cloud Tasks processing, `{ok:true}` |
-| `POST /internal/finish` | Same exact OIDC identity; `{job_id}` | Private Cloud Tasks export, `{ok:true}` |
+| `GET /health` | None; direct gateway health probe | `{status:"ready",available:boolean}` |
+| `GET /api/config` | None | `{live:true,providers:["reAPI","ToAPIs"],provider:"reAPI",model:"minimax-h3",delivery:"native",beta:"single-person",available:boolean,max_source_bytes:104857600}` |
+| `POST /api/session` | `X-Reapi-Key`; optional JSON `{provider:"reAPI"}` or `{provider:"ToAPIs"}`; omitted provider defaults to reAPI | `{token,expires_at,balance}` |
+| `GET /api/preparation-capacity` | Session bearer | `{available:true}` or structured capacity error |
+| `POST /api/uploads` | Session bearer; JSON `{source_bytes,reference_bytes,setup}` | HTTP 201 `{id,source:{url,headers},reference:{url,headers}}` |
+| `POST /api/uploads/{id}/complete` | Same session bearer after both PUTs | HTTP 202 `{id,status:"queued"}`; repeat completion returns the existing job status |
+| `POST /api/jobs` | Legacy endpoint; session bearer; multipart `clip`, `reference`, `setup` JSON string | HTTP 202 `{id,status:"queued"}` |
+| `GET /api/jobs/{id}` | Session bearer that owns the job | Public status, messages and available review/result URLs |
+| `POST /api/jobs/{id}/generate` | Session bearer plus `X-Reapi-Key`; JSON `{approved:true}` | Current public job status; submits at most once |
+| `GET /api/jobs/{id}/provider` | Session bearer plus `X-Reapi-Key` | Refreshes provider state and queues one export on completion |
+| `POST /internal/prepare` | Exact Google OIDC task identity and audience; JSON `{job_id}` | `{ok:true}` |
+| `POST /internal/finish` | Same task identity; JSON `{job_id}` | `{ok:true}` |
 
-The multipart `setup` field contains JSON:
+`expires_at` is Unix seconds. `balance` and `actual_provider_credits` use the
+gateway's shared millidollar convention: 1,000 units represent US$1. reAPI already
+uses this scale. ToAPIs balance is translated from `remain_balance`, and task
+usage from `billing.cost_usd`; these values are not ToAPIs dashboard credit units.
+The session stores the selected provider and key fingerprint, and jobs inherit
+that provider. Switching providers in the UI clears the key, session, guide and
+approval; the selector is locked during active or uncertain submissions.
+
+### Setup and uploads
 
 ```json
 {
   "trim": [2.3, 7.3],
   "anchor": {"x": 0.48, "y": 0.52, "time": 3.2},
-  "target_name": "Person 1"
+  "target_name": "Person 1",
+  "enhanced_character_masking": false
 }
 ```
 
-The anchor is in normalized coordinates of the original displayed video, and its
-time is an absolute source timestamp inside the trim. The duration must be a whole
-number of seconds from 4 through 15. A source can be MP4, MOV, WebM or AVI, up to
-100 MiB, at most 4096px per side / 16 MP, with audio and a 0.4–2.5 aspect ratio. A
-reference must be a still JPG, PNG or WebP, up to 5 MiB, sides 256–5760px and the
-same ratio range. The gateway converts the reference to an EXIF-corrected JPEG
-and strips its metadata. The site sends source/reference files directly to the private
-application bucket using signed V4 PUT URLs that expire in 15 minutes. Each
-signature binds the exact declared Content-Length, binary Content-Type and
-`x-goog-if-generation-match: 0`, so an upload cannot exceed its declared size or
-replace an existing object. The browser supplies Content-Length automatically.
-The gateway verifies both stored sizes before preparation. Bucket CORS permits
-only the configured site origins; no provider key or session token goes to storage.
-The original multipart `/api/jobs` endpoint is retained for older tabs, limited to
-a 25 MiB source and 31 MiB total request to stay below Cloud Run HTTP/1 ingress.
-Regular JSON request bodies are capped at 8 KiB.
+The anchor coordinates are normalized against the displayed original video.
+Its time is an absolute source timestamp within `[trim start, trim end)`.
+`target_name` has 1–40 characters. `enhanced_character_masking` is a strict
+boolean, defaulting to `false` on new requests. Historical stored jobs lacking
+that field keep their earlier gray-mode interpretation. Unknown setup fields
+are rejected.
 
-Public job statuses are `queued`, `preparing`, `ready`, `generating`, `finalizing`,
-`completed`, `failed`, and `submission_unknown`. The response always includes
-`id`, `status`, and `message`; later it includes `duration`, `width`, `height`,
-`tracking_url`, `guide_url`, and finally `output_url` as available. URLs expire in
-at most one hour. Optional `estimated_cost_usd`, `estimate_note`, `estimate_source`,
-`estimate_verified_at`, and `actual_provider_credits` explain provider costs.
-Private bucket URIs, session ownership and the raw key are never returned.
-
-The browser should poll preparation status every few seconds, show the gray guide
-at `ready`, require approval, call `/generate` once, then refresh `/provider` during
-generation. Once `finalizing`, poll the ordinary status endpoint. Keep the bearer
-and provider key only in browser memory; clearing them or reloading requires a new
-session. A new session cannot access an older session's jobs. There is no saved-key
-or account-recovery flow in this initial beta.
-
-## Pipeline and limits
-
-1. Validate the user's key through `GET https://reapi.ai/api/v1/balance`. Only a
-   SHA256 key fingerprint is stored, alongside the hashed bearer and six-hour
-   expiry. The raw provider key never enters GCS, Cloud Tasks or deployment env.
-2. On completed upload, atomically reserve the global preparation slot and quota in permanent
-   `control/preparation.json`: maximum one active preparation, 100 preparations
-   per UTC day, 3,100 per UTC calendar month. Failed attempts consume a quota slot.
-   This is an owner-cost-limited beta; reAPI keys do not pay for Google preparation.
-3. Issue private upload URLs after incrementing a separate permanent
-   `control/uploads.json` ticket quota (100 per UTC day, 3,100 per UTC month).
-   Abandoned uploads consume this quota but hold no processing slot. After both
-   immutable uploads are verified and the reference is normalized, reserve the
-   existing preparation quota, enqueue an authenticated Cloud Task and return
-   HTTP 202. Confirmation is bound to the upload's session and cannot queue twice.
-4. In that task, trim/normalize to 24 fps and at most 854×480. Narrow clips gain
-   small letterboxes so both sides remain at least 256px. Adjust the selected
-   anchor to match. Detect strong cuts and reject multi-shot input before GPU work.
-5. Verify the existing project-specific Cloud Run native spend cap is CAD and
-   configured at a positive amount no greater than CAD 7, querying the project
-   scope. Register the existing 15-minute backup shutdown before each activation.
-6. Enable `proof-gpu` manually for SAM on the normalized RGB clip. Select the
-   actual label at the clicked anchor, require exactly one matching mask per frame
-   and nonzero selected-person coverage throughout. Stop and verify manual zero.
-7. Enable `proof-audio`, separate vocals with its existing Demucs endpoint, shift
-   three semitones, and compose the existing gray guide using that single label.
-   Stop and verify manual zero. Depth and face mesh are omitted.
-8. Expose signed links to the actual SAM preview and gray guide. Wait for approval.
-9. Check the same API key fingerprint and balance, atomically move the job from
-   `ready` to `submitting`, then POST one fixed MiniMax H3 request: one reference
-   image, one guide video, duration 4–15, resolution `768P`, ratio `adaptive`, and
-   `content_filter:false`, matching the tested pipeline route.
-10. Poll with the user's request-only key. On completion, enqueue export, download
-    up to 100 MiB from exact approved HTTPS provider hosts, validate every redirect
-    and resolved address, check timing, trim only small extra tail frames, restore
-    the soundtrack directly from the original uploaded file at the exact trim
-    start, and export at the provider's generated resolution at 24 fps. The
-    normalized source is used only to validate framing; audio comes directly
-    from the original upload. Video trimming uses a filter rather
-    than an output frame cap, so a second input's audio is fully drained. Both
-    audio stream duration and decoded sample count are checked before publishing.
-    Each export has a unique object name so a reviewed operator re-export
-    preserves the earlier file.
-
-There is no retry of a paid provider POST. A timeout, unexpected response, or
-crash after the durable submission claim produces `submission_unknown`; the user
-must check reAPI task history before starting another paid request. Repeat
-approval calls return current state. Preparation and export task claims are also
-atomic so Cloud Tasks retries cannot reactivate workers or re-export a claimed job.
-Crash recovery currently reports failed/stale jobs; it does not reconstruct them.
-
-Processing requests are bounded at 600 seconds per worker call, with a 1200-second
-aggregate preparation deadline plus cleanup. Scaling and health checks are
-bounded. Worker shutdown uses `finally`; if zero cannot be verified, the backup
-remains and the global slot is retained, marked blocked. Failure to cancel a stale
-backup also blocks the slot so that its later zero-scaling request cannot interrupt
-another user's job. An expired/blocked lease requires operator recovery: verify
-both workers are manually at zero, wait for or cancel every relevant backup task,
-then clear the matching active slot. There is no automatic expiry-based reuse.
-A failed backup or platform-wide API outage requires operator intervention.
-Backup task identities and deadlines are recorded before the bounded registration
-RPC. A lost create-task acknowledgment blocks the global slot without activating
-any worker; its predetermined task name is retained for operator reconciliation.
-All task creation calls disable SDK retries and use a 30-second timeout.
-Never treat budget alert emails
-as an instantaneous universal spending ceiling. The native Run cap, fixed beta
-quotas, one-instance settings and shutdown controls limit this deployment; storage,
-build and non-Run costs remain separate.
-
-## Deployment configuration and IAM
-
-Use Cloud Run in `us-east4`, one maximum instance, zero minimum instances,
-concurrency 4, 2 vCPU, 2 GiB RAM, request timeout 1800 seconds. The public gateway
-must allow browser invocations; its `/internal/*` handlers independently verify
-Google OIDC issuer, exact audience, exact email and verified-email claim. The
-model workers remain private.
-
-| Environment variable | Purpose |
+| Input | Bounds |
 | --- | --- |
-| `GOOGLE_CLOUD_PROJECT` | `charswap-franky-20261013` |
-| `PROJECT_NUMBER` | `634011479314` |
-| `REGION` | `us-east4` |
-| `BILLING_ACCOUNT` | Current billing account used to verify the project Run cap |
-| `APP_BUCKET` | New private gateway bucket |
-| `WORKER_BUCKET` | Existing `charswap-franky-20261013-proof` |
-| `SERVICE_URL` | Exact Cloud Run gateway URL and task OIDC audience |
-| `GATEWAY_SERVICE_ACCOUNT` | Runtime identity and GCS signed-URL signer |
-| `TASK_SERVICE_ACCOUNT` | Exact task caller, normally the gateway identity |
+| Direct-upload source | MP4, MOV, WebM or AVI; nonempty; at most **100 MiB** (104,857,600 bytes); audio required; at most 4096px per side and 16,777,216 pixels; aspect ratio 0.4–2.5 |
+| Reference image | One nonanimated JPG, PNG or WebP; nonempty; at most **5 MiB**; sides 256–5760px; aspect ratio 0.4–2.5 |
+| Legacy multipart source | At most **25 MiB**, with total request body at most **31 MiB**, to stay below Cloud Run HTTP/1 ingress bounds |
+| Other request bodies | At most 8 KiB; legacy setup string at most 4 KiB |
+
+The reference is EXIF-corrected, converted to JPEG and stripped of metadata.
+Each signed V4 PUT URL expires in 15 minutes and binds the declared exact
+`Content-Length`, `Content-Type: application/octet-stream`, and
+`x-goog-if-generation-match: 0`. The browser supplies Content-Length from the
+file body and sends the returned headers. A ticket cannot replace an existing
+object; the completion endpoint rechecks exact stored sizes. No provider key or
+session bearer is sent to storage. App-bucket CORS permits only configured site
+origins for GET, HEAD and PUT.
+
+### Capacity errors and job state
+
+Capacity is project-wide, across all users and provider keys. Both preparation
+attempts and upload tickets allow **100 per UTC day and 3,100 per UTC calendar
+month**, using separate permanent records. Failed preparation consumes an
+attempt; abandoned uploads consume an upload ticket but hold no processing slot.
+Preflight is read-only and can race with another caller, so reservation rechecks
+inside an atomic GCS generation-precondition update.
+
+Controlled capacity errors return `{message,code,retry_after?}`. When present,
+`retry_after` is an integer number of seconds and is also sent in `Retry-After`.
+
+| Code | HTTP | Meaning / reset |
+| --- | --- | --- |
+| `preparation_busy` | 429 | One preparation already holds the slot; retry hint is its current lease deadline, not a guaranteed completion time |
+| `preparation_recovery` | 503 | Expired or blocked lease; operator recovery required; no automatic reset |
+| `preparation_daily_limit` | 429 | Preparation attempts exhausted; next UTC midnight |
+| `preparation_monthly_limit` | 429 | Preparation attempts exhausted; first of next UTC month |
+| `upload_daily_limit` | 429 | Upload tickets exhausted; next UTC midnight |
+| `upload_monthly_limit` | 429 | Upload tickets exhausted; first of next UTC month |
+
+The UI translates these codes into a specific reason and local reset time where
+known. Other errors retain a sanitized `message`; raw provider responses and
+credentials are not reflected.
+
+Public statuses are `queued`, `preparing`, `ready`, `generating`, `finalizing`,
+`completed`, `failed`, and `submission_unknown`. Internal `submitting` and
+`finishing` map to `generating` and `finalizing`. Status includes `provider`, `id`,
+`status` and `message`, then `duration`, `width`, `height`, `selected_label`,
+`tracking_url`, `guide_url`, and `output_url` as available. Optional cost fields
+are `estimated_cost_usd`, `estimate_note`, `estimate_source`,
+`estimate_verified_at`, and `actual_provider_credits`. Signed GET URLs last at
+most one hour. Private bucket URIs and session ownership are not returned.
+
+Poll ordinary job state during preparation and finalization, show the actual
+review media at `ready`, and require approval before one `/generate` call. During
+generation, use `/provider` with the same request-only key. A new session cannot
+access an older session's jobs; account recovery and saved keys are not available.
+
+## Provider protocols and export
+
+Both integrations are implemented in [provider.py](swapmein/provider.py), with
+one reference image, one guide video, integer duration, adaptive aspect ratio
+and a replacement prompt that preserves the source scene and other people.
+Without gray fill, the prompt identifies the selected person using normalized
+anchor coordinates and clip-relative time; with gray fill, it identifies the
+gray silhouette. There is no paid fallback to another provider.
+
+| Operation | reAPI | ToAPIs |
+| --- | --- | --- |
+| Key/allowance validation | `GET https://reapi.ai/api/v1/balance` | `GET https://toapis.com/v1/balance` |
+| Submit | `POST https://reapi.ai/api/v1/videos/generations` | `POST https://toapis.com/v1/videos/generations` |
+| Poll | `GET https://reapi.ai/api/v1/tasks/{id}` | `GET https://toapis.com/v1/videos/generations/{id}` |
+| Model / resolution | `minimax-h3` / `768P` | `MiniMax-H3` / `768p` |
+| References | `reference_image_urls`, `reference_video_urls` | `image_with_roles` and `video_with_roles`, with `reference_image` / `reference_video` roles |
+| Provider-specific fields | `content_filter:false` | Unique `client_business_id`; no content-filter field forwarded |
+
+No seed or anatomy/motion-strength option is supplied. The two providers' model
+names do not prove identical internal routing or generation behavior.
+
+The reAPI estimate currently uses a rounded rate dated 2026-10-14:
+`ceil((input seconds + output seconds) × 0.074 × 1000) / 1000` USD. A five-second
+input and output therefore displays approximately US$0.74. The ToAPIs estimate
+scales the measured US$0.80 five-second proof (`duration × 0.16` USD). Estimates
+are not quotes; provider usage/billing is authoritative. Google preparation,
+storage, builds, tax and currency conversion are separate. Reverify the
+[reAPI model page](https://reapi.ai/models/minimax-h3) and
+[ToAPIs protocol](https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation)
+before changing dated pricing or provider support.
+
+Export downloads at most 100 MiB from exact approved HTTPS hosts:
+`cdn.reapi.ai`, `reapiflexible.b-cdn.net`, `reapi.ai`, and `files.toapis.xyz`.
+Every redirect and resolved address is checked to reject unsupported hosts or
+nonpublic addresses. Result duration must be within −0.05/+0.3 seconds of the
+requested length; its aspect ratio must stay within 3% of the normalized source,
+and its longest side must not exceed 5760px. Larger timing/framing changes require
+manual review rather than silent stretching or cropping.
+
+[media.py](swapmein/media.py) exports H.264/yuv420p at CRF 18 and AAC 192 kb/s,
+24 fps, exactly `duration × 24` frames, with MP4 fast-start. It preserves generated
+width/height, restores audio from the original uploaded file and exact trim start,
+and validates frame count, audio-stream duration and decoded sample coverage.
+Export names are unique so an operator-reviewed re-export preserves older files.
+
+## Cost controls, shutdown and recovery
+
+The gateway uses a single active preparation lease in
+`control/preparation.json`; upload counts live in `control/uploads.json`.
+Daily/monthly allowances are attempt limits, not a guarantee that all 100 daily
+attempts fit the spending cap. Before every private-worker activation, the gateway
+queries project-scoped Google billing budgets and requires a configured native
+Cloud Run spend cap in CAD with a positive amount no greater than **CAD 7/month**.
+The separate CAD 10 project budget alert is not an instantaneous universal cap.
+Storage, builds and other non-Run charges remain separate.
+
+Each worker is normally in MANUAL mode at zero. Before setting it to one, the
+gateway registers a backup shutdown task for 15 minutes later, recording its
+predetermined name and deadline before the bounded registration RPC. After the
+worker call, a `finally` block returns it to manual zero, verifies settled Run
+state, and deletes the backup task. Worker calls are bounded at 600 seconds each,
+with a 1,200-second aggregate preparation deadline plus cleanup; scaling checks
+are bounded at 120 seconds. Cloud Tasks create calls disable SDK retries and use
+30-second RPC timeouts. Task dispatch deadline is 1,800 seconds.
+
+If shutdown cannot be verified, backup registration acknowledgment is lost, or
+backup cancellation fails, the lease is retained and marked blocked. No worker
+is activated if registration was unconfirmed. Expired/blocked leases are not
+automatically reused: a stale backup must not shut down a later user's worker.
+Operator recovery must verify both workers at manual zero, wait for or cancel
+every relevant backup task, then clear only the matching active lease. Preserve
+the quota counts. Do not delete `control/` or reset usage as a routine retry.
+
+Job claims use atomic GCS generation preconditions. A repeated task cannot
+reactivate a claimed preparation or duplicate an export. A paid POST has a durable
+`submitting` claim and a 35-second timeout, with **no retry**. An ambiguous response
+or crash becomes `submission_unknown`; inspect the selected provider's task
+history before initiating any new paid request. Repeated approval returns current
+state. The application does not reconstruct unknown provider tasks or failed
+exports automatically. Queue-creation ambiguity retains the known job/lease and
+reports pending confirmation rather than admitting a duplicate preparation.
+
+Status reads mark queued/preparing/finalizing work older than 2,100 seconds failed,
+and a submitting claim older than 90 seconds unknown. That UI transition does
+not release a blocked worker lease or prove a provider task was canceled.
+
+## Deployment and IAM
+
+| Resource | Current deployment configuration |
+| --- | --- |
+| Google project | `charswap-franky-20261013` / project number `634011479314` |
+| Firebase site | `https://charswap-franky-20261013.web.app`; [firebase.json](../../firebase.json) rewrites `/api/**` to `swapmein-api` in `us-east4` |
+| Gateway | `swapmein-api`, `us-east4`; AUTO min 0/max 1 at service and revision; concurrency 4; 2 vCPU; 2 GiB; timeout 1,800s; request CPU throttling; gen2 |
+| Workers | Private `proof-gpu` and `proof-audio`; normally MANUAL count 0; one instance enabled only for the relevant preparation stage |
+| App bucket | `charswap-franky-20261013-app`, uniform IAM/public-access prevention; short-lived app media and records |
+| Worker bucket | `charswap-franky-20261013-proof`, existing private model/proof assets |
+| App task queue | `swapmein-jobs`; one concurrent dispatch, one dispatch/minute, one attempt; queue pause is preserved |
+| Backup queue | Existing `proof-shutdown`; must be RUNNING; deployment does not rewrite its rate/retry policy |
+| Gateway identity | `swapmein-gateway@charswap-franky-20261013.iam.gserviceaccount.com` |
+| Worker runtime identity | `proof-worker@charswap-franky-20261013.iam.gserviceaccount.com`; deployment derives/verifies the attached identities |
+| Shutdown identity | `proof-shutdown@charswap-franky-20261013.iam.gserviceaccount.com` |
+
+The gateway is publicly invokable for browser traffic. Its `/internal/*` handlers
+independently require Google OIDC issuer, exact configured audience, exact task
+service-account email and `email_verified:true`. Model workers remain private.
+The runtime identity has object read/write/delete access on the app and worker
+buckets, private Run invoker plus service-scoped `run.services.get/update` on the
+two workers, queue-scoped enqueue permissions, shutdown-task delete permission,
+self `signBlob`, and project-scoped budget read. `actAs` is granted on itself,
+the shutdown identity and exact verified worker runtime identities. It does not
+require project-wide Run update or project-wide service-account impersonation.
+The optional billing-viewer fallback is an operator action after a verified
+project-scoped budget-read failure; it is not the normal path.
+
+| Environment variable | Meaning / deployed default |
+| --- | --- |
+| `GOOGLE_CLOUD_PROJECT`, `PROJECT_NUMBER`, `REGION` | Project, numeric project ID and `us-east4` |
+| `BILLING_ACCOUNT` | Account used to verify the project-specific Run cap |
+| `APP_BUCKET`, `WORKER_BUCKET` | Private application bucket and existing worker bucket |
+| `SERVICE_URL` | Exact gateway Run URL; also the task OIDC audience |
+| `GATEWAY_SERVICE_ACCOUNT`, `TASK_SERVICE_ACCOUNT` | Runtime signer and exact accepted task caller; normally the gateway identity |
 | `TASK_QUEUE` | `swapmein-jobs` |
-| `SHUTDOWN_SERVICE_ACCOUNT` | Existing `proof-shutdown` identity |
-| `GPU_URL`, `AUDIO_URL` | Exact existing private Cloud Run worker URLs |
+| `SHUTDOWN_SERVICE_ACCOUNT` | Existing backup shutdown identity |
+| `GPU_URL`, `AUDIO_URL` | Exact private worker URLs |
 | `ALLOWED_ORIGINS` | Comma-separated Firebase `web.app` and `firebaseapp.com` HTTPS origins |
-| `DAILY_PREPARATIONS` | Positive whole number; defaults and deploys to `100`, shared by preparations and upload tickets |
-| `MONTHLY_PREPARATIONS` | Positive whole number; defaults and deploys to `3100`, allowing 100/day in a 31-day UTC month |
+| `DAILY_PREPARATIONS` | Positive integer; default/deployed `100`, used by preparation and upload-ticket quotas separately |
+| `MONTHLY_PREPARATIONS` | Positive integer; default/deployed `3100`, measured by UTC calendar month |
 
-No provider key is an environment variable. The service image contains only this
-code and its Python dependencies; it must not contain media, local `.secrets`,
-ADC files, browser profiles or credentials. The Dockerfile disables Uvicorn access
-logging; application errors use sanitized messages and never log request headers.
+App-bucket lifecycle deletes only `uploads/`, `outputs/`, `sessions/`, and `jobs/`
+after two days; `control/` is permanent. Soft-delete retention is disabled on this
+ephemeral app bucket. The separate worker bucket currently has no lifecycle
+cleanup and retains deleted objects for seven days: copied worker inputs and
+outputs persist beyond app cleanup. Any future worker-bucket lifecycle changes
+must be scoped to this gateway's `inputs/swapmein-` and `outputs/sm-` prefixes and
+preserve historical proofs. The gateway deployment does not globally delete worker
+assets. Artifact Registry stores software container images, not user pictures;
+retained images and model storage are separate from active compute charges.
 
-The gateway identity needs object read/write/delete permissions on its private
-bucket and the existing worker bucket, private Run invoker on both workers, a
-scoped custom role with `run.services.get` / `run.services.update` on just those
-two services, Cloud Tasks enqueue on `swapmein-jobs` and `proof-shutdown`, and
-task-delete permission on `proof-shutdown` for canceling verified backup shutdowns.
-It needs `iam.serviceAccounts.actAs` on itself, the shutdown identity, and each
-worker's attached runtime service account to update worker scaling. Both existing
-workers currently attach `proof-worker@charswap-franky-20261013.iam.gserviceaccount.com`;
-grant `roles/iam.serviceAccountUser` on that exact service account. The deployment
-script derives worker identities from their service templates and verifies that
-their IAM account metadata belongs to this project before adding account-level
-bindings. It also needs self `iam.serviceAccounts.signBlob` and project-scoped
-`billing.resourcebudgets.read`.
-It does not need project-wide Run update or operation-get permissions, an owner
-key, project-wide service-account actAs, or access to unrelated billing accounts.
+### Operator deployment
 
-Protect GCS with uniform bucket IAM and public access prevention. Delete only
-`uploads/`, `outputs/`, `sessions/`, and `jobs/` objects after two days. Preserve
-`control/` indefinitely, because deleting its quota record resets spending limits.
-Apply any worker-bucket cleanup only to this gateway's `inputs/swapmein-` and
-`outputs/sm-` prefixes; preserve older proof records. Signed URLs and session/job
-data are private but short-lived. Consider disabling GCS soft-delete retention
-for the new ephemeral bucket if retention cost is unwanted, after agreeing the
-recovery tradeoff.
+[deploy.py](deploy.py) is separate from the user's normal workflow. It pins the
+authorized project/account, verifies active billing and the native cap, verifies
+worker state and identity scope, configures the app bucket/IAM/queue, stages an
+allowlist of runtime source, builds a container and deploys the gateway by image
+digest. It never activates model workers and checks their configuration stayed
+unchanged. The public frontend is built/deployed separately through Firebase.
 
-Use Firebase Hosting rewrites `/api/**` to the gateway. Hosting's shorter timeout
-is why preprocessing/export run as tasks. Provider submission has a 35-second
-timeout and a durable claim before the paid call. Queue dispatch deadline is 1800
-seconds, maximum concurrent dispatch one, and maximum attempts one is recommended
-for this initial bounded beta. Registering backup shutdown must precede scaling.
+From the repository root, with the appropriate authenticated Google Cloud CLI:
 
-## Dependencies, cost and validation
+```sh
+python3 deployment/swapmein/deploy.py --setup-only
+python3 deployment/swapmein/deploy.py
+```
 
-Python 3.12, FastAPI, Uvicorn, python-multipart, Google Cloud Storage / Tasks SDKs,
-google-auth, requests, httpx, NumPy, Pillow, and system FFmpeg are needed. Versions
-in `requirements.txt` were checked against PyPI on 2026-10-14. No Torch, SAM,
-Demucs, depth model or model weights are bundled in this gateway: it invokes the
-existing worker deployments.
+`--setup-only` configures scoped resources without building or deploying.
+`--service-only` checks the cap and bounds the existing gateway without a build or
+worker change. `--allowed-origin` may be repeated for authorized HTTPS origins.
+Do not add a provider key to CLI arguments or environment configuration.
 
-[reAPI's H3 documentation](https://reapi.ai/docs/minimax-h3) specifies 4–15 whole
-seconds, `768P`/`2K`, reference input limits and billing input-video seconds plus
-output seconds. Its [model pricing page](https://reapi.ai/models/minimax-h3),
-verified 2026-10-14, displays a rounded 768P rate of USD 0.074 per second. The UI
-estimate therefore uses `ceil((input seconds + output seconds) × 0.074 × 1000) /
-1000`: a five-second input plus output is approximately USD 0.74. This excludes
-Google preparation, storage, build, tax and exchange rates. The provider's actual
-task usage is the charge record. Prices can change; update the explicitly dated
-estimate after verifying the official price before later releases.
+Build staging includes only `Dockerfile`, `requirements.txt` and runtime Python
+files, rejecting source symlinks. It excludes local media, `.secrets`, ADC files,
+browser profiles, credentials and tests. Uvicorn access logging is disabled;
+application errors are sanitized and must not log request headers.
 
-Run tests from this directory in a dedicated virtual environment:
+## Dependencies, code map and validation
+
+[Dockerfile](Dockerfile) uses `python:3.12-slim-bookworm`, system `ffmpeg` and
+`ca-certificates`, and runs as UID 10001. The pinned runtime packages are in
+[requirements.txt](requirements.txt): FastAPI 0.143.1, Starlette 1.8.0, Pydantic
+2.14.1, Uvicorn 0.54.0, python-multipart 0.0.32, google-cloud-storage 3.17.0,
+google-cloud-tasks 2.26.0, google-auth 2.62.0, requests 2.34.2, httpx 0.28.1,
+NumPy 2.5.4 and Pillow 12.3.0. [requirements-test.txt](requirements-test.txt) adds
+pytest 9.1.1. The gateway bundles no Torch, SAM, Demucs, depth/face model or model
+weights; those dependencies belong to the existing private worker containers.
+
+| Source | Responsibility |
+| --- | --- |
+| [app.py](swapmein/app.py) | HTTP contract, sessions, uploads, approval and provider polling |
+| [pipeline.py](swapmein/pipeline.py) | Task claims, SAM/audio orchestration, review and final export |
+| [media.py](swapmein/media.py) | Strict setup/media validation, normalization, anchor/label selection and audio restoration |
+| [provider.py](swapmein/provider.py) | Provider adapters, prompts, estimates and one paid submission |
+| [cloud.py](swapmein/cloud.py) | Private storage, signed URLs, tasks, native-cap check and bounded worker activation/shutdown |
+| [storage.py](swapmein/storage.py) | Atomic records, separate quotas and shared lease |
+| [security.py](swapmein/security.py) | Ownership/key binding, OIDC and constrained result fetching |
+| [config.py](swapmein/config.py), [limits.py](swapmein/limits.py) | Deployment configuration and shared media bounds |
+| [frontend charSwap feature](../../frontend/src/features/charSwap) | Walkthrough state, upload feedback, API integration and explicit approval |
+
+For development verification, from this directory in a dedicated virtualenv:
 
 ```sh
 python3 -m venv /tmp/swapmein-gateway-tests
@@ -234,38 +371,17 @@ python3 -m venv /tmp/swapmein-gateway-tests
 /tmp/swapmein-gateway-tests/bin/python -m pytest tests -q
 ```
 
-Tests exercise session/key/job isolation, OIDC identity, SSRF/redirect host
-restrictions, body bounds, global quotas and leases, one-way submission claims,
-one provider charge/export, actual clicked SAM labels, disappearing targets,
-EXIF handling, FFmpeg normalization, restored audio correlation, and network
-playlist rejection. Mocks cannot confirm live IAM, signed URLs, spend-cap access,
-private model compatibility or generated quality: require a bounded deployed
-preparation proof and user-reviewed output before describing those as validated.
+Tests cover session/key/job isolation, OIDC identity, media/body bounds,
+SSRF/redirect restrictions, quotas and leases, atomic submission/export claims,
+actual clicked SAM labels, disappearing targets, EXIF normalization, both fill
+modes, provider protocol translation, native output dimensions and restored
+audio coverage. Mocks do not prove live IAM, signed-URL access, spend-cap access,
+worker compatibility or creative generation quality. Operator readiness requires
+a bounded deployed preparation proof and reviewed output. The existing paid
+ToAPIs proof used vendor-uploaded URLs; signed-Google-reference submission from
+the public UI still needs its own paid integration proof. Motion and lip sync
+remain user-review decisions.
 
-This backend is a separate deployment consumer of the existing private workers,
-not a VLO SDK/extension-owned service. No new extension surface is exposed; the
-repository extension-surface check still applies before handoff.
-
-The job setup accepts strict boolean `enhanced_character_masking` (default `false` for new requests). Existing saved jobs without the option retain their historical gray-mode interpretation. The CPU compose call uses `gray` when on and `original` when off. SAM and audio preparation remain active in both modes. Generation reads the saved job option and normalized selection coordinates; the final export preserves generated resolution with original audio.
-
-### ToAPIs MiniMax H3
-
-Settings offers reAPI or ToAPIs with a user-entered key. Changing providers clears the key, session, guide and approval; active and uncertain submissions lock the selector. Sessions store only the provider name and key fingerprint. The compatibility header `X-Reapi-Key` carries either provider key only on HTTPS requests, never in saved setup JSON or static files. The provider choice is bound to the session and inherited by its job.
-
-ToAPIs uses `POST /v1/videos/generations` with model `MiniMax-H3`, fixed integer duration, `768p`, and explicit `reference_image`/`reference_video` roles; polling uses `GET /v1/videos/generations/{id}`. Signed private Google media URLs supply references. Its documented API does not expose reAPI's content-filter toggle, so that field is not forwarded. Completed media is constrained to `files.toapis.xyz` and passes the same timing, native-resolution and original-audio export checks. No automatic paid retry or provider fallback is made.
-
-The approved five-second proof replaced the performer with the teddy in sampled frames; raw output had 124 frames and was trimmed to 120 at 24fps. Token usage increased by 160 ToAPIs credits (US$0.80). Site estimates scale that measured five-second charge and are not quotes; Google preparation is separate. No operator key is bundled or used as a site fallback. Provider integration is tested with mocked HTTP responses; the paid proof used vendor-uploaded reference URLs. The site uses signed Google URLs as supported by the vendor URL-reference schema, without another paid integration proof. Motion/lip sync require user review.
-
-Export resolution correction (2026-10-14): the preparation guide still uses the existing 480p normalization. Final videos preserve the provider-returned dimensions; they are not resized to the guide or upscaled to the uploaded source. Earlier 480p proofs remain preserved as historical artifacts.
-
-Scene-check feedback (2026-10-14): “Check all scenes” shows the current access,
-capacity, upload, confirmation, queued or preparation stage with elapsed time.
-The beta still processes the selected continuous shot. It checks capacity before
-opening/uploading files and rechecks before issuing upload URLs. Controlled
-capacity errors return stable `code`, optional integer `retry_after` seconds and
-`Retry-After`; the UI shows the specific daily/monthly/busy/recovery reason and a
-local reset time when known. Preparations and upload tickets each permit 100/day
-and 3,100/month, with one active preparation. These are attempt allowances, not
-spending guarantees: the existing CAD 7/month Cloud Run spend cap is unchanged and
-can stop processing before those allowances are used. Failed preparation stays on References instead of
-advancing into an empty tracking screen. No automatic generation retry is added.
+This standalone gateway consumes the private workers outside the VLO extension
+host; it adds no SDK or extension-owned service. After repository changes, run
+`npm run check:extension-surface` at the repository root as required by AGENTS.md.
