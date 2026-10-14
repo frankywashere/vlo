@@ -48,6 +48,7 @@ function defaultRequest(input: RequestInfo | URL): Promise<Response> {
   }));
   if (path === "blob:source") return Promise.resolve(new Response("source", { headers: { "Content-Type": "video/mp4" } }));
   if (path === "blob:reference") return Promise.resolve(new Response("reference", { headers: { "Content-Type": "image/png" } }));
+  if (path === "/api/preparation-capacity") return Promise.resolve(json({available: true}));
   if (path === "/api/uploads") return Promise.resolve(json({
     id: "job-1",
     source: {url: "https://storage.googleapis.com/private-app/source?signature=test", headers: {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}},
@@ -198,6 +199,45 @@ describe("live BYOK pipeline", () => {
     expect(result.current.error).toContain("retained");
   });
 
+  it("shows immediate access feedback and elapsed time while a slow check is pending", async () => {
+    const access = deferred<Response>();
+    requests.mockImplementation((input) => input === "/api/session" ? access.promise : defaultRequest(input));
+    const {result} = await renderLive();
+    vi.useFakeTimers();
+    let pending!: Promise<boolean>;
+    await act(async () => {pending = result.current.prepare(setup());});
+    expect(result.current.preparationProgress).toMatchObject({phase: "checking_access"});
+    expect(result.current.busy).toBe(true);
+    act(() => vi.advanceTimersByTime(2100));
+    expect(result.current.preparationElapsedSeconds).toBe(2);
+    await act(async () => {
+      access.resolve(json({token: SESSION_TOKEN, expires_at: Math.floor(Date.now()/1000)+3600, balance: 10000}));
+      await pending;
+    });
+    expect(result.current.preparationProgress?.phase).toBe("queued");
+    act(() => result.current.reset());
+    expect(result.current.preparationProgress).toBeNull();
+    expect(result.current.preparationElapsedSeconds).toBe(0);
+  });
+
+  it("explains a daily limit and reset before opening or uploading any media", async () => {
+    requests.mockImplementation((input) => input === "/api/preparation-capacity"
+      ? Promise.resolve(json({code: "preparation_daily_limit", retry_after: 3600, message: "Do not echo " + USER_KEY}, 429))
+      : defaultRequest(input));
+    const {result} = await renderLive();
+    let prepared: boolean | undefined;
+    await act(async () => {prepared = await result.current.prepare(setup());});
+    expect(prepared).toBe(false);
+    expect(result.current.error).toContain("Today's cloud-preparation limit");
+    expect(result.current.error).toContain("Resets");
+    expect(result.current.error).not.toContain(USER_KEY);
+    expect(result.current.preparationProgress).toBeNull();
+    expect(result.current.busy).toBe(false);
+    expect(calls("blob:source")).toHaveLength(0);
+    expect(calls("/api/uploads")).toHaveLength(0);
+    expect(result.current.job).toBeNull();
+  });
+
   it("guards the paid submission before the first response and never automatically retries", async () => {
     jobStatus = "ready";
     const response = deferred<Response>();
@@ -235,7 +275,7 @@ describe("live BYOK pipeline", () => {
     const response = deferred<Response>();
     requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? response.promise : defaultRequest(input));
     const { result } = await renderLive();
-    let pending!: Promise<void>;
+    let pending!: Promise<boolean>;
     await act(async () => { pending = result.current.prepare(setup()); });
     await waitFor(() => expect(calls("/api/uploads/job-1/complete")).toHaveLength(1));
     act(() => result.current.reset());

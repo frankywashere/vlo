@@ -1,4 +1,5 @@
 import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES } from "../limits";
+import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
@@ -115,6 +116,25 @@ function requestMessage(status: number): string {
   }
 }
 
+function capacityMessage(value: unknown): string | null {
+  if (!isRecord(value) || typeof value.code !== "string") return null;
+  const messages: Record<string, string> = {
+    preparation_busy: "Another clip is being checked. Wait for it to finish before starting yours.",
+    preparation_daily_limit: "Today's cloud-preparation limit has been reached.",
+    preparation_monthly_limit: "This month's cloud-preparation limit has been reached.",
+    upload_daily_limit: "Today's upload limit has been reached.",
+    upload_monthly_limit: "This month's upload limit has been reached.",
+    preparation_recovery: "Cloud preparation is paused while a previous job is checked. The site operator needs to restore availability.",
+  };
+  const message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
+  if (!message) return null;
+  const seconds = value.retry_after;
+  const reset = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && seconds <= 32 * 86400
+    ? new Date(Date.now() + seconds * 1000).toLocaleString(undefined, {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short"})
+    : null;
+  return message + (reset ? value.code === "preparation_busy" ? " Current processing deadline: " + reset + "." : " Resets " + reset + "." : "") + " No generation was submitted.";
+}
+
 async function requestJson(
   path: string,
   init: RequestInit,
@@ -134,11 +154,11 @@ async function requestJson(
       cache: "no-store",
     });
     signal.throwIfAborted();
-    if (!response.ok)
-      throw new LivePipelineError(
-        requestMessage(response.status),
-        response.status,
-      );
+    if (!response.ok) {
+      let detail: unknown;
+      try { detail = await response.json(); } catch { /* Never echo raw error bodies. */ }
+      throw new LivePipelineError(capacityMessage(detail) ?? requestMessage(response.status), response.status);
+    }
     return await response.json();
   } catch (error) {
     if (signal.aborted) throw error;
@@ -410,9 +430,12 @@ export async function createLiveJob(
   state: WalkthroughState,
   token: string,
   signal: AbortSignal,
+  onProgress?: (progress: PreparationProgressState) => void,
 ): Promise<LivePipelineJob> {
   assertSecureOrigin();
   const { clip, reference, target } = validateLiveSetup(state);
+  onProgress?.({phase: "checking_capacity", message: "Checking cloud availability before uploading your clip…"});
+  await requestJson("/api/preparation-capacity", {headers: sessionHeaders(token)}, signal);
   const [sourceFile, referenceFile] = await Promise.all([
     assetFile(clip.url, clip.name, MAX_SOURCE_BYTES, "source", signal),
     assetFile(
@@ -450,6 +473,7 @@ export async function createLiveJob(
   signal.addEventListener("abort", abortUploads, {once: true});
   try {
     signal.throwIfAborted();
+    onProgress?.({phase: "uploading", message: "Uploading your video and reference to private storage…"});
     await Promise.all([
       uploadAsset(ticket.source, sourceFile, uploads.signal),
       uploadAsset(ticket.reference, referenceFile, uploads.signal),
@@ -460,6 +484,7 @@ export async function createLiveJob(
   } finally {
     signal.removeEventListener("abort", abortUploads);
   }
+  onProgress?.({phase: "confirming", message: "Verifying your uploads and queuing the scene check…"});
   try {
     return readJob(await requestJson(
       `/api/uploads/${encodeURIComponent(ticket.id)}/complete`,

@@ -121,3 +121,9 @@ ToAPIs uses `POST /v1/videos/generations` with model `MiniMax-H3`, fixed integer
 The approved five-second proof replaced the performer with the teddy in sampled frames; raw output had 124 frames and was trimmed to 120 at 24fps. Token usage increased by 160 ToAPIs credits (US$0.80). Site estimates scale that measured five-second charge and are not quotes; Google preparation is separate. No operator key is bundled or used as a site fallback. Provider integration is tested with mocked HTTP responses; the paid proof used vendor-uploaded reference URLs. The site uses signed Google URLs as supported by the vendor URL-reference schema, without another paid integration proof. Motion/lip sync require user review.
 
 Export resolution correction (2026-10-14): retain generated pixels at their native dimensions while trimming small extra tail frames and restoring original audio. Guide preparation stays at 480p. The ToAPIs proof was re-exported at 1344×768, without another generation; its prior 480p copy remains preserved.
+
+“Check all scenes” displays current preparation stages and elapsed time from the
+initial click through cloud tracking. The beta checks the selected continuous
+shot; multiple-shot identity continuity remains future work. Capacity is checked
+before uploads, and daily/monthly limits show their reset time rather than a
+generic job-limit message. A refused preparation stays on the current step.

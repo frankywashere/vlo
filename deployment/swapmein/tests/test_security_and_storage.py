@@ -8,7 +8,7 @@ from swapmein.cloud import valid_spend_cap
 from swapmein.errors import PublicError
 from swapmein.security import (check_key_binding, check_owner, check_session, digest,
                                validate_media_url, verify_task_identity)
-from swapmein.storage import claim_job, release_preparation, reserve_preparation
+from swapmein.storage import check_preparation_capacity, claim_job, release_preparation, reserve_preparation
 
 
 def resolver(address):
@@ -96,6 +96,46 @@ def test_expired_or_blocked_preparation_requires_operator_recovery():
     current["active"]["blocked"] = True
     with pytest.raises(PublicError, match="operator recovery"):
         reserve_preparation(current, "b", 110)
+
+
+def test_capacity_preflight_does_not_reserve_or_reset_stored_counters():
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc).timestamp()
+    current = {"month": "2026-09", "day": "2026-09-30", "month_count": 10, "day_count": 3}
+    original = copy.deepcopy(current)
+    available = check_preparation_capacity(current, now)
+    assert available == {"month": "2026-10", "day": "2026-10-14", "month_count": 0, "day_count": 0}
+    assert current == original
+    reserved = reserve_preparation(current, "new-job", now)
+    assert reserved["month_count"] == reserved["day_count"] == 1
+    assert reserved["active"]["job_id"] == "new-job"
+    assert current == original
+
+
+@pytest.mark.parametrize("limit_prefix", ["preparation", "upload"])
+def test_capacity_limits_have_distinct_codes_and_utc_reset_delays(limit_prefix):
+    now = datetime(2026, 12, 31, 23, 59, 59, 500000, tzinfo=timezone.utc).timestamp()
+    current = {"month": "2026-12", "day": "2026-12-31", "month_count": 2, "day_count": 3}
+    with pytest.raises(PublicError) as error:
+        check_preparation_capacity(current, now, limit_prefix=limit_prefix)
+    assert error.value.code == f"{limit_prefix}_daily_limit"
+    assert error.value.retry_after == 1
+    current["month_count"] = 10
+    with pytest.raises(PublicError) as error:
+        reserve_preparation(current, "not-reserved", now, limit_prefix=limit_prefix)
+    assert error.value.code == f"{limit_prefix}_monthly_limit"
+    assert error.value.retry_after == 1
+    assert current["month_count"] == 10 and current["day_count"] == 3 and "active" not in current
+
+
+def test_busy_capacity_reports_lease_wait_but_recovery_does_not_promise_a_retry():
+    current = {"active": {"job_id": "existing", "until": 110.1}}
+    with pytest.raises(PublicError) as error:
+        check_preparation_capacity(current, 100)
+    assert error.value.code == "preparation_busy" and error.value.retry_after == 11
+    for active in ({"until": 99}, {"until": 110.1, "blocked": True}):
+        with pytest.raises(PublicError) as error:
+            check_preparation_capacity({"active": active}, 100)
+        assert error.value.code == "preparation_recovery" and error.value.retry_after is None
 
 
 def test_spend_cap_checks_project_service_currency_fraction_and_state():

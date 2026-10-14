@@ -41,6 +41,7 @@ import { useLocalAssets } from "./hooks/useLocalAssets";
 import { useLivePipeline } from "./hooks/useLivePipeline";
 import { MAX_SOURCE_BYTES } from "./limits";
 import { isSecureLiveOrigin } from "./services/livePipeline";
+import { PreparationProgress } from "./components/PreparationProgress";
 import { LiveTrackingStep } from "./components/LiveTrackingStep";
 import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
 import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
@@ -422,7 +423,7 @@ export function CharSwapWalkthrough() {
         pipeline.job.status === "completed"
       ) {
         invalidateTracking();
-        await pipeline.prepare(state);
+        if (!await pipeline.prepare(state)) return;
       }
     }
     if (step === "references" && clip?.mode === "demo" && demo)
@@ -437,7 +438,7 @@ export function CharSwapWalkthrough() {
         : step === "people"
           ? "Choose references"
           : step === "references"
-            ? "Check matches"
+            ? "Check all scenes"
             : step === "matches"
               ? "Choose access"
               : "Review setup";
@@ -663,6 +664,11 @@ export function CharSwapWalkthrough() {
                   {STEP_INFO[step].description}
                 </Typography>
               </Box>
+              {pipeline.preparationProgress && (
+                <Box sx={{mb: 2}}>
+                  <PreparationProgress progress={pipeline.preparationProgress} elapsedSeconds={pipeline.preparationElapsedSeconds} />
+                </Box>
+              )}
               {(error || pipeline.error) && (
                 <Alert
                   severity="error"
@@ -732,7 +738,7 @@ export function CharSwapWalkthrough() {
                   }}
                 />
               )}
-              {step === "matches" &&
+              {step === "matches" && !pipeline.preparationProgress &&
                 (live ? (
                   <LiveTrackingStep
                     key={pipeline.job?.guide_url ?? liveJobId ?? "empty"}
@@ -837,8 +843,10 @@ export function CharSwapWalkthrough() {
                       }}
                       aria-live="polite"
                     >
-                      {step === "matches" && !trackingReady
-                        ? "Tracking connection needed"
+                      {pipeline.preparationProgress
+                        ? "Scene check in progress"
+                        : step === "matches" && !trackingReady
+                          ? "Tracking connection needed"
                         : step === "matches" && unresolved
                           ? `${unresolved} sections left to check`
                           : blocker}
@@ -853,7 +861,7 @@ export function CharSwapWalkthrough() {
                       endIcon={<ArrowForwardRounded />}
                       sx={{ minWidth: { xs: 150, md: 190 } }}
                     >
-                      {nextLabel}
+                      {step === "references" && pipeline.preparationProgress ? "Checking all scenes…" : nextLabel}
                     </Button>
                   </Box>
                 </Box>

@@ -25,6 +25,7 @@ job ownership are authenticated by an unpredictable bearer token.
 | `GET /health` | None | `{status:"ready",available:boolean}` |
 | `GET /api/config` | None | `{live:true,provider:"reAPI",model:"minimax-h3",delivery:"native",beta:"single-person",available:boolean}` |
 | `POST /api/session` | `X-Reapi-Key`; no body | `{token,expires_at,balance}`; expiry is Unix seconds, balance is reAPI credits |
+| `GET /api/preparation-capacity` | Session bearer | `{available:true}` or a specific capacity error, before any upload |
 | `POST /api/uploads` | Session bearer; JSON `source_bytes`, `reference_bytes`, `setup` | HTTP 201 upload ID and two short-lived private-storage PUT URLs |
 | `POST /api/uploads/{id}/complete` | Same session bearer after both PUTs succeed | HTTP 202 `{id,status:"queued"}`; validates actual sizes and queues at most once |
 | `POST /api/jobs` (legacy) | `Authorization: Bearer SESSION`; multipart `clip`, `reference`, `setup` | HTTP 202 `{id,status:"queued"}` |
@@ -254,3 +255,13 @@ ToAPIs uses `POST /v1/videos/generations` with model `MiniMax-H3`, fixed integer
 The approved five-second proof replaced the performer with the teddy in sampled frames; raw output had 124 frames and was trimmed to 120 at 24fps. Token usage increased by 160 ToAPIs credits (US$0.80). Site estimates scale that measured five-second charge and are not quotes; Google preparation is separate. No operator key is bundled or used as a site fallback. Provider integration is tested with mocked HTTP responses; the paid proof used vendor-uploaded reference URLs. The site uses signed Google URLs as supported by the vendor URL-reference schema, without another paid integration proof. Motion/lip sync require user review.
 
 Export resolution correction (2026-10-14): the preparation guide still uses the existing 480p normalization. Final videos preserve the provider-returned dimensions; they are not resized to the guide or upscaled to the uploaded source. Earlier 480p proofs remain preserved as historical artifacts.
+
+Scene-check feedback (2026-10-14): “Check all scenes” shows the current access,
+capacity, upload, confirmation, queued or preparation stage with elapsed time.
+The beta still processes the selected continuous shot. It checks capacity before
+opening/uploading files and rechecks before issuing upload URLs. Controlled
+capacity errors return stable `code`, optional integer `retry_after` seconds and
+`Retry-After`; the UI shows the specific daily/monthly/busy/recovery reason and a
+local reset time when known. The existing three/day, ten/month and one-active
+preparation protections remain. Failed preparation stays on References instead of
+advancing into an empty tracking screen. No automatic generation retry is added.

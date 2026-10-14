@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import {
   assertLiveKey,
@@ -29,7 +30,9 @@ export interface LivePipelineHandle {
   job: LivePipelineJob | null;
   busy: boolean;
   error: string | null;
-  prepare: (state: WalkthroughState) => Promise<void>;
+  preparationProgress: PreparationProgressState | null;
+  preparationElapsedSeconds: number;
+  prepare: (state: WalkthroughState) => Promise<boolean>;
   generate: () => Promise<void>;
   refresh: () => Promise<void>;
   clear: () => void;
@@ -48,6 +51,10 @@ function safeMessage(message: string, key: string, token?: string): string {
 export function useLivePipeline(apiKey: string, provider: GenerationProvider = "reAPI"): LivePipelineHandle {
   const [config, setConfig] = useState<LivePipelineConfig | null>(null);
   const [job, setJob] = useState<LivePipelineJob | null>(null);
+  const [preparationProgress, setPreparationProgress] = useState<PreparationProgressState | null>(null);
+  const [preparationElapsedSeconds, setPreparationElapsedSeconds] = useState(0);
+  const preparationStartedAt = useRef(0);
+  const preparing = preparationProgress !== null;
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollRevision, setPollRevision] = useState(0);
@@ -63,6 +70,14 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   const enabled = config?.live === true && config.available && isSecureLiveOrigin();
   const jobId = job?.id;
   const jobStatus = job?.status;
+
+  useEffect(() => {
+    if (!preparing) return;
+    const tick = () => setPreparationElapsedSeconds(Math.max(0, Math.floor((Date.now() - preparationStartedAt.current) / 1000)));
+    tick();
+    const timer = globalThis.setInterval(tick, 1000);
+    return () => globalThis.clearInterval(timer);
+  }, [preparing]);
 
   const cancelRequests = useCallback(() => {
     epoch.current += 1;
@@ -80,6 +95,8 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     currentJob.current = null;
     pollStartedAt.current = 0;
     setJob(null);
+    setPreparationProgress(null);
+    setPreparationElapsedSeconds(0);
     setWorking(false);
     setError(null);
   }, [cancelRequests]);
@@ -106,6 +123,8 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     session.current = null;
     currentJob.current = null;
     setJob(null);
+    setPreparationProgress(null);
+    setPreparationElapsedSeconds(0);
     setWorking(false);
     setError(null);
   }, [apiKey, provider, cancelRequests]);
@@ -133,6 +152,9 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     }
     currentJob.current = clean;
     setJob(clean);
+    setPreparationProgress(clean.status === "queued" || clean.status === "preparing"
+      ? {phase: clean.status, message: clean.message || (clean.status === "queued" ? "Your clip is queued for scene checks…" : "Checking the selected person and preparing your guide…")}
+      : null);
     setError(clean.status === "failed" || clean.status === "submission_unknown"
       ? clean.message ?? (clean.status === "failed"
         ? "This job failed. Review the setup before explicitly preparing a new job."
@@ -202,7 +224,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   }, [enabled, jobId, jobStatus, apiKey, ensureSession, publishJob, pollRevision]);
 
   const prepare = useCallback(async (state: WalkthroughState) => {
-    if (operation.current) return;
+    if (operation.current) return false;
     try {
       if (!enabled) throw new LivePipelineError("Live preparation is unavailable on this page.");
       assertLiveKey(apiKey);
@@ -212,24 +234,32 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       }
     } catch (cause) {
       setError(cause instanceof LivePipelineError ? cause.message : "Check your live setup before preparing it.");
-      return;
+      return false;
     }
     reset();
     const version = epoch.current;
     const controller = new AbortController();
     operation.current = controller;
     setWorking(true);
+    preparationStartedAt.current = Date.now();
+    setPreparationElapsedSeconds(0);
+    setPreparationProgress({phase: "checking_access", message: "Checking your API key and connecting to the service…"});
     try {
       const access = await ensureSession(controller.signal);
-      const prepared = await createLiveJob(state, access.token, controller.signal);
-      if (controller.signal.aborted || epoch.current !== version) return;
+      const prepared = await createLiveJob(state, access.token, controller.signal, (progress) => {
+        if (!controller.signal.aborted && epoch.current === version) setPreparationProgress(progress);
+      });
+      if (controller.signal.aborted || epoch.current !== version) return false;
       pollStartedAt.current = Date.now();
       publishJob(prepared);
+      return true;
     } catch (cause) {
       if (!controller.signal.aborted && epoch.current === version) {
         const message = cause instanceof LivePipelineError ? cause.message : "Preparation could not finish. Upload the media again before trying.";
         setError(safeMessage(message, apiKey, session.current?.token));
+        setPreparationProgress(null);
       }
+      return false;
     } finally {
       if (epoch.current === version) {
         operation.current = null;
@@ -333,6 +363,8 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
 
   return {
     enabled,
+    preparationProgress,
+    preparationElapsedSeconds,
     job,
     busy: working || Boolean(job && ACTIVE_STATUSES.has(job.status)),
     error,

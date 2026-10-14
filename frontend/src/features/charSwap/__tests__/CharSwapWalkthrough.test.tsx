@@ -129,13 +129,13 @@ describe("CharSwap walkthrough", () => {
     await user.click(screen.getByRole("button", { name: "Select Person 2" }));
     await user.click(screen.getByRole("button", { name: "Choose references" }));
     expect(
-      screen.getByRole("button", { name: "Check matches" }),
+      screen.getByRole("button", { name: "Check all scenes" }),
     ).toBeDisabled();
     for (const button of screen.getAllByRole("button", {
       name: "Use sample teddy bear",
     }))
       await user.click(button);
-    await user.click(screen.getByRole("button", { name: "Check matches" }));
+    await user.click(screen.getByRole("button", { name: "Check all scenes" }));
     expect(screen.getByText(/Sample review moment/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose access" })).toBeDisabled();
     await user.click(

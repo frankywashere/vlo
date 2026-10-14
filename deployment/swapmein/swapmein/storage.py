@@ -1,7 +1,8 @@
 """Private GCS records, generation preconditions and bounded shared leases."""
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
+import math
 import time
 
 from google.api_core.exceptions import NotFound, PreconditionFailed
@@ -46,24 +47,41 @@ class Records:
         self.write(path, data, 0)
 
 
-def reserve_preparation(current: dict | None, job_id: str, now: float,
-                        monthly_limit: int = 10, daily_limit: int = 3):
-    current = dict(current or {})
+def check_preparation_capacity(current: dict | None, now: float,
+                               monthly_limit: int = 10, daily_limit: int = 3, *,
+                               limit_prefix: str = "preparation"):
+    """Read-only preflight; reservation must still check inside its atomic update."""
+    current = current or {}
     clock = datetime.fromtimestamp(now, timezone.utc)
     month, day = clock.strftime("%Y-%m"), clock.strftime("%Y-%m-%d")
     active = current.get("active")
     if active:
         if active.get("until", 0) <= now or active.get("blocked"):
-            raise PublicError("A previous preparation needs operator recovery before new clips can run.", 503)
-        raise PublicError("Another clip is being prepared. Try again when it finishes.", 429)
+            raise PublicError("A previous preparation needs operator recovery before new clips can run.", 503,
+                              code="preparation_recovery")
+        raise PublicError("Another clip is being prepared. Try again when it finishes.", 429,
+                          code="preparation_busy", retry_after=max(1, math.ceil(active["until"] - now)))
     month_count = current.get("month_count", 0) if current.get("month") == month else 0
     day_count = current.get("day_count", 0) if current.get("day") == day else 0
+    subject = "upload" if limit_prefix == "upload" else "preparation"
     if month_count >= monthly_limit:
-        raise PublicError("The beta has reached its monthly preparation limit.", 429)
+        reset = (clock.replace(year=clock.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+                 if clock.month == 12 else clock.replace(month=clock.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0))
+        raise PublicError(f"The beta has reached its monthly {subject} limit.", 429,
+                          code=f"{limit_prefix}_monthly_limit", retry_after=max(1, math.ceil(reset.timestamp() - now)))
     if day_count >= daily_limit:
-        raise PublicError("The beta has reached its daily preparation limit.", 429)
-    return {"month": month, "day": day, "month_count": month_count + 1,
-            "day_count": day_count + 1, "active": {"job_id": job_id, "until": now + 1800}}
+        reset = clock.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        raise PublicError(f"The beta has reached its daily {subject} limit.", 429,
+                          code=f"{limit_prefix}_daily_limit", retry_after=max(1, math.ceil(reset.timestamp() - now)))
+    return {"month": month, "day": day, "month_count": month_count, "day_count": day_count}
+
+
+def reserve_preparation(current: dict | None, job_id: str, now: float,
+                        monthly_limit: int = 10, daily_limit: int = 3, *,
+                        limit_prefix: str = "preparation"):
+    available = check_preparation_capacity(current, now, monthly_limit, daily_limit, limit_prefix=limit_prefix)
+    return {**available, "month_count": available["month_count"] + 1,
+            "day_count": available["day_count"] + 1, "active": {"job_id": job_id, "until": now + 1800}}
 
 
 def release_preparation(current: dict | None, job_id: str):

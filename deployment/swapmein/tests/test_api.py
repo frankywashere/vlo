@@ -1,5 +1,6 @@
 import copy
 from dataclasses import replace
+from datetime import datetime, timezone
 from io import BytesIO
 import json
 import threading
@@ -345,5 +346,61 @@ def test_abandoned_upload_tickets_are_bounded_without_locking_preparation(api):
     headers, _ = authenticated(api)
     for _ in range(3):
         assert client.post("/api/uploads", headers=headers, json=upload_options()).status_code == 201
-    assert client.post("/api/uploads", headers=headers, json=upload_options()).status_code == 429
+    refused = client.post("/api/uploads", headers=headers, json=upload_options())
+    assert refused.status_code == 429 and refused.json()["code"] == "upload_daily_limit"
     assert not cloud.enqueued and "control/preparation.json" not in records.data
+
+
+@pytest.mark.parametrize("record, state, code, status, retry_after", [
+    ("preparation", {"month_count": 2, "day_count": 3}, "preparation_daily_limit", 429, 3600),
+    ("preparation", {"month_count": 10, "day_count": 1}, "preparation_monthly_limit", 429, 17 * 86400 + 3600),
+    ("preparation", {"active": {"job_id": "existing", "until": 120.1}}, "preparation_busy", 429, 121),
+    ("preparation", {"active": {"job_id": "existing", "until": -1}}, "preparation_recovery", 503, None),
+    ("preparation", {"active": {"job_id": "existing", "until": 120, "blocked": True}}, "preparation_recovery", 503, None),
+    ("uploads", {"month_count": 2, "day_count": 3}, "upload_daily_limit", 429, 3600),
+    ("uploads", {"month_count": 10, "day_count": 1}, "upload_monthly_limit", 429, 17 * 86400 + 3600),
+])
+def test_capacity_refuses_before_upload_or_ticket_consumption(api, monkeypatch, record, state, code, status, retry_after):
+    now = datetime(2026, 10, 14, 23, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(gateway.time, "time", lambda: now)
+    client, records, cloud, provider = api
+    headers, _ = authenticated(api)
+    current = {"month": "2026-10", "day": "2026-10-14", "month_count": 0, "day_count": 0, **state}
+    if "active" in current:
+        current["active"]["until"] += now
+    records.data[f"control/{record}.json"] = current
+    before = copy.deepcopy(records.data)
+    for response in (client.get("/api/preparation-capacity", headers=headers),
+                     client.post("/api/uploads", headers=headers, json=upload_options())):
+        assert response.status_code == status and response.json()["code"] == code
+        if retry_after is None:
+            assert "retry_after" not in response.json() and "Retry-After" not in response.headers
+        else:
+            assert response.json()["retry_after"] == retry_after
+            assert response.headers["Retry-After"] == str(retry_after)
+    assert records.data == before
+    assert not cloud.upload_sizes and not cloud.enqueued and not provider.submissions
+
+
+def test_capacity_read_requires_session_and_does_not_modify_counters_or_activate_workers(api):
+    client, records, cloud, provider = api
+    assert client.get("/api/preparation-capacity").status_code == 401
+    headers, _ = authenticated(api)
+    before = copy.deepcopy(records.data)
+    for _ in range(2):
+        response = client.get("/api/preparation-capacity", headers=headers)
+        assert response.status_code == 200 and response.json() == {"available": True}
+    assert records.data == before
+    assert not cloud.upload_sizes and not cloud.enqueued and not provider.submissions
+
+
+def test_upload_rechecks_capacity_after_successful_preflight(api, monkeypatch):
+    now = datetime(2026, 10, 14, 23, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(gateway.time, "time", lambda: now)
+    client, records, cloud, _ = api
+    headers, _ = authenticated(api)
+    assert client.get("/api/preparation-capacity", headers=headers).status_code == 200
+    records.data["control/preparation.json"] = {"month": "2026-10", "day": "2026-10-14", "month_count": 3, "day_count": 3}
+    response = client.post("/api/uploads", headers=headers, json=upload_options())
+    assert response.status_code == 429 and response.json()["code"] == "preparation_daily_limit"
+    assert "control/uploads.json" not in records.data and not cloud.upload_sizes and not cloud.enqueued

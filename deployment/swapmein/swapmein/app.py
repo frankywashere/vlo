@@ -25,7 +25,7 @@ from .pipeline import Pipeline
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
-from .storage import Records, claim_job, reserve_preparation, release_preparation
+from .storage import Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation
 
 settings = Settings.from_env()
 app = FastAPI(title="swapMEin single-shot beta", docs_url=None, redoc_url=None, openapi_url=None)
@@ -76,7 +76,13 @@ async def protect_requests(request: Request, call_next):
 
 @app.exception_handler(PublicError)
 async def public_error(_request, error):
-    return JSONResponse({"message": error.message}, status_code=error.status_code)
+    content = {"message": error.message}
+    if error.code is not None:
+        content["code"] = error.code
+    if error.retry_after is not None:
+        content["retry_after"] = error.retry_after
+    headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
+    return JSONResponse(content, status_code=error.status_code, headers=headers)
 
 
 @app.exception_handler(RequestValidationError)
@@ -249,15 +255,33 @@ class UploadRequest(BaseModel):
     setup: Setup
 
 
+def check_available_preparation(records, now):
+    preparation, _ = records.read("control/preparation.json")
+    check_preparation_capacity(preparation, now, settings.monthly_preparations, settings.daily_preparations)
+    uploads, _ = records.read("control/uploads.json")
+    check_preparation_capacity(uploads, now, settings.monthly_preparations, settings.daily_preparations,
+                               limit_prefix="upload")
+
+
+@app.get("/api/preparation-capacity")
+def preparation_capacity(authorization: str | None = Header(default=None)):
+    authenticate(authorization)
+    records, _, _ = services()
+    check_available_preparation(records, time.time())
+    return {"available": True}
+
+
 @app.post("/api/uploads", status_code=201)
 def start_upload(options: UploadRequest, authorization: str | None = Header(default=None)):
     owner, active_session = authenticate(authorization)
     records, cloud, _ = services()
+    check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
     # Bound abandoned upload storage separately; no preparation slot or worker is
     # activated until the complete endpoint verifies both immutable objects.
     records.update("control/uploads.json", lambda current: release_preparation(reserve_preparation(
-        current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations), job_id))
+        current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations,
+        limit_prefix="upload"), job_id))
     prefix = f"uploads/{job_id}/"
     source_uri = f"gs://{settings.app_bucket}/{prefix}source.bin"
     reference_uri = f"gs://{settings.app_bucket}/{prefix}reference.bin"
