@@ -5,6 +5,7 @@ import re
 import httpx
 
 from .errors import PublicError
+from .diagnostics import emit, submission_event
 
 BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -67,7 +68,8 @@ class Provider:
         except Exception:
             raise PublicError("reAPI could not validate your account. Try again later.", 502) from None
 
-    def submit(self, key: str, payload: dict):
+    def submit(self, key: str, payload: dict, *, job_id: str | None = None):
+        fingerprint = submission_event(payload, provider="reAPI", endpoint="/api/v1/videos/generations", job_id=job_id)
         # No retry transport: a timeout/ambiguous response must never duplicate a charge.
         try:
             response = self.client.post(BASE + "/api/v1/videos/generations", json=payload,
@@ -82,6 +84,8 @@ class Provider:
             task = body.get("id") or body.get("task_id")
             if not isinstance(task, str) or not TASK_ID.fullmatch(task):
                 raise ValueError
+            emit("provider_submission_accepted", job_id=job_id, provider="ToAPIs" if isinstance(self, ToAPIsProvider) else "reAPI",
+                 provider_task=task, request_sha256=fingerprint)
             return task
         except Exception:
             raise PublicError("The provider submission outcome is unknown. Check your reAPI task history before trying again.", 502) from None
@@ -125,12 +129,13 @@ class ToAPIsProvider(Provider):
         except Exception:
             raise PublicError("ToAPIs could not validate this key and its allowance. Check your token settings.", 401) from None
 
-    def submit(self, key: str, payload: dict):
+    def submit(self, key: str, payload: dict, *, job_id: str | None = None):
         import uuid
         translated = {"model": "MiniMax-H3", "prompt": payload["prompt"], "duration": payload["duration"],
             "resolution": "768p", "aspect_ratio": "adaptive", "client_business_id": "swapmein-" + uuid.uuid4().hex,
             "image_with_roles": [{"url": url, "role": "reference_image"} for url in payload["reference_image_urls"]],
             "video_with_roles": [{"url": url, "role": "reference_video"} for url in payload["reference_video_urls"]]}
+        fingerprint = submission_event(translated, provider="ToAPIs", endpoint="/v1/videos/generations", job_id=job_id)
         try:
             response = self.client.post(self.base + "/v1/videos/generations", json=translated,
                 headers={"Authorization": "Bearer " + key}, timeout=35)
@@ -143,6 +148,8 @@ class ToAPIsProvider(Provider):
             task = response.json().get("id")
             if not isinstance(task, str) or not TASK_ID.fullmatch(task):
                 raise ValueError
+            emit("provider_submission_accepted", job_id=job_id, provider="ToAPIs" if isinstance(self, ToAPIsProvider) else "reAPI",
+                 provider_task=task, request_sha256=fingerprint)
             return task
         except Exception:
             raise PublicError("The ToAPIs submission outcome is unknown. Check its task history before trying again.", 502) from None

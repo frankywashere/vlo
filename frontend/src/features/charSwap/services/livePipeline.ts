@@ -38,6 +38,9 @@ export interface LivePipelineJob {
   selected_label?: number;
   tracking_continuous?: boolean;
   scene_cut_count?: number;
+  generation_started_at?: number;
+  provider_checked_at?: number;
+  provider_state?: "queued" | "pending" | "processing" | "running" | "generating" | "unknown";
   estimated_cost_usd?: number;
   actual_provider_credits?: number;
 }
@@ -210,6 +213,8 @@ function readJob(value: unknown): LivePipelineJob {
     value.scene_cut_count >= 0
   )
     job.scene_cut_count = value.scene_cut_count;
+  if (["queued", "pending", "processing", "running", "generating", "unknown"].includes(String(value.provider_state)))
+    job.provider_state = value.provider_state as LivePipelineJob["provider_state"];
   for (const field of ["tracking_url", "guide_url", "output_url"] as const) {
     const url = value[field];
     if (typeof url !== "string") continue;
@@ -232,6 +237,8 @@ function readJob(value: unknown): LivePipelineJob {
     "selected_label",
     "estimated_cost_usd",
     "actual_provider_credits",
+    "generation_started_at",
+    "provider_checked_at",
   ] as const) {
     if (
       typeof value[field] === "number" &&

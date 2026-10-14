@@ -73,7 +73,7 @@ class FakeProvider:
     def balance(self, _key):
         return 5000
 
-    def submit(self, _key, payload):
+    def submit(self, _key, payload, *, job_id=None):
         self.submissions.append(payload)
         if self.unknown:
             raise PublicError("Submission outcome is unknown.", 502)
@@ -415,3 +415,19 @@ def test_upload_rechecks_capacity_after_successful_preflight(api, monkeypatch):
     response = client.post("/api/uploads", headers=headers, json=upload_options())
     assert response.status_code == 429 and response.json()["code"] == "preparation_daily_limit"
     assert "control/uploads.json" not in records.data and not cloud.upload_sizes and not cloud.enqueued
+
+
+@pytest.mark.parametrize('provider_state', ['queued', 'processing', 'unexpected-private-message'])
+def test_provider_poll_reports_safe_status_and_check_time_without_resubmission(api, provider_state):
+    client, records, cloud, provider = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    submitted = client.post(f'/api/jobs/{job_id}/generate', headers=headers, json={'approved': True})
+    assert submitted.json()['generation_started_at'] > 0
+    provider.status = lambda *_: {'status': provider_state}
+    checked = client.get(f'/api/jobs/{job_id}/provider', headers=headers).json()
+    assert checked['status'] == 'generating'
+    assert checked['provider_state'] == (provider_state if provider_state in {'queued', 'processing'} else 'unknown')
+    assert checked['provider_checked_at'] >= submitted.json()['generation_started_at']
+    assert 'unexpected-private-message' not in json.dumps(checked)
+    assert len(provider.submissions) == 1 and cloud.enqueued == []

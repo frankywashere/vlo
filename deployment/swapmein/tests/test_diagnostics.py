@@ -31,3 +31,22 @@ def test_http_failure_excludes_request_headers_urls_and_response_body(capsys):
     raw = capsys.readouterr().out
     assert json.loads(raw)['http_status'] == 403
     assert all(value not in raw for value in ('secret', 'hidden', 'private-body', 'example.com'))
+
+
+def test_submission_log_preserves_actual_settings_but_removes_signed_urls(capsys):
+    from swapmein.diagnostics import submission_event
+    payload = {'model': 'MiniMax-H3', 'duration': 4, 'resolution': '768p',
+               'prompt': 'Replace the selected person for exactly 4 seconds.',
+               'image_with_roles': [{'url': 'https://private/image?secret-signature', 'role': 'reference_image'}],
+               'reference_video_urls': ['https://private/video?secret-signature']}
+    fingerprint = submission_event(payload, provider='ToAPIs', endpoint='/v1/videos/generations', job_id='job123')
+    raw = capsys.readouterr().out
+    record = json.loads(raw)
+    assert record['job_id'] == 'job123'
+    assert record['request_sha256'] == fingerprint and len(fingerprint) == 64
+    assert record['payload']['duration'] == 4
+    assert record['payload']['prompt'] == payload['prompt']
+    assert record['payload']['resolution'] == '768p'
+    assert record['payload']['image_with_roles'][0]['role'] == 'reference_image'
+    assert 'secret-signature' not in raw and 'https://private' not in raw
+    assert payload['image_with_roles'][0]['url'].startswith('https://private')

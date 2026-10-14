@@ -5,6 +5,7 @@ import DownloadRounded from "@mui/icons-material/DownloadRounded";
 import KeyOutlined from "@mui/icons-material/KeyOutlined";
 import { useCharSwapStore } from "../useCharSwapStore";
 import { formatTime } from "../utils/videoGeometry";
+import { GenerationProgress } from "./GenerationProgress";
 import { PersonBadge } from "./PersonBadge";
 import type { LivePipelineJob } from "../services/livePipeline";
 import { VideoPreview } from "./VideoPreview";
@@ -290,6 +291,7 @@ export function ReviewStep({
               `Review the prepared guide before generating. This uses your own ${provider} credits.`
           : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
       </Alert>
+      {live && job && <GenerationProgress job={job} provider={provider} />}
       {live && job && (
         <Button variant="outlined" onClick={onRefresh}>
           Refresh status and video links

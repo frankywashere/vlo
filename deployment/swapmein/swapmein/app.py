@@ -146,7 +146,7 @@ def view(job: dict):
     if job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous"]:
+    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "generation_started_at"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
@@ -409,14 +409,14 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
             return view(current)
         raise
     try:
-        task_id = provider.submit(key, payload)
+        task_id = provider.submit(key, payload, job_id=job_id)
     except PublicError as error:
         status = "submission_unknown" if error.status_code >= 500 else "failed"
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": status, "message": error.message})
         return view(updated)
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "generating",
-            "provider_task": task_id, "message": "MiniMax H3 is generating your replacement.", "updated_at": time.time()})
+            "generation_started_at": time.time(), "provider_task": task_id, "message": "MiniMax H3 is generating your replacement.", "updated_at": time.time()})
     except Exception:
         # The durable submitting claim is retained. A caller timeout may not retry the charge.
         raise PublicError("Submitted to the provider, but its task could not be saved. Check its dashboard; do not submit again.", 502) from None
@@ -445,7 +445,9 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
         } if current["status"] == "generating" and current.get("provider_task") == job["provider_task"] else current)
         return view(updated)
     if body.get("status") != "completed":
-        return view(job)
+        reported = body.get("status")
+        state = reported if isinstance(reported, str) and reported in {"queued", "pending", "processing", "running", "generating"} else "unknown"
+        return {**view(job), "provider_state": state, "provider_checked_at": time.time()}
     try:
         output_url = body["output"]["video_urls"][0]
         validate_media_url(output_url)

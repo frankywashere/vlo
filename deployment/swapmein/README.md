@@ -294,6 +294,19 @@ locations. Exception messages, request headers/bodies, media URLs and source
 lines are excluded to avoid leaking BYOK credentials and private media. These
 logs do not automatically clear recovery locks or retry generation.
 
+Immediately before each generation POST, the provider adapter logs its actual
+vendor-specific payload (including duration, prompt and resolution), job ID,
+endpoint and SHA-256 request fingerprint. Signed media URLs are redacted; API
+keys are never included. The acceptance event links the provider task ID to that
+fingerprint. This is diagnostic evidence, not a replayable credential-bearing
+request archive.
+
+The Review step shows provider queue/processing state, elapsed time since
+acceptance, age of the last successful provider check and final audio-restoration
+progress. Unknown states are displayed as waiting for an update; no estimated
+percentage or completion time is invented. Checks remain browser-driven and
+pause after 20 minutes; users can manually refresh without resubmitting.
+
 ## Deployment and IAM
 
 | Resource | Verified deployment configuration, 2026-10-14 |
