@@ -153,6 +153,10 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       rollupOptions: {
+        input: {
+          editor: resolve(frontendRoot, "index.html"),
+          charswap: resolve(frontendRoot, "charswap.html"),
+        },
         output: {
           manualChunks: {
             "vendor-react": ["react", "react-dom", "zustand"],

@@ -75,3 +75,7 @@ backend/sam2
 backend/runtime/
 frontend/dist-render-worker/
 .vlo-update-backups/
+
+# CharSwap local preview assets (never commit source clips or references)
+frontend/public/charswap-demo/
+frontend/charSwap-qa/
