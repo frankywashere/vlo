@@ -25,7 +25,9 @@ job ownership are authenticated by an unpredictable bearer token.
 | `GET /health` | None | `{status:"ready",available:boolean}` |
 | `GET /api/config` | None | `{live:true,provider:"reAPI",model:"minimax-h3",delivery:"native",beta:"single-person",available:boolean}` |
 | `POST /api/session` | `X-Reapi-Key`; no body | `{token,expires_at,balance}`; expiry is Unix seconds, balance is reAPI credits |
-| `POST /api/jobs` | `Authorization: Bearer SESSION`; multipart `clip`, `reference`, `setup` | HTTP 202 `{id,status:"queued"}` |
+| `POST /api/uploads` | Session bearer; JSON `source_bytes`, `reference_bytes`, `setup` | HTTP 201 upload ID and two short-lived private-storage PUT URLs |
+| `POST /api/uploads/{id}/complete` | Same session bearer after both PUTs succeed | HTTP 202 `{id,status:"queued"}`; validates actual sizes and queues at most once |
+| `POST /api/jobs` (legacy) | `Authorization: Bearer SESSION`; multipart `clip`, `reference`, `setup` | HTTP 202 `{id,status:"queued"}` |
 | `GET /api/jobs/{id}` | Session bearer | Public job status and short-lived review/result links |
 | `POST /api/jobs/{id}/generate` | Session bearer and `X-Reapi-Key`; `{approved:true}` | Current job status; submits at most once |
 | `GET /api/jobs/{id}/provider` | Session bearer and `X-Reapi-Key` | Refreshes provider status; enqueues one export on completion |
@@ -45,11 +47,19 @@ The multipart `setup` field contains JSON:
 The anchor is in normalized coordinates of the original displayed video, and its
 time is an absolute source timestamp inside the trim. The duration must be a whole
 number of seconds from 4 through 15. A source can be MP4, MOV, WebM or AVI, up to
-25 MiB, at most 4096px per side / 16 MP, with audio and a 0.4–2.5 aspect ratio. A
+100 MiB, at most 4096px per side / 16 MP, with audio and a 0.4–2.5 aspect ratio. A
 reference must be a still JPG, PNG or WebP, up to 5 MiB, sides 256–5760px and the
 same ratio range. The gateway converts the reference to an EXIF-corrected JPEG
-and strips its metadata. Total request bytes are capped at 31 MiB while receiving;
-regular JSON request bodies are capped at 8 KiB.
+and strips its metadata. The site sends source/reference files directly to the private
+application bucket using signed V4 PUT URLs that expire in 15 minutes. Each
+signature binds the exact declared Content-Length, binary Content-Type and
+`x-goog-if-generation-match: 0`, so an upload cannot exceed its declared size or
+replace an existing object. The browser supplies Content-Length automatically.
+The gateway verifies both stored sizes before preparation. Bucket CORS permits
+only the configured site origins; no provider key or session token goes to storage.
+The original multipart `/api/jobs` endpoint is retained for older tabs, limited to
+a 25 MiB source and 31 MiB total request to stay below Cloud Run HTTP/1 ingress.
+Regular JSON request bodies are capped at 8 KiB.
 
 Public job statuses are `queued`, `preparing`, `ready`, `generating`, `finalizing`,
 `completed`, `failed`, and `submission_unknown`. The response always includes
@@ -71,11 +81,16 @@ or account-recovery flow in this initial beta.
 1. Validate the user's key through `GET https://reapi.ai/api/v1/balance`. Only a
    SHA256 key fingerprint is stored, alongside the hashed bearer and six-hour
    expiry. The raw provider key never enters GCS, Cloud Tasks or deployment env.
-2. Atomically reserve the global preparation slot and quota in permanent
+2. On completed upload, atomically reserve the global preparation slot and quota in permanent
    `control/preparation.json`: maximum one active preparation, three preparations
    per UTC day, ten per UTC calendar month. Failed attempts consume a quota slot.
    This is an owner-cost-limited beta; reAPI keys do not pay for Google preparation.
-3. Upload to private GCS, enqueue an authenticated Cloud Task and return HTTP 202.
+3. Issue private upload URLs after incrementing a separate permanent
+   `control/uploads.json` ticket quota (three per UTC day, ten per UTC month).
+   Abandoned uploads consume this quota but hold no processing slot. After both
+   immutable uploads are verified and the reference is normalized, reserve the
+   existing preparation quota, enqueue an authenticated Cloud Task and return
+   HTTP 202. Confirmation is bound to the upload's session and cannot queue twice.
 4. In that task, trim/normalize to 24 fps and at most 854×480. Narrow clips gain
    small letterboxes so both sides remain at least 256px. Adjust the selected
    anchor to match. Detect strong cuts and reject multi-shot input before GPU work.

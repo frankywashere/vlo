@@ -1,8 +1,13 @@
 from dataclasses import replace
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
+from google.api_core.exceptions import NotFound
+from google.auth.credentials import Credentials, Signing
+from google.cloud.storage import Client
 import httpx
 import pytest
 
@@ -17,6 +22,109 @@ class Tasks:
 
     def delete_task(self, name):
         self.events.append(("delete", name))
+
+
+def test_direct_upload_signs_exact_size_and_prevents_object_replacement(monkeypatch):
+    captured = {}
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), app_bucket="private-app", gateway_service_account="gateway@example.test")
+    class Blob:
+        def generate_signed_url(self, **options):
+            captured.update(options)
+            return "https://storage.googleapis.com/private-app/uploads/source.bin?signed"
+    cloud.blob = lambda bucket, key: Blob() if (bucket, key) == ("private-app", "uploads/source.bin") else None
+    monkeypatch.setattr("swapmein.cloud.access_token", lambda: "test-access-token")
+    result = cloud.signed_upload("gs://private-app/uploads/source.bin", 100 * 1024 * 1024)
+    assert result["headers"] == {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}
+    assert "Content-Length" not in result["headers"]  # Browser owns this forbidden request header.
+    assert captured == {"version": "v4", "expiration": timedelta(minutes=15), "method": "PUT",
+        "headers": {"Content-Length": str(100 * 1024 * 1024), "x-goog-if-generation-match": "0"},
+        "content_type": "application/octet-stream", "service_account_email": "gateway@example.test",
+        "access_token": "test-access-token"}
+
+
+def test_storage_sdk_binds_length_and_create_only_precondition_in_v4_signature():
+    class LocalSigner(Credentials, Signing):
+        @property
+        def signer_email(self):
+            return "local@example.test"
+
+        @property
+        def signer(self):
+            return self
+
+        def sign_bytes(self, message):
+            import hashlib
+            return hashlib.sha256(message).digest()
+
+        def refresh(self, request):
+            raise AssertionError("No network credentials are used in this test")
+    signer = LocalSigner()
+    blob = Client(project="local", credentials=signer).bucket("private-app").blob("uploads/source.bin")
+    def signed(size):
+        return blob.generate_signed_url(version="v4", expiration=timedelta(minutes=15), method="PUT",
+            credentials=signer, headers={"Content-Length": str(size), "x-goog-if-generation-match": "0"},
+            content_type="application/octet-stream")
+    first, changed = [parse_qs(urlsplit(signed(size)).query) for size in [104857600, 104857601]]
+    assert first["X-Goog-SignedHeaders"] == ["content-length;content-type;host;x-goog-if-generation-match"]
+    assert first["X-Goog-Signature"] != changed["X-Goog-Signature"]
+
+
+@pytest.mark.parametrize("size", [None, 0, -1, True, "100"])
+def test_direct_upload_rejects_invalid_declared_size_before_signing(size):
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), app_bucket="private-app")
+    with pytest.raises(PublicError, match="Invalid upload"):
+        cloud.signed_upload("gs://private-app/uploads/source.bin", size)
+
+
+def test_direct_upload_never_grants_browser_writes_to_worker_bucket():
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), app_bucket="private-app", worker_bucket="private-worker")
+    with pytest.raises(PublicError, match="Invalid upload"):
+        cloud.signed_upload("gs://private-worker/inputs/source.bin", 100)
+
+
+@pytest.mark.parametrize("actual_size", [None, 0, 99, 101])
+def test_direct_upload_verification_rejects_wrong_stored_size(actual_size):
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), app_bucket="private-app")
+    cloud.blob = lambda *_args: SimpleNamespace(size=actual_size, reload=lambda: None)
+    with pytest.raises(PublicError, match="does not match"):
+        cloud.verify_upload("gs://private-app/uploads/source.bin", 100)
+
+
+def test_direct_upload_verification_requires_completed_object():
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), app_bucket="private-app")
+    def missing():
+        raise NotFound("Object not found")
+    cloud.blob = lambda *_args: SimpleNamespace(reload=missing)
+    with pytest.raises(PublicError, match="incomplete"):
+        cloud.verify_upload("gs://private-app/uploads/source.bin", 100)
+    cloud.blob = lambda *_args: SimpleNamespace(size=100, reload=lambda: None)
+    assert cloud.verify_upload("gs://private-app/uploads/source.bin", 100) is None
+
+
+def test_bucket_setup_adds_scoped_direct_upload_cors_without_worker_bucket_changes(monkeypatch, tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("swapmein_deploy_test", Path(__file__).parents[1] / "deploy.py")
+    deploy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(deploy)
+    calls = []
+    def fake_gcloud(*args, **kwargs):
+        calls.append(args)
+        return {"name": deploy.APP_BUCKET} if args[:3] == ("storage", "buckets", "describe") else {}
+    monkeypatch.setattr(deploy, "gcloud", fake_gcloud)
+    monkeypatch.setattr(deploy, "google_get", lambda _url: {"projectNumber": deploy.PROJECT_NUMBER})
+    origins = ["https://site.web.app", "https://site.firebaseapp.com"]
+    deploy.ensure_bucket(tmp_path, origins)
+    assert json.loads((tmp_path / "app-cors.json").read_text()) == [{"origin": origins,
+        "method": ["GET", "HEAD", "PUT"], "responseHeader": ["Content-Type", "x-goog-if-generation-match"],
+        "maxAgeSeconds": 3600}]
+    changes = [call for call in calls if call[:3] == ("storage", "buckets", "update")]
+    assert len(changes) == 1 and changes[0][3] == "gs://" + deploy.APP_BUCKET
+    assert "--cors-file=" + str(tmp_path / "app-cors.json") in changes[0]
 
 
 def test_worker_creates_backup_before_activation_and_stops_after_request_failure(monkeypatch):

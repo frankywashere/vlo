@@ -27,7 +27,7 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
 
         def download(self, uri, destination, maximum=None):
             if uri.endswith("upload.bin"):
-                assert maximum == 25 * 1024 * 1024
+                assert maximum == 100 * 1024 * 1024
                 destination.write_bytes(b"original-upload")
             else:
                 destination.write_bytes(b"normalized-shape")

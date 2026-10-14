@@ -1,3 +1,4 @@
+import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES } from "../limits";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
@@ -43,8 +44,6 @@ export interface LivePipelineSession {
   expiresAt: number;
 }
 
-const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
-const MAX_REFERENCE_BYTES = 5 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 45000;
 const JOB_STATUSES: ReadonlySet<string> = new Set([
   "queued",
@@ -106,7 +105,7 @@ function requestMessage(status: number): string {
     case 403:
       return "This session cannot access the job. Start a new setup with your own key.";
     case 413:
-      return "Use a source under 25 MiB and a reference under 5 MiB.";
+      return "Use a source up to 100 MiB and a reference under 5 MiB.";
     case 429:
       return "The service is at its current job limit. Try preparing again later.";
     case 503:
@@ -354,18 +353,57 @@ async function assetFile(
   const declaredBytes = Number(response.headers.get("Content-Length"));
   if (declaredBytes > maxBytes)
     throw new LivePipelineError(
-      `Choose a ${kind} under ${kind === "source" ? 25 : 5} MiB for the live beta.`,
+      `Choose a ${kind} under ${kind === "source" ? 100 : 5} MiB for the live beta.`,
     );
   const blob = await response.blob();
   signal.throwIfAborted();
   if (!blob.size || blob.size > maxBytes)
     throw new LivePipelineError(
-      `Choose a ${kind} under ${kind === "source" ? 25 : 5} MiB for the live beta.`,
+      `Choose a ${kind} under ${kind === "source" ? 100 : 5} MiB for the live beta.`,
     );
   if (kind === "reference" && !/^image\/(jpeg|png|webp)$/.test(blob.type)) {
     throw new LivePipelineError("Choose a JPG, PNG, or WebP reference image.");
   }
   return new File([blob], name, { type: blob.type || "video/mp4" });
+}
+
+async function uploadAsset(value: unknown, file: File, signal: AbortSignal) {
+  if (!isRecord(value) || typeof value.url !== "string" || !isRecord(value.headers)) {
+    throw new LivePipelineError("The upload could not be started. Try again later.");
+  }
+  const url = new URL(value.url);
+  if (url.protocol !== "https:" || url.hostname !== "storage.googleapis.com" ||
+      url.username || url.password || url.port ||
+      value.headers["Content-Type"] !== "application/octet-stream" ||
+      value.headers["x-goog-if-generation-match"] !== "0") {
+    throw new LivePipelineError("The upload destination could not be verified.");
+  }
+  signal.throwIfAborted();
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  const timer = globalThis.setTimeout(abort, 10 * 60 * 1000);
+  try {
+    const response = await fetch(value.url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "x-goog-if-generation-match": "0",
+      },
+      body: file,
+      credentials: "omit",
+      redirect: "error",
+      signal: controller.signal,
+    });
+    signal.throwIfAborted();
+    if (!response.ok) throw new Error("Upload rejected");
+  } catch (error) {
+    if (signal.aborted) throw error;
+    throw new LivePipelineError("The media upload did not finish. Check your connection and prepare again. No generation was submitted.");
+  } finally {
+    globalThis.clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+  }
 }
 
 export async function createLiveJob(
@@ -385,25 +423,56 @@ export async function createLiveJob(
       signal,
     ),
   ]);
-  const form = new FormData();
-  form.append("clip", sourceFile);
-  form.append("reference", referenceFile);
-  form.append(
-    "setup",
-    JSON.stringify({
-      trim: state.trim,
-      anchor: target.anchor,
-      target_name: target.name,
-      enhanced_character_masking: state.enhancedCharacterMasking ?? false,
-    }),
+  const ticket = await requestJson(
+    "/api/uploads",
+    {
+      method: "POST",
+      headers: { ...sessionHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_bytes: sourceFile.size,
+        reference_bytes: referenceFile.size,
+        setup: {
+          trim: state.trim,
+          anchor: target.anchor,
+          target_name: target.name,
+          enhanced_character_masking: state.enhancedCharacterMasking ?? false,
+        },
+      }),
+    },
+    signal,
   );
-  return readJob(
-    await requestJson(
-      "/api/jobs",
-      { method: "POST", headers: sessionHeaders(token), body: form },
+  if (!isRecord(ticket) || typeof ticket.id !== "string" ||
+      !/^[a-zA-Z0-9_-]{1,128}$/.test(ticket.id)) {
+    throw new LivePipelineError("The upload could not be started. Try again later.");
+  }
+  const uploads = new AbortController();
+  const abortUploads = () => uploads.abort();
+  signal.addEventListener("abort", abortUploads, {once: true});
+  try {
+    signal.throwIfAborted();
+    await Promise.all([
+      uploadAsset(ticket.source, sourceFile, uploads.signal),
+      uploadAsset(ticket.reference, referenceFile, uploads.signal),
+    ]);
+  } catch (error) {
+    uploads.abort();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abortUploads);
+  }
+  try {
+    return readJob(await requestJson(
+      `/api/uploads/${encodeURIComponent(ticket.id)}/complete`,
+      { method: "POST", headers: sessionHeaders(token) },
       signal,
-    ),
-  );
+    ));
+  } catch (error) {
+    if (signal.aborted) throw error;
+    if (error instanceof LivePipelineError && error.status !== null && error.status < 500) throw error;
+    // Confirmation may already have queued work. Retain its known ID and poll;
+    // never start another upload just because the acknowledgement was lost.
+    return {id: ticket.id, status: "queued", message: "Upload confirmation is pending. Check this job's status before preparing another clip."};
+  }
 }
 
 export async function getLiveJob(

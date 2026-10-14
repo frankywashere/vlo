@@ -99,7 +99,7 @@ export function ClipStep({
           <Typography variant="caption" color="text.secondary">
             {sampleAvailable
               ? "MP4, MOV or WebM · up to 300 MB in this preview"
-              : "MP4, MOV or WebM · up to 25 MiB"}
+              : "MP4, MOV or WebM · up to 100 MiB"}
           </Typography>
         </Box>
         {sampleAvailable && (

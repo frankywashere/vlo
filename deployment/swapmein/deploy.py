@@ -273,7 +273,7 @@ def ensure_gateway_identity():
         gcloud("iam", "service-accounts", "create", "swapmein-gateway", "--display-name=SwapMeIn gateway")
 
 
-def ensure_bucket(temp: Path):
+def ensure_bucket(temp: Path, origins: list[str]):
     if APP_BUCKET == WORKER_BUCKET:
         raise SetupError("Application and worker buckets must differ.")
     # Never expire control/: it holds the global monthly/daily preparation counter.
@@ -281,6 +281,12 @@ def ensure_bucket(temp: Path):
                             "condition": {"age": 2, "matchesPrefix": ["uploads/", "outputs/", "sessions/", "jobs/"]}}]}
     lifecycle_file = temp / "app-lifecycle.json"
     lifecycle_file.write_text(json.dumps(lifecycle))
+    # Upload bodies go directly to private storage, beyond Cloud Run's HTTP/1
+    # request-size limit. Only the configured website origins can use the PUTs.
+    cors = [{"origin": origins, "method": ["GET", "HEAD", "PUT"],
+             "responseHeader": ["Content-Type", "x-goog-if-generation-match"], "maxAgeSeconds": 3600}]
+    cors_file = temp / "app-cors.json"
+    cors_file.write_text(json.dumps(cors))
     current = gcloud("storage", "buckets", "describe", "gs://" + APP_BUCKET, optional=True)
     if current:
         # The storage CLI's normalized bucket display omits projectNumber.
@@ -290,11 +296,12 @@ def ensure_bucket(temp: Path):
             raise SetupError("The application bucket is not owned by the expected project. Refusing to change it.")
         gcloud("storage", "buckets", "update", "gs://" + APP_BUCKET,
                "--uniform-bucket-level-access", "--public-access-prevention", "--soft-delete-duration=0",
-               "--lifecycle-file=" + str(lifecycle_file))
+               "--lifecycle-file=" + str(lifecycle_file), "--cors-file=" + str(cors_file))
     else:
         gcloud("storage", "buckets", "create", "gs://" + APP_BUCKET, f"--location={REGION}",
                "--default-storage-class=STANDARD", "--uniform-bucket-level-access",
                "--public-access-prevention", "--soft-delete-duration=0", "--lifecycle-file=" + str(lifecycle_file))
+        gcloud("storage", "buckets", "update", "gs://" + APP_BUCKET, "--cors-file=" + str(cors_file))
     for bucket in (APP_BUCKET, WORKER_BUCKET):
         gcloud("storage", "buckets", "add-iam-policy-binding", "gs://" + bucket,
                "--member=" + MEMBER, "--role=roles/storage.objectAdmin")
@@ -495,7 +502,7 @@ def main():
         gcloud("services", "enable", "run.googleapis.com", "cloudbuild.googleapis.com", "artifactregistry.googleapis.com",
                "cloudtasks.googleapis.com", "iam.googleapis.com", "iamcredentials.googleapis.com", "storage.googleapis.com")
         ensure_gateway_identity()
-        ensure_bucket(temp)
+        ensure_bucket(temp, origins)
         ensure_queue()
         grant_runtime_roles(args.billing_viewer_fallback, workers_before)
         if args.setup_only:

@@ -7,6 +7,7 @@ import uuid
 from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
+from .limits import MAX_SOURCE_BYTES
 from .media import Setup, finish, normalize, select_label
 from .storage import Records, claim_job, release_preparation
 
@@ -48,7 +49,7 @@ class Pipeline:
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 source, normalized = root / "source.bin", root / "normalized.mp4"
-                self.cloud.download(job["source_uri"], source, 25 * 1024 * 1024)
+                self.cloud.download(job["source_uri"], source, MAX_SOURCE_BYTES)
                 options = Setup.model_validate({"enhanced_character_masking": True, **job["setup"]})
                 metadata = normalize(source, normalized, options)
                 prefix = f"inputs/swapmein-{job_id}/"
@@ -110,7 +111,7 @@ class Pipeline:
                 raw, original, uploaded, output = root / "generated.mp4", root / "source.mp4", root / "upload.bin", root / "swapMEin.mp4"
                 self.cloud.download_provider(job["provider_output"], raw)
                 self.cloud.download(job["normalized_uri"], original)
-                self.cloud.download(job["source_uri"], uploaded, 25 * 1024 * 1024)
+                self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
                 output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded, audio_start=job["setup"]["trim"][0])
                 output_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/swapMEin-{uuid.uuid4().hex}.mp4", output, "video/mp4")
                 self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,

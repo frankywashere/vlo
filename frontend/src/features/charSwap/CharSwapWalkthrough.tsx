@@ -39,6 +39,7 @@ import { loadDemo, sampleReviewIssues } from "./services/demo";
 import type { DemoManifest } from "./services/demo";
 import { useLocalAssets } from "./hooks/useLocalAssets";
 import { useLivePipeline } from "./hooks/useLivePipeline";
+import { MAX_SOURCE_BYTES } from "./limits";
 import { isSecureLiveOrigin } from "./services/livePipeline";
 import { LiveTrackingStep } from "./components/LiveTrackingStep";
 import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
@@ -689,9 +690,9 @@ export function CharSwapWalkthrough() {
                   sampleAvailable={!secureSite}
                   busy={busy || loadingDemo}
                   onImport={(file) => {
-                    if (secureSite && file.size > 25 * 1024 * 1024) {
+                    if (secureSite && file.size > MAX_SOURCE_BYTES) {
                       setError(
-                        "The live beta accepts source files up to 25 MiB. Export a smaller copy first.",
+                        "The live beta accepts source files up to 100 MiB. Export a smaller copy first.",
                       );
                       return;
                     }

@@ -37,12 +37,28 @@ class MemoryRecords:
 class FakeCloud:
     def __init__(self):
         self.enqueued = []
+        self.upload_sizes = {}
 
     def signed_url(self, uri):
         return "https://storage.googleapis.com/private-app/" + uri.split("/")[-1] + "?signed=short-lived"
 
     def upload(self, bucket, key, _path, _content_type):
         return f"gs://{bucket}/{key}"
+
+    def signed_upload(self, uri, size):
+        self.upload_sizes[uri] = size
+        return {"url": "https://storage.googleapis.com/" + uri[5:] + "?signature=test",
+                "headers": {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}}
+
+    def verify_upload(self, uri, size):
+        if self.upload_sizes.get(uri) != size:
+            raise PublicError("Upload is incomplete.", 400)
+
+    def download(self, uri, path, maximum):
+        assert maximum == 5 * 1024 * 1024
+        image = BytesIO()
+        Image.new("RGB", (256, 256), "blue").save(image, "PNG")
+        path.write_bytes(image.getvalue())
 
     def enqueue(self, kind, job_id):
         self.enqueued.append((kind, job_id))
@@ -258,3 +274,76 @@ def test_provider_choice_is_bound_to_session_and_job_and_key_is_not_persisted(ap
     assert generated.json()["estimated_cost_usd"] == .8
     assert len(provider.submissions) == 1
     assert client.post("/api/session", headers={"X-Reapi-Key": "example-key"}, json={"provider": "untrusted"}).status_code == 422
+
+
+def upload_options(source_bytes=100 * 1024 * 1024):
+    return {"source_bytes": source_bytes, "reference_bytes": 1024,
+            "setup": {"trim": [0, 5], "anchor": {"x": .5, "y": .5, "time": 1}}}
+
+
+def test_direct_upload_accepts_100mib_without_body_or_worker_and_confirms_once(api):
+    client, records, cloud, provider = api
+    headers, _ = authenticated(api)
+    response = client.post("/api/uploads", headers=headers, json=upload_options())
+    assert response.status_code == 201
+    ticket = response.json()
+    assert set(ticket) == {"id", "source", "reference"}
+    assert not cloud.enqueued and not provider.submissions
+    assert "control/preparation.json" not in records.data
+    assert not records.data["control/uploads.json"].get("active")
+    assert max(cloud.upload_sizes.values()) == 100 * 1024 * 1024
+    for _ in range(2):
+        result = client.post(f"/api/uploads/{ticket['id']}/complete", headers=headers)
+        assert result.status_code == 202 and result.json()["status"] == "queued"
+    assert cloud.enqueued == [("prepare", ticket["id"])]
+    job = records.data[f"jobs/{ticket['id']}.json"]
+    assert job["setup"]["enhanced_character_masking"] is False
+    assert job["source_uri"].endswith("/source.bin")
+    assert records.data["control/preparation.json"]["month_count"] == 1
+    assert "valid-example-key" not in json.dumps(records.data)
+
+
+@pytest.mark.parametrize("change", [{"source_bytes": 100 * 1024 * 1024 + 1}, {"source_bytes": 0},
+    {"source_bytes": True}, {"reference_bytes": 5 * 1024 * 1024 + 1}, {"source_uri": "gs://elsewhere/asset"}])
+def test_direct_upload_rejects_invalid_sizes_and_client_chosen_paths(api, change):
+    client, records, cloud, _ = api
+    headers, _ = authenticated(api)
+    assert client.post("/api/uploads", headers=headers, json={**upload_options(), **change}).status_code == 422
+    assert not cloud.upload_sizes and "control/uploads.json" not in records.data
+
+
+def test_incomplete_or_expired_upload_and_wrong_owner_never_queue_preparation(api):
+    client, records, cloud, _ = api
+    headers, _ = authenticated(api)
+    ticket = client.post("/api/uploads", headers=headers, json=upload_options()).json()
+    other, _ = authenticated(api, "other-provider-key")
+    assert client.post(f"/api/uploads/{ticket['id']}/complete", headers=other).status_code == 404
+    cloud.upload_sizes.clear()
+    assert client.post(f"/api/uploads/{ticket['id']}/complete", headers=headers).status_code == 400
+    assert not cloud.enqueued and "control/preparation.json" not in records.data
+    second = client.post("/api/uploads", headers=headers, json=upload_options()).json()
+    records.data[f"uploads/{second['id']}/manifest.json"]["expires_at"] = time.time() - 1
+    assert client.post(f"/api/uploads/{second['id']}/complete", headers=headers).status_code == 409
+    assert not cloud.enqueued
+
+
+def test_direct_upload_lost_queue_ack_keeps_job_and_preparation_claim(api):
+    client, records, cloud, _ = api
+    headers, _ = authenticated(api)
+    ticket = client.post("/api/uploads", headers=headers, json=upload_options()).json()
+    def ambiguous(_kind, job_id):
+        records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "preparing"})
+        raise TimeoutError("Response lost")
+    cloud.enqueue = ambiguous
+    response = client.post(f"/api/uploads/{ticket['id']}/complete", headers=headers)
+    assert response.status_code == 202 and response.json()["status"] == "preparing"
+    assert records.data["control/preparation.json"]["active"]["job_id"] == ticket["id"]
+
+
+def test_abandoned_upload_tickets_are_bounded_without_locking_preparation(api):
+    client, records, cloud, _ = api
+    headers, _ = authenticated(api)
+    for _ in range(3):
+        assert client.post("/api/uploads", headers=headers, json=upload_options()).status_code == 201
+    assert client.post("/api/uploads", headers=headers, json=upload_options()).status_code == 429
+    assert not cloud.enqueued and "control/preparation.json" not in records.data

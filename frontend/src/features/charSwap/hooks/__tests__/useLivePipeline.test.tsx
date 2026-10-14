@@ -48,7 +48,13 @@ function defaultRequest(input: RequestInfo | URL): Promise<Response> {
   }));
   if (path === "blob:source") return Promise.resolve(new Response("source", { headers: { "Content-Type": "video/mp4" } }));
   if (path === "blob:reference") return Promise.resolve(new Response("reference", { headers: { "Content-Type": "image/png" } }));
-  if (path === "/api/jobs" || path === "/api/jobs/job-1") return Promise.resolve(json({ id: "job-1", status: jobStatus }));
+  if (path === "/api/uploads") return Promise.resolve(json({
+    id: "job-1",
+    source: {url: "https://storage.googleapis.com/private-app/source?signature=test", headers: {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}},
+    reference: {url: "https://storage.googleapis.com/private-app/reference?signature=test", headers: {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}},
+  }));
+  if (path.startsWith("https://storage.googleapis.com/private-app/")) return Promise.resolve(new Response(null, {status: 200}));
+  if (path === "/api/uploads/job-1/complete" || path === "/api/jobs/job-1") return Promise.resolve(json({ id: "job-1", status: jobStatus }));
   if (path === "/api/jobs/job-1/generate") return Promise.resolve(json({ id: "job-1", status: "generating" }));
   if (path === "/api/jobs/job-1/provider") return Promise.resolve(json({ id: "job-1", status: "generating" }));
   return Promise.reject(new Error("Unexpected test request"));
@@ -95,7 +101,7 @@ describe("live BYOK pipeline", () => {
     await act(async () => { await result.current.prepare(setup()); });
     expect(result.current.error).toContain("own provider key");
     expect(calls("/api/session")).toHaveLength(0);
-    expect(calls("/api/jobs")).toHaveLength(0);
+    expect(calls("/api/uploads")).toHaveLength(0);
     expect(JSON.stringify(requests.mock.calls)).not.toContain(DEMO_API_KEY);
   });
 
@@ -116,23 +122,32 @@ describe("live BYOK pipeline", () => {
     await act(async () => { await result.current.prepare(setup()); });
     expect(result.current.job).toEqual({ id: "job-1", status: "queued" });
     expect(calls("/api/session")[0][1]?.headers).toEqual({ "X-Reapi-Key": USER_KEY, "Content-Type": "application/json" });
-    const upload = calls("/api/jobs")[0][1];
-    expect(upload?.headers).toEqual({ Authorization: `Bearer ${SESSION_TOKEN}` });
-    const form = upload?.body as FormData;
-    expect(form.get("clip")).toBeInstanceOf(File);
-    expect(form.get("reference")).toBeInstanceOf(File);
-    expect(JSON.parse(String(form.get("setup")))).toEqual({
+    const upload = calls("/api/uploads")[0][1];
+    expect(upload?.headers).toEqual({ Authorization: `Bearer ${SESSION_TOKEN}`, "Content-Type": "application/json" });
+    const ticket = JSON.parse(String(upload?.body));
+    expect(ticket.source_bytes).toBe(6);
+    expect(ticket.reference_bytes).toBe(9);
+    expect(ticket.setup).toEqual({
       trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: false,
     });
-    expect(String(form.get("setup"))).not.toContain(USER_KEY);
-    expect(String(form.get("setup"))).not.toContain(SESSION_TOKEN);
+    expect(String(upload?.body)).not.toContain(USER_KEY);
+    expect(String(upload?.body)).not.toContain(SESSION_TOKEN);
+    const storage = requests.mock.calls.filter(([input]) => String(input).startsWith("https://storage.googleapis.com/"));
+    expect(storage).toHaveLength(2);
+    for (const [, request] of storage) {
+      expect(request?.method).toBe("PUT");
+      expect(request?.body).toBeInstanceOf(File);
+      expect(request?.headers).toEqual({"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"});
+      expect(request?.credentials).toBe("omit");
+      expect(request?.redirect).toBe("error");
+    }
     expect(JSON.stringify(result.current)).not.toContain(USER_KEY);
     expect(JSON.stringify(result.current)).not.toContain(SESSION_TOKEN);
     expect(localWrites).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["blob:source", 25 * 1024 * 1024 + 1, "source"],
+    ["blob:source", 100 * 1024 * 1024 + 1, "source"],
     ["blob:reference", 5 * 1024 * 1024 + 1, "reference"],
   ])("refuses an oversized %s before any worker job is submitted", async (path, bytes, kind) => {
     requests.mockImplementation((input) => input === path
@@ -141,8 +156,46 @@ describe("live BYOK pipeline", () => {
     const { result } = await renderLive();
     await act(async () => { await result.current.prepare(setup()); });
     expect(result.current.error).toContain(`Choose a ${kind} under`);
-    expect(calls("/api/jobs")).toHaveLength(0);
+    expect(calls("/api/uploads")).toHaveLength(0);
     expect(result.current.busy).toBe(false);
+  });
+
+  it("accepts a source above the old 25 MiB limit and uploads outside the API", async () => {
+    requests.mockImplementation((input) => input === "blob:source"
+      ? Promise.resolve(new Response("source", {headers: {"Content-Length": String(100 * 1024 * 1024)}}))
+      : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    expect(result.current.job?.id).toBe("job-1");
+    expect(calls("/api/uploads/job-1/complete")).toHaveLength(1);
+    expect(calls("/api/jobs")).toHaveLength(0);
+  });
+
+  it("does not confirm or generate after a storage upload fails", async () => {
+    requests.mockImplementation((input, init) => {
+      if (String(input).includes("private-app/source?")) return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {once: true});
+      });
+      if (String(input).includes("private-app/reference?")) return Promise.resolve(new Response(null, {status: 403}));
+      return defaultRequest(input);
+    });
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    expect(result.current.error).toContain("upload did not finish");
+    expect(requests.mock.calls.find(([input]) => String(input).includes("private-app/source?"))?.[1]?.signal?.aborted).toBe(true);
+    expect(calls("/api/uploads/job-1/complete")).toHaveLength(0);
+    expect(calls("/api/jobs/job-1/generate")).toHaveLength(0);
+  });
+
+  it("retains the upload ID if queue confirmation is lost and blocks a new preparation", async () => {
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete"
+      ? Promise.reject(new Error("Response lost")) : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    expect(result.current.job).toMatchObject({id: "job-1", status: "queued"});
+    await act(async () => {await result.current.prepare(setup());});
+    expect(calls("/api/uploads")).toHaveLength(1);
+    expect(result.current.error).toContain("retained");
   });
 
   it("guards the paid submission before the first response and never automatically retries", async () => {
@@ -180,13 +233,13 @@ describe("live BYOK pipeline", () => {
 
   it("ignores a stale preparation response after reset and cancels the request", async () => {
     const response = deferred<Response>();
-    requests.mockImplementation((input) => input === "/api/jobs" ? response.promise : defaultRequest(input));
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? response.promise : defaultRequest(input));
     const { result } = await renderLive();
     let pending!: Promise<void>;
     await act(async () => { pending = result.current.prepare(setup()); });
-    expect(calls("/api/jobs")).toHaveLength(1);
+    await waitFor(() => expect(calls("/api/uploads/job-1/complete")).toHaveLength(1));
     act(() => result.current.reset());
-    expect(calls("/api/jobs")[0][1]?.signal?.aborted).toBe(true);
+    expect(calls("/api/uploads/job-1/complete")[0][1]?.signal?.aborted).toBe(true);
     await act(async () => { response.resolve(json({ id: "stale", status: "queued" })); await pending; });
     expect(result.current.job).toBeNull();
     expect(result.current.busy).toBe(false);

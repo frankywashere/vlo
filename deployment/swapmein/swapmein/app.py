@@ -12,13 +12,14 @@ from fastapi import Body, FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
+from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
 from .media import Setup, normalize_reference
 from .pipeline import Pipeline
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
@@ -153,7 +154,7 @@ def view(job: dict):
 @app.get("/api/config")
 def config():
     return {"live": True, "providers": ["reAPI", "ToAPIs"], "provider": "reAPI", "model": "minimax-h3", "delivery": "native",
-            "beta": "single-person", "available": settings.available}
+            "beta": "single-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES}
 
 
 @app.get("/health")
@@ -185,7 +186,7 @@ async def save_upload(upload: UploadFile, path: Path, maximum: int):
             while chunk := await upload.read(1024 * 1024):
                 total += len(chunk)
                 if total > maximum:
-                    raise PublicError("The clip is limited to 25 MiB and its reference to 5 MiB.", 413)
+                    raise PublicError("This multipart endpoint accepts a 25 MiB clip and 5 MiB reference. Use direct upload for clips up to 100 MiB.", 413)
                 output.write(chunk)
         if not total:
             raise PublicError("The uploaded file is empty.")
@@ -213,8 +214,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, raw_reference, image = root / "source.bin", root / "reference.bin", root / "reference.jpg"
-            await save_upload(clip, source, 25 * 1024 * 1024)
-            await save_upload(reference, raw_reference, 5 * 1024 * 1024)
+            await save_upload(clip, source, LEGACY_SOURCE_BYTES)
+            await save_upload(reference, raw_reference, MAX_REFERENCE_BYTES)
             await run_in_threadpool(normalize_reference, raw_reference, image)
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
@@ -238,6 +239,90 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             await run_in_threadpool(records.update, f"jobs/{job_id}.json", lambda current: {
                 **current, "status": "failed", "message": "Unable to queue preparation. No provider request was submitted."})
         await run_in_threadpool(records.update, "control/preparation.json", lambda current: release_preparation(current, job_id))
+        raise
+
+
+class UploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_bytes: int = Field(strict=True, gt=0, le=MAX_SOURCE_BYTES)
+    reference_bytes: int = Field(strict=True, gt=0, le=MAX_REFERENCE_BYTES)
+    setup: Setup
+
+
+@app.post("/api/uploads", status_code=201)
+def start_upload(options: UploadRequest, authorization: str | None = Header(default=None)):
+    owner, active_session = authenticate(authorization)
+    records, cloud, _ = services()
+    job_id = uuid.uuid4().hex
+    # Bound abandoned upload storage separately; no preparation slot or worker is
+    # activated until the complete endpoint verifies both immutable objects.
+    records.update("control/uploads.json", lambda current: release_preparation(reserve_preparation(
+        current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations), job_id))
+    prefix = f"uploads/{job_id}/"
+    source_uri = f"gs://{settings.app_bucket}/{prefix}source.bin"
+    reference_uri = f"gs://{settings.app_bucket}/{prefix}reference.bin"
+    source = cloud.signed_upload(source_uri, options.source_bytes)
+    reference = cloud.signed_upload(reference_uri, options.reference_bytes)
+    records.create(prefix + "manifest.json", {
+        "id": job_id, "owner": owner, "status": "uploading", "created_at": time.time(),
+        "expires_at": time.time() + UPLOAD_SECONDS, "source_uri": source_uri,
+        "raw_reference_uri": reference_uri, "source_bytes": options.source_bytes,
+        "reference_bytes": options.reference_bytes, "setup": options.setup.model_dump(),
+        "provider": active_session.get("provider", "reAPI"),
+    })
+    return {"id": job_id, "source": source, "reference": reference}
+
+
+@app.post("/api/uploads/{job_id}/complete", status_code=202)
+def complete_upload(job_id: str, authorization: str | None = Header(default=None)):
+    if not ID_PATTERN.fullmatch(job_id):
+        raise PublicError("Upload not found.", 404)
+    owner, _ = authenticate(authorization)
+    records, cloud, _ = services()
+    manifest_path = f"uploads/{job_id}/manifest.json"
+    manifest, _ = records.read(manifest_path)
+    manifest = check_owner(manifest, owner)
+    existing, _ = records.read(f"jobs/{job_id}.json")
+    if existing:
+        job = check_owner(existing, owner)
+        return {"id": job_id, "status": job["status"]}
+    if manifest["expires_at"] <= time.time():
+        raise PublicError("This upload expired. Prepare the clip again.", 409)
+    # A lost confirmation never creates a second job or duplicate task.
+    manifest = records.update(manifest_path, lambda current: claim_job(current, {"uploading"}, "confirming"))
+    reserved = False
+    record_created = False
+    enqueue_attempted = False
+    try:
+        cloud.verify_upload(manifest["source_uri"], manifest["source_bytes"])
+        cloud.verify_upload(manifest["raw_reference_uri"], manifest["reference_bytes"])
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_reference = Path(temporary) / "reference.bin"
+            image = Path(temporary) / "reference.jpg"
+            cloud.download(manifest["raw_reference_uri"], raw_reference, MAX_REFERENCE_BYTES)
+            normalize_reference(raw_reference, image)
+            reference_uri = cloud.upload(settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
+        records.update("control/preparation.json", lambda current: reserve_preparation(
+            current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+        reserved = True
+        job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
+               "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
+               "source_uri": manifest["source_uri"], "reference_uri": reference_uri}
+        records.create(f"jobs/{job_id}.json", job)
+        record_created = True
+        enqueue_attempted = True
+        cloud.enqueue("prepare", job_id)
+        records.update(manifest_path, lambda current: {**current, "status": "queued"})
+        return {"id": job_id, "status": "queued"}
+    except Exception:
+        if record_created and enqueue_attempted:
+            current = records.update(f"jobs/{job_id}.json", lambda existing: {
+                **existing, "message": "Queue confirmation is pending. Wait for this clip's status before retrying."
+            } if existing["status"] == "queued" else existing)
+            return {"id": job_id, "status": current["status"], "message": current.get("message", "")}
+        records.update(manifest_path, lambda current: {**current, "status": "failed"})
+        if reserved:
+            records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
         raise
 
 

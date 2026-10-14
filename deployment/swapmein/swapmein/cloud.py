@@ -107,6 +107,34 @@ class Cloud:
             service_account_email=self.settings.gateway_service_account, access_token=access_token(),
         )
 
+    def signed_upload(self, uri: str, size: int):
+        bucket, key = self.split_uri(uri)
+        if bucket != self.settings.app_bucket or type(size) is not int or size <= 0:
+            raise PublicError("Invalid upload.")
+        headers = {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}
+        # The browser supplies Content-Length from the Blob body. Signing it
+        # bounds the upload before it reaches storage; generation 0 prevents
+        # reuse of this URL from changing an object after verification.
+        url = self.blob(bucket, key).generate_signed_url(
+            version="v4", expiration=timedelta(minutes=15), method="PUT",
+            headers={"Content-Length": str(size), "x-goog-if-generation-match": "0"},
+            content_type=headers["Content-Type"],
+            service_account_email=self.settings.gateway_service_account, access_token=access_token(),
+        )
+        return {"url": url, "headers": headers}
+
+    def verify_upload(self, uri: str, size: int):
+        bucket, key = self.split_uri(uri)
+        if bucket != self.settings.app_bucket or type(size) is not int or size <= 0:
+            raise PublicError("Invalid upload.")
+        blob = self.blob(bucket, key)
+        try:
+            blob.reload()
+        except NotFound:
+            raise PublicError("The upload is incomplete. Upload the clip and reference again.", 409) from None
+        if blob.size != size:
+            raise PublicError("The uploaded file size does not match. Upload the clip and reference again.", 409)
+
     def check_cap(self):
         url = f"https://billingbudgets.googleapis.com/v1/billingAccounts/{self.settings.billing_account}/budgets"
         response = self.http.get(url, params={"scope": "projects/" + self.settings.project_number},
