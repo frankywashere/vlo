@@ -74,7 +74,7 @@ describe("live guide review", () => {
     render(<LiveTrackingStep {...properties()} enhancedCharacterMasking />);
     expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", guideUrl);
     expect(screen.getByText("Your generation guide")).toBeInTheDocument();
-    expect(screen.getByText(/The gray silhouette should follow your person/)).toBeInTheDocument();
+    expect(screen.getByText(/The selected-person overlay should follow your person/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "This is the right person" })).toBeDisabled();
   });
 
@@ -84,4 +84,12 @@ describe("live guide review", () => {
     expect(screen.getByRole("button", { name: "I reviewed the whole clip" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Refresh guide" })).toBeInTheDocument();
   });
+});
+
+it("requires whole-clip review for a cyan guide with cuts without rejecting it", () => {
+  render(<LiveTrackingStep {...properties()} enhancedCharacterMasking maskStyle="cyan_overlay" trackingContinuous={false} sceneCutCount={2} />);
+  expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", guideUrl);
+  expect(screen.getByText(/Only the selected person is tinted cyan/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "I reviewed the whole clip" })).toBeDisabled();
+  expect(screen.queryByText(/older guide uses solid gray/)).not.toBeInTheDocument();
 });

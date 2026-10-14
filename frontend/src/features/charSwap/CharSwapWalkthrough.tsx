@@ -714,8 +714,7 @@ export function CharSwapWalkthrough() {
                   {secureSite && (
                     <Alert severity="info" sx={{ mb: 2 }}>
                       The length snaps to whole seconds (4–15). Your start can be between seconds.
-                      {enhancedCharacterMasking &&
-                        " Enhanced character masking requires one continuous shot."}
+
                     </Alert>
                   )}
                   <TrimStep demo={demo} />
@@ -751,6 +750,7 @@ export function CharSwapWalkthrough() {
                     }
                     enhancedCharacterMasking={enhancedCharacterMasking}
                     selectedLabel={pipeline.job?.selected_label}
+                    maskStyle={pipeline.job?.mask_style}
                     trackingContinuous={pipeline.job?.tracking_continuous}
                     sceneCutCount={pipeline.job?.scene_cut_count}
                     guideUrl={pipeline.job?.guide_url}

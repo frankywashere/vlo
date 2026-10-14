@@ -66,7 +66,7 @@ class Pipeline:
                 preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
                 masks = root / "masks.zip"
                 self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
-                label, coverage = select_label(masks, metadata, require_continuous=options.enhanced_character_masking)
+                label, coverage = select_label(masks, metadata, require_continuous=False)
                 tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
                 preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
                 self.update_job(job_id, message="Preparing vocals and the generation guide.")
@@ -75,11 +75,11 @@ class Pipeline:
                     audio = invoke("/benchmark", {"input_uri": source_uri, "run_id": audio_run}, remaining())
                     vocals_uri = self.cloud.worker_output(audio, audio_run, "vocals_plus3.wav")
                     if options.enhanced_character_masking:
-                        # Gray compositing still requires the selected label in every frame.
+                        # Overlay only the selected label; empty frames remain unchanged.
                         masks_input = self.cloud.copy(masks_uri, self.settings.worker_bucket, prefix + "masks.zip")
                         vocals_input = self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
                         composed = invoke("/compose", {"input_uri": source_uri, "masks_uri": masks_input,
-                            "guide_audio_uri": vocals_input, "selected_label": label, "fill_mode": "gray", "run_id": guide_run}, remaining())
+                            "guide_audio_uri": vocals_input, "selected_label": label, "fill_mode": "color", "run_id": guide_run}, remaining())
                 if options.enhanced_character_masking:
                     prepared = self.cloud.worker_output(composed, guide_run, "prepared_guide.mp4")
                     guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, f"outputs/{job_id}/guide.mp4")
@@ -89,7 +89,7 @@ class Pipeline:
                     original_guide(normalized, vocals, guide, metadata)
                     guide_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/guide.mp4", guide, "video/mp4")
                 if options.enhanced_character_masking:
-                    message = "Review the guide and confirm that only your selected person is covered."
+                    message = "Review every scene. Only your selected person should have a translucent cyan overlay. Identity across cuts or gaps is not verified."
                 elif not tracking_continuous:
                     message = "Review every scene in the guide. The selected person's identity is not verified across camera cuts or tracking gaps; generation may change other people."
                 else:
@@ -97,7 +97,7 @@ class Pipeline:
                 self.update_job(job_id, status="ready", message=message,
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
                     normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"]["frame"] / 24},
-                    mask_frames=metadata["frames"], mask_coverage_min=min(coverage), review_required=True,
+                    mask_style="cyan_overlay" if options.enhanced_character_masking else "none", mask_frames=metadata["frames"], mask_coverage_min=min(coverage), review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)

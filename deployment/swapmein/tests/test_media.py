@@ -190,7 +190,7 @@ def test_network_playlist_is_not_allowed_as_an_uploaded_video(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for cut detection")
-def test_camera_cuts_are_allowed_without_masking_and_rejected_for_gray_masking(tmp_path):
+def test_camera_cuts_are_allowed_with_and_without_enhanced_masking(tmp_path):
     source, output = tmp_path / "cut.mp4", tmp_path / "normalized.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x320:r=24:d=2",
                     "-f", "lavfi", "-i", "color=c=blue:s=320x320:r=24:d=2", "-f", "lavfi",
@@ -200,8 +200,8 @@ def test_camera_cuts_are_allowed_without_masking_and_rejected_for_gray_masking(t
     metadata = normalize(source, output, options())
     assert metadata["scene_cuts"] == [2.0]
     assert metadata["frames"] == 96
-    with pytest.raises(PublicError, match="Enhanced character masking needs one continuous shot"):
-        normalize(source, output, options(enhanced_character_masking=True))
+    masked_metadata = normalize(source, output, options(enhanced_character_masking=True))
+    assert masked_metadata["scene_cuts"] == [2.0]
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for mask-free guide composition")

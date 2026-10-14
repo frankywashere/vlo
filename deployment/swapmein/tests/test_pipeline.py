@@ -60,7 +60,7 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     assert all(re.fullmatch(rf"outputs/{job_id}/swapMEin-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
 
 
-@pytest.mark.parametrize("enabled,scene_cuts,coverage", [(True, [], [100] * 120),
+@pytest.mark.parametrize("enabled,scene_cuts,coverage", [(True, [], [100] * 120), (True, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 120), (False, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 48 + [0] * 72)])
 def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage):
@@ -72,7 +72,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
                 "anchor": {"x": .6, "y": .4, "frame": 24}, "scene_cuts": scene_cuts}
     monkeypatch.setattr("swapmein.pipeline.normalize", lambda *_: metadata)
     def selected(*_, require_continuous):
-        assert require_continuous is enabled
+        assert require_continuous is False
         return 2, coverage
     monkeypatch.setattr("swapmein.pipeline.select_label", selected)
     composed_original = []
@@ -116,7 +116,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
     assert records.data[path]["tracking_continuous"] is (not scene_cuts and all(coverage))
     if enabled:
         assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio", "audio"]
-        assert cloud.calls[-1][2]["fill_mode"] == "gray"
+        assert cloud.calls[-1][2]["fill_mode"] == "color"
         assert cloud.calls[-1][2]["selected_label"] == 2
         assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
         assert not composed_original

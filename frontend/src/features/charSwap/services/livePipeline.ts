@@ -38,6 +38,7 @@ export interface LivePipelineJob {
   selected_label?: number;
   tracking_continuous?: boolean;
   scene_cut_count?: number;
+  mask_style?: "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
   provider_checked_at?: number;
   provider_state?: "queued" | "pending" | "processing" | "running" | "generating" | "unknown";
@@ -203,6 +204,8 @@ function readJob(value: unknown): LivePipelineJob {
     id: value.id,
     status: value.status as LiveJobStatus,
   };
+  if (["cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
+    job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
   if (typeof value.tracking_continuous === "boolean")

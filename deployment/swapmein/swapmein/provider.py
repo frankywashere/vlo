@@ -15,7 +15,7 @@ def estimate(duration: int, rate: float = .074):
     return math.ceil(duration * 2 * rate * 1000) / 1000
 
 
-def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: dict | None = None):
+def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay"):
     if not enhanced_masking:
         anchor = anchor or {"x": .5, "y": .5, "time": 0}
         return (
@@ -26,6 +26,18 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
             f"Preserve the background, camera, lighting, motion and exact {duration}-second timing. "
             "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
             "Replace this person rather than adding another character. Keep all other people unchanged."
+        )
+    if mask_style == "cyan_overlay":
+        return (
+            "Use reference video 1 as the source scene and precise motion guide. "
+            "Replace only the person highlighted by the translucent cyan (blue-green) overlay with the character "
+            "from reference image 1, including their entire head, hands, body and feet. "
+            "The cyan tint is a selection marker, not their appearance. Remove all overlay tint in the final video. "
+            "Follow that selected person through scene changes. In frames where the selected person is absent, "
+            "preserve the scene and do not replace another person. Keep all other people unchanged. "
+            f"Preserve the background, camera, lighting, motion and exact {duration}-second timing. "
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
+            "Replace the selected person rather than adding another character."
         )
     return (
         "Use reference video 1 as the source scene and precise motion guide. "
@@ -40,8 +52,8 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
     )
 
 
-def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None):
-    return {"model": "minimax-h3", "prompt": replacement_prompt(duration, enhanced_masking, anchor), "duration": duration,
+def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay"):
+    return {"model": "minimax-h3", "prompt": replacement_prompt(duration, enhanced_masking, anchor, mask_style), "duration": duration,
             "resolution": "768P", "aspect_ratio": "adaptive", "content_filter": False,
             "reference_image_urls": [image_url], "reference_video_urls": [video_url]}
 

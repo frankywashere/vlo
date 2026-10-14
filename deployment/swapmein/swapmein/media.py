@@ -115,8 +115,6 @@ def normalize(source: Path, output: Path, setup: Setup):
     cuts = run(["ffmpeg", "-hide_banner", "-loglevel", "info", "-protocol_whitelist", "file,pipe", "-i", str(output), "-an",
                 "-vf", "select='gt(scene,0.40)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
     scene_cuts = [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
-    if setup.enhanced_character_masking and scene_cuts:
-        raise PublicError("Enhanced character masking needs one continuous shot. Turn it off to use a clip with camera cuts, or trim to one shot.")
     anchor = {"x": (setup.anchor.x * sw + (width - sw) / 2) / width,
               "y": (setup.anchor.y * sh + (height - sh) / 2) / height,
               "frame": min(duration * 24 - 1, round((setup.anchor.time - start) * 24))}

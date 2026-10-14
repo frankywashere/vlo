@@ -72,14 +72,13 @@ afterEach(() => {
 });
 
 describe("live generation approval", () => {
-  it.each([false, true])("requires a continuous shot only when enhanced masking is %s", (enhanced) => {
+  it.each([false, true])("allows scene changes when enhanced masking is %s", (enhanced) => {
     useCharSwapStore.getState().setEnhancedCharacterMasking(enhanced);
     useCharSwapStore.getState().visit("trim");
     render(<CharSwapWalkthrough />);
     expect(screen.getByText(/The length snaps to whole seconds/)).toBeInTheDocument();
     const continuityHint = screen.queryByText(/Enhanced character masking requires one continuous shot/);
-    if (enhanced) expect(continuityHint).toBeInTheDocument();
-    else expect(continuityHint).not.toBeInTheDocument();
+    expect(continuityHint).not.toBeInTheDocument();
   });
 
   it("requires whole-clip review before access for a guide containing scene cuts", async () => {

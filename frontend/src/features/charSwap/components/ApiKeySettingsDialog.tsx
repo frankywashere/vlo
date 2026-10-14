@@ -125,7 +125,7 @@ function ApiKeyPreviewEditor({
               }
             />
             <Typography variant="body2" color="text.secondary">
-              Cover the selected person with a solid gray silhouette before
+              Highlight only the selected person with a translucent cyan overlay before
               generation. Turn off to keep the original person visible. Person
               tracking stays on.
             </Typography>

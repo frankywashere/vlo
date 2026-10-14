@@ -13,6 +13,7 @@ import { PANEL } from "./stepStyles";
 interface LiveTrackingStepProps {
   enhancedCharacterMasking?: boolean;
   selectedLabel?: number;
+  maskStyle?: "cyan_overlay" | "gray" | "none";
   trackingContinuous?: boolean;
   sceneCutCount?: number;
   status: string;
@@ -32,6 +33,7 @@ interface LiveTrackingStepProps {
 export function LiveTrackingStep({
   enhancedCharacterMasking = false,
   selectedLabel,
+  maskStyle,
   trackingContinuous,
   sceneCutCount,
   status,
@@ -49,7 +51,6 @@ export function LiveTrackingStep({
 }: LiveTrackingStepProps) {
   const ready = status === "ready";
   const wholeClipReview =
-    !enhancedCharacterMasking &&
     (trackingContinuous === false || (sceneCutCount ?? 0) > 0);
   const [playable, setPlayable] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -60,7 +61,7 @@ export function LiveTrackingStep({
         {message ??
           (ready
             ? enhancedCharacterMasking
-              ? "Check that gray covers only the person you selected throughout the clip. Generation has not started."
+              ? "Check that the overlay covers only the person you selected throughout the clip. Generation has not started."
               : wholeClipReview
                 ? "Review the whole generation guide before approving. Generation has not started."
                 : "Review the selected label in the tracking preview. Generation has not started."
@@ -75,6 +76,9 @@ export function LiveTrackingStep({
           The model may change other people. Review every scene before approving.
         </Alert>
       )}
+      {ready && enhancedCharacterMasking && guideUrl && <Typography variant="body2">
+        {maskStyle === "gray" || !maskStyle ? "This older guide uses solid gray masking." : "Only the selected person is tinted cyan. This guide is sent to MiniMax without numbers."}
+      </Typography>}
       {ready && guideUrl && (
         <Box sx={PANEL}>
           <Typography fontWeight={600} sx={{ mb: 2 }}>
@@ -106,9 +110,9 @@ export function LiveTrackingStep({
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {enhancedCharacterMasking
-              ? "Review the whole clip. The gray silhouette should follow your person without covering anyone else."
+              ? "Review the whole clip. The selected-person overlay should follow your person without covering anyone else."
               : wholeClipReview
-                ? "Watch the whole guide, including every scene change. The generation guide keeps the original person visible."
+                ? "Watch the whole guide, including every scene change. Confirm the correct person in each scene."
                 : `Check that person label ${selectedLabel ?? "shown"} follows your selected person throughout this tracking preview. The generation guide keeps the original person visible.`}{" "}
             This is a visual check; it does not guarantee identity tracking
             through a cut.

@@ -13,15 +13,14 @@ records its checks and the remaining generation-quality limits.
 
 ## Supported beta
 
-- One selected person and one reference image. Cuts are allowed with enhanced
-  masking off; enhanced gray masking requires one continuous shot.
+- One selected person and one reference image. Cuts are allowed in both masking modes.
 - A 4–15-second selection with a whole-second duration; the trim start and target
   timestamp may be fractional. The application does not yet round a fractional
   selection up for generation and trim it back afterward.
 - SAM tracks the original RGB video. Depth Anything and face mesh are omitted.
 - **Enhanced character masking is off by default.** With it off, the generation
-  guide keeps the original person visible. With it on, the CPU compositor fills
-  the selected SAM label with flat gray and keeps the rest of the original frame.
+  guide keeps the original person visible. With it on, the CPU compositor blends a 50%-opacity cyan overlay into
+  only the selected SAM label, without numbers, and keeps the rest of the original frame.
 - Both modes use Demucs-separated vocals shifted up three semitones, without a
   timing change. The final export restores the source soundtrack.
 - Preparation uses a normalized guide of at most 854×480 at 24 fps. Standard H3
@@ -50,12 +49,12 @@ may flag strong lighting changes or abrupt motion.
 3. The browser uploads both files and confirms with `/api/uploads/{id}/complete`.
    The gateway verifies their actual sizes, normalizes the image, atomically
    reserves a preparation slot, saves the job, and enqueues its preparation task.
-4. The task trims and normalizes the source, records detected cuts, and rejects
-   them only with enhanced gray masking. Both modes activate SAM on `proof-gpu`,
+4. The task trims and normalizes the source, records detected cuts, and allows
+   them in either masking mode. Both modes activate SAM on `proof-gpu`,
    validate the mask archive and actual label under the clicked point, then shut
-   the GPU worker down. Only gray mode requires that label in every frame.
-5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Gray mode calls
-   its strict `/compose` endpoint; masking-off mode uses gateway CPU FFmpeg to
+   the GPU worker down. Absent-label frames remain unchanged; identity matching across cuts requires review.
+5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Overlay mode calls
+   its `/compose` endpoint with `fill_mode: color`; masking-off mode uses gateway CPU FFmpeg to
    remux normalized RGB with those vocals, bypassing mask-based composition. The
    audio worker is shut down, private review links are published, and the job
    becomes `ready`.
@@ -204,8 +203,7 @@ Both integrations are implemented in [provider.py](swapmein/provider.py), with
 one reference image, one guide video, integer duration, adaptive aspect ratio
 and a replacement prompt that preserves the source scene and other people.
 Without gray fill, the prompt identifies the selected person using normalized
-anchor coordinates and clip-relative time; with gray fill, it identifies the
-gray silhouette. There is no paid fallback to another provider.
+anchor coordinates and clip-relative time; with colored masking, it identifies the cyan overlay. There is no paid fallback to another provider.
 
 | Operation | reAPI | ToAPIs |
 | --- | --- | --- |
@@ -443,3 +441,16 @@ is applied.
 Cloud Tasks RPC timeouts stay below its 30-second server limit. A controlled
 cloud diagnostic reproduced `INVALID_ARGUMENT` at the 30-second boundary; task
 creation and deletion now use 20 seconds to leave transport/clock headroom.
+
+## Colored masking revision
+
+Enhanced masking now submits a translucent cyan overlay (RGB 0,220,255, opacity
+0.5) on only the selected label, with no numbers. Scene cuts and zero-coverage
+frames are accepted; zero coverage does not select a different label. The
+review must still confirm identity in every scene. Legacy ready gray guides
+retain the gray prompt via their absent `mask_style` field. New masked guides
+store `mask_style: cyan_overlay`.
+
+The versioned CPU worker patch is in `worker_patch/`; it overlays the existing
+immutable audio image without reinstalling models. Original gray/original
+composition modes remain available for historical diagnostics.

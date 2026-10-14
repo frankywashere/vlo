@@ -431,3 +431,14 @@ def test_provider_poll_reports_safe_status_and_check_time_without_resubmission(a
     assert checked['provider_checked_at'] >= submitted.json()['generation_started_at']
     assert 'unexpected-private-message' not in json.dumps(checked)
     assert len(provider.submissions) == 1 and cloud.enqueued == []
+
+
+def test_new_overlay_guide_uses_cyan_prompt_without_changing_legacy_gray_jobs(api):
+    client, records, _, provider = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    records.data[f'jobs/{job_id}.json']['mask_style'] = 'cyan_overlay'
+    response = client.post(f'/api/jobs/{job_id}/generate', headers=headers, json={'approved': True})
+    assert response.status_code == 200
+    assert 'translucent cyan' in provider.submissions[-1]['prompt']
+    assert 'gray silhouette' not in provider.submissions[-1]['prompt']

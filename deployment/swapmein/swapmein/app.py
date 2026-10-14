@@ -146,7 +146,7 @@ def view(job: dict):
     if job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "generation_started_at"]:
+    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "generation_started_at", "mask_style"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
@@ -397,7 +397,7 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     anchor = options.anchor.model_dump()
     anchor["time"] -= options.trim[0]
     anchor = job.get("normalized_anchor", anchor)
-    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor)
+    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor, job.get("mask_style", "gray"))
     balance = provider.balance(key)
     if balance < round(job_estimate(job) * 1000):
         raise PublicError("Your provider allowance is below the current estimate. Check credits and token limits before generating.", 402)
