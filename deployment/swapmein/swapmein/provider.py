@@ -14,7 +14,7 @@ def estimate(duration: int, rate: float = .074):
     return math.ceil(duration * 2 * rate * 1000) / 1000
 
 
-def replacement_prompt(duration: int, enhanced_masking: bool = True, anchor: dict | None = None):
+def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: dict | None = None):
     if not enhanced_masking:
         anchor = anchor or {"x": .5, "y": .5, "time": 0}
         return (
@@ -39,7 +39,7 @@ def replacement_prompt(duration: int, enhanced_masking: bool = True, anchor: dic
     )
 
 
-def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = True, anchor: dict | None = None):
+def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None):
     return {"model": "minimax-h3", "prompt": replacement_prompt(duration, enhanced_masking, anchor), "duration": duration,
             "resolution": "768P", "aspect_ratio": "adaptive", "content_filter": False,
             "reference_image_urls": [image_url], "reference_video_urls": [video_url]}

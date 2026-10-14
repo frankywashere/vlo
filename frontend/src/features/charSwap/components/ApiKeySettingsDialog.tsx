@@ -64,7 +64,7 @@ export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
 }
 
 function ApiKeyPreviewEditor({
-  enhancedCharacterMasking = true,
+  enhancedCharacterMasking = false,
   maskingLocked = false,
   onMaskingChange,
   provider = "reAPI",

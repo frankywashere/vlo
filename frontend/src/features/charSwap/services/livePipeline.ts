@@ -394,7 +394,7 @@ export async function createLiveJob(
       trim: state.trim,
       anchor: target.anchor,
       target_name: target.name,
-      enhanced_character_masking: state.enhancedCharacterMasking ?? true,
+      enhanced_character_masking: state.enhancedCharacterMasking ?? false,
     }),
   );
   return readJob(

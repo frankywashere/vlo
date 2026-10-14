@@ -110,7 +110,7 @@ The setup download records filenames, anchors and decisions; it excludes keys, f
 
 ### Enhanced character masking
 
-Settings includes **Use enhanced character masking**, on by default. On paints the selected SAM label solid gray; off retains the original RGB performer. Both modes keep SAM tracking and shifted vocal guidance. Changing the setting invalidates the prepared job and its approval; active or uncertain submissions lock settings. With masking off, review the selected numeric label in the tracking preview before generation. The generation prompt identifies the clicked position and time instead of referring to gray. Saved setup JSON includes this choice.
+Settings includes **Use enhanced character masking**, off by default. On paints the selected SAM label solid gray; off retains the original RGB performer. Both modes keep SAM tracking and shifted vocal guidance. Changing the setting invalidates the prepared job and its approval; active or uncertain submissions lock settings. With masking off, review the selected numeric label in the tracking preview before generation. The generation prompt identifies the clicked position and time instead of referring to gray. Saved setup JSON includes this choice.
 
 ### ToAPIs MiniMax H3
 

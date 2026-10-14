@@ -228,7 +228,7 @@ This backend is a separate deployment consumer of the existing private workers,
 not a VLO SDK/extension-owned service. No new extension surface is exposed; the
 repository extension-surface check still applies before handoff.
 
-The job setup accepts strict boolean `enhanced_character_masking` (default `true` for existing clients). The CPU compose call uses `gray` when on and `original` when off. SAM and audio preparation remain active in both modes. Generation reads the saved job option and normalized selection coordinates; the final export preserves generated resolution with original audio.
+The job setup accepts strict boolean `enhanced_character_masking` (default `false` for new requests). Existing saved jobs without the option retain their historical gray-mode interpretation. The CPU compose call uses `gray` when on and `original` when off. SAM and audio preparation remain active in both modes. Generation reads the saved job option and normalized selection coordinates; the final export preserves generated resolution with original audio.
 
 ### ToAPIs MiniMax H3
 

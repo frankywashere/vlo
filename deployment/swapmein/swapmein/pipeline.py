@@ -49,7 +49,7 @@ class Pipeline:
                 root = Path(temporary)
                 source, normalized = root / "source.bin", root / "normalized.mp4"
                 self.cloud.download(job["source_uri"], source, 25 * 1024 * 1024)
-                options = Setup.model_validate(job["setup"])
+                options = Setup.model_validate({"enhanced_character_masking": True, **job["setup"]})
                 metadata = normalize(source, normalized, options)
                 prefix = f"inputs/swapmein-{job_id}/"
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")

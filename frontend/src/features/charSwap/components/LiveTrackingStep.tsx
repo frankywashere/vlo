@@ -28,7 +28,7 @@ interface LiveTrackingStepProps {
 }
 
 export function LiveTrackingStep({
-  enhancedCharacterMasking = true,
+  enhancedCharacterMasking = false,
   selectedLabel,
   status,
   message,
