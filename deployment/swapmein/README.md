@@ -433,3 +433,9 @@ remain user-review decisions.
 This standalone gateway consumes the private workers outside the VLO extension
 host; it adds no SDK or extension-owned service. After repository changes, run
 `npm run check:extension-surface` at the repository root as required by AGENTS.md.
+
+Export accepts provider results longer than the requested selection and trims
+excess end frames to the selected duration. It restores only the matching
+original soundtrack segment, preserves generated dimensions, and still rejects
+short results or incomplete frame/audio coverage. No playback-speed adjustment
+is applied.

@@ -103,15 +103,16 @@ def test_real_normalization_and_soundtrack_restoration(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for independent input streams")
-def test_five_second_dual_input_export_restores_audio_through_the_last_frame(tmp_path):
+@pytest.mark.parametrize("returned_duration", [5.167, 5.458333, 8])
+def test_five_second_dual_input_export_restores_audio_through_the_last_frame(tmp_path, returned_duration):
     source, normalized, generated, result = [tmp_path / name for name in ["source.mp4", "normalized.mp4", "generated.mp4", "result.mp4"]]
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=854x480:r=24:d=6",
                     "-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-map", "0:v", "-map", "1:a", "-t", "6",
                     "-c:v", "libx264", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-pix_fmt", "yuv420p", str(source)], check=True)
     normalize(source, normalized, options(trim=[.25, 5.25]))
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=1280x720:r=24:d=5.167",
-                    "-f", "lavfi", "-i", "sine=frequency=880:duration=5.167", "-map", "0:v", "-map", "1:a",
-                    "-t", "5.167", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", str(generated)], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=blue:s=1280x720:r=24:d={returned_duration}",
+                    "-f", "lavfi", "-i", f"sine=frequency=880:duration={returned_duration}", "-map", "0:v", "-map", "1:a",
+                    "-t", str(returned_duration), "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", str(generated)], check=True)
     finish(generated, normalized, result, 5)
     checked = probe(result)
     video = next(stream for stream in checked["streams"] if stream["codec_type"] == "video")
@@ -240,3 +241,9 @@ def test_original_guide_preserves_cut_frames_and_replaces_audio_without_masks(tm
                     "sine=frequency=440:duration=2", str(vocals)], check=True)
     with pytest.raises(PublicError, match="does not match the clip timing"):
         original_guide(normalized, vocals, tmp_path / "short.mp4", metadata)
+
+
+def test_export_still_rejects_a_provider_video_shorter_than_selection(tmp_path, monkeypatch):
+    monkeypatch.setattr('swapmein.media.probe', lambda _: {'format': {'duration': '3.5'}})
+    with pytest.raises(PublicError, match='shorter than the selected section'):
+        finish(tmp_path/'generated.mp4', tmp_path/'source.mp4', tmp_path/'out.mp4', 4)

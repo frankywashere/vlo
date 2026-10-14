@@ -205,8 +205,8 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
            audio_source: Path | None = None, audio_start: float = 0):
     metadata = probe(raw)
     length = float(metadata.get("format", {}).get("duration", 0))
-    if not duration - .05 <= length <= duration + .3:
-        raise PublicError("The provider changed the clip timing. The result needs manual review.")
+    if not math.isfinite(length) or length < duration - .05:
+        raise PublicError("The provider returned a clip shorter than the selected section. The result needs manual review.")
     video = next((s for s in metadata.get("streams", []) if s.get("codec_type") == "video"), None)
     if not video or max(video["width"], video["height"]) > 5760:
         raise PublicError("The provider returned an unsupported video.")
