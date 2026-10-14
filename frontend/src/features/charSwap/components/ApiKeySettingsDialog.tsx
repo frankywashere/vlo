@@ -140,12 +140,9 @@ function ApiKeyPreviewEditor({
           </Alert>
           <Stack direction="row" spacing={3}>
             <Box>
-              <Typography variant="caption" color="text.secondary">
-                Provider
-              </Typography>
               <TextField
                 select
-                label="Generation provider"
+                label="Provider"
                 value={provider}
                 disabled={maskingLocked}
                 onChange={(event) => {
