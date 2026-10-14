@@ -40,7 +40,7 @@ quality or identity correctness.
 
 1. **Clip:** choose a local video. It stays on the device until cloud preparation.
 2. **Trim:** select the section before choosing people. The starting time may be
-   fractional; the selected duration currently must be a whole number from 4–15
+   fractional; the trimmer automatically snaps the selected duration to a whole number from 4–15
    seconds. Both integrated H3 APIs document integer output durations. Automatic
    round-up generation followed by an exact fractional trim is a proposed change,
    not deployed behavior.
@@ -49,26 +49,28 @@ quality or identity correctness.
    local demo can show multiple targets.
 4. **References:** tap the image tile or Upload button to assign a replacement
    image to that person. Each card holds its own person-to-reference mapping.
-5. **Check all scenes / Matches:** the button starts preparation. The site shows
-   the real access, capacity, upload, confirmation, queued and preparation stages,
-   with elapsed time and an indeterminate progress bar. It checks capacity before
-   reading/uploading media and checks again before issuing upload links. Daily,
-   monthly, busy and recovery errors are distinguished; known reset times display
-   in the browser's local timezone. A refused check stays on References.
-6. **Access:** choose a personal provider key or the app-credit preview. A real key
-   must already be supplied in Settings before preparation validates access. Both
-   reAPI and ToAPIs are available. Real app-credit purchases and generation using
-   app credits are not implemented.
-7. **Review:** confirm tracking/guide playback, the assigned reference and the
-   estimate, then explicitly approve one generation. A completed result provides
-   a private download link.
+5. **Access (masking off):** choose a personal provider key or the app-credit
+   preview. No preparation starts when leaving References. With a real key,
+   continuing from Access validates it and starts preparation. App-credit purchases
+   and generation using app credits are not implemented.
+6. **Review (masking off):** preparation reports real access, capacity, upload,
+   confirmation, queued and audio/guide stages with elapsed time. The guide appears
+   here when ready. Generation stays disabled until it is playable; the user checks
+   the section, reference and cost, then explicitly clicks Generate. There is no
+   separate tracking confirmation and no paid generation during preparation.
 
-**“Check all scenes” prepares the selected section.** With enhanced masking off,
-cuts or gaps in the selected SAM label trigger whole-guide review and an explicit
-warning that identity matching across scenes is unverified. With masking on,
-detected cuts or missing selected-label coverage are rejected. Automatic cross-shot
-matching and per-scene target assignments are not implemented. The local demo's
-uncertainty cases are simulated; no identity-confidence scores are calculated.
+With enhanced masking **on**, the seven-step flow retains its overlay review
+between References and Access. A provider key must be entered before this earlier
+preparation; the guide must be reviewed/confirmed before moving to Access.
+Scene cuts and absent-label frames are supported. Automatic cross-shot identity
+matching and per-scene target assignments are not implemented. The local demo
+retains its simulated matching flow.
+
+Capacity is checked before upload and again before issuing upload links. Daily,
+monthly, busy and recovery errors are distinguished. A rejected masking-off
+preparation remains at Access; an error after queuing can be inspected in Review
+and retried explicitly through Access. A completed generation exposes its private
+download link. Refreshing status does not submit another generation.
 
 ## End-to-end processing and where it runs
 

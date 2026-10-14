@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { CharSwapWalkthrough } from "../CharSwapWalkthrough";
 import { useCharSwapStore } from "../useCharSwapStore";
+import type { PreparationProgressState } from "../model/preparation";
 import type { LivePipelineJob } from "../services/livePipeline";
 
 const live = vi.hoisted(() => ({
@@ -23,6 +24,8 @@ const live = vi.hoisted(() => ({
     guide_url: "https://storage.googleapis.com/test/guide.mp4",
     estimated_cost_usd: 0.74,
   } as LivePipelineJob,
+  preparationProgress: null as PreparationProgressState | null,
+  preparationElapsedSeconds: 0,
   busy: false,
   error: null,
   prepare: vi.fn(),
@@ -36,6 +39,10 @@ vi.mock("../services/livePipeline", () => ({ isSecureLiveOrigin: () => true }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  live.job.status = "ready";
+  live.busy = false;
+  live.preparationProgress = null;
+  live.prepare.mockReset();
   delete live.job.tracking_continuous;
   delete live.job.scene_cut_count;
   vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
@@ -44,6 +51,7 @@ beforeEach(() => {
   );
   useCharSwapStore.getState().reset();
   const store = useCharSwapStore.getState();
+  store.setEnhancedCharacterMasking(true);
   store.loadClip({
     id: "clip",
     name: "clip.mp4",
@@ -144,4 +152,43 @@ describe("live generation approval", () => {
     );
     expect(live.generate).toHaveBeenCalledOnce();
   });
+});
+
+
+it("routes masking-off references to Access, prepares after key entry, and reviews before generation", async () => {
+  const user = userEvent.setup();
+  const store = useCharSwapStore.getState();
+  store.setEnhancedCharacterMasking(false);
+  store.visit("references");
+  live.job.status = "failed"; // no reusable prepared guide
+  live.prepare.mockImplementation(async () => {
+    live.job.status = "queued";
+    live.preparationProgress = {phase: "preparing", message: "Preparing vocals and the generation guide."};
+    return true;
+  });
+  const {rerender} = render(<CharSwapWalkthrough />);
+  const nav = screen.getByRole("navigation", {name: "Replacement steps"});
+  expect(within(nav).queryByRole("button", {name: "Prepare"})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Choose access"}));
+  expect(useCharSwapStore.getState().step).toBe("access");
+  expect(live.prepare).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", {name: "Review setup"})).toBeDisabled();
+  await user.click(screen.getByRole("button", {name: "Add API key"}));
+  await user.type(screen.getByLabelText("reAPI API key"), "fake-user-key-for-flow");
+  await user.click(screen.getByRole("button", {name: "Save key"}));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await user.click(screen.getByRole("button", {name: "Review setup"}));
+  expect(live.prepare).toHaveBeenCalledOnce();
+  expect(useCharSwapStore.getState().step).toBe("review");
+  expect(screen.getByRole("heading", {name: "Preparing your clip"})).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
+  expect(live.generate).not.toHaveBeenCalled();
+  live.job.status = "ready";
+  live.preparationProgress = null;
+  rerender(<CharSwapWalkthrough />);
+  expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", live.job.guide_url);
+  expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
+  fireEvent.loadedData(screen.getByLabelText("Clip preview"));
+  await user.click(screen.getByRole("button", {name: "Generate replacements"}));
+  expect(live.generate).toHaveBeenCalledOnce();
 });

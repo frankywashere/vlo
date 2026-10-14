@@ -161,7 +161,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     const state = get();
     if (
       canVisitStep(state, step) &&
-      (!["access", "review"].includes(step) || state.trackingReady)
+      (!["access", "review"].includes(step) || state.trackingReady || (state.clip?.mode === "upload" && !state.enhancedCharacterMasking))
     )
       set({ step, error: null });
   },
@@ -172,7 +172,9 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
       return;
     }
     if (state.step === "matches" && !state.trackingReady) return;
-    const next = STEPS[STEPS.indexOf(state.step) + 1];
+    const steps = state.clip?.mode === "upload" && !state.enhancedCharacterMasking
+      ? STEPS.filter((step) => step !== "matches") : STEPS;
+    const next = steps[steps.indexOf(state.step) + 1];
     if (next) set({ step: next, error: null });
   },
   setError: (error) => set({ error }),

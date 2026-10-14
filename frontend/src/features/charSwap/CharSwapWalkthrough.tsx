@@ -134,10 +134,14 @@ function ProgressNavigation({
   locked,
   blockedForward,
   accessReady,
+  skipMaskReview,
+  reviewReady,
 }: {
   locked: boolean;
   blockedForward: boolean;
   accessReady: boolean;
+  skipMaskReview: boolean;
+  reviewReady: boolean;
 }) {
   const {
     step,
@@ -173,7 +177,8 @@ function ProgressNavigation({
     issues,
     decisions,
   };
-  const current = STEPS.indexOf(step);
+  const flowSteps = skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS;
+  const current = flowSteps.indexOf(step);
   const navigationRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const nav = navigationRef.current;
@@ -198,14 +203,14 @@ function ProgressNavigation({
         overflowX: "auto",
       }}
     >
-      {STEPS.map((item, index) => {
+      {flowSteps.map((item, index) => {
         const Icon = STEP_INFO[item].icon;
         const active = item === step;
         const accessible =
           !locked &&
           canVisitStep(state, item) &&
           (item !== "review" || accessReady) &&
-          (!["matches", "access", "review"].includes(item) || trackingReady) &&
+          (skipMaskReview ? item !== "review" || reviewReady : !["matches", "access", "review"].includes(item) || trackingReady) &&
           (index <= current || !blockedForward);
         return (
           <Button
@@ -345,7 +350,9 @@ export function CharSwapWalkthrough() {
     importClip,
     importReference,
   } = useLocalAssets();
-  const current = STEPS.indexOf(step);
+  const skipMaskReview = clip?.mode === "upload" && !enhancedCharacterMasking;
+  const flowSteps = skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS;
+  const current = flowSteps.indexOf(step);
   const state = {
     enhancedCharacterMasking,
     clip,
@@ -409,7 +416,7 @@ export function CharSwapWalkthrough() {
     setResetDialog(false);
   }
   async function continueFlow() {
-    if (step === "references" && live) {
+    if (step === "references" && live && !skipMaskReview) {
       if (!hasKey || isSampleKey) {
         setError(
           `Add your ${provider} key before cloud preparation. Generation starts only after Review.`,
@@ -426,6 +433,16 @@ export function CharSwapWalkthrough() {
         if (!await pipeline.prepare(state)) return;
       }
     }
+    if (step === "access" && skipMaskReview && live && accessMode === "api-key") {
+      if (!hasKey || isSampleKey) {
+        setError(`Add your ${provider} key before preparing your clip.`);
+        setApiSettingsOpen(true);
+        return;
+      }
+      if (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) {
+        if (!await pipeline.prepare(state)) return;
+      }
+    }
     if (step === "references" && clip?.mode === "demo" && demo)
       reviewTracking(sampleReviewIssues(targets, demo, trim));
     next();
@@ -438,7 +455,7 @@ export function CharSwapWalkthrough() {
         : step === "people"
           ? "Choose references"
           : step === "references"
-            ? "Check all scenes"
+            ? skipMaskReview ? "Choose access" : "Check all scenes"
             : step === "matches"
               ? "Choose access"
               : "Review setup";
@@ -589,6 +606,8 @@ export function CharSwapWalkthrough() {
               <ProgressNavigation
                 locked={lockedAccess}
                 accessReady={accessMode === "credits" || hasKey}
+                skipMaskReview={skipMaskReview}
+                reviewReady={!live || Boolean(pipeline.job && ["ready", "generating", "finalizing", "completed", "submission_unknown"].includes(pipeline.job.status))}
                 blockedForward={
                   busy || loadingDemo || pendingReferences.length > 0
                 }
@@ -644,7 +663,7 @@ export function CharSwapWalkthrough() {
                   color="primary"
                   sx={{ letterSpacing: ".08em", fontWeight: 600 }}
                 >
-                  STEP {current + 1} OF {STEPS.length}
+                  STEP {current + 1} OF {flowSteps.length}
                 </Typography>
                 <Typography
                   component="h1"
@@ -666,7 +685,7 @@ export function CharSwapWalkthrough() {
               </Box>
               {pipeline.preparationProgress && (
                 <Box sx={{mb: 2}}>
-                  <PreparationProgress progress={pipeline.preparationProgress} elapsedSeconds={pipeline.preparationElapsedSeconds} />
+                  <PreparationProgress title={skipMaskReview ? "Preparing your clip" : undefined} progress={pipeline.preparationProgress} elapsedSeconds={pipeline.preparationElapsedSeconds} />
                 </Box>
               )}
               {(error || pipeline.error) && (
@@ -831,7 +850,7 @@ export function CharSwapWalkthrough() {
                 >
                   <Button
                     startIcon={<ArrowBackRounded />}
-                    onClick={() => visit(STEPS[current - 1])}
+                    onClick={() => visit(flowSteps[current - 1])}
                     disabled={current === 0 || pipeline.busy}
                     sx={{ color: "text.secondary", minWidth: 76 }}
                   >
@@ -848,7 +867,7 @@ export function CharSwapWalkthrough() {
                       aria-live="polite"
                     >
                       {pipeline.preparationProgress
-                        ? "Scene check in progress"
+                        ? "Preparing your clip"
                         : step === "matches" && !trackingReady
                           ? "Tracking connection needed"
                         : step === "matches" && unresolved

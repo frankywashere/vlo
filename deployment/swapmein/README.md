@@ -73,7 +73,7 @@ The UI immediately reports access, capacity, upload, confirmation, queued and
 preparation stages with elapsed time. The live path uses an indeterminate bar;
 its upload implementation does not currently supply measured byte percentages.
 Worker feedback is based on actual job messages, not an invented percentage or
-ETA. A failed preparation stays on References. Reloading clears the browser key
+ETA. A preparation rejected before queuing stays on Access when masking is off, or References with enhanced masking. Reloading clears the browser key
 and session; keep the tab open through generation and export.
 
 ## API contract
@@ -465,3 +465,13 @@ SAM label. The review step always shows the actual guide and explains that the
 provider uses the selected coordinates and clip-relative timestamp. Changing
 selection still requires a new preparation/review. The timestamp retains the
 original fractional offset within the trimmed clip.
+
+### Access before preparation with masking off
+
+Uploaded clips with masking off use six steps: Clip, Trim, People, References,
+Access, Review. References proceeds to Access without requiring a key or starting
+preparation. Continuing with a personal key validates access and queues CPU
+preparation; progress and the resulting guide appear in Review. Generate remains
+disabled until the job is ready and the guide can play. It remains an explicit
+paid submission. Enhanced masking and the sample demo retain their overlay/match
+review step and confirmation requirements. App credits remain a preview only.

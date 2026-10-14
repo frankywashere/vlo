@@ -7,11 +7,13 @@ export type { PreparationProgressState } from "../model/preparation";
 interface PreparationProgressProps {
   progress: PreparationProgressState;
   elapsedSeconds: number;
+  title?: string;
 }
 
 export function PreparationProgress({
   progress,
   elapsedSeconds,
+  title = "Checking all scenes",
 }: PreparationProgressProps) {
   const elapsed = Number.isFinite(elapsedSeconds)
     ? Math.max(0, Math.floor(elapsedSeconds))
@@ -35,7 +37,7 @@ export function PreparationProgress({
         >
           <Box role="status" aria-live="polite" aria-atomic="true">
             <Typography component="h3" fontWeight={600}>
-              Checking all scenes
+              {title}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
               {progress.message}
@@ -54,7 +56,7 @@ export function PreparationProgress({
             aria-label={
               uploadPercent !== undefined
                 ? "Uploading clip and references"
-                : "Checking all scenes"
+                : title
             }
             variant={uploadPercent !== undefined ? "determinate" : "indeterminate"}
             value={uploadPercent}
