@@ -11,7 +11,7 @@ from pydantic import ValidationError
 import pytest
 
 from swapmein.errors import PublicError
-from swapmein.media import Setup, decoded_audio_samples, dimensions, finish, normalize, normalize_reference, probe, select_label
+from swapmein.media import Setup, decoded_audio_samples, dimensions, finish, normalize, normalize_reference, original_guide, probe, select_label
 
 
 def options(**updates):
@@ -52,6 +52,12 @@ def test_actual_clicked_sam_label_is_selected_and_must_exist_in_every_frame(tmp_
     archive(path, [first, np.ones((8, 8), dtype=np.uint16)])
     with pytest.raises(PublicError, match="disappears"):
         select_label(path, metadata)
+    assert select_label(path, metadata, require_continuous=False) == (2, [16, 0])
+    # Permissive tracking still cannot select a background click.
+    first[4, 4] = 0
+    archive(path, [first, first])
+    with pytest.raises(PublicError, match="point missed"):
+        select_label(path, metadata, require_continuous=False)
 
 
 def test_missing_mask_frame_is_not_silently_interpolated(tmp_path):
@@ -183,12 +189,54 @@ def test_network_playlist_is_not_allowed_as_an_uploaded_video(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for cut detection")
-def test_a_clear_camera_cut_is_rejected_before_sam(tmp_path):
+def test_camera_cuts_are_allowed_without_masking_and_rejected_for_gray_masking(tmp_path):
     source, output = tmp_path / "cut.mp4", tmp_path / "normalized.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x320:r=24:d=2",
                     "-f", "lavfi", "-i", "color=c=blue:s=320x320:r=24:d=2", "-f", "lavfi",
                     "-i", "sine=frequency=440:duration=4", "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
                     "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p",
                     "-shortest", str(source)], check=True)
-    with pytest.raises(PublicError, match="one continuous shot"):
-        normalize(source, output, options())
+    metadata = normalize(source, output, options())
+    assert metadata["scene_cuts"] == [2.0]
+    assert metadata["frames"] == 96
+    with pytest.raises(PublicError, match="Enhanced character masking needs one continuous shot"):
+        normalize(source, output, options(enhanced_character_masking=True))
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for mask-free guide composition")
+def test_original_guide_preserves_cut_frames_and_replaces_audio_without_masks(tmp_path):
+    source, normalized, vocals, guide = [tmp_path / name for name in ("source.mp4", "normalized.mp4", "vocals.wav", "guide.mp4")]
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x320:r=24:d=2",
+                    "-f", "lavfi", "-i", "color=c=blue:s=320x320:r=24:d=2", "-f", "lavfi",
+                    "-i", "sine=frequency=440:duration=4", "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+                    "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p",
+                    "-shortest", str(source)], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "aevalsrc=0.15*sin(2*PI*(200*t+70*t*t)):s=44100:d=4", str(vocals)], check=True)
+    metadata = normalize(source, normalized, options())
+    original_guide(normalized, vocals, guide, metadata)
+    def video_hashes(path):
+        return subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v:0", "-f", "framemd5", "-"])
+    assert video_hashes(normalized) == video_hashes(guide)
+    def pcm(path):
+        return np.frombuffer(subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path),
+            "-map", "0:a:0", "-ac", "1", "-ar", "44100", "-t", "4", "-f", "f32le", "-"]), dtype=np.float32)[:176400]
+    expected, restored = pcm(vocals), pcm(guide)
+    assert len(expected) == len(restored) == 176400
+    assert np.corrcoef(expected, restored)[0, 1] > .99
+    assert np.corrcoef(expected[-44100:], restored[-44100:])[0, 1] > .99
+    # Real Rubber Band output can be about 74 ms short. Honor the existing
+    # 100 ms input tolerance by padding only the tail, without retiming vocals.
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "aevalsrc=0.15*sin(2*PI*(200*t+70*t*t)):s=44100:d=3.925", str(vocals)], check=True)
+    original_guide(normalized, vocals, guide, metadata)
+    assert video_hashes(normalized) == video_hashes(guide)
+    expected, restored = pcm(vocals), pcm(guide)
+    assert len(restored) == 176400
+    assert np.corrcoef(expected, restored[:len(expected)])[0, 1] > .99
+    assert np.sqrt(np.mean(restored[-1000:] ** 2)) < .001
+    # A short vocal file must not silently truncate the guide or gain padding.
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=2", str(vocals)], check=True)
+    with pytest.raises(PublicError, match="does not match the clip timing"):
+        original_guide(normalized, vocals, tmp_path / "short.mp4", metadata)

@@ -36,6 +36,8 @@ export interface LivePipelineJob {
   width?: number;
   height?: number;
   selected_label?: number;
+  tracking_continuous?: boolean;
+  scene_cut_count?: number;
   estimated_cost_usd?: number;
   actual_provider_credits?: number;
 }
@@ -200,6 +202,14 @@ function readJob(value: unknown): LivePipelineJob {
   };
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
+  if (typeof value.tracking_continuous === "boolean")
+    job.tracking_continuous = value.tracking_continuous;
+  if (
+    typeof value.scene_cut_count === "number" &&
+    Number.isInteger(value.scene_cut_count) &&
+    value.scene_cut_count >= 0
+  )
+    job.scene_cut_count = value.scene_cut_count;
   for (const field of ["tracking_url", "guide_url", "output_url"] as const) {
     const url = value[field];
     if (typeof url !== "string") continue;

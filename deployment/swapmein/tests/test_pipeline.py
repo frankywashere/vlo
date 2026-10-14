@@ -1,6 +1,7 @@
 import copy
 from dataclasses import replace
 import re
+import pytest
 
 from swapmein.config import Settings
 from swapmein.pipeline import Pipeline
@@ -59,15 +60,27 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     assert all(re.fullmatch(rf"outputs/{job_id}/swapMEin-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
 
 
-def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch):
+@pytest.mark.parametrize("enabled,scene_cuts,coverage", [(True, [], [100] * 120),
+    (False, [], [100] * 120), (False, [2.0], [100] * 48 + [0] * 72),
+    (False, [], [100] * 48 + [0] * 72)])
+def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage):
     from contextlib import contextmanager
     import time
     job_id = "b" * 32
     path = f"jobs/{job_id}.json"
     metadata = {"duration": 5, "width": 854, "height": 480, "frames": 120,
-                "anchor": {"x": .6, "y": .4, "frame": 24}}
+                "anchor": {"x": .6, "y": .4, "frame": 24}, "scene_cuts": scene_cuts}
     monkeypatch.setattr("swapmein.pipeline.normalize", lambda *_: metadata)
-    monkeypatch.setattr("swapmein.pipeline.select_label", lambda *_: (2, [100] * 120))
+    def selected(*_, require_continuous):
+        assert require_continuous is enabled
+        return 2, coverage
+    monkeypatch.setattr("swapmein.pipeline.select_label", selected)
+    composed_original = []
+    def original_guide(source, vocals, output, checked):
+        assert vocals.read_bytes() == b"input" and checked == metadata
+        composed_original.append(True)
+        output.write_bytes(b"original-rgb-with-vocals")
+    monkeypatch.setattr("swapmein.pipeline.original_guide", original_guide)
     class Records:
         def __init__(self, enabled):
             self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/input.bin",
@@ -94,13 +107,21 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch)
                 self.calls.append((kind, endpoint, payload))
                 return {}
             yield invoke
-    for enabled, mode in [(True, "gray"), (False, "original")]:
-        records, cloud = Records(enabled), Cloud()
-        Pipeline(Settings(), records, cloud).prepare(job_id)
-        assert records.data[path]["status"] == "ready"
-        assert records.data[path]["selected_label"] == 2
-        assert records.data[path]["normalized_anchor"]["time"] == 1
+    records, cloud = Records(enabled), Cloud()
+    Pipeline(Settings(), records, cloud).prepare(job_id)
+    assert records.data[path]["status"] == "ready"
+    assert records.data[path]["selected_label"] == 2
+    assert records.data[path]["normalized_anchor"]["time"] == 1
+    assert records.data[path]["scene_cut_count"] == len(scene_cuts)
+    assert records.data[path]["tracking_continuous"] is (not scene_cuts and all(coverage))
+    if enabled:
         assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio", "audio"]
-        assert cloud.calls[-1][2]["fill_mode"] == mode
+        assert cloud.calls[-1][2]["fill_mode"] == "gray"
         assert cloud.calls[-1][2]["selected_label"] == 2
         assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
+        assert not composed_original
+    else:
+        assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio"]
+        assert composed_original == [True]
+        if scene_cuts or not all(coverage):
+            assert "not verified" in records.data[path]["message"]

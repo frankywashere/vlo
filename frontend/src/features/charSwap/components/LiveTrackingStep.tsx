@@ -13,6 +13,8 @@ import { PANEL } from "./stepStyles";
 interface LiveTrackingStepProps {
   enhancedCharacterMasking?: boolean;
   selectedLabel?: number;
+  trackingContinuous?: boolean;
+  sceneCutCount?: number;
   status: string;
   message?: string;
   guideUrl?: string;
@@ -30,6 +32,8 @@ interface LiveTrackingStepProps {
 export function LiveTrackingStep({
   enhancedCharacterMasking = false,
   selectedLabel,
+  trackingContinuous,
+  sceneCutCount,
   status,
   message,
   guideUrl,
@@ -44,6 +48,9 @@ export function LiveTrackingStep({
   onGuideError,
 }: LiveTrackingStepProps) {
   const ready = status === "ready";
+  const wholeClipReview =
+    !enhancedCharacterMasking &&
+    (trackingContinuous === false || (sceneCutCount ?? 0) > 0);
   const [playable, setPlayable] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const failed = status === "failed";
@@ -54,25 +61,35 @@ export function LiveTrackingStep({
           (ready
             ? enhancedCharacterMasking
               ? "Check that gray covers only the person you selected throughout the clip. Generation has not started."
-              : "Review the selected label in the tracking preview. Generation has not started."
+              : wholeClipReview
+                ? "Review the whole generation guide before approving. Generation has not started."
+                : "Review the selected label in the tracking preview. Generation has not started."
             : "Preparing your clip and checking the selected person. You can leave this tab open while it runs.")}
       </Alert>
       {!ready && !failed && (
         <LinearProgress aria-label="Preparing selected person" />
       )}
+      {ready && wholeClipReview && (
+        <Alert severity="warning">
+          Automatic identity matching across scene cuts has not been verified.
+          The model may change other people. Review every scene before approving.
+        </Alert>
+      )}
       {ready && guideUrl && (
         <Box sx={PANEL}>
           <Typography fontWeight={600} sx={{ mb: 2 }}>
-            {enhancedCharacterMasking
-              ? "Your generation guide"
-              : "Review the tracked person"}
+            {wholeClipReview
+              ? "Review the generation guide"
+              : enhancedCharacterMasking
+                ? "Your generation guide"
+                : "Review the tracked person"}
           </Typography>
           <VideoPreview
             clip={{
               id: "live-guide",
               name: "Prepared guide",
               url:
-                !enhancedCharacterMasking && trackingUrl
+                !enhancedCharacterMasking && !wholeClipReview && trackingUrl
                   ? trackingUrl
                   : guideUrl,
               duration,
@@ -90,7 +107,9 @@ export function LiveTrackingStep({
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {enhancedCharacterMasking
               ? "Review the whole clip. The gray silhouette should follow your person without covering anyone else."
-              : `Check that person label ${selectedLabel ?? "shown"} follows your selected person throughout this tracking preview. The generation guide keeps the original person visible.`}{" "}
+              : wholeClipReview
+                ? "Watch the whole guide, including every scene change. The generation guide keeps the original person visible."
+                : `Check that person label ${selectedLabel ?? "shown"} follows your selected person throughout this tracking preview. The generation guide keeps the original person visible.`}{" "}
             This is a visual check; it does not guarantee identity tracking
             through a cut.
           </Typography>
@@ -102,7 +121,7 @@ export function LiveTrackingStep({
           <Button onClick={onRefresh}>Refresh guide</Button>
         </Alert>
       )}
-      {ready && !enhancedCharacterMasking && guideUrl && (
+      {ready && !enhancedCharacterMasking && !wholeClipReview && guideUrl && (
         <Button
           component="a"
           href={guideUrl}
@@ -121,7 +140,7 @@ export function LiveTrackingStep({
           rel="noreferrer"
           variant="outlined"
         >
-          View all detected people
+          {wholeClipReview ? "View detected people" : "View all detected people"}
         </Button>
       )}
       {(ready || failed) && (
@@ -133,8 +152,12 @@ export function LiveTrackingStep({
               disabled={confirmed || !guideUrl || !playable}
             >
               {confirmed
-                ? "Selected person confirmed"
-                : "This is the right person"}
+                ? wholeClipReview
+                  ? "Whole clip reviewed"
+                  : "Selected person confirmed"
+                : wholeClipReview
+                  ? "I reviewed the whole clip"
+                  : "This is the right person"}
             </Button>
           )}
           <Button variant="outlined" onClick={onReselect}>

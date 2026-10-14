@@ -713,8 +713,9 @@ export function CharSwapWalkthrough() {
                 <>
                   {secureSite && (
                     <Alert severity="info" sx={{ mb: 2 }}>
-                      For the live beta, select one continuous shot with a
-                      whole-second length between 4 and 15 seconds.
+                      Choose a whole-second length between 4 and 15 seconds.
+                      {enhancedCharacterMasking &&
+                        " Enhanced character masking requires one continuous shot."}
                     </Alert>
                   )}
                   <TrimStep demo={demo} />
@@ -750,6 +751,8 @@ export function CharSwapWalkthrough() {
                     }
                     enhancedCharacterMasking={enhancedCharacterMasking}
                     selectedLabel={pipeline.job?.selected_label}
+                    trackingContinuous={pipeline.job?.tracking_continuous}
+                    sceneCutCount={pipeline.job?.scene_cut_count}
                     guideUrl={pipeline.job?.guide_url}
                     trackingUrl={pipeline.job?.tracking_url}
                     duration={pipeline.job?.duration ?? trim[1] - trim[0]}

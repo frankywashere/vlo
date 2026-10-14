@@ -28,7 +28,7 @@ from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner,
 from .storage import Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation
 
 settings = Settings.from_env()
-app = FastAPI(title="swapMEin single-shot beta", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="swapMEin single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins),
     allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key"], max_age=600)
 
@@ -146,7 +146,7 @@ def view(job: dict):
     if job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["width", "height", "selected_label"]:
+    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:

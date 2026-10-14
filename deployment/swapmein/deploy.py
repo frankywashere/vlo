@@ -422,6 +422,60 @@ def deployment_env(workers: dict, origins: list[str], service_url: str) -> dict[
     }
 
 
+def promote_gateway_revision(image: str, revision_name: str, timeout_seconds: float = 180):
+    """Release the exact ready image; inherited rollback traffic is not success."""
+    if not re.fullmatch(re.escape(IMAGE_REPOSITORY) + r"@sha256:[a-f0-9]{64}", image):
+        raise SetupError("Gateway release requires an immutable image in the expected repository.")
+    if not isinstance(revision_name, str) or not re.fullmatch(re.escape(SERVICE) + r"-[a-z0-9-]+", revision_name):
+        raise SetupError("The final deployment did not identify its created gateway revision.")
+    if not 0 < timeout_seconds <= 180:
+        raise SetupError("Gateway release verification must have a deadline of at most 180 seconds.")
+    resource = f"projects/{PROJECT}/locations/{REGION}/services/{SERVICE}"
+    revision_resource = resource + "/revisions/" + revision_name
+    deadline = time.monotonic() + timeout_seconds
+
+    def remaining():
+        value = deadline - time.monotonic()
+        if value <= 0:
+            raise SetupError("Gateway release verification timed out. Inspect traffic before redeploying.")
+        return value
+
+    revision = google_get("https://run.googleapis.com/v2/" + revision_resource, timeout=min(45, remaining()))
+    containers = revision.get("containers", [])
+    ready = any(condition.get("type") == "Ready" and condition.get("state") == "CONDITION_SUCCEEDED"
+                for condition in revision.get("conditions", []))
+    if (revision.get("name") != revision_resource or revision.get("deleteTime")
+            or len(containers) != 1 or containers[0].get("image") != image):
+        raise SetupError("The created gateway revision does not match the intended immutable image.")
+    if not ready or revision.get("reconciling", False):
+        raise SetupError("The intended gateway revision is not Ready. Its traffic was not promoted.")
+    # Cloud Run can retain an explicit older revision's traffic after deploy.
+    # This helper performs full releases, so always name the verified revision.
+    gcloud("run", "services", "update-traffic", SERVICE, f"--region={REGION}",
+           "--to-revisions=" + revision_name + "=100", timeout=remaining())
+    while True:
+        current = google_get("https://run.googleapis.com/v2/" + resource, timeout=min(45, remaining()))
+        if current.get("name") != resource or current.get("deleteTime"):
+            raise SetupError("Gateway release resource identity or lifecycle state could not be verified.")
+        if not current.get("reconciling", False):
+            generation = current.get("generation")
+            service_ready = (generation is not None
+                             and str(current.get("observedGeneration")) == str(generation)
+                             and current.get("terminalCondition", {}).get("state") == "CONDITION_SUCCEEDED"
+                             and current.get("latestCreatedRevision") == revision_resource
+                             and current.get("latestReadyRevision") == revision_resource)
+            def intended_traffic(targets):
+                return (len(targets) == 1 and targets[0].get("percent") == 100
+                        and targets[0].get("revision") == revision_name
+                        and targets[0].get("type") == "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION")
+            if (not service_ready or not intended_traffic(current.get("traffic", []))
+                    or not intended_traffic(current.get("trafficStatuses", []))):
+                raise SetupError("The intended ready gateway revision was not confirmed at 100% traffic.")
+            print("Verified gateway release: " + revision_name + " at 100% traffic for " + image, flush=True)
+            return current
+        time.sleep(min(2, remaining()))
+
+
 def deploy_gateway(image: str, workers: dict, origins: list[str], temp: Path) -> str:
     existing = gcloud("run", "services", "describe", SERVICE, f"--region={REGION}", optional=True)
     if existing:
@@ -445,6 +499,8 @@ def deploy_gateway(image: str, workers: dict, origins: list[str], temp: Path) ->
         env_file.write_text(json.dumps(deployment_env(workers, origins, url)))
         gcloud("run", "services", "update", SERVICE, f"--region={REGION}", "--env-vars-file=" + str(env_file))
     ensure_gateway_scaling()
+    final = gcloud("run", "services", "describe", SERVICE, f"--region={REGION}")
+    promote_gateway_revision(image, final.get("status", {}).get("latestCreatedRevisionName"))
     # Safe config read: no clip processing, provider validation or generation is triggered.
     token = gcloud("auth", "print-identity-token", json_output=False)
     with urlopen(Request(url + "/api/config", headers={"Authorization": "Bearer " + token}), timeout=60) as response:

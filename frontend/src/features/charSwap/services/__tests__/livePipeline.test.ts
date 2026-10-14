@@ -59,3 +59,27 @@ describe("live job charge parsing", () => {
     expect(job).not.toHaveProperty("actual_provider_credits");
   });
 });
+
+describe("live scene review metadata", () => {
+  it.each([
+    { tracking_continuous: false, scene_cut_count: 2 },
+    { tracking_continuous: true, scene_cut_count: 0 },
+  ])("preserves valid scene metadata (%o)", async (metadata) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({ id: "job-1", status: "ready", ...metadata })));
+    const job = await getLiveJob("job-1", "test-session-token", new AbortController().signal);
+    expect(job).toMatchObject(metadata);
+  });
+
+  it.each([
+    { tracking_continuous: "false", scene_cut_count: -1 },
+    { tracking_continuous: null, scene_cut_count: 1.5 },
+    { tracking_continuous: 0, scene_cut_count: "2" },
+    { tracking_continuous: undefined, scene_cut_count: null },
+  ])("ignores invalid optional scene metadata (%o)", async (metadata) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({ id: "job-1", status: "ready", ...metadata })));
+    const job = await getLiveJob("job-1", "test-session-token", new AbortController().signal);
+    expect(job.status).toBe("ready");
+    expect(job).not.toHaveProperty("tracking_continuous");
+    expect(job).not.toHaveProperty("scene_cut_count");
+  });
+});

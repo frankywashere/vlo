@@ -7,11 +7,14 @@ using a key entered by the user. No owner key is bundled or supplied as a fallba
 
 The [pipeline and deployment overview](../../docs/charswap-walkthrough.md) is the
 canonical architecture document. This README is the gateway's API and operator
-runbook, checked against the repository implementation on 2026-10-14.
+runbook, checked against the deployed implementation on 2026-10-14. Masking-off
+multi-shot preparation passed a bounded cloud proof; the canonical overview
+records its checks and the remaining generation-quality limits.
 
 ## Supported beta
 
-- One selected person, one reference image, one continuous shot.
+- One selected person and one reference image. Cuts are allowed with enhanced
+  masking off; enhanced gray masking requires one continuous shot.
 - A 4–15-second selection with a whole-second duration; the trim start and target
   timestamp may be fractional. The application does not yet round a fractional
   selection up for generation and trim it back afterward.
@@ -28,12 +31,13 @@ runbook, checked against the repository implementation on 2026-10-14.
 
 Multiple-person generation, identity continuity across cuts, automated face
 re-identification, payments and purchased app credits are not implemented.
-The walkthrough may illustrate later capabilities, but the live gateway rejects
-unsupported input. “Check all scenes” is the preparation button label; the beta
-still checks the selected continuous shot, rather than processing a multi-shot
-sequence. SAM coverage is not proof of identity: the user reviews its preview and
-guide before approving generation. The cut detector is a heuristic and may reject
-strong lighting changes or abrupt motion.
+The walkthrough may illustrate later capabilities, but those services are not
+implemented. “Check all scenes” prepares the selected section. With masking off,
+detected cuts or selected-label gaps require whole-guide review with an explicit
+identity warning; there is no automatic cross-scene matching or per-scene target
+assignment. SAM coverage is not proof of identity. With masking on, cuts and
+missing selected-label coverage remain errors. The cut detector is a heuristic and
+may flag strong lighting changes or abrupt motion.
 
 ## Normal application flow
 
@@ -46,13 +50,19 @@ strong lighting changes or abrupt motion.
 3. The browser uploads both files and confirms with `/api/uploads/{id}/complete`.
    The gateway verifies their actual sizes, normalizes the image, atomically
    reserves a preparation slot, saves the job, and enqueues its preparation task.
-4. The task trims and normalizes the source, rejects strong cuts, then activates
-   SAM on `proof-gpu`. It chooses the actual mask label under the clicked point,
-   verifies that label has pixels in every frame, and shuts the GPU worker down.
-5. The task activates `proof-audio`, obtains `vocals_plus3.wav`, and calls its
-   `/compose` endpoint with `fill_mode: "original"` or `"gray"`. It shuts that
-   worker down, publishes private review links, and sets the job to `ready`.
-6. The user reviews the tracking preview and guide, then explicitly approves one
+4. The task trims and normalizes the source, records detected cuts, and rejects
+   them only with enhanced gray masking. Both modes activate SAM on `proof-gpu`,
+   validate the mask archive and actual label under the clicked point, then shut
+   the GPU worker down. Only gray mode requires that label in every frame.
+5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Gray mode calls
+   its strict `/compose` endpoint; masking-off mode uses gateway CPU FFmpeg to
+   remux normalized RGB with those vocals, bypassing mask-based composition. The
+   audio worker is shut down, private review links are published, and the job
+   becomes `ready`.
+   Masking-off remux honors the existing 100 ms vocal-duration tolerance by
+   padding a short tail to the selected length; it does not retime vocals.
+6. The user reviews the tracking preview and guide, or the whole source guide with
+   an unverified-identity warning when cuts or label gaps exist, then approves one
    provider submission. The gateway binds that submission to the session's
    provider and key fingerprint. It never automatically retries the paid POST.
 7. The browser refreshes provider status. On completion, the gateway enqueues
@@ -166,10 +176,22 @@ Public statuses are `queued`, `preparing`, `ready`, `generating`, `finalizing`,
 `completed`, `failed`, and `submission_unknown`. Internal `submitting` and
 `finishing` map to `generating` and `finalizing`. Status includes `provider`, `id`,
 `status` and `message`, then `duration`, `width`, `height`, `selected_label`,
+`scene_cut_count`, `tracking_continuous`,
 `tracking_url`, `guide_url`, and `output_url` as available. Optional cost fields
 are `estimated_cost_usd`, `estimate_note`, `estimate_source`,
 `estimate_verified_at`, and `actual_provider_credits`. Signed GET URLs last at
 most one hour. Private bucket URIs and session ownership are not returned.
+
+`scene_cut_count` reports heuristic cut detections; `tracking_continuous` is true
+only when there are no detected cuts and the selected label has nonzero coverage
+throughout. It is not identity confidence. Masking-off jobs with cuts or gaps require whole-guide approval and
+must not be described as verified cross-scene tracking.
+
+Record reads retry up to four times if a progress update replaces an object
+between fetching its metadata and downloading that generation. Exhaustion is a
+temporary 503, rather than a false missing-job 404. Actual missing records and
+other-session ownership still return their usual errors; paid submissions are
+never retried by this read handling.
 
 Poll ordinary job state during preparation and finalization, show the actual
 review media at `ready`, and require approval before one `/generate` call. During
@@ -264,7 +286,7 @@ not release a blocked worker lease or prove a provider task was canceled.
 
 ## Deployment and IAM
 
-| Resource | Current deployment configuration |
+| Resource | Verified deployment configuration, 2026-10-14 |
 | --- | --- |
 | Google project | `charswap-franky-20261013` / project number `634011479314` |
 | Firebase site | `https://charswap-franky-20261013.web.app`; [firebase.json](../../firebase.json) rewrites `/api/**` to `swapmein-api` in `us-east4` |
@@ -321,7 +343,10 @@ authorized project/account, verifies active billing and the native cap, verifies
 worker state and identity scope, configures the app bucket/IAM/queue, stages an
 allowlist of runtime source, builds a container and deploys the gateway by image
 digest. It never activates model workers and checks their configuration stayed
-unchanged. The public frontend is built/deployed separately through Firebase.
+unchanged. A release explicitly promotes the final Ready revision and verifies
+its immutable image and sole 100% requested/effective traffic before checking
+HTTP configuration; an inherited rollback route cannot count as a new release.
+The public frontend is built/deployed separately through Firebase.
 
 From the repository root, with the appropriate authenticated Google Cloud CLI:
 
@@ -355,7 +380,7 @@ weights; those dependencies belong to the existing private worker containers.
 | --- | --- |
 | [app.py](swapmein/app.py) | HTTP contract, sessions, uploads, approval and provider polling |
 | [pipeline.py](swapmein/pipeline.py) | Task claims, SAM/audio orchestration, review and final export |
-| [media.py](swapmein/media.py) | Strict setup/media validation, normalization, anchor/label selection and audio restoration |
+| [media.py](swapmein/media.py) | Setup/media validation, cut detection, anchor/label selection, original-guide remux and audio restoration |
 | [provider.py](swapmein/provider.py) | Provider adapters, prompts, estimates and one paid submission |
 | [cloud.py](swapmein/cloud.py) | Private storage, signed URLs, tasks, native-cap check and bounded worker activation/shutdown |
 | [storage.py](swapmein/storage.py) | Atomic records, separate quotas and shared lease |

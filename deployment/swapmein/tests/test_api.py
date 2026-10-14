@@ -127,6 +127,17 @@ def test_provider_key_is_never_saved_and_other_sessions_cannot_read_the_job(api)
     assert response.headers["cache-control"] == "no-store"
 
 
+def test_cut_and_tracking_review_metadata_reaches_the_owned_job_response(api):
+    client, records, *_ = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    records.data[f"jobs/{job_id}.json"].update(scene_cut_count=2, tracking_continuous=False)
+    response = client.get("/api/jobs/" + job_id, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["scene_cut_count"] == 2
+    assert response.json()["tracking_continuous"] is False
+
+
 def test_paid_submission_requires_approval_and_bound_key_and_happens_only_once(api):
     client, records, _, provider = api
     headers, owner = authenticated(api)

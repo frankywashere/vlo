@@ -3,6 +3,7 @@ from io import BytesIO
 import json
 import math
 from pathlib import Path
+import re
 import subprocess
 import warnings
 import zipfile
@@ -113,13 +114,14 @@ def normalize(source: Path, output: Path, setup: Setup):
     require_audio_duration(normalized, duration)
     cuts = run(["ffmpeg", "-hide_banner", "-loglevel", "info", "-protocol_whitelist", "file,pipe", "-i", str(output), "-an",
                 "-vf", "select='gt(scene,0.40)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
-    if b"pts_time:" in cuts.stderr:
-        raise PublicError("This beta accepts one continuous shot. Trim the clip to remove camera cuts.")
+    scene_cuts = [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
+    if setup.enhanced_character_masking and scene_cuts:
+        raise PublicError("Enhanced character masking needs one continuous shot. Turn it off to use a clip with camera cuts, or trim to one shot.")
     anchor = {"x": (setup.anchor.x * sw + (width - sw) / 2) / width,
               "y": (setup.anchor.y * sh + (height - sh) / 2) / height,
               "frame": min(duration * 24 - 1, round((setup.anchor.time - start) * 24))}
     return {"duration": duration, "width": width, "height": height,
-            "frames": duration * 24, "anchor": anchor}
+            "frames": duration * 24, "anchor": anchor, "scene_cuts": scene_cuts}
 
 
 def normalize_reference(raw: Path, output: Path):
@@ -142,7 +144,7 @@ def normalize_reference(raw: Path, output: Path):
         raise PublicError("The reference image could not be read.") from None
 
 
-def select_label(archive: Path, metadata: dict):
+def select_label(archive: Path, metadata: dict, *, require_continuous: bool = True):
     width, height, frames = metadata["width"], metadata["height"], metadata["frames"]
     anchor = metadata["anchor"]
     try:
@@ -166,13 +168,37 @@ def select_label(archive: Path, metadata: dict):
             if label == 0:
                 raise PublicError("That point missed the person. Select a point inside their body and try again.")
             coverage = [int(np.count_nonzero(read(index) == label)) for index in range(frames)]
-            if not all(coverage):
+            if require_continuous and not all(coverage):
                 raise PublicError("The selected person disappears or tracking is uncertain. Use a continuous shot where they stay visible.")
             return label, coverage
     except PublicError:
         raise
     except Exception:
         raise PublicError("The tracking masks could not be read.") from None
+
+
+def original_guide(source: Path, vocals: Path, output: Path, metadata: dict):
+    """Keep every RGB frame without requiring a persistent mask across cuts."""
+    duration = metadata["duration"]
+    samples = decoded_audio_samples(vocals)
+    if abs(samples / 44100 - duration) > .1:
+        raise PublicError("The vocal guide does not match the clip timing.")
+    # The normalized video already has the required frame rate and dimensions.
+    # Only replace its audio; no mask, interpolation or video re-encode is needed.
+    # The worker's pitch filter can leave a tail under 100 ms short. Pad only
+    # that bounded tail rather than stretching or moving the existing vocals.
+    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(source),
+         "-protocol_whitelist", "file,pipe", "-i", str(vocals), "-map", "0:v:0", "-map", "1:a:0",
+         "-c:v", "copy", "-af", "apad", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+         "-t", str(duration), "-movflags", "+faststart", str(output)])
+    checked = probe(output)
+    video = next((stream for stream in checked["streams"] if stream["codec_type"] == "video"), None)
+    if (not video or (video["width"], video["height"]) != (metadata["width"], metadata["height"])
+            or int(video.get("nb_frames", 0)) != metadata["frames"]):
+        raise PublicError("The generation guide did not retain every source frame.")
+    require_audio_duration(checked, duration)
+    if decoded_audio_samples(output) < math.floor((duration - .05) * 44100):
+        raise PublicError("The generation guide lost vocal audio samples.")
 
 
 def finish(raw: Path, original: Path, output: Path, duration: int,

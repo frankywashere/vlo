@@ -1,9 +1,10 @@
 # swapMEin pipeline, dependencies and deployment
 
-**Current reference, revised 14 October 2026.** This document describes the deployed
-single-person beta. It replaces the earlier CharSwap writeup and its accumulated
-corrections. Runtime settings, deployed worker identities and bucket policies were
-checked read-only during this revision; no inference or generation was started.
+**Current reference, revised 14 October 2026.** This document describes the
+deployed single-person beta, including camera cuts with enhanced masking off.
+It replaces the earlier CharSwap writeup and its accumulated corrections.
+Deployment settings were verified during release; the bounded cloud-preparation
+and review-response checks are recorded below.
 
 - Live application: [swapMEin](https://charswap-franky-20261013.web.app).
 - Application source: [frankywashere/vlo, branch `tasty`](https://github.com/frankywashere/vlo/tree/tasty).
@@ -26,7 +27,7 @@ checked read-only during this revision; no inference or generation was started.
 | Generation resolution | Current standard-H3 route requests 768p; no Max/Lite/Turbo model integration |
 | Final resolution | Preserve the provider's generated dimensions; no automatic downscale to 480p or upscale to the uploaded source |
 | Final soundtrack | Restore the selected section of the original uploaded soundtrack; discard provider audio |
-| Current scope | One selected person in one continuous 4–15-second shot |
+| Current scope | One selected person in a 4–15-second selection; cuts allowed with masking off, continuous shot required with masking on |
 | Preparation allowance | 100 attempts/day and 3,100/month, UTC; uploads have a separate allowance of the same size |
 | Financial protection | Project-specific CAD$7/month Cloud Run spending cap remains; CAD$10 budget is an alert |
 
@@ -62,11 +63,12 @@ quality or identity correctness.
    estimate, then explicitly approve one generation. A completed result provides
    a private download link.
 
-Despite the button wording, **“Check all scenes” currently checks the selected
-continuous shot**. Camera cuts are rejected before GPU processing; automatic
-cross-shot matching is not implemented. The local demo's uncertainty cases are
-simulated. The production system does not calculate or expose identity-confidence
-scores.
+**“Check all scenes” prepares the selected section.** With enhanced masking off,
+cuts or gaps in the selected SAM label trigger whole-guide review and an explicit
+warning that identity matching across scenes is unverified. With masking on,
+detected cuts or missing selected-label coverage are rejected. Automatic cross-shot
+matching and per-scene target assignments are not implemented. The local demo's
+uncertainty cases are simulated; no identity-confidence scores are calculated.
 
 ## End-to-end processing and where it runs
 
@@ -78,8 +80,12 @@ flowchart TD
     D --> E[Cloud Task / gateway CPU: trim and normalize]
     E --> F[Private L4 worker: SAM on original RGB]
     F --> G[Gateway: choose clicked label and check coverage]
-    G --> H[Private CPU worker: Demucs, pitch shift, original or gray guide]
-    H --> I[Browser: review tracking / guide and approve]
+    G --> H[Private CPU worker: Demucs and pitch shift]
+    H --> P{Enhanced masking}
+    P -->|Off| Q[Gateway CPU: original RGB with shifted vocals]
+    P -->|On| R[Private CPU worker: gray guide assembly]
+    Q --> I[Browser: review tracking / guide and approve]
+    R --> I
     I --> J[Gateway: one reAPI or ToAPIs MiniMax H3 request]
     J --> K[Browser polls provider through gateway]
     K --> L[Cloud Task / gateway CPU: native-size export with original audio]
@@ -93,8 +99,9 @@ flowchart TD
 | File transfer | Browser → private application bucket | Signed direct PUTs; large media does not pass through Firebase's API rewrite |
 | Source preparation | Gateway CPU, authenticated Cloud Task | FFmpeg validates, trims, rotates, normalizes to 24 fps, and checks for cuts |
 | Segmentation | `proof-gpu`, NVIDIA L4 | SAM 3 detects/tracks people using text prompt `person`; returns labeled masks for each frame |
-| Target resolution | Gateway CPU | Find the label at the selected position/time and require nonzero coverage in every frame |
-| Audio and guide | `proof-audio` CPU | Demucs vocal separation, +3 semitone guidance, mask validation/cleanup and guide assembly |
+| Target resolution | Gateway CPU | Find the label at the selected position/time; validate every mask frame, requiring continuous selected-label coverage only with masking on |
+| Audio guidance | `proof-audio` CPU | Demucs vocal separation and +3 semitone guidance |
+| Guide assembly | Gateway CPU when masking off; `proof-audio` CPU when on | Off remuxes unchanged normalized RGB with shifted vocals; on validates/cleans masks and paints gray |
 | Video generation | reAPI or ToAPIs infrastructure | MiniMax H3 receives one guide video, one reference image and the replacement prompt |
 | Final export | Gateway CPU, authenticated Cloud Task | Validate output timing/framing, trim small extra tail frames, restore source audio and retain generated dimensions |
 
@@ -107,15 +114,24 @@ Demucs or FFmpeg.
 
 SAM processes the original RGB clip in both settings. It does not select a named
 identity automatically. The gateway chooses the numerical label beneath the
-user's tap and checks coverage. A label can still track the wrong person, merge,
-or drift, so review is required.
+user's tap and checks coverage. Mask integrity and a valid clicked label are
+required in both modes; nonzero label coverage in every frame is required only
+with gray masking. A label can still track the wrong person, merge or drift, so
+review is required.
 
 With **Use enhanced character masking off**, the guide retains the original
 person. The prompt identifies the intended target using the clicked position and
-time. The main review player shows the labeled tracking preview, with a separate
-link to the actual generation guide.
+time. The gateway remuxes the normalized RGB frames with shifted vocals without
+using the gray compositor. For continuous coverage without detected cuts, the main
+player shows the labeled tracking preview, with a separate guide link. With cuts
+or coverage gaps, it shows the whole generation guide and requires approval after
+warning that cross-scene identity is unverified and other people may change.
+The pitch filter may leave the guide vocals under 100 ms short; the remux pads
+only that bounded tail to the selected duration, without shifting or stretching
+the vocals. Larger timing differences remain errors.
 
-With the setting **on**, the CPU compositor paints the selected label flat RGB
+With the setting **on**, a continuous shot is required. The CPU worker compositor
+paints the selected label flat RGB
 `128,128,128`, preserving source pixels outside it. The prompt refers to that gray
 silhouette, and the main review player shows the guide. This is a flat 2D guide;
 there is no depth or mesh stage.
@@ -215,15 +231,16 @@ matched results; filtering is not established as the cause.
 
 ## Deployed Google resources
 
-The configuration below was checked on **14 October 2026**. Recheck live resources
-before deployment or paid work; this table is a dated configuration snapshot.
+The configuration below was checked on **14 October 2026**, including the
+masking-off multi-shot release. Recheck live resources before deployment or paid
+work; this inventory is a dated snapshot.
 
 | Resource | Configuration |
 | --- | --- |
 | Google/Firebase project | `charswap-franky-20261013`, project number `634011479314` |
 | Deployment account / region | `frankywashere@gmail.com` / `us-east4` |
 | Firebase Hosting | `charswap-franky-20261013.web.app`; two-file public walkthrough build |
-| Gateway | `swapmein-api`, revision `swapmein-api-00011-6p5`; 2 vCPU, 2 GiB; automatic min 0 / max 1; concurrency 4 |
+| Gateway | `swapmein-api`, revision `swapmein-api-00014-9ph`; 2 vCPU, 2 GiB; automatic min 0 / max 1; concurrency 4; verified at 100% traffic |
 | Private GPU worker | `proof-gpu`, revision `proof-gpu-00005-tgh`; 8 vCPU, 32 GiB, one nonredundant NVIDIA L4; MANUAL 0 between jobs, max 1, concurrency 1 |
 | Private audio/compositor | `proof-audio`, revision `proof-audio-00003-58x`; 4 vCPU, 8 GiB; MANUAL 0 between jobs, max 1, concurrency 1 |
 | Application queue | `swapmein-jobs`; one concurrent dispatch, approximately one dispatch/minute, one attempt |
@@ -239,10 +256,10 @@ the backup. If zero or backup cleanup cannot be verified, the global preparation
 slot remains blocked for operator recovery. Budget alert emails are not used as
 an immediate shutdown mechanism.
 
-Immutable image references:
+Verified immutable image references:
 
 ```text
-gateway: us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gateway@sha256:fd3792c7aec472e46537dd7650cd2ea3c859f594c9415b11395378d5938ac141
+gateway: us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gateway@sha256:a549ed90b62d5a1bee580d24d79eded401906deec0329803e4a4401c6067370a
 gpu:     us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gpu@sha256:6b1bb4e7f1ac184f8a49831d26c89d06375e1b8d4fa8af8dce96482d49a259fd
 audio:   us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:e11d2c6c08a22a06f5e8c9a7a27219e92d4f8c520b1265c8ed4f6d1759d53853
 ```
@@ -358,7 +375,16 @@ this documentation revision.
 | Cloud/local gray guide comparison | Selected-label coverage matched all 120 frames; audio correlation ~0.9994; encoding differed, so files were not byte-identical |
 | Direct-upload proof | A full 100 MiB transfer succeeded; size, overwrite and CORS checks passed; invalid reference deliberately stopped before any model run |
 | Capacity/progress proof | Live browser showed immediate stage feedback and specific daily reset; preflight changed no counters or media; subsequent 100/day reset verified capacity available |
-| Latest code checks recorded | 91 CharSwap frontend tests; 111 gateway tests after quota change; public TypeScript build and extension-impact check passed |
+| Masking-off multi-shot preparation | A 30,415,826-byte source uploaded through the direct path; selected first five seconds crossed one detected cut and reached `ready`. All 120 decoded guide frames matched the normalized RGB input; the five-second guide retained 220,500 samples/channel. Vocal correlation ~0.99963, including ~74 ms of bounded tail padding; no provider generation submitted |
+| Latest code checks recorded | 106 CharSwap frontend tests; 130 gateway tests; public TypeScript build and extension-impact check passed |
+
+The multi-shot preparation's first HTTP status poll hit a record-generation
+replacement race; the cloud task continued, and the completed guide was collected
+from private storage for inspection. Bounded record-read retries now handle that
+race without a false missing-job response. A separate live review-response
+fixture reuses the completed media to check the new metadata, ownership isolation
+and exact guide download without another model run. Neither check establishes
+cross-scene replacement quality; that still depends on reviewing a generated result.
 
 ToAPIs' paid proof used **vendor-uploaded reference URLs**. The public site uses
 signed Google URLs and has mocked provider-adapter coverage; that exact ToAPIs
@@ -410,8 +436,8 @@ npm run check:extension-surface
 Gateway tests use a dedicated environment and
 `python -m pytest deployment/swapmein/tests -q` with the package on the import
 path; see the [runbook's exact setup](../deployment/swapmein/README.md).
-This documentation-only revision requires link/metadata checks, not another paid
-render or deployment.
+Documentation-only edits require link/metadata checks. Behavior changes also
+require relevant implementation tests and release validation.
 
 ## Remaining product work
 

@@ -24,6 +24,111 @@ class Tasks:
         self.events.append(("delete", name))
 
 
+@pytest.fixture
+def deploy_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("swapmein_release_test", Path(__file__).parents[1] / "deploy.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def gateway_release_state(deploy):
+    resource = f"projects/{deploy.PROJECT}/locations/{deploy.REGION}/services/{deploy.SERVICE}"
+    name = deploy.SERVICE + "-00013-new"
+    image = deploy.IMAGE_REPOSITORY + "@sha256:" + "a" * 64
+    revision = {"name": resource + "/revisions/" + name, "containers": [{"image": image}],
+                "conditions": [{"type": "Ready", "state": "CONDITION_SUCCEEDED"}]}
+    traffic = {"type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION", "revision": name, "percent": 100}
+    service = {"name": resource, "generation": "14", "observedGeneration": "14",
+               "terminalCondition": {"type": "Ready", "state": "CONDITION_SUCCEEDED"},
+               "latestCreatedRevision": revision["name"], "latestReadyRevision": revision["name"],
+               "traffic": [dict(traffic)], "trafficStatuses": [dict(traffic)]}
+    return name, image, revision, service
+
+
+def test_gateway_release_explicitly_promotes_verified_image_instead_of_inherited_rollback_traffic(monkeypatch, deploy_module):
+    deploy = deploy_module
+    name, image, revision, service = gateway_release_state(deploy)
+    calls = []
+    def get(url, **_kwargs):
+        return revision if url.endswith("/revisions/" + name) else service
+    monkeypatch.setattr(deploy, "google_get", get)
+    monkeypatch.setattr(deploy, "gcloud", lambda *args, **kwargs: calls.append((args, kwargs)) or {})
+    assert deploy.promote_gateway_revision(image, name) == service
+    assert len(calls) == 1
+    assert calls[0][0] == ("run", "services", "update-traffic", deploy.SERVICE,
+                           "--region=" + deploy.REGION, "--to-revisions=" + name + "=100")
+    assert 0 < calls[0][1]["timeout"] <= 180
+
+
+@pytest.mark.parametrize("failure", ["old_traffic", "split_traffic", "old_ready", "failed_ready", "stale_generation"])
+def test_gateway_release_rejects_a_ready_service_that_is_not_serving_the_new_revision(monkeypatch, deploy_module, failure):
+    deploy = deploy_module
+    name, image, revision, service = gateway_release_state(deploy)
+    if failure == "old_traffic":
+        service["traffic"][0]["revision"] = service["trafficStatuses"][0]["revision"] = deploy.SERVICE + "-00011-old"
+    elif failure == "split_traffic":
+        service["trafficStatuses"][0]["percent"] = 90
+        service["trafficStatuses"].append({"revision": deploy.SERVICE + "-00011-old", "percent": 10})
+    elif failure == "old_ready":
+        service["latestReadyRevision"] = revision["name"].replace(name, deploy.SERVICE + "-00011-old")
+    elif failure == "failed_ready":
+        service["terminalCondition"]["state"] = "CONDITION_FAILED"
+    else:
+        service["observedGeneration"] = "13"
+    monkeypatch.setattr(deploy, "google_get", lambda url, **_: revision if "/revisions/" in url else service)
+    monkeypatch.setattr(deploy, "gcloud", lambda *_args, **_kwargs: {})
+    with pytest.raises(deploy.SetupError, match="100% traffic"):
+        deploy.promote_gateway_revision(image, name)
+
+
+@pytest.mark.parametrize("failure", ["wrong_image", "unready", "reconciling"])
+def test_gateway_release_refuses_to_promote_wrong_image_or_unready_revision(monkeypatch, deploy_module, failure):
+    deploy = deploy_module
+    name, image, revision, _service = gateway_release_state(deploy)
+    if failure == "wrong_image":
+        revision["containers"][0]["image"] = image.replace("a" * 64, "b" * 64)
+    elif failure == "unready":
+        revision["conditions"][0]["state"] = "CONDITION_FAILED"
+    else:
+        revision["reconciling"] = True
+    monkeypatch.setattr(deploy, "google_get", lambda *_args, **_kwargs: revision)
+    def no_traffic_mutation(*_args, **_kwargs):
+        pytest.fail("An unverified image or revision must never receive traffic")
+    monkeypatch.setattr(deploy, "gcloud", no_traffic_mutation)
+    with pytest.raises(deploy.SetupError, match="immutable image|not Ready"):
+        deploy.promote_gateway_revision(image, name)
+
+
+def test_gateway_deploy_promotes_final_environment_revision_before_http_config_check(monkeypatch, deploy_module, tmp_path):
+    deploy = deploy_module
+    name, image, _revision, _service = gateway_release_state(deploy)
+    events, descriptions = [], iter([None, {"status": {"url": "https://gateway.run.app"}},
+                                    {"status": {"latestCreatedRevisionName": name}}])
+    def gcloud(*args, **_kwargs):
+        if args[:3] == ("run", "services", "describe"):
+            return next(descriptions)
+        events.append(args[:3])
+        return "identity-token" if args[:2] == ("auth", "print-identity-token") else {}
+    monkeypatch.setattr(deploy, "gcloud", gcloud)
+    monkeypatch.setattr(deploy, "verify_cap", lambda: None)
+    monkeypatch.setattr(deploy, "ensure_gateway_scaling", lambda: events.append(("bounds",)))
+    def promote(actual_image, actual_name):
+        assert (actual_image, actual_name) == (image, name)
+        events.append(("promoted",))
+    monkeypatch.setattr(deploy, "promote_gateway_revision", promote)
+    from io import BytesIO
+    def config(*_args, **_kwargs):
+        assert events[-2:] == [("promoted",), ("auth", "print-identity-token")]
+        events.append(("config",))
+        return BytesIO(b'{"available":true,"live":true}')
+    monkeypatch.setattr(deploy, "urlopen", config)
+    workers = {"proof-gpu": {"url": "https://gpu.run.app"}, "proof-audio": {"url": "https://audio.run.app"}}
+    assert deploy.deploy_gateway(image, workers, ["https://site.web.app"], tmp_path) == "https://gateway.run.app"
+    assert events.index(("run", "services", "update")) < events.index(("promoted",)) < events.index(("config",))
+
+
 def test_direct_upload_signs_exact_size_and_prevents_object_replacement(monkeypatch):
     captured = {}
     cloud = Cloud.__new__(Cloud)

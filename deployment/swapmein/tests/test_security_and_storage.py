@@ -1,14 +1,61 @@
 import copy
 from datetime import datetime, timezone
 import socket
+from types import SimpleNamespace
 
+from google.api_core.exceptions import NotFound, PreconditionFailed
 import pytest
 
 from swapmein.cloud import valid_spend_cap
 from swapmein.errors import PublicError
 from swapmein.security import (check_key_binding, check_owner, check_session, digest,
                                validate_media_url, verify_task_identity)
-from swapmein.storage import check_preparation_capacity, claim_job, release_preparation, reserve_preparation
+from swapmein.storage import Records, check_preparation_capacity, claim_job, release_preparation, reserve_preparation
+
+
+@pytest.mark.parametrize("race", [NotFound, PreconditionFailed])
+def test_record_replacement_during_read_returns_current_generation_instead_of_missing(race):
+    calls = []
+    class Bucket:
+        def blob(self, path):
+            assert path == "jobs/proof.json"
+            generation = len(calls) + 1
+            class Blob:
+                def reload(self):
+                    self.generation = generation
+                def download_as_bytes(self, *, if_generation_match):
+                    calls.append(if_generation_match)
+                    if if_generation_match == 1:
+                        raise race("Generation replaced")
+                    return b'{"status":"preparing"}'
+            return Blob()
+    records = Records("app", client=SimpleNamespace(bucket=lambda _: Bucket()))
+    assert records.read("jobs/proof.json") == ({"status": "preparing"}, 2)
+    assert calls == [1, 2]
+
+
+def test_a_record_missing_at_reload_remains_missing():
+    class Blob:
+        def reload(self):
+            raise NotFound("Missing")
+        def download_as_bytes(self, **_):
+            pytest.fail("A genuinely missing record must not be downloaded")
+    records = Records("app", client=SimpleNamespace(bucket=lambda _: SimpleNamespace(blob=lambda _: Blob())))
+    assert records.read("jobs/missing.json") == (None, 0)
+
+
+def test_record_read_races_are_bounded_and_do_not_report_a_missing_job():
+    calls = []
+    class Blob:
+        def reload(self):
+            self.generation = len(calls) + 1
+        def download_as_bytes(self, **_):
+            calls.append(True)
+            raise NotFound("Old generation removed")
+    records = Records("app", client=SimpleNamespace(bucket=lambda _: SimpleNamespace(blob=lambda _: Blob())))
+    with pytest.raises(PublicError) as error:
+        records.read("jobs/busy.json")
+    assert error.value.status_code == 503 and len(calls) == 4
 
 
 def resolver(address):

@@ -272,7 +272,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     const active = currentJob.current;
     if (operation.current) return;
     if (!enabled || !active || active.status !== "ready") {
-      setError("Prepare the job and review its real tracking preview before generating.");
+      setError("Prepare the job and review its preview before generating.");
       return;
     }
     if (attemptedJobs.current.has(active.id)) {

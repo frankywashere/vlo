@@ -18,14 +18,22 @@ class Records:
         self.bucket = self.client.bucket(bucket_name)
 
     def read(self, path: str):
-        blob = self.bucket.blob(path)
-        try:
-            blob.reload()
+        for _ in range(4):
+            blob = self.bucket.blob(path)
+            try:
+                blob.reload()
+            except NotFound:
+                return None, 0
             generation = int(blob.generation)
-            data = blob.download_as_bytes(if_generation_match=generation)
-        except NotFound:
-            return None, 0
-        return json.loads(data), generation
+            try:
+                data = blob.download_as_bytes(if_generation_match=generation)
+            except (NotFound, PreconditionFailed):
+                # A progress update can replace the generation after reload.
+                # With versioning/soft-delete off, that old generation is gone;
+                # it does not mean the current job or session disappeared.
+                continue
+            return json.loads(data), generation
+        raise PublicError("This record is being updated. Try checking its status again.", 503)
 
     def write(self, path: str, data: dict, generation: int):
         self.bucket.blob(path).upload_from_string(
