@@ -33,7 +33,7 @@ describe("API settings preview dialog", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("discards cancelled drafts and reopens with the currently saved key", () => {
+  it("discards unsaved key drafts when closed and reopens with the currently saved key", () => {
     const props = {
       apiKey: "saved-example",
       onSave: vi.fn(),
@@ -44,7 +44,7 @@ describe("API settings preview dialog", () => {
     fireEvent.change(screen.getByLabelText("reAPI API key"), {
       target: { value: "unsaved-draft" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(props.onSave).not.toHaveBeenCalled();
     expect(props.onClose).toHaveBeenCalledOnce();
     rerender(<ApiKeySettingsDialog {...props} open={false} />);
@@ -150,4 +150,26 @@ describe("API settings preview dialog", () => {
     expect(screen.getByLabelText("reAPI API key")).toHaveValue("");
   });
 
+});
+
+
+it("lets masking change and settings close without entering or saving a key", () => {
+  const onMaskingChange = vi.fn();
+  const onSave = vi.fn();
+  const onClose = vi.fn();
+  const props = {open: true, live: true, apiKey: "", onMaskingChange, onSave, onClose, onClear: vi.fn()};
+  const {rerender} = render(<ApiKeySettingsDialog {...props} enhancedCharacterMasking={false} />);
+  fireEvent.click(screen.getByRole("switch", {name: "Use enhanced character masking"}));
+  expect(onMaskingChange).toHaveBeenCalledExactlyOnceWith(true);
+  rerender(<ApiKeySettingsDialog {...props} enhancedCharacterMasking />);
+  expect(screen.getByRole("switch", {name: "Use enhanced character masking"})).toBeChecked();
+  expect(screen.getByRole("button", {name: "Save key"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Done"})).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", {name: "Done"}));
+  expect(onClose).toHaveBeenCalledOnce();
+  expect(onSave).not.toHaveBeenCalled();
+  rerender(<ApiKeySettingsDialog {...props} enhancedCharacterMasking open={false} />);
+  rerender(<ApiKeySettingsDialog {...props} enhancedCharacterMasking />);
+  expect(screen.getByRole("switch", {name: "Use enhanced character masking"})).toBeChecked();
+  expect(screen.getByLabelText("reAPI API key")).toHaveValue("");
 });

@@ -130,7 +130,7 @@ function ApiKeyPreviewEditor({
               tracking is skipped when masking is off; your tap position and timestamp identify the person.
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Changes apply immediately and require a new guide review.
+              Masking is saved automatically. No API key is needed to change it. Changing masking requires a new guide review.
             </Typography>
           </Box>
           <Alert severity="info" id="charswap-api-settings-notice">
@@ -247,7 +247,7 @@ function ApiKeyPreviewEditor({
           Clear key
         </Button>
         <Button onClick={onClose} sx={{ minHeight: 44 }}>
-          Cancel
+          Done
         </Button>
         <Button
           variant="contained"
