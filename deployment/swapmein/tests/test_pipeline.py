@@ -55,3 +55,50 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     assert records.data[path]["output_uri"] != first_uri
     assert len(set(cloud.uploads)) == 2
     assert all(re.fullmatch(rf"outputs/{job_id}/swapMEin-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
+
+
+def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch):
+    from contextlib import contextmanager
+    import time
+    job_id = "b" * 32
+    path = f"jobs/{job_id}.json"
+    metadata = {"duration": 5, "width": 854, "height": 480, "frames": 120,
+                "anchor": {"x": .6, "y": .4, "frame": 24}}
+    monkeypatch.setattr("swapmein.pipeline.normalize", lambda *_: metadata)
+    monkeypatch.setattr("swapmein.pipeline.select_label", lambda *_: (2, [100] * 120))
+    class Records:
+        def __init__(self, enabled):
+            self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/input.bin",
+                "setup": {"trim": [0, 5], "anchor": {"x": .6, "y": .4, "time": 1}, "enhanced_character_masking": enabled}},
+                "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
+        def update(self, key, mutation):
+            self.data[key] = mutation(copy.deepcopy(self.data.get(key)))
+            return copy.deepcopy(self.data[key])
+    class Cloud:
+        shutdown_verified = True
+        def __init__(self):
+            self.calls = []
+        def download(self, uri, destination, *_):
+            destination.write_bytes(b"input")
+        def upload(self, bucket, key, *_):
+            return f"gs://{bucket}/{key}"
+        def copy(self, uri, bucket, key):
+            return f"gs://{bucket}/{key}"
+        def worker_output(self, result, run, filename):
+            return f"gs://worker/{run}/{filename}"
+        @contextmanager
+        def worker(self, kind):
+            def invoke(endpoint, payload, timeout):
+                self.calls.append((kind, endpoint, payload))
+                return {}
+            yield invoke
+    for enabled, mode in [(True, "gray"), (False, "original")]:
+        records, cloud = Records(enabled), Cloud()
+        Pipeline(Settings(), records, cloud).prepare(job_id)
+        assert records.data[path]["status"] == "ready"
+        assert records.data[path]["selected_label"] == 2
+        assert records.data[path]["normalized_anchor"]["time"] == 1
+        assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio", "audio"]
+        assert cloud.calls[-1][2]["fill_mode"] == mode
+        assert cloud.calls[-1][2]["selected_label"] == 2
+        assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]

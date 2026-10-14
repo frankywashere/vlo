@@ -226,3 +226,5 @@ preparation proof and user-reviewed output before describing those as validated.
 This backend is a separate deployment consumer of the existing private workers,
 not a VLO SDK/extension-owned service. No new extension surface is exposed; the
 repository extension-surface check still applies before handoff.
+
+The job setup accepts strict boolean `enhanced_character_masking` (default `true` for existing clients). The CPU compose call uses `gray` when on and `original` when off. SAM and audio preparation remain active in both modes. Generation reads the saved job option and normalized selection coordinates; the final export remains 480p with original audio.

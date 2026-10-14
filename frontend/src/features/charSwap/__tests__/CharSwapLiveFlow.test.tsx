@@ -93,7 +93,7 @@ describe("live generation approval", () => {
     );
     await user.click(screen.getByRole("button", { name: "Choose access" }));
     expect(screen.getByRole("button", { name: "Review setup" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "API settings" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.type(
       screen.getByLabelText("reAPI API key"),
       "fake-user-key-for-this-test",

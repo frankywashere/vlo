@@ -19,7 +19,7 @@ describe("API settings preview dialog", () => {
       />,
     );
     expect(
-      screen.getByRole("dialog", { name: "API settings" }),
+      screen.getByRole("dialog", { name: "Settings" }),
     ).toBeInTheDocument();
     const input = screen.getByLabelText("reAPI API key");
     const save = screen.getByRole("button", { name: "Save for preview" });
@@ -110,5 +110,35 @@ describe("API settings preview dialog", () => {
     expect(
       screen.getByRole("button", { name: "Save for preview" }),
     ).toBeDisabled();
+  });
+  it("changes masking without requiring a key and locks it during processing", () => {
+    const onMaskingChange = vi.fn();
+    const props = {
+      open: true,
+      apiKey: "",
+      onSave: vi.fn(),
+      onClear: vi.fn(),
+      onClose: vi.fn(),
+      onMaskingChange,
+    };
+    const { rerender } = render(
+      <ApiKeySettingsDialog {...props} enhancedCharacterMasking />,
+    );
+    const toggle = screen.getByRole("switch", {
+      name: "Use enhanced character masking",
+    });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(onMaskingChange).toHaveBeenCalledWith(false);
+    rerender(
+      <ApiKeySettingsDialog
+        {...props}
+        enhancedCharacterMasking={false}
+        maskingLocked
+      />,
+    );
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(props.onSave).not.toHaveBeenCalled();
   });
 });

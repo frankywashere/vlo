@@ -147,4 +147,19 @@ describe("walkthrough store readiness", () => {
     expect(reset.trackingReady).toBe(false);
     expect(reset.error).toBeNull();
   });
+  it("changing masking invalidates approval and returns to preparation without losing references", () => {
+    prepareReferences();
+    const store = useCharSwapStore.getState();
+    store.reviewTracking([]);
+    store.visit("review");
+    const before = useCharSwapStore.getState();
+    store.setEnhancedCharacterMasking(false);
+    const after = useCharSwapStore.getState();
+    expect(after.enhancedCharacterMasking).toBe(false);
+    expect(after.trackingReady).toBe(false);
+    expect(after.step).toBe("references");
+    expect(after.selectionVersion).toBe(before.selectionVersion + 1);
+    expect(after.references).toEqual(before.references);
+    expect(after.assignments).toEqual(before.assignments);
+  });
 });

@@ -91,6 +91,7 @@ def ready_job(records, owner):
     job_id = "a" * 32
     records.create(f"jobs/{job_id}.json", {"id": job_id, "owner": owner, "status": "ready", "updated_at": time.time(),
         "duration": 5, "width": 854, "height": 480, "guide_uri": "gs://private-app/guide.mp4",
+        "setup": {"trim": [0, 5], "anchor": {"x": .5, "y": .5, "time": 1}},
         "reference_uri": "gs://private-app/reference.jpg", "review_required": True})
     return job_id
 
@@ -223,3 +224,18 @@ def test_lost_export_enqueue_response_preserves_an_already_completed_export(api)
     response = client.get(f"/api/jobs/{job_id}/provider", headers=headers)
     assert response.json()["status"] == "completed"
     assert records.data[f"jobs/{job_id}.json"]["status"] == "completed"
+
+
+def test_original_visible_mode_uses_stored_selection_without_gray_instructions(api):
+    client, records, cloud, provider = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    job = records.data[f"jobs/{job_id}.json"]
+    job["setup"]["enhanced_character_masking"] = False
+    job["normalized_anchor"] = {"x": .6, "y": .4, "time": 2}
+    response = client.post(f"/api/jobs/{job_id}/generate", headers=headers, json={"approved": True})
+    assert response.status_code == 200
+    prompt = provider.submissions[0]["prompt"]
+    assert "gray" not in prompt and "60%" in prompt and "40%" in prompt and "2.00 seconds" in prompt
+    assert "Keep all other people unchanged" in prompt
+    assert provider.submissions[0]["reference_video_urls"][0].startswith("https://storage.googleapis.com/")

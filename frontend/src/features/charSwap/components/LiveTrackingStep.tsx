@@ -11,6 +11,8 @@ import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
 
 interface LiveTrackingStepProps {
+  enhancedCharacterMasking?: boolean;
+  selectedLabel?: number;
   status: string;
   message?: string;
   guideUrl?: string;
@@ -26,6 +28,8 @@ interface LiveTrackingStepProps {
 }
 
 export function LiveTrackingStep({
+  enhancedCharacterMasking = true,
+  selectedLabel,
   status,
   message,
   guideUrl,
@@ -48,7 +52,9 @@ export function LiveTrackingStep({
       <Alert severity={failed ? "error" : "info"} role="note">
         {message ??
           (ready
-            ? "Check that gray covers only the person you selected throughout the clip. Generation has not started."
+            ? enhancedCharacterMasking
+              ? "Check that gray covers only the person you selected throughout the clip. Generation has not started."
+              : "Review the selected label in the tracking preview. Generation has not started."
             : "Preparing your clip and checking the selected person. You can leave this tab open while it runs.")}
       </Alert>
       {!ready && !failed && (
@@ -57,13 +63,18 @@ export function LiveTrackingStep({
       {ready && guideUrl && (
         <Box sx={PANEL}>
           <Typography fontWeight={600} sx={{ mb: 2 }}>
-            Your generation guide
+            {enhancedCharacterMasking
+              ? "Your generation guide"
+              : "Review the tracked person"}
           </Typography>
           <VideoPreview
             clip={{
               id: "live-guide",
               name: "Prepared guide",
-              url: guideUrl,
+              url:
+                !enhancedCharacterMasking && trackingUrl
+                  ? trackingUrl
+                  : guideUrl,
               duration,
               width,
               height,
@@ -77,9 +88,11 @@ export function LiveTrackingStep({
             trim={[0, duration]}
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Review the whole clip. The gray silhouette should follow your person
-            without covering anyone else. This is a visual check; it does not
-            guarantee identity tracking through a cut.
+            {enhancedCharacterMasking
+              ? "Review the whole clip. The gray silhouette should follow your person without covering anyone else."
+              : `Check that person label ${selectedLabel ?? "shown"} follows your selected person throughout this tracking preview. The generation guide keeps the original person visible.`}{" "}
+            This is a visual check; it does not guarantee identity tracking
+            through a cut.
           </Typography>
         </Box>
       )}
@@ -88,6 +101,17 @@ export function LiveTrackingStep({
           The guide could not be loaded. Refresh its link before confirming.
           <Button onClick={onRefresh}>Refresh guide</Button>
         </Alert>
+      )}
+      {ready && !enhancedCharacterMasking && guideUrl && (
+        <Button
+          component="a"
+          href={guideUrl}
+          target="_blank"
+          rel="noreferrer"
+          variant="outlined"
+        >
+          View generation guide
+        </Button>
       )}
       {ready && trackingUrl && (
         <Button

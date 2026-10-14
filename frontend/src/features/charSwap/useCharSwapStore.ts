@@ -35,6 +35,7 @@ interface CharSwapStore extends WalkthroughState {
   selectionVersion: number;
   trackingReady: boolean;
   error: string | null;
+  setEnhancedCharacterMasking: (enabled: boolean) => void;
   loadClip: (clip: ClipAsset) => void;
   changeTrim: (trim: [number, number]) => void;
   selectTarget: (person: TargetPerson) => void;
@@ -56,6 +57,21 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   selectionVersion: 0,
   trackingReady: false,
   error: null,
+  setEnhancedCharacterMasking: (enabled) =>
+    set((state) =>
+      enabled === state.enhancedCharacterMasking
+        ? state
+        : {
+            enhancedCharacterMasking: enabled,
+            selectionVersion: state.selectionVersion + 1,
+            trackingReady: false,
+            issues: [],
+            decisions: {},
+            step: ["matches", "access", "review"].includes(state.step)
+              ? "references"
+              : state.step,
+          },
+    ),
   loadClip: (clip) =>
     set((state) => ({
       ...setClip(state, clip),

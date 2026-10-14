@@ -14,7 +14,18 @@ def estimate(duration: int, rate: float = .074):
     return math.ceil(duration * 2 * rate * 1000) / 1000
 
 
-def replacement_prompt(duration: int):
+def replacement_prompt(duration: int, enhanced_masking: bool = True, anchor: dict | None = None):
+    if not enhanced_masking:
+        anchor = anchor or {"x": .5, "y": .5, "time": 0}
+        return (
+            "Use reference video 1 as the source scene and precise motion guide. "
+            f"Replace the person selected at approximately {anchor['x'] * 100:.0f}% of the frame width "
+            f"and {anchor['y'] * 100:.0f}% of its height, measured from the top left, at {anchor['time']:.2f} seconds. "
+            "Replace their entire head, hands, body and feet with the character from reference image 1 in every frame. "
+            f"Preserve the background, camera, lighting, motion and exact {duration}-second timing. "
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
+            "Replace this person rather than adding another character. Keep all other people unchanged."
+        )
     return (
         "Use reference video 1 as the source scene and precise motion guide. "
         "Replace the complete selected person covered by the flat gray silhouette with the character "
@@ -28,8 +39,8 @@ def replacement_prompt(duration: int):
     )
 
 
-def generation_payload(duration: int, image_url: str, video_url: str):
-    return {"model": "minimax-h3", "prompt": replacement_prompt(duration), "duration": duration,
+def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = True, anchor: dict | None = None):
+    return {"model": "minimax-h3", "prompt": replacement_prompt(duration, enhanced_masking, anchor), "duration": duration,
             "resolution": "768P", "aspect_ratio": "adaptive", "content_filter": False,
             "reference_image_urls": [image_url], "reference_video_urls": [video_url]}
 

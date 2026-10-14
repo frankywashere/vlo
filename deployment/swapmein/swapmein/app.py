@@ -120,7 +120,7 @@ def view(job: dict):
         result["estimate_note"] = "Provider estimate only, using rounded published 768P rate; Google preparation costs are separate."
         result["estimate_source"] = "https://reapi.ai/models/minimax-h3"
         result["estimate_verified_at"] = "2026-10-14"
-    for field in ["width", "height"]:
+    for field in ["width", "height", "selected_label"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
@@ -258,7 +258,11 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
         return view(job)
     records, cloud, provider = services()
     image_url, video_url = cloud.signed_url(job["reference_uri"]), cloud.signed_url(job["guide_uri"])
-    payload = generation_payload(job["duration"], image_url, video_url)
+    options = Setup.model_validate(job["setup"])
+    anchor = options.anchor.model_dump()
+    anchor["time"] -= options.trim[0]
+    anchor = job.get("normalized_anchor", anchor)
+    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor)
     balance = provider.balance(key)
     if balance < math_credits(job["duration"]):
         raise PublicError("Your reAPI balance is below the current provider estimate. Add credits before generating.", 402)

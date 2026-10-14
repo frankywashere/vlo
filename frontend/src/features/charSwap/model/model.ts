@@ -45,6 +45,7 @@ export interface MatchDecision {
 }
 
 export interface WalkthroughState {
+  enhancedCharacterMasking?: boolean;
   clip: ClipAsset | null;
   trim: [number, number];
   targets: TargetPerson[];
@@ -68,6 +69,7 @@ const MAX_CLIP_SECONDS = 15;
 
 export function createInitialState(): WalkthroughState {
   return {
+    enhancedCharacterMasking: true,
     clip: null,
     trim: [0, 0],
     targets: [],

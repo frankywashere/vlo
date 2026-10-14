@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   Alert,
+  FormControlLabel,
+  Switch,
   Box,
   Button,
   Dialog,
@@ -21,6 +23,9 @@ import VisibilityOffOutlined from "@mui/icons-material/VisibilityOffOutlined";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
 interface ApiKeySettingsDialogProps {
+  enhancedCharacterMasking?: boolean;
+  maskingLocked?: boolean;
+  onMaskingChange?: (enabled: boolean) => void;
   open: boolean;
   live?: boolean;
   apiKey: string;
@@ -56,6 +61,9 @@ export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
 }
 
 function ApiKeyPreviewEditor({
+  enhancedCharacterMasking = true,
+  maskingLocked = false,
+  onMaskingChange,
   apiKey,
   live = false,
   onSave,
@@ -81,7 +89,7 @@ function ApiKeyPreviewEditor({
     >
       <DialogTitle
         id="charswap-api-settings-title"
-        aria-label="API settings"
+        aria-label="Settings"
         sx={{
           display: "flex",
           alignItems: "center",
@@ -89,9 +97,9 @@ function ApiKeyPreviewEditor({
           gap: 2,
         }}
       >
-        API settings
+        Settings
         <IconButton
-          aria-label="Close API settings"
+          aria-label="Close settings"
           onClick={onClose}
           sx={{ width: 44, height: 44 }}
         >
@@ -100,6 +108,26 @@ function ApiKeyPreviewEditor({
       </DialogTitle>
       <DialogContent dividers sx={{ py: 3 }}>
         <Stack spacing={3}>
+          <Box>
+            <FormControlLabel
+              label="Use enhanced character masking"
+              control={
+                <Switch
+                  checked={enhancedCharacterMasking}
+                  disabled={maskingLocked}
+                  onChange={(_, checked) => onMaskingChange?.(checked)}
+                />
+              }
+            />
+            <Typography variant="body2" color="text.secondary">
+              Cover the selected person with a solid gray silhouette before
+              generation. Turn off to keep the original person visible. Person
+              tracking stays on.
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Changes apply immediately and require a new guide review.
+            </Typography>
+          </Box>
           <Alert severity="info" id="charswap-api-settings-notice">
             {live
               ? "Your key is used only for this tab and sent securely through swapMEin to reAPI. Video generation starts only after your final review."

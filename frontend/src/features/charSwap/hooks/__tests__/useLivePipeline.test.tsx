@@ -122,7 +122,7 @@ describe("live BYOK pipeline", () => {
     expect(form.get("clip")).toBeInstanceOf(File);
     expect(form.get("reference")).toBeInstanceOf(File);
     expect(JSON.parse(String(form.get("setup")))).toEqual({
-      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1",
+      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true,
     });
     expect(String(form.get("setup"))).not.toContain(USER_KEY);
     expect(String(form.get("setup"))).not.toContain(SESSION_TOKEN);

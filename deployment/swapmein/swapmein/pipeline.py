@@ -49,7 +49,8 @@ class Pipeline:
                 root = Path(temporary)
                 source, normalized = root / "source.bin", root / "normalized.mp4"
                 self.cloud.download(job["source_uri"], source, 25 * 1024 * 1024)
-                metadata = normalize(source, normalized, Setup.model_validate(job["setup"]))
+                options = Setup.model_validate(job["setup"])
+                metadata = normalize(source, normalized, options)
                 prefix = f"inputs/swapmein-{job_id}/"
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
                 self.update_job(job_id, message="Tracking the selected person.", duration=metadata["duration"],
@@ -65,18 +66,19 @@ class Pipeline:
                 # Existing compose worker deliberately accepts only private inputs/ objects.
                 masks_input = self.cloud.copy(masks_uri, self.settings.worker_bucket, prefix + "masks.zip")
                 preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
-                self.update_job(job_id, message="Preparing vocals and the gray guide.")
+                self.update_job(job_id, message="Preparing vocals and the generation guide.")
                 audio_run, guide_run = "sm-audio-" + job_id, "sm-guide-" + job_id
                 with self.cloud.worker("audio") as invoke:
                     audio = invoke("/benchmark", {"input_uri": source_uri, "run_id": audio_run}, remaining())
                     vocals_uri = self.cloud.worker_output(audio, audio_run, "vocals_plus3.wav")
                     vocals_input = self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
                     composed = invoke("/compose", {"input_uri": source_uri, "masks_uri": masks_input,
-                        "guide_audio_uri": vocals_input, "selected_label": label, "fill_mode": "gray", "run_id": guide_run}, remaining())
+                        "guide_audio_uri": vocals_input, "selected_label": label, "fill_mode": "gray" if options.enhanced_character_masking else "original", "run_id": guide_run}, remaining())
                 prepared = self.cloud.worker_output(composed, guide_run, "prepared_guide.mp4")
                 guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, f"outputs/{job_id}/guide.mp4")
-                self.update_job(job_id, status="ready", message="Review the guide and confirm that only your selected person is covered.",
+                self.update_job(job_id, status="ready", message=("Review the guide and confirm that only your selected person is covered." if options.enhanced_character_masking else f"Review tracking label {label} and confirm it follows your selected person. The guide keeps the original person visible."),
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
+                    normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"]["frame"] / 24},
                     mask_frames=metadata["frames"], mask_coverage_min=min(coverage), review_required=True)
         except PublicError as error:
             self.update_job(job_id, status="failed", message=error.message)

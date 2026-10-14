@@ -107,3 +107,7 @@ cd deployment/swapmein && .venv/bin/python -m pytest -q
 This standalone native application and its owner-neutral `charSwap` API client do not register extensions or change VLO’s supported SDK surface. No extension-owned behavior is presented. If shared editor or extension contributions are added later, revisit `extensions/extension-development/references/host-contracts.md` and use the real extension API or a shared host seam. The surface check is required but does not substitute for behavioral tests.
 
 The setup download records filenames, anchors and decisions; it excludes keys, file contents and browser object URLs. It cannot restart a job without supplying media again. Multi-person generation, cross-cut re-identification, automated uncertainty review, persistent user accounts and real app-credit payments remain future work.
+
+### Enhanced character masking
+
+Settings includes **Use enhanced character masking**, on by default. On paints the selected SAM label solid gray; off retains the original RGB performer. Both modes keep SAM tracking and shifted vocal guidance. Changing the setting invalidates the prepared job and its approval; active or uncertain submissions lock settings. With masking off, review the selected numeric label in the tracking preview before generation. The generation prompt identifies the clicked position and time instead of referring to gray. Saved setup JSON includes this choice.

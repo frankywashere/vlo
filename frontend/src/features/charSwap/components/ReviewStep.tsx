@@ -38,6 +38,7 @@ export function ReviewStep({
   onApiSettings,
 }: ReviewStepProps) {
   const {
+    enhancedCharacterMasking,
     clip,
     trim,
     targets,
@@ -48,6 +49,7 @@ export function ReviewStep({
     visit,
   } = useCharSwapStore(
     useShallow((s) => ({
+      enhancedCharacterMasking: s.enhancedCharacterMasking,
       clip: s.clip,
       trim: s.trim,
       targets: s.targets,
@@ -63,6 +65,7 @@ export function ReviewStep({
     // Local object URLs and thumbnail data are deliberately excluded from the handoff.
     const setup = {
       version: 1,
+      enhancedCharacterMasking: enhancedCharacterMasking ?? true,
       previewOnly: !live,
       clip: { name: clip!.name, duration: clip!.duration, trim },
       people: targets.map((person) => ({
@@ -110,6 +113,10 @@ export function ReviewStep({
         >
           <Box>
             <Typography fontWeight={600}>{clip.name}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Enhanced character masking:{" "}
+              {(enhancedCharacterMasking ?? true) ? "On" : "Off"}
+            </Typography>
             <Typography variant="body2" color="text.secondary">
               {formatTime(trim[0])}–{formatTime(trim[1])} ·{" "}
               {(trim[1] - trim[0]).toFixed(1)} seconds

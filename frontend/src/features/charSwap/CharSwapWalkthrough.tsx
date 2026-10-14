@@ -262,6 +262,8 @@ export function CharSwapWalkthrough() {
     assignments,
     issues,
     decisions,
+    enhancedCharacterMasking,
+    setEnhancedCharacterMasking,
     selectionVersion,
     trackingReady,
     error,
@@ -283,6 +285,8 @@ export function CharSwapWalkthrough() {
       issues: s.issues,
       decisions: s.decisions,
       trackingReady: s.trackingReady,
+      enhancedCharacterMasking: s.enhancedCharacterMasking,
+      setEnhancedCharacterMasking: s.setEnhancedCharacterMasking,
       selectionVersion: s.selectionVersion,
       error: s.error,
       next: s.next,
@@ -340,6 +344,7 @@ export function CharSwapWalkthrough() {
   } = useLocalAssets();
   const current = STEPS.indexOf(step);
   const state = {
+    enhancedCharacterMasking,
     clip,
     trim,
     targets,
@@ -505,7 +510,7 @@ export function CharSwapWalkthrough() {
               alignItems="center"
             >
               <Button
-                aria-label="API settings"
+                aria-label="Settings"
                 disabled={lockedAccess}
                 onClick={() => setApiSettingsOpen(true)}
                 sx={{
@@ -520,7 +525,7 @@ export function CharSwapWalkthrough() {
                   component="span"
                   sx={{ display: { xs: "none", sm: "inline" } }}
                 >
-                  API settings
+                  Settings
                 </Box>
               </Button>
               <Button
@@ -735,6 +740,8 @@ export function CharSwapWalkthrough() {
                       pipeline.error ||
                       "Preparation has not started. Go back to References to try again."
                     }
+                    enhancedCharacterMasking={enhancedCharacterMasking}
+                    selectedLabel={pipeline.job?.selected_label}
                     guideUrl={pipeline.job?.guide_url}
                     trackingUrl={pipeline.job?.tracking_url}
                     duration={pipeline.job?.duration ?? trim[1] - trim[0]}
@@ -874,6 +881,9 @@ export function CharSwapWalkthrough() {
         <ApiKeySettingsDialog
           open={apiSettingsOpen}
           live={secureSite}
+          enhancedCharacterMasking={enhancedCharacterMasking}
+          maskingLocked={lockedAccess}
+          onMaskingChange={setEnhancedCharacterMasking}
           apiKey={previewKey}
           onSave={saveKey}
           onClear={clearKey}

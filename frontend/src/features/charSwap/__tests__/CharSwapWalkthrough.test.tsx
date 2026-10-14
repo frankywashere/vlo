@@ -82,7 +82,7 @@ describe("CharSwap walkthrough", () => {
       () => undefined,
     );
     render(<CharSwapWalkthrough />);
-    await user.click(screen.getByRole("button", { name: "API settings" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.type(
       screen.getByLabelText("reAPI API key"),
       "preview-only-private-token",

@@ -30,6 +30,7 @@ export interface LivePipelineJob {
   duration?: number;
   width?: number;
   height?: number;
+  selected_label?: number;
   estimated_cost_usd?: number;
   actual_provider_credits?: number;
 }
@@ -195,6 +196,7 @@ function readJob(value: unknown): LivePipelineJob {
     "duration",
     "width",
     "height",
+    "selected_label",
     "estimated_cost_usd",
     "actual_provider_credits",
   ] as const) {
@@ -386,6 +388,7 @@ export async function createLiveJob(
       trim: state.trim,
       anchor: target.anchor,
       target_name: target.name,
+      enhanced_character_masking: state.enhancedCharacterMasking ?? true,
     }),
   );
   return readJob(
