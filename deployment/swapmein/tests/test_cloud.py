@@ -20,7 +20,7 @@ class Tasks:
     def __init__(self, events):
         self.events = events
 
-    def delete_task(self, name):
+    def delete_task(self, name, *, retry=None, timeout=20):
         self.events.append(("delete", name))
 
 
@@ -279,7 +279,7 @@ def test_failed_backup_cancellation_also_blocks_new_preparations(monkeypatch):
     cloud._backup_shutdown = lambda _service: "backup-task"
     cloud._scale = lambda *_args: None
     class UnavailableTasks:
-        def delete_task(self, name):
+        def delete_task(self, name, *, retry=None, timeout=20):
             raise RuntimeError("Task deletion unavailable")
     cloud.tasks = UnavailableTasks()
     cloud.http = httpx.Client(transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={"cuda": True})))
@@ -310,7 +310,7 @@ def test_real_backup_task_shape_uses_shutdown_identity_and_zero_patch():
     assert json.loads(task.http_request.body)["scaling"] == {"scalingMode": "MANUAL", "manualInstanceCount": 0}
     assert 890 < (task.schedule_time - datetime.now(timezone.utc)).total_seconds() <= 900
     assert task.name.startswith(captured["parent"] + "/tasks/shutdown-gpu-")
-    assert captured["retry"] is None and captured["timeout"] == 30
+    assert captured["retry"] is None and captured["timeout"] == 20
 
 
 def test_backup_created_but_ack_lost_prevents_activation_and_blocks_the_lease():

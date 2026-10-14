@@ -258,10 +258,10 @@ Each worker is normally in MANUAL mode at zero. Before setting it to one, the
 gateway registers a backup shutdown task for 15 minutes later, recording its
 predetermined name and deadline before the bounded registration RPC. After the
 worker call, a `finally` block returns it to manual zero, verifies settled Run
-state, and deletes the backup task. Worker calls are bounded at 600 seconds each,
+state, and deletes the backup task with retries disabled and a 20-second timeout. Worker calls are bounded at 600 seconds each,
 with a 1,200-second aggregate preparation deadline plus cleanup; scaling checks
 are bounded at 120 seconds. Cloud Tasks create calls disable SDK retries and use
-30-second RPC timeouts. Task dispatch deadline is 1,800 seconds.
+20-second RPC timeouts. Task dispatch deadline is 1,800 seconds.
 
 If shutdown cannot be verified, backup registration acknowledgment is lost, or
 backup cancellation fails, the lease is retained and marked blocked. No worker
@@ -439,3 +439,7 @@ excess end frames to the selected duration. It restores only the matching
 original soundtrack segment, preserves generated dimensions, and still rejects
 short results or incomplete frame/audio coverage. No playback-speed adjustment
 is applied.
+
+Cloud Tasks RPC timeouts stay below its 30-second server limit. A controlled
+cloud diagnostic reproduced `INVALID_ARGUMENT` at the 30-second boundary; task
+creation and deletion now use 20 seconds to leave transport/clock headroom.

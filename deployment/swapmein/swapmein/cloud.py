@@ -41,6 +41,8 @@ def valid_spend_cap(body: dict, project_number: str):
     return False
 
 
+# Cloud Tasks rejects RPC deadlines over 30 seconds. Keep headroom for gRPC
+# deadline rounding and clock differences; do not use the boundary value.
 class Cloud:
     job_id = None
 
@@ -71,7 +73,7 @@ class Cloud:
             dispatch_deadline=duration_pb2.Duration(seconds=1800),
         )
         self.tasks.create_task(parent=self.tasks.queue_path(settings.project, settings.region, settings.task_queue),
-                               task=task, retry=None, timeout=30)
+                               task=task, retry=None, timeout=20)
 
     def blob(self, bucket: str, key: str):
         if ".." in key or key.startswith("/"):
@@ -200,7 +202,7 @@ class Cloud:
         task.schedule_time = deadline
         emit("backup_shutdown_registering", job_id=self.job_id, worker=service, task_name=name)
         try:
-            created = self.tasks.create_task(parent=queue, task=task, retry=None, timeout=30)
+            created = self.tasks.create_task(parent=queue, task=task, retry=None, timeout=20)
         except Exception as error:
             emit("backup_shutdown_registration_failed", error=error, job_id=self.job_id, worker=service, task_name=name)
             self.shutdown_verified = False
@@ -240,7 +242,7 @@ class Cloud:
             else:
                 emit("worker_stopped", job_id=self.job_id, worker=service)
                 try:
-                    self.tasks.delete_task(name=backup)
+                    self.tasks.delete_task(name=backup, retry=None, timeout=20)
                 except NotFound:
                     pass
                 except Exception as error:
