@@ -1,5 +1,7 @@
 """Private recastfx credit catalog and idempotent account wallet operations."""
 import os
+import math
+from decimal import Decimal, ROUND_CEILING
 import re
 import time
 
@@ -135,8 +137,32 @@ def public_catalog(records) -> dict:
     }
 
 
-def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int) -> dict:
+def margin_credit_rate(model: dict) -> int:
+    """Whole credits per second, rounded up to meet the estimated margin."""
+    bounds = {"target_margin_percent": (0, 95), "provider_usd_per_second": (0, 100),
+              "cloud_usd_per_run": (0, 100), "payment_fee_percent": (0, 50),
+              "reference_seconds": (1, 15)}
+    if set(model) != set(bounds):
+        raise PublicError("Set all margin cost assumptions.")
+    for name, (low, high) in bounds.items():
+        value = model[name]
+        if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
+            raise PublicError("Set valid margin cost assumptions.")
+    d = lambda key: Decimal(str(model[key]))
+    available = 1 - (d("target_margin_percent") + d("payment_fee_percent")) / 100
+    if available <= 0:
+        raise PublicError("Margin and payment fees must total less than 100%.")
+    cost = d("provider_usd_per_second") + d("cloud_usd_per_run") / d("reference_seconds")
+    rate = int((cost * 100 / available).to_integral_value(rounding=ROUND_CEILING))
+    if not 1 <= rate <= 6666:
+        raise PublicError("The estimated cost must produce a valid credit rate.")
+    return rate
+
+
+def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int, margin_model: dict | None = None) -> dict:
     require_staff(records, actor, {"owner", "pricing_admin"})
+    if margin_model is not None:
+        credits_per_generation = margin_credit_rate(margin_model) * 15
     if not 1 <= credits_per_generation <= 100000 or not 1 <= len(packs) <= 8:
         raise PublicError("Set a valid credit rate and one to eight packs.")
     seen = set()
@@ -156,12 +182,12 @@ def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits
             raise PublicError("Prices changed in another session. Reload before saving.", 409)
         history = current.get("history", [])[-49:]
         history.append({"revision": revision + 1, "actor": actor["email"], "at": time.time(),
-                        "packs": packs, "credits_per_generation": credits_per_generation})
+                        "packs": packs, "credits_per_generation": credits_per_generation, "margin_model": margin_model})
         return {"revision": revision + 1, "packs": packs,
-                "credits_per_generation": credits_per_generation, "history": history}
+                "credits_per_generation": credits_per_generation, "margin_model": margin_model, "history": history}
 
     saved = records.update(CATALOG_PATH, mutate)
-    emit("admin_pricing_changed", actor_id=digest(actor["email"]), revision=saved["revision"], credits_for_15_seconds=credits_per_generation, pack_count=len(packs))
+    emit("admin_pricing_changed", actor_id=digest(actor["email"]), revision=saved["revision"], credits_for_15_seconds=credits_per_generation, pack_count=len(packs), target_margin_percent=margin_model.get("target_margin_percent") if margin_model else None)
     return saved
 
 

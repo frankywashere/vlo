@@ -323,11 +323,21 @@ class CreditPack(BaseModel):
     active: bool
 
 
+class MarginModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    target_margin_percent: float = Field(ge=0, le=95)
+    provider_usd_per_second: float = Field(ge=0, le=100)
+    cloud_usd_per_run: float = Field(ge=0, le=100)
+    payment_fee_percent: float = Field(ge=0, le=50)
+    reference_seconds: float = Field(ge=1, le=15)
+
+
 class CatalogUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     revision: int = Field(ge=0)
     packs: list[CreditPack]
     credits_per_generation: int
+    margin_model: MarginModel | None = None
 
 
 class FeatureUpdate(BaseModel):
@@ -408,7 +418,7 @@ def update_commerce_features(body: FeatureUpdate, x_firebase_token: str | None =
 def update_commerce_catalog(body: CatalogUpdate, x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_generation)
+    return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_generation, body.margin_model.model_dump() if body.margin_model else None)
 
 
 @app.post("/api/commerce/admin/provider-key")

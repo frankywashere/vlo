@@ -3,14 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
 
-const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin", ready: false, grant: vi.fn() }));
+const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin", ready: false, grant: vi.fn(), save: vi.fn() }));
 vi.mock("../../services/commerce", () => ({
   loadCreditAdmin: async () => ({ role: api.role, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
-  saveCreditCatalog: vi.fn(), saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), setCreditStaff: vi.fn(),
+  saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), setCreditStaff: vi.fn(),
 }));
-beforeEach(() => { api.role = "owner"; api.grant.mockReset(); });
+beforeEach(() => { api.role = "owner"; api.grant.mockReset(); api.save.mockReset().mockImplementation(async (catalog) => ({ ...catalog, revision: catalog.revision + 1 })); });
 afterEach(() => cleanup());
 
 it("shows owner service switches but blocks activation until credentials are ready", async () => {
@@ -48,4 +48,29 @@ it("lets owners grant credits and reuses the same operation when a response is u
   expect(api.grant).toHaveBeenCalledTimes(2);
   expect(api.grant.mock.calls[1]).toEqual(api.grant.mock.calls[0]);
   expect(api.grant.mock.calls[0].slice(0, 3)).toEqual(["customer@example.com", 100, "Support adjustment"]);
+});
+
+it("lets admins preview a margin-based rate before saving", async () => {
+  const user = userEvent.setup();
+  render(<AdminPage />);
+  await user.click(await screen.findByRole("switch", {name: "Calculate pricing from target margin"}));
+  expect(screen.getByLabelText("Target margin (%)")).toHaveValue(30);
+  expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.13);
+  expect(screen.getByLabelText("Price per video second (USD)")).toBeDisabled();
+  expect(screen.getByText(/Estimated margin: 32.8%/)).toBeInTheDocument();
+  await user.clear(screen.getByLabelText("Target margin (%)"));
+  await user.type(screen.getByLabelText("Target margin (%)"), "50");
+  expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.18);
+});
+
+it("saves the margin assumptions with the calculated quote", async () => {
+  const user = userEvent.setup();
+  render(<AdminPage />);
+  await user.click(await screen.findByRole("switch", { name: "Calculate pricing from target margin" }));
+  await user.click(screen.getByRole("button", { name: "Save pricing" }));
+  await screen.findByText("Pricing saved.");
+  expect(api.save).toHaveBeenCalledWith(expect.objectContaining({
+    credits_per_generation: 195,
+    margin_model: expect.objectContaining({ target_margin_percent: 30, payment_fee_percent: 4.75 }),
+  }));
 });

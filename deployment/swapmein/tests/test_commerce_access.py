@@ -296,3 +296,23 @@ def test_easy_preflight_checks_selected_duration_instead_of_maximum(api, monkeyp
     with pytest.raises(PublicError) as error:
         gateway.check_automatic_generation(records, setup(15), session)
     assert "Add enough" in str(error.value)
+
+
+def test_margin_pricing_is_server_calculated_and_keeps_history(api, monkeypatch):
+    from swapmein.commerce import margin_credit_rate
+    _, records, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
+    model = {"target_margin_percent": 30, "provider_usd_per_second": 0.0732,
+             "cloud_usd_per_run": 0.08, "payment_fee_percent": 4.75, "reference_seconds": 10}
+    assert margin_credit_rate(model) == 13
+    packs = [{"id": "starter", "name": "Starter", "credits": 2000, "price_cents": 2000, "active": True}]
+    saved = save_catalog(records, {"email": "frank@whipsnapfilms.com"}, 0, packs, 1, model)
+    assert saved["credits_per_generation"] == 195
+    assert saved["margin_model"] == model == saved["history"][-1]["margin_model"]
+    assert "margin_model" not in public_catalog(records)
+    for bad in [{**model, "target_margin_percent": 95, "payment_fee_percent": 5},
+                {**model, "reference_seconds": 0}, {**model, "cloud_usd_per_run": float("nan")}]:
+        with pytest.raises(PublicError):
+            margin_credit_rate(bad)
+    with pytest.raises(PublicError):
+        save_catalog(records, {"email": "outsider@example.com"}, 1, packs, 195, model)

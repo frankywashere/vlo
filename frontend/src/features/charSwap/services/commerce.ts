@@ -31,6 +31,14 @@ export interface CreditWallet {
   }>;
 }
 
+export interface MarginModel {
+  target_margin_percent: number;
+  provider_usd_per_second: number;
+  cloud_usd_per_run: number;
+  payment_fee_percent: number;
+  reference_seconds: number;
+}
+
 export interface CreditAdmin {
   role: "owner" | "pricing_admin" | "viewer";
   features: CreditFeatures;
@@ -39,6 +47,7 @@ export interface CreditAdmin {
     packs: CreditPack[];
     credits_per_generation: number;
     credits_per_second?: number;
+    margin_model?: MarginModel | null;
   };
 }
 
