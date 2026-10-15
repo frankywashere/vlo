@@ -24,6 +24,8 @@ import VisibilityOffOutlined from "@mui/icons-material/VisibilityOffOutlined";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
 interface ApiKeySettingsDialogProps {
+  easyMode?: boolean;
+  onEasyModeChange?: (enabled: boolean) => void;
   enhancedCharacterMasking?: boolean;
   maskingLocked?: boolean;
   onMaskingChange?: (enabled: boolean) => void;
@@ -64,6 +66,8 @@ export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
 }
 
 function ApiKeyPreviewEditor({
+  easyMode = true,
+  onEasyModeChange,
   enhancedCharacterMasking = true,
   maskingLocked = false,
   onMaskingChange,
@@ -113,6 +117,16 @@ function ApiKeyPreviewEditor({
       </DialogTitle>
       <DialogContent dividers sx={{ py: 3 }}>
         <Stack spacing={3}>
+          <Box>
+            <FormControlLabel label="Easy mode" control={<Switch checked={easyMode} disabled={maskingLocked}
+              onChange={(_, checked) => onEasyModeChange?.(checked)} />} />
+            <Typography variant="body2" color="text.secondary">
+              Skip scene-by-scene matching. With enhanced masking on, SAM follows the person selected by your initial tap throughout the clip. Turn Easy mode off to select the matching person in each flagged section.
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Saved automatically, without an API key. Changing modes requires preparing a new guide. Review the final guide for changes of person across scenes.
+            </Typography>
+          </Box>
           <Box>
             <FormControlLabel
               label="Use enhanced character masking"

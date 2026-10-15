@@ -60,10 +60,11 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     assert all(re.fullmatch(rf"outputs/{job_id}/swapMEin-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
 
 
+@pytest.mark.parametrize("easy", [None, False, True])
 @pytest.mark.parametrize("enabled,scene_cuts,coverage", [(True, [], [100] * 120), (True, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 120), (False, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 48 + [0] * 72)])
-def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage):
+def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage, easy):
     from contextlib import contextmanager
     import time
     job_id = "b" * 32
@@ -75,12 +76,15 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert enabled and require_continuous is False
         return 2, coverage
     monkeypatch.setattr("swapmein.pipeline.select_label", selected)
-    needs_review = bool(scene_cuts or not all(coverage))
+    needs_review = bool(scene_cuts or not all(coverage)) and easy is not True
     plan = {"version": 1, "review_required": needs_review, "segments": [{
         "id": "segment-000", "start_frame": 0, "end_frame": 120,
         "start": 0, "end": 5, "seek_time": 1, "reason": "scene_cut" if scene_cuts else "selected_person",
         "needs_review": needs_review, "selected_label": None if needs_review else 2}]}
-    monkeypatch.setattr("swapmein.pipeline.analyze_tracking", lambda *_: plan)
+    def analyze(*_):
+        assert easy is not True, "Easy mode must not require scene matching"
+        return plan
+    monkeypatch.setattr("swapmein.pipeline.analyze_tracking", analyze)
     monkeypatch.setattr("swapmein.pipeline.create_selection_preview", lambda _source, _masks, output, _metadata: output.write_bytes(b"translucent-selection-preview"))
     composed_original = []
     def original_guide(source, vocals, output, checked):
@@ -117,8 +121,11 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
                 return {}
             yield invoke
     records, cloud = Records(enabled), Cloud()
+    if easy is not None:
+        records.data[path]["setup"]["easy_mode"] = easy
     Pipeline(Settings(), records, cloud).prepare(job_id)
     assert records.data[path]["status"] == ("tracking_review" if enabled and needs_review else "ready")
+    assert records.data[path]["easy_mode"] is (easy is True)
     assert records.data[path]["selected_label"] == (2 if enabled else None)
     assert records.data[path]["tracking_performed"] is enabled
     assert records.data[path]["normalized_anchor"]["time"] == 1
@@ -128,7 +135,11 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert [kind for kind, _, _ in cloud.calls] == (["gpu", "audio"] if needs_review else ["gpu", "audio", "audio"])
         assert cloud.calls[0][2]["operation"] == "both"
         assert records.data[path]["mask_style"] == "depth"
-        assert records.data[path]["tracking_plan"] == plan
+        if easy is True:
+            assert "tracking_plan" not in records.data[path]
+            assert "Identity across cuts or gaps is not verified" in records.data[path]["message"]
+        else:
+            assert records.data[path]["tracking_plan"] == plan
         if needs_review:
             assert "guide_uri" not in records.data[path]
             assert records.data[path]["tracking_masks_uri"].endswith("masks.zip")

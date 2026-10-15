@@ -173,3 +173,19 @@ it("lets masking change and settings close without entering or saving a key", ()
   expect(screen.getByRole("switch", {name: "Use enhanced character masking"})).toBeChecked();
   expect(screen.getByLabelText("reAPI API key")).toHaveValue("");
 });
+
+
+it("defaults Easy mode on, applies changes without a key, and locks mode during a run", () => {
+  const onEasyModeChange = vi.fn();
+  const props = {open: true, live: true, apiKey: "", onEasyModeChange, onSave: vi.fn(), onClear: vi.fn(), onClose: vi.fn()};
+  const {rerender} = render(<ApiKeySettingsDialog {...props} />);
+  const toggle = screen.getByRole("switch", {name: "Easy mode"});
+  expect(toggle).toBeChecked();
+  fireEvent.click(toggle);
+  expect(onEasyModeChange).toHaveBeenCalledExactlyOnceWith(false);
+  expect(props.onSave).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", {name: "Save key"})).toBeDisabled();
+  rerender(<ApiKeySettingsDialog {...props} easyMode={false} maskingLocked />);
+  expect(toggle).not.toBeChecked();
+  expect(toggle).toBeDisabled();
+});

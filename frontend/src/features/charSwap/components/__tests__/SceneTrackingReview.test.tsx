@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SceneTrackingReview } from "../SceneTrackingReview";
+import { reviewFrameNumbers, reviewFrameTime } from "../../utils/trackingReviewFrames";
 
 function properties() {
   return {
@@ -16,130 +17,134 @@ function properties() {
   };
 }
 
-beforeEach(() => {
-  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
-});
+function loadedFrame() {
+  const video = document.querySelector("video")!;
+  Object.defineProperty(video, "readyState", {configurable: true, value: 2});
+  fireEvent.loadedMetadata(video);
+  fireEvent.seeked(video);
+  return video;
+}
+
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
 
-describe("scene tracking review", () => {
-  it("defaults to the translucent detected-person preview and switches to the original without losing position or choices", () => {
+describe("still-frame scene tracking review", () => {
+  it("shows one masked still without playback or scrubbing controls, and toggles to the same original frame", () => {
     const props = properties();
     const trackingUrl = "https://storage.googleapis.com/test/selection-preview.mp4?signature=test";
     render(<SceneTrackingReview {...props} trackingUrl={trackingUrl} />);
     const toggle = screen.getByRole("switch", {name: "Show detected people"});
     expect(toggle).toBeChecked();
-    let video = screen.getByLabelText("Clip preview") as HTMLVideoElement;
+    let video = loadedFrame();
+    const selectedTime = video.currentTime;
     expect(video).toHaveAttribute("src", trackingUrl);
-    expect(screen.getByText(/tap inside the colored mask on Person 1/)).toBeInTheDocument();
-    fireEvent.loadedData(video);
-    video.currentTime = 2.25;
-    fireEvent.timeUpdate(video);
-    fireEvent.keyDown(screen.getByTestId("person-tap-surface"), {key: "Enter"});
-    video.currentTime = 2.75;
-    fireEvent.timeUpdate(video);
+    expect(video).not.toHaveAttribute("controls");
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: /Play|Pause|Next section/})).not.toBeInTheDocument();
     fireEvent.click(toggle);
-    expect(toggle).not.toBeChecked();
-    video = screen.getByLabelText("Clip preview") as HTMLVideoElement;
+    video = loadedFrame();
     expect(video).toHaveAttribute("src", props.sourceUrl);
-    expect(video.currentTime).toBe(2.75);
-    expect(screen.getByText("1 of 2 sections checked")).toBeInTheDocument();
-    expect(screen.getByRole("button", {name: "Not visible here"})).toBeDisabled();
-    fireEvent.loadedData(video);
-    fireEvent.click(toggle);
-    expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", trackingUrl);
-    expect((screen.getByLabelText("Clip preview") as HTMLVideoElement).currentTime).toBe(2.75);
-    expect(screen.getByText("1 of 2 sections checked")).toBeInTheDocument();
-  });
-
-  it("shows only flagged sections, original source, and explains why the user is checking", () => {
-    render(<SceneTrackingReview {...properties()} />);
+    expect(video.currentTime).toBe(selectedTime);
+    expect(screen.getByRole("button", {name: "Not in this scene"})).toBeEnabled();
     expect(screen.getByText("0 of 2 sections checked")).toBeInTheDocument();
-    expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", properties().sourceUrl);
-    expect(screen.queryByRole("switch", {name: "Show detected people"})).not.toBeInTheDocument();
-    expect(screen.getByText(/The camera cuts to a new scene/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", {name: /Section 3/})).not.toBeInTheDocument();
-    expect(screen.getByRole("button", {name: "Apply matches"})).toBeDisabled();
-    expect(screen.queryByRole("button", {name: /Match Person/})).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(loadedFrame().currentTime).toBe(selectedTime);
   });
 
-  it("keeps a tap's normalized point and actual clip-local time, then applies all choices together", () => {
+  it("automatically advances after selecting a person or marking them absent, then applies exact frame choices", () => {
     const props = properties();
     render(<SceneTrackingReview {...props} />);
-    const video = screen.getByLabelText("Clip preview") as HTMLVideoElement;
-    fireEvent.loadedData(video);
-    fireEvent.click(screen.getByRole("button", {name: "Section 1, needs checking"}));
-    expect(screen.getByTestId("person-tap-surface")).toBeInTheDocument();
-    expect(screen.getByRole("button", {name: "Not visible here"})).toBeEnabled();
-    video.currentTime = 2.25;
-    fireEvent.timeUpdate(video);
-    // Keyboard selection uses the same normalized point path as a touch tap.
-    fireEvent.keyDown(screen.getByTestId("person-tap-surface"), {key: "Enter"});
-    expect(screen.getByLabelText("Selected person marker")).toBeInTheDocument();
+    loadedFrame();
+    const frameTime = reviewFrameTime(Math.floor(props.segments[1].seek_time * 24));
+    fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
+    expect(screen.getByRole("heading", {name: "Section 2 of 2"})).toHaveFocus();
     expect(screen.getByText("1 of 2 sections checked")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", {name: "Next section to check"}));
-    expect(screen.getByText(/Tracking lost your person here/)).toBeInTheDocument();
-    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
-    fireEvent.click(screen.getByRole("button", {name: "Not visible here"}));
+    loadedFrame();
+    fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
     expect(screen.getByText("2 of 2 sections checked")).toBeInTheDocument();
+    expect(screen.getByText(/All sections checked. Apply your matches/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: "Apply matches"}));
     expect(props.onApply).toHaveBeenCalledWith([
-      {segment_id: "cut", absent: false, anchor: {x: 0.5, y: 0.5, time: 2.25}},
+      {segment_id: "cut", absent: false, anchor: {x: 0.5, y: 0.5, time: frameTime}},
       {segment_id: "gap", absent: true, anchor: null},
     ]);
-    fireEvent.click(screen.getByRole("button", {name: /Section 1, checked/}));
-    expect(screen.getByText(/Tap again to change your choice/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Section 1, checked"}));
+    loadedFrame();
+    expect(screen.getByLabelText("Selected person marker")).toBeInTheDocument();
   });
 
-  it("does not accept a tap outside its section or enable missing-preview choices", () => {
+  it("cycles bounded alternative stills without saving a selection or leaving its section", () => {
     const props = properties();
     render(<SceneTrackingReview {...props} />);
-    expect(screen.getByRole("button", {name: "Not visible here"})).toBeDisabled();
-    const video = screen.getByLabelText("Clip preview") as HTMLVideoElement;
-    fireEvent.loadedData(video);
-    video.currentTime = 3;
-    fireEvent.keyDown(screen.getByTestId("person-tap-surface"), {key: "Enter"});
+    const frames = reviewFrameNumbers(props.segments[1]);
+    const first = loadedFrame().currentTime;
+    for (let index = 1; index <= frames.length; index += 1) {
+      fireEvent.click(screen.getByRole("button", {name: "Show another frame"}));
+      const video = loadedFrame();
+      expect(video.currentTime).toBe(reviewFrameTime(frames[index % frames.length]));
+      expect(video.currentTime).toBeGreaterThanOrEqual(1);
+      expect(video.currentTime).toBeLessThan(3);
+    }
+    expect(document.querySelector("video")!.currentTime).toBe(first);
     expect(screen.getByText("0 of 2 sections checked")).toBeInTheDocument();
-    fireEvent.error(video);
-    expect(screen.getByRole("button", {name: "Not visible here"})).toBeDisabled();
-    expect(screen.getByRole("button", {name: "Apply matches"})).toBeDisabled();
+    expect(props.onApply).not.toHaveBeenCalled();
+  });
+
+  it("lets users edit checked sections without losing other decisions or chosen frames", () => {
+    const props = properties();
+    render(<SceneTrackingReview {...props} />);
+    fireEvent.click(screen.getByRole("button", {name: "Show another frame"}));
+    const frameTime = loadedFrame().currentTime;
+    fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
+    loadedFrame();
+    fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
+    fireEvent.click(screen.getByRole("button", {name: "Section 1, checked"}));
+    expect(loadedFrame().currentTime).toBe(frameTime);
+    fireEvent.click(screen.getByRole("button", {name: "Section 1, checked"}));
+    expect(screen.getByRole("button", {name: "Not in this scene"})).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
+    fireEvent.click(screen.getByRole("button", {name: "Apply matches"}));
+    expect(props.onApply.mock.calls[0][0].every((choice: {absent: boolean}) => choice.absent)).toBe(true);
+  });
+
+  it("requires a decoded still before selecting, offers recovery on failure, and locks controls during apply", () => {
+    const props = properties();
+    const {rerender} = render(<SceneTrackingReview {...props} />);
+    expect(screen.getByRole("button", {name: "Not in this scene"})).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
+    expect(screen.getByText("0 of 2 sections checked")).toBeInTheDocument();
+    fireEvent.error(document.querySelector("video")!);
     fireEvent.click(screen.getByRole("button", {name: "Refresh preview"}));
     expect(props.onRefresh).toHaveBeenCalledOnce();
-  });
-
-  it("locks review controls while applying matches and retains local choices on an error rerender", () => {
-    const props = properties();
-    const {rerender} = render(<SceneTrackingReview {...props} />);
-    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
-    fireEvent.click(screen.getByRole("button", {name: "Not visible here"}));
+    fireEvent.click(screen.getByRole("button", {name: "Show another frame"}));
+    loadedFrame();
     rerender(<SceneTrackingReview {...props} busy />);
-    expect(screen.getByRole("button", {name: "Applying matches…"})).toBeDisabled();
+    expect(screen.getByRole("button", {name: "Show another frame"})).toBeDisabled();
+    expect(screen.getByRole("button", {name: "Not in this scene"})).toBeDisabled();
     expect(screen.getByRole("button", {name: /Section 2, needs checking/})).toBeDisabled();
-    rerender(<SceneTrackingReview {...props} busy={false} />);
-    expect(screen.getByText("1 of 2 sections checked")).toBeInTheDocument();
   });
 
-  it("returns to the specific section whose tap was rejected while keeping the other decisions", () => {
+  it("returns to a rejected section while preserving all saved choices", () => {
     const props = properties();
     const {rerender} = render(<SceneTrackingReview {...props} />);
-    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
-    fireEvent.click(screen.getByRole("button", {name: "Not visible here"}));
-    fireEvent.click(screen.getByRole("button", {name: "Next section to check"}));
+    loadedFrame();
+    fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
     expect(screen.getByRole("heading", {name: "Section 2 of 2"})).toBeInTheDocument();
     rerender(<SceneTrackingReview {...props} errorSegmentId="cut" />);
     expect(screen.getByRole("heading", {name: "Section 1 of 2"})).toHaveFocus();
-    expect(screen.getByText(/The tap in this section missed a detected person/)).toBeInTheDocument();
+    expect(screen.getByText(/That selection missed a detected person/)).toBeInTheDocument();
     expect(screen.getByText("1 of 2 sections checked")).toBeInTheDocument();
-    expect(screen.getByRole("button", {name: "Not visible here"})).toBeDisabled();
   });
 
-  it("restores saved matches and explains an interrupted guide rebuild", () => {
+  it("restores saved matches and shows the stored chosen frame after an interrupted rebuild", () => {
     const props = properties();
-    render(<SceneTrackingReview {...props} message="Guide preparation did not finish. Your matches are saved; apply them again to retry." initialChoices={[
-      {segment_id: "cut", absent: false, anchor: {x: 0.5, y: 0.4, time: 2}},
+    render(<SceneTrackingReview {...props} message="Guide preparation did not finish. Your matches are saved." initialChoices={[
+      {segment_id: "cut", absent: false, anchor: {x: 0.5, y: 0.4, time: 2.1}},
       {segment_id: "gap", absent: true, anchor: null},
     ]} />);
     expect(screen.getByText("2 of 2 sections checked")).toBeInTheDocument();
     expect(screen.getByText(/Guide preparation did not finish/)).toBeInTheDocument();
+    expect(loadedFrame().currentTime).toBe(reviewFrameTime(Math.floor(2.1 * 24)));
+    expect(screen.getByLabelText("Selected person marker")).toBeInTheDocument();
     expect(screen.getByRole("button", {name: "Apply matches"})).toBeEnabled();
   });
 });

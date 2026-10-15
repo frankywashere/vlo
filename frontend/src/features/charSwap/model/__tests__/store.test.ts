@@ -57,7 +57,10 @@ function prepareReferences() {
   });
 }
 
-beforeEach(() => useCharSwapStore.getState().reset());
+beforeEach(() => {
+  useCharSwapStore.getState().reset();
+  useCharSwapStore.getState().setEasyMode(false);
+});
 
 describe("walkthrough store readiness", () => {
   it("blocks review until tracking finishes, even when references are complete", () => {
@@ -164,4 +167,27 @@ describe("walkthrough store readiness", () => {
     expect(after.references).toEqual(before.references);
     expect(after.assignments).toEqual(before.assignments);
   });
+});
+
+
+it("defaults Easy mode on and changing it invalidates the guide while preserving selections and references", () => {
+  useCharSwapStore.getState().reset();
+  expect(useCharSwapStore.getState().easyMode).toBe(true);
+  prepareReferences();
+  const store = useCharSwapStore.getState();
+  store.visit("references");
+  store.next();
+  expect(useCharSwapStore.getState().step).toBe("access");
+  const before = useCharSwapStore.getState();
+  store.setEasyMode(false);
+  const after = useCharSwapStore.getState();
+  expect(after.easyMode).toBe(false);
+  expect(after.step).toBe("references");
+  expect(after.trackingReady).toBe(false);
+  expect(after.selectionVersion).toBe(before.selectionVersion + 1);
+  expect(after.targets).toEqual(before.targets);
+  expect(after.assignments).toEqual(before.assignments);
+  expect(after.references).toEqual(before.references);
+  store.next();
+  expect(useCharSwapStore.getState().step).toBe("matches");
 });

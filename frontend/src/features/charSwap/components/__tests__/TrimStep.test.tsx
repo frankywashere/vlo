@@ -47,7 +47,7 @@ describe("trim step", () => {
       draft: "-2.50",
       commit: "blur",
       initial: [2, 12] as [number, number],
-      expected: [0, 10] as [number, number],
+      expected: [0, 12] as [number, number],
       normalized: "0",
     },
     {
@@ -121,12 +121,11 @@ describe("trim step", () => {
     },
   );
 
-  it("preserves a five-second length when moving the start to 1.3", async () => {
+  it("moves a five-second selection to 1.3 with the middle grip and keeps endpoint lengths whole", async () => {
     useCharSwapStore.getState().changeTrim([0, 5]);
     render(<TrimStep demo={null} />);
-    const input = screen.getByRole("spinbutton", { name: "Start (seconds)" });
-    fireEvent.change(input, { target: { value: "1.3" } });
-    fireEvent.blur(input);
+    const grip = screen.getByRole("slider", { name: "Move selected section" });
+    for (let i = 0; i < 13; i++) fireEvent.keyDown(grip, {key: "ArrowRight"});
     expect(useCharSwapStore.getState().trim).toEqual([1.3, 6.3]);
     const end = screen.getByRole("spinbutton", { name: "End (seconds)" });
     fireEvent.change(end, { target: { value: "7.7" } });
@@ -135,9 +134,9 @@ describe("trim step", () => {
   });
 
   it.each([
-    { duration: 10, start: 1.3, expected: [1.3, 9.3] },
-    { duration: 20, start: 6, expected: [6, 20] },
-  ])("lets the start slider move forward and shortens the selection at the end of a $duration second clip",
+    { duration: 10, start: 1.3, expected: [1, 10] },
+    { duration: 20, start: 6, expected: [6, 15] },
+  ])("resizes from the start without moving the end of a $duration second clip",
     ({ duration, start, expected }) => {
       useCharSwapStore.getState().loadClip({ ...CLIP, duration });
       render(<TrimStep demo={null} />);
@@ -161,6 +160,21 @@ describe("trim step", () => {
     fireEvent.blur(start);
 
     expect(useCharSwapStore.getState().trim).toEqual([2, 6]);
+  });
+
+  it("stops the middle grip at each boundary without losing duration or access to the end handle", () => {
+    render(<TrimStep demo={null} />);
+    const grip = screen.getByRole("slider", {name: "Move selected section"});
+    fireEvent.keyDown(grip, {key: "End"});
+    expect(useCharSwapStore.getState().trim).toEqual([5, 20]);
+    fireEvent.keyDown(grip, {key: "ArrowRight"});
+    expect(useCharSwapStore.getState().trim).toEqual([5, 20]);
+    fireEvent.keyDown(grip, {key: "Home"});
+    expect(useCharSwapStore.getState().trim).toEqual([0, 15]);
+    fireEvent.change(screen.getByRole("slider", {name: "Clip end"}), {target: {value: "10"}});
+    expect(useCharSwapStore.getState().trim).toEqual([0, 10]);
+    fireEvent.keyDown(grip, {key: "End"});
+    expect(useCharSwapStore.getState().trim).toEqual([10, 20]);
   });
 
   it("previews the full uploaded clip without trim controls in the upload step", () => {

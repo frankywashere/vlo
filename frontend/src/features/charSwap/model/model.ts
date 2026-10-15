@@ -45,6 +45,7 @@ export interface MatchDecision {
 }
 
 export interface WalkthroughState {
+  easyMode?: boolean;
   enhancedCharacterMasking?: boolean;
   clip: ClipAsset | null;
   trim: [number, number];
@@ -69,6 +70,7 @@ const MAX_CLIP_SECONDS = 15;
 
 export function createInitialState(): WalkthroughState {
   return {
+    easyMode: true,
     enhancedCharacterMasking: true,
     clip: null,
     trim: [0, 0],

@@ -42,6 +42,7 @@ export function ReviewStep({
   onApiSettings,
 }: ReviewStepProps) {
   const {
+    easyMode,
     enhancedCharacterMasking,
     clip,
     trim,
@@ -53,6 +54,7 @@ export function ReviewStep({
     visit,
   } = useCharSwapStore(
     useShallow((s) => ({
+      easyMode: s.easyMode,
       enhancedCharacterMasking: s.enhancedCharacterMasking,
       clip: s.clip,
       trim: s.trim,
@@ -74,6 +76,7 @@ export function ReviewStep({
       version: 1,
       provider,
       enhancedCharacterMasking: enhancedCharacterMasking ?? true,
+      easyMode: easyMode ?? true,
       previewOnly: !live,
       clip: { name: clip!.name, duration: clip!.duration, trim },
       people: targets.map((person) => ({
@@ -121,6 +124,9 @@ export function ReviewStep({
         >
           <Box>
             <Typography fontWeight={600}>{clip.name}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Easy mode: {(easyMode ?? true) ? "On" : "Off"}
+            </Typography>
             <Typography variant="body2" color="text.secondary">
               Enhanced character masking:{" "}
               {(enhancedCharacterMasking ?? true) ? "On" : "Off"}
@@ -270,7 +276,7 @@ export function ReviewStep({
               : live
                 ? job?.tracking_reviewed
                   ? "Scene matches checked and applied"
-                  : enhancedCharacterMasking ? "Tracking checks completed" : "Person selected by position and timestamp"
+                  : (job?.easy_mode && enhancedCharacterMasking) ? "Easy mode: automatic tracking, no scene matching" : enhancedCharacterMasking ? "Tracking checks completed" : "Person selected by position and timestamp"
                 : "No uncertain sections"}
             {clip.mode === "demo" ? " (sample)" : ""}
           </Typography>

@@ -263,3 +263,11 @@ def test_export_still_rejects_a_provider_video_shorter_than_selection(tmp_path, 
     monkeypatch.setattr('swapmein.media.probe', lambda _: {'format': {'duration': '3.5'}})
     with pytest.raises(PublicError, match='shorter than the selected section'):
         finish(tmp_path/'generated.mp4', tmp_path/'source.mp4', tmp_path/'out.mp4', 4)
+
+
+def test_easy_mode_defaults_on_and_requires_a_real_boolean():
+    assert options().easy_mode is True
+    assert options(easy_mode=False).easy_mode is False
+    for value in ["false", 0, None]:
+        with pytest.raises(ValidationError):
+            options(easy_mode=value)

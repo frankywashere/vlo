@@ -68,7 +68,11 @@ class Pipeline:
                     return
                 source, normalized = root / "source.bin", root / "normalized.mp4"
                 self.cloud.download(job["source_uri"], source, MAX_SOURCE_BYTES)
-                options = Setup.model_validate({"enhanced_character_masking": True, **job["setup"]})
+                # Jobs created before the Easy mode option retain their scene-review policy.
+                options = Setup.model_validate({"enhanced_character_masking": True, "easy_mode": False, **job["setup"]})
+                self.update_job(job_id, easy_mode=options.easy_mode)
+                emit("preparation_mode", job_id=job_id, easy_mode=options.easy_mode,
+                     enhanced_character_masking=options.enhanced_character_masking)
                 metadata = normalize(source, normalized, options)
                 prefix = f"inputs/swapmein-{job_id}/"
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
@@ -87,9 +91,14 @@ class Pipeline:
                     masks = root / "masks.zip"
                     self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
                     label, coverage = select_label(masks, metadata, require_continuous=False)
-                    plan = analyze_tracking(masks, metadata, label)
+                    # Easy mode retains the original selected ID across all frames,
+                    # including cuts and gaps, just as preparation did before scene review.
+                    if not options.easy_mode:
+                        plan = analyze_tracking(masks, metadata, label)
+                    emit("tracking_selection", job_id=job_id, easy_mode=options.easy_mode,
+                         selected_label=label, missing_frames=sum(count == 0 for count in coverage))
                     tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
-                    if plan["review_required"]:
+                    if plan and plan["review_required"]:
                         selection_preview = root / "selection-preview.mp4"
                         create_selection_preview(normalized, masks, selection_preview, metadata)
                         preview = self.cloud.upload(self.settings.app_bucket,
@@ -107,7 +116,7 @@ class Pipeline:
                         depth_input = self.cloud.copy(depth_uri, self.settings.worker_bucket, prefix + "depth.mp4")
                         masks_input = self.cloud.copy(masks_uri, self.settings.worker_bucket, prefix + "masks.zip")
                         vocals_input = self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
-                        if not plan["review_required"]:
+                        if not plan or not plan["review_required"]:
                             composed = invoke("/compose", {"input_uri": source_uri, "masks_uri": masks_input,
                                 "guide_audio_uri": vocals_input, "selected_label": label, "depth_uri": depth_input, "fill_mode": "depth", "run_id": guide_run}, remaining())
                 tracking_fields = {}

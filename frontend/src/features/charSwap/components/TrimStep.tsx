@@ -1,10 +1,12 @@
 import { useShallow } from "zustand/react/shallow";
-import { Box, Chip, Slider, Stack, Typography } from "@mui/material";
+import { Box, Chip, Stack, Typography } from "@mui/material";
 import { BufferedNumberInput } from "../../panelUI";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { DemoManifest } from "../services/demo";
 import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
+import { TrimRangeSlider } from "./TrimRangeSlider";
+import { resizeTrim } from "../utils/trimRange";
 
 interface TrimStepProps {
   demo: DemoManifest | null;
@@ -21,18 +23,8 @@ export function TrimStep({ demo }: TrimStepProps) {
   );
   if (!clip) return null;
   const minimumLength = Math.min(4, clip.duration);
-  const maximumLength = Math.min(15, Math.floor(clip.duration));
-  const changeStart = (value: number) => {
-    const start = Math.max(0, Math.min(value, clip.duration - minimumLength));
-    const available = Math.floor(clip.duration - start + 1e-6);
-    const length = Math.min(maximumLength, available, Math.max(minimumLength, Math.round(trim[1] - trim[0])));
-    changeTrim([start, start + length]);
-  };
-  const changeEnd = (value: number) => {
-    const available = Math.floor(clip.duration - trim[0] + 1e-6);
-    const length = Math.min(maximumLength, available, Math.max(minimumLength, Math.round(value - trim[0])));
-    changeTrim([trim[0], trim[0] + length]);
-  };
+  const changeStart = (value: number) => changeTrim(resizeTrim(trim, "start", value, clip.duration));
+  const changeEnd = (value: number) => changeTrim(resizeTrim(trim, "end", value, clip.duration));
   return (
     <Stack spacing={2.5}>
       <VideoPreview
@@ -52,21 +44,7 @@ export function TrimStep({ demo }: TrimStepProps) {
             label={`${(trim[1] - trim[0]).toFixed(1)} seconds`}
           />
         </Stack>
-        <Slider
-          aria-label="Clip trim"
-          getAriaLabel={(index) => (index === 0 ? "Clip start" : "Clip end")}
-          value={trim}
-          min={0}
-          max={clip.duration}
-          step={0.1}
-          disableSwap
-          onChange={(_event, value, thumb) => {
-            if (!Array.isArray(value)) return;
-            if (thumb === 0) changeStart(value[0]);
-            else changeEnd(value[1]);
-          }}
-          sx={{ mt: 2, mb: 1 }}
-        />
+        <TrimRangeSlider value={trim} duration={clip.duration} onChange={changeTrim} />
         <Stack direction="row" spacing={2}>
           <BufferedNumberInput
             label="Start (seconds)"
@@ -76,7 +54,7 @@ export function TrimStep({ demo }: TrimStepProps) {
                 changeStart(Number(value));
               }
             }}
-            inputProps={{ min: 0, max: clip.duration - minimumLength, step: 0.1 }}
+            inputProps={{ min: Math.max(0, trim[1] - 15), max: trim[1] - minimumLength, step: 1 }}
             sx={{ flex: 1, minWidth: 0 }}
           />
           <BufferedNumberInput
@@ -98,7 +76,7 @@ export function TrimStep({ demo }: TrimStepProps) {
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {targets.length
             ? "Changing this section clears your selected people and their assignments."
-            : "Moving the start keeps the length when it fits, and shortens it near the end of the file. Lengths stay between 4 and 15 whole seconds."}
+            : "Drag either end to resize. Drag the middle grip to move the whole section; it stops at the file boundaries without shortening. Lengths stay between 4 and 15 whole seconds."}
         </Typography>
       </Box>
     </Stack>

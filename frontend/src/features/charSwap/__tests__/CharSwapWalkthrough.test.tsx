@@ -34,6 +34,7 @@ const sample: DemoManifest = {
 
 beforeEach(() => {
   useCharSwapStore.getState().reset();
+  useCharSwapStore.getState().setEasyMode(false);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify(sample), {
       headers: { "content-type": "application/json" },

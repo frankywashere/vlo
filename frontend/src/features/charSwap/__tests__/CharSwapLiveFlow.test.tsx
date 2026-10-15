@@ -55,6 +55,7 @@ beforeEach(() => {
     () => undefined,
   );
   useCharSwapStore.getState().reset();
+  useCharSwapStore.getState().setEasyMode(false);
   const store = useCharSwapStore.getState();
   store.setEnhancedCharacterMasking(true);
   store.loadClip({
@@ -93,10 +94,13 @@ describe("live generation approval", () => {
     live.job.tracking_segments = [{id: "segment-001", start_frame: 48, end_frame: 120, start: 2, end: 5, seek_time: 3, reason: "scene_cut", needs_review: true}];
     const {rerender} = render(<CharSwapWalkthrough />);
     expect(screen.getByRole("heading", {name: "Check scene matches"})).toBeInTheDocument();
-    expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", live.job.source_preview_url);
+    const frame = screen.getByRole("button", {name: "Select the person in this frame"}).querySelector("video")!;
+    expect(frame).toHaveAttribute("src", live.job.source_preview_url);
     expect(screen.queryByRole("button", {name: "Choose access"})).not.toBeInTheDocument();
-    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
-    await user.click(screen.getByRole("button", {name: "Not visible here"}));
+    Object.defineProperty(frame, "readyState", {value: 2, configurable: true});
+    fireEvent.loadedMetadata(frame);
+    fireEvent.seeked(frame);
+    await user.click(screen.getByRole("button", {name: "Not in this scene"}));
     await user.click(screen.getByRole("button", {name: "Apply matches"}));
     expect(live.resolveTracking).toHaveBeenCalledWith([{segment_id: "segment-001", absent: true, anchor: null}]);
     expect(live.generate).not.toHaveBeenCalled();
@@ -205,10 +209,11 @@ describe("live generation approval", () => {
 });
 
 
-it("routes masking-off references to Access, prepares after key entry, and reviews before generation", async () => {
+it.each([{masking: false, easy: false}, {masking: true, easy: true}])("routes references to Access with masking=$masking and easy=$easy, then prepares and reviews before generation", async ({masking, easy}) => {
   const user = userEvent.setup();
   const store = useCharSwapStore.getState();
-  store.setEnhancedCharacterMasking(false);
+  store.setEnhancedCharacterMasking(masking);
+  store.setEasyMode(easy);
   store.visit("references");
   live.job.status = "failed"; // no reusable prepared guide
   live.prepare.mockImplementation(async () => {
@@ -218,7 +223,7 @@ it("routes masking-off references to Access, prepares after key entry, and revie
   });
   const {rerender} = render(<CharSwapWalkthrough />);
   const nav = screen.getByRole("navigation", {name: "Replacement steps"});
-  expect(within(nav).queryByRole("button", {name: "Prepare"})).not.toBeInTheDocument();
+  expect(within(nav).queryByRole("button", {name: "Matches"})).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", {name: "Choose access"}));
   expect(useCharSwapStore.getState().step).toBe("access");
   expect(live.prepare).not.toHaveBeenCalled();
@@ -229,6 +234,7 @@ it("routes masking-off references to Access, prepares after key entry, and revie
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   await user.click(screen.getByRole("button", {name: "Review setup"}));
   expect(live.prepare).toHaveBeenCalledOnce();
+  expect(live.prepare.mock.calls[0][0]).toMatchObject({easyMode: easy, enhancedCharacterMasking: masking});
   expect(useCharSwapStore.getState().step).toBe("review");
   expect(screen.getByRole("heading", {name: "Preparing your clip"})).toBeInTheDocument();
   expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();

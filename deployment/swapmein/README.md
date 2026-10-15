@@ -529,3 +529,25 @@ Released on 2026-10-14 with gateway revision `swapmein-api-00023-x4p`, serving
 and desktop/mobile browser checks with saved SAM masks. Release checks verify the
 new owned review route and the exact frontend bundle; no paid generation was run
 as part of deployment.
+
+
+### Easy mode
+
+New preparations accept strict boolean `setup.easy_mode`, defaulting to `true`.
+The Settings switch applies immediately without a provider key and defaults on.
+Easy mode removes Matches from the walkthrough: Clip → Trim → People → References
+→ Access → Review. Preparation begins after Access; the prepared guide remains
+visible at final Review before any paid generation. Turning Easy mode off retains
+the scene picker and its per-section label assignments. Mode changes invalidate
+the prepared guide and return to References, preserving the original selection and
+reference image. The switch is locked during processing.
+
+With enhanced masking on, Easy mode still runs Depth Anything, SAM 3, and vocal
+preparation. It selects the original tap's SAM ID and composites that same ID
+throughout the clip, including cuts and gaps, without manual scene assignments.
+It does not provide cross-cut identity verification. With masking off, the
+existing original-video guide and coordinate/timestamp prompt are unchanged.
+No GPU model or worker image changes are required; the gateway and frontend must
+be released together. Existing saved jobs lacking `easy_mode` keep the prior
+review behavior. Logs record `preparation_mode` and `tracking_selection`, including
+the selected label and count of frames where its mask is missing.

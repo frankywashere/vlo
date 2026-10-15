@@ -270,6 +270,8 @@ export function CharSwapWalkthrough() {
     assignments,
     issues,
     decisions,
+    easyMode,
+    setEasyMode,
     enhancedCharacterMasking,
     setEnhancedCharacterMasking,
     selectionVersion,
@@ -293,6 +295,8 @@ export function CharSwapWalkthrough() {
       issues: s.issues,
       decisions: s.decisions,
       trackingReady: s.trackingReady,
+      easyMode: s.easyMode,
+      setEasyMode: s.setEasyMode,
       enhancedCharacterMasking: s.enhancedCharacterMasking,
       setEnhancedCharacterMasking: s.setEnhancedCharacterMasking,
       selectionVersion: s.selectionVersion,
@@ -352,10 +356,11 @@ export function CharSwapWalkthrough() {
     importReference,
   } = useLocalAssets();
   const noFlaggedSections = live && enhancedCharacterMasking && pipeline.job && ["ready", "generating", "finalizing", "completed", "submission_unknown"].includes(pipeline.job.status) && pipeline.job.tracking_segments !== undefined && !pipeline.job.tracking_segments.some((segment) => segment.needs_review);
-  const skipMaskReview = (clip?.mode === "upload" && !enhancedCharacterMasking) || Boolean(noFlaggedSections);
+  const skipMaskReview = (easyMode ?? true) || (clip?.mode === "upload" && !enhancedCharacterMasking) || Boolean(noFlaggedSections);
   const flowSteps = skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS;
   const current = flowSteps.indexOf(step);
   const state = {
+    easyMode,
     enhancedCharacterMasking,
     clip,
     trim,
@@ -452,7 +457,7 @@ export function CharSwapWalkthrough() {
         if (!await pipeline.prepare(state)) return;
       }
     }
-    if (step === "references" && clip?.mode === "demo" && demo)
+    if (step === "references" && clip?.mode === "demo" && demo && !(easyMode ?? true))
       reviewTracking(sampleReviewIssues(targets, demo, trim));
     next();
   }
@@ -953,6 +958,8 @@ export function CharSwapWalkthrough() {
             if (["matches", "access", "review"].includes(step))
               visit("references");
           }}
+          easyMode={easyMode}
+          onEasyModeChange={setEasyMode}
           enhancedCharacterMasking={enhancedCharacterMasking}
           maskingLocked={lockedAccess}
           onMaskingChange={setEnhancedCharacterMasking}

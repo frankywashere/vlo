@@ -44,6 +44,7 @@ export interface LivePipelineJob {
   selected_label?: number;
   tracking_continuous?: boolean;
   tracking_performed?: boolean;
+  easy_mode?: boolean;
   scene_cut_count?: number;
   mask_style?: "depth" | "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
@@ -239,6 +240,7 @@ function readJob(value: unknown): LivePipelineJob {
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
+  if (typeof value.easy_mode === "boolean") job.easy_mode = value.easy_mode;
   if (typeof value.tracking_performed === "boolean")
     job.tracking_performed = value.tracking_performed;
   if (typeof value.tracking_continuous === "boolean")
@@ -563,6 +565,7 @@ export async function createLiveJob(
           anchor: target.anchor,
           target_name: target.name,
           enhanced_character_masking: state.enhancedCharacterMasking ?? true,
+          easy_mode: state.easyMode ?? true,
         },
       }),
     },

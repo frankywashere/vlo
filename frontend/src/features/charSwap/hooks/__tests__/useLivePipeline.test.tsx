@@ -181,7 +181,7 @@ describe("live BYOK pipeline", () => {
     expect(ticket.source_bytes).toBe(6);
     expect(ticket.reference_bytes).toBe(9);
     expect(ticket.setup).toEqual({
-      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true,
+      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true, easy_mode: true,
     });
     expect(String(upload?.body)).not.toContain(USER_KEY);
     expect(String(upload?.body)).not.toContain(SESSION_TOKEN);
