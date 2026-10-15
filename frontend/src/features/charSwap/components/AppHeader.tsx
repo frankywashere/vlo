@@ -4,10 +4,11 @@ import LightModeOutlined from "@mui/icons-material/LightModeOutlined";
 import SettingsOutlined from "@mui/icons-material/SettingsOutlined";
 
 interface AppHeaderProps {
-  active: "home" | "create" | "library";
+  active: "home" | "create" | "library" | "admin";
   onHome: () => void;
   onCreate: () => void;
   onLibrary?: () => void;
+  onAdmin?: () => void;
   onSettings?: () => void;
   accountLabel?: string;
   onAccount?: () => void;
@@ -21,6 +22,7 @@ export function AppHeader({
   onHome,
   onCreate,
   onLibrary,
+  onAdmin,
   onSettings,
   accountLabel,
   onAccount,
@@ -99,6 +101,7 @@ export function AppHeader({
               Library
             </Button>
           )}
+          {onAdmin && <Button onClick={onAdmin} aria-current={active === "admin" ? "page" : undefined} sx={{ color: active === "admin" ? "primary.main" : "text.secondary", minWidth: 0, fontSize: { xs: 12, sm: 14 }, px: { xs: 0.75, sm: 2 } }}>Admin</Button>}
           {onToggleAppearance && (
             <IconButton
               aria-label={

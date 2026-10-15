@@ -20,6 +20,8 @@ import { AppHeader } from "./components/AppHeader";
 import { LandingPage } from "./components/LandingPage";
 import { AccountLibrary } from "./components/AccountLibrary";
 import { CommerceDialog } from "./components/CommerceDialog";
+import { AdminPage } from "./components/AdminPage";
+import { loadAccountAccess } from "./services/commerce";
 import { useAccount } from "./hooks/useAccount";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
@@ -28,7 +30,7 @@ type AccountState = ReturnType<typeof useAccount>;
 
 export function SwapMeinApp() {
   const account = useAccount();
-  const [destination, setDestination] = useState<"home" | "create" | "library">(
+  const [destination, setDestination] = useState<"home" | "create" | "library" | "admin">(
     "home",
   );
   const [colorMode, setColorMode] = useState<"light" | "dark">(() => {
@@ -91,12 +93,12 @@ function AccountWorkspace({
   onDestination,
 }: {
   account: AccountState;
-  destination: "home" | "create" | "library";
-  onDestination: (next: "home" | "create" | "library") => void;
+  destination: "home" | "create" | "library" | "admin";
+  onDestination: (next: "home" | "create" | "library" | "admin") => void;
   colorMode: "light" | "dark";
   toggleAppearance: () => void;
 }) {
-  const [view, setView] = useState<"home" | "create" | "library">(
+  const [view, setView] = useState<"home" | "create" | "library" | "admin">(
     account.user ? destination : "home",
   );
   const [started, setStarted] = useState(
@@ -105,9 +107,16 @@ function AccountWorkspace({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [commerceOpen, setCommerceOpen] = useState(false);
-  const [pending, setPending] = useState<"create" | "library" | null>(null);
+  const [pending, setPending] = useState<"create" | "library" | "admin" | null>(null);
   const [busy, setBusy] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
+  const [staffRole, setStaffRole] = useState<string | null>(null);
+  useEffect(() => {
+    if (!account.user) return;
+    let active = true;
+    void loadAccountAccess().then((access) => { if (active) setStaffRole(access.role); }).catch(() => { if (active) setStaffRole(null); });
+    return () => { active = false; };
+  }, [account.user]);
   useEffect(() => () => useCharSwapStore.getState().reset(), []);
   function navigate(next: typeof view) {
     onDestination(next);
@@ -144,6 +153,7 @@ function AccountWorkspace({
           onHome={() => navigate("home")}
           onCreate={() => navigate("create")}
           onLibrary={() => navigate("library")}
+          onAdmin={staffRole ? () => navigate("admin") : undefined}
           onSettings={() => {
             navigate("create");
             if (account.user) setSettingsOpen(true);
@@ -161,6 +171,7 @@ function AccountWorkspace({
             onToggleAppearance={toggleAppearance}
             onHome={() => navigate("home")}
             onLibrary={() => navigate("library")}
+            onAdmin={staffRole ? () => navigate("admin") : undefined}
             onBusyChange={setBusy}
             settingsOpen={settingsOpen}
             onSettingsClose={() => setSettingsOpen(false)}
@@ -172,6 +183,7 @@ function AccountWorkspace({
       {view === "library" && account.user && (
         <AccountLibrary onCreate={() => navigate("create")} />
       )}
+      {view === "admin" && account.user && staffRole && <AdminPage />}
       <Dialog
         open={accountOpen}
         onClose={() => {
@@ -228,7 +240,7 @@ function AccountWorkspace({
             {pending && !account.user && (
               <Typography variant="body2" color="text.secondary">
                 Sign in to continue to{" "}
-                {pending === "library" ? "your library" : "your new swap"}.
+                {pending === "library" ? "your library" : pending === "admin" ? "admin" : "your new swap"}.
               </Typography>
             )}
             {account.error && <Alert severity="error">{account.error}</Alert>}

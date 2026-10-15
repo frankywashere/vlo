@@ -30,9 +30,10 @@ records its checks and the remaining generation-quality limits.
   uploaded source dimensions.
 
 Multiple-person generation, automatic identity continuity across cuts, and automated face
-re-identification are not implemented. Sandbox credit checkout code is staged on `launch`;
-checkout and credit-funded generation remain disabled until prices, private secrets,
-webhook delivery, and refund handling are verified.
+re-identification are not implemented. The Admin page exposes owner-only switches
+for sandbox credit checkout and credit-funded generation. Both default off and
+require private gateway credentials. Checkout accepts Stripe test keys only;
+live payments remain blocked pending webhook delivery and refund review.
 The walkthrough may illustrate later capabilities, but those services are not
 implemented. “Check all scenes” prepares the selected section. With masking off,
 SAM is skipped and the user reviews the original-picture guide. With masking on,
@@ -486,7 +487,8 @@ preparation. Continuing with a personal key validates access and queues CPU
 preparation; progress and the resulting guide appear in Review. Generate remains
 disabled until the job is ready and the guide can play. It remains an explicit
 paid submission. Enhanced masking and the sample demo retain their overlay/match
-review step and confirmation requirements. App credits remain a preview only.
+review step and confirmation requirements. App credits require the owner switch
+and a private provider key; the customer credits dialog cannot change either.
 
 ### Scene tracking review
 

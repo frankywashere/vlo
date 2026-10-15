@@ -6,7 +6,9 @@ import time
 
 import swapmein.app as gateway
 import swapmein.stripe_billing as billing
-from swapmein.commerce import api_key_permission, public_catalog, save_catalog, wallet_view
+from swapmein.commerce import api_key_permission, public_catalog, save_catalog, save_features, feature_view, wallet_view
+from swapmein.errors import PublicError
+import pytest
 from swapmein.security import digest
 from swapmein.stripe_billing import fulfill_checkout
 from test_api import api
@@ -27,6 +29,45 @@ def test_sandbox_starting_prices_are_editable_and_checkout_stays_off(api, monkey
     assert updated["revision"] == 1
     assert public_catalog(records)["packs"][0]["price_cents"] == 700
     assert public_catalog(records)["credits_per_second"] == 15
+
+
+def test_owner_feature_switches_require_credentials_and_are_revisioned(api, monkeypatch):
+    _, records, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
+    owner = {"email": "frank@whipsnapfilms.com"}
+    outsider = {"email": "other@example.com"}
+    assert not feature_view(records)["checkout"]
+    assert not feature_view(records)["credit_generation"]
+    with pytest.raises(PublicError):
+        save_features(records, outsider, 0, False, False)
+    with pytest.raises(PublicError):
+        save_features(records, owner, 0, True, False)
+    with pytest.raises(PublicError):
+        save_features(records, owner, 0, False, True)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_example")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_example")
+    monkeypatch.setenv("REAPI_SERVER_KEY", "example-provider-key")
+    enabled = save_features(records, owner, 0, True, True)
+    assert enabled["checkout"] and enabled["credit_generation"]
+    assert public_catalog(records)["checkout_enabled"]
+    with pytest.raises(PublicError):
+        save_features(records, owner, 0, False, False)
+    monkeypatch.delenv("REAPI_SERVER_KEY")
+    assert not feature_view(records)["credit_generation"]
+    disabled = save_features(records, owner, 1, False, False)
+    assert not disabled["checkout"] and not disabled["credit_generation"]
+
+
+def test_feature_switch_endpoint_is_owner_only(api, monkeypatch):
+    client, _, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
+    monkeypatch.setattr(gateway, "verify_account", lambda token, project: {
+        "account_id": digest(token), "email": "frank@whipsnapfilms.com" if token == "owner" else "user@example.com"})
+    body = {"revision": 0, "checkout": False, "credit_generation": False}
+    assert client.post("/api/commerce/admin/features", headers={"X-Firebase-Token": "user"}, json=body).status_code == 403
+    response = client.post("/api/commerce/admin/features", headers={"X-Firebase-Token": "owner"}, json=body)
+    assert response.status_code == 200
+    assert response.json()["revision"] == 1
 
 
 def test_owner_controls_api_key_access_and_revocation_blocks_existing_session(api, monkeypatch):

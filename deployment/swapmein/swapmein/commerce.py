@@ -9,6 +9,50 @@ from .security import digest
 ACCOUNT_PATTERN = re.compile(r"[a-f0-9]{64}")
 PACK_PATTERN = re.compile(r"[a-z][a-z0-9-]{1,31}")
 CATALOG_PATH = "commerce/catalog.json"
+FEATURES_PATH = "commerce/features.json"
+
+
+def feature_readiness() -> dict:
+    """Server-side prerequisites; never expose credential values to the client."""
+    return {
+        "checkout": bool(os.getenv("STRIPE_SECRET_KEY", "").startswith("sk_test_")
+                         and os.getenv("STRIPE_WEBHOOK_SECRET", "").startswith("whsec_")),
+        "credit_generation": bool(os.getenv("REAPI_SERVER_KEY")),
+    }
+
+
+def feature_view(records) -> dict:
+    current, _ = records.read(FEATURES_PATH)
+    current = current or {}
+    ready = feature_readiness()
+    return {"revision": current.get("revision", 0),
+            "checkout": current.get("checkout") is True and ready["checkout"],
+            "credit_generation": current.get("credit_generation") is True and ready["credit_generation"],
+            "readiness": ready}
+
+
+def save_features(records, actor: dict, revision: int, checkout: bool, credit_generation: bool) -> dict:
+    require_staff(records, actor, {"owner"})
+    ready = feature_readiness()
+    catalog, _ = records.read(CATALOG_PATH)
+    catalog = catalog or default_catalog()
+    if checkout and (not any(pack.get("active") for pack in catalog.get("packs", []))
+                     or catalog.get("credits_per_second", 0) <= 0):
+        raise PublicError("Configure an active credit pack and generation price before enabling checkout.", 409)
+    if checkout and not ready["checkout"]:
+        raise PublicError("Configure Stripe sandbox checkout and webhook secrets before enabling checkout.", 409)
+    if credit_generation and not ready["credit_generation"]:
+        raise PublicError("Configure the private provider key before enabling credit-funded generation.", 409)
+
+    def mutate(current):
+        current = current or {}
+        if current.get("revision", 0) != revision:
+            raise PublicError("Admin settings changed in another session. Reload before saving.", 409)
+        return {"revision": revision + 1, "checkout": checkout,
+                "credit_generation": credit_generation, "updated_by": actor["email"], "updated_at": time.time()}
+
+    records.update(FEATURES_PATH, mutate)
+    return feature_view(records)
 
 
 def default_catalog() -> dict:
@@ -56,9 +100,7 @@ def public_catalog(records) -> dict:
                   for pack in current.get("packs", []) if pack.get("active")],
         "credits_per_second": current.get("credits_per_second", 0),
         "configured": any(pack.get("active") for pack in current.get("packs", [])) and current.get("credits_per_second", 0) > 0,
-        "checkout_enabled": (os.getenv("RECASTFX_CHECKOUT_ENABLED") == "true"
-                             and bool(os.getenv("STRIPE_SECRET_KEY"))
-                             and bool(os.getenv("STRIPE_WEBHOOK_SECRET"))),
+        "checkout_enabled": feature_view(records)["checkout"],
     }
 
 

@@ -28,11 +28,19 @@ export interface CreditWallet {
 
 export interface CreditAdmin {
   role: "owner" | "pricing_admin" | "viewer";
+  features: CreditFeatures;
   catalog: {
     revision: number;
     packs: CreditPack[];
     credits_per_second: number;
   };
+}
+
+export interface CreditFeatures {
+  revision: number;
+  checkout: boolean;
+  credit_generation: boolean;
+  readiness: { checkout: boolean; credit_generation: boolean };
 }
 
 export interface AccountAccess {
@@ -85,6 +93,10 @@ export function startCreditCheckout(packId: string) {
 
 export function loadCreditAdmin() {
   return commerceRequest<CreditAdmin>("/api/commerce/admin");
+}
+
+export function saveCreditFeatures(features: Pick<CreditFeatures, "revision" | "checkout" | "credit_generation">) {
+  return commerceRequest<CreditFeatures>("/api/commerce/admin/features", features);
 }
 
 export function saveCreditCatalog(catalog: CreditAdmin["catalog"]) {

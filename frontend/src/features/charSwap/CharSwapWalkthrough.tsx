@@ -246,6 +246,7 @@ interface CharSwapWalkthroughProps {
   onToggleAppearance?: () => void;
   onHome?: () => void;
   onLibrary?: () => void;
+  onAdmin?: () => void;
   accountLabel?: string;
   onAccount?: () => void;
   onJobChange?: (job: LivePipelineJob, title: string) => void;
@@ -259,6 +260,7 @@ export function CharSwapWalkthrough({
   onToggleAppearance,
   onHome,
   onLibrary,
+  onAdmin,
   accountLabel,
   onAccount,
   onJobChange,
@@ -574,6 +576,7 @@ export function CharSwapWalkthrough({
           onHome={onHome ?? (() => {})}
           onCreate={() => {}}
           onLibrary={onLibrary}
+          onAdmin={onAdmin}
           accountLabel={accountLabel}
           onAccount={onAccount}
           onSettings={() => setApiSettingsOpen(true)}

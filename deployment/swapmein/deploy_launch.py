@@ -23,8 +23,6 @@ def main():
         **base_env(workers, origins, url), "REQUIRE_ACCOUNT": "true",
         "COMMERCE_OWNER_EMAILS": "frank@whipsnapfilms.com",
         "RECASTFX_CHECKOUT_RETURN_ORIGIN": "https://recastfx.com",
-        "RECASTFX_CREDIT_GENERATION_ENABLED": "false",
-        "RECASTFX_CHECKOUT_ENABLED": "false",
     }
     project = deploy.gcloud("projects", "describe", deploy.PROJECT)
     if str(project.get("projectNumber")) != deploy.PROJECT_NUMBER:

@@ -33,7 +33,7 @@ from .tracking import resolve_tracking
 from .diagnostics import emit
 from .accounts import verify_account, bind_job, archive_completed, index_path
 from .commerce import (CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
-                       save_catalog, staff_role, wallet_view)
+                       save_catalog, staff_role, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 
 settings = Settings.from_env()
@@ -129,7 +129,7 @@ def selected_provider(provider_name: str):
 def key_for_session(active_session: dict, supplied_key: str | None) -> str:
     if active_session.get("access_mode") == "credits":
         key = os.getenv("REAPI_SERVER_KEY", "")
-        if not os.getenv("RECASTFX_CREDIT_GENERATION_ENABLED") == "true" or not key:
+        if not feature_view(services()[0])["credit_generation"] or not key:
             raise PublicError("Credit-funded generation is not available yet.", 503)
         return provider_key(key)
     records, _, _ = services()
@@ -214,8 +214,7 @@ def view(job: dict):
 
 @app.get("/api/config")
 def config():
-    credit_ready = (os.getenv("RECASTFX_CREDIT_GENERATION_ENABLED") == "true"
-                    and bool(os.getenv("REAPI_SERVER_KEY")))
+    credit_ready = feature_view(services()[0])["credit_generation"] if settings.available else False
     return {"live": True, "providers": [] if settings.require_account else ["reAPI", "ToAPIs"],
             "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "single-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
@@ -247,6 +246,13 @@ class CatalogUpdate(BaseModel):
     revision: int = Field(ge=0)
     packs: list[CreditPack]
     credits_per_second: int
+
+
+class FeatureUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: int = Field(ge=0)
+    checkout: bool
+    credit_generation: bool
 
 
 class CheckoutRequest(BaseModel):
@@ -301,7 +307,14 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "catalog": catalog or default_catalog()}
+    return {"role": role, "catalog": catalog or default_catalog(), "features": feature_view(records)}
+
+
+@app.post("/api/commerce/admin/features")
+def update_commerce_features(body: FeatureUpdate, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return save_features(records, account, body.revision, body.checkout, body.credit_generation)
 
 
 @app.post("/api/commerce/admin/catalog")
@@ -369,7 +382,7 @@ def session(options: ProviderSelection = Body(default=ProviderSelection()), x_re
     if options.access_mode == "credits":
         if options.provider != "reAPI" or not account.get("account_id"):
             raise PublicError("Sign in to use recastfx credits with MiniMax H3.", 400)
-        if not os.getenv("RECASTFX_CREDIT_GENERATION_ENABLED") == "true" or not os.getenv("REAPI_SERVER_KEY"):
+        if not feature_view(records)["credit_generation"]:
             raise PublicError("Credit-funded generation is not available yet.", 503)
         balance = wallet_view(records, account["account_id"])["balance"]
         key_fingerprint = digest("recastfx-credits")
