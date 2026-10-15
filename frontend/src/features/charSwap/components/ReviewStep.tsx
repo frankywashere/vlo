@@ -110,7 +110,7 @@ export function ReviewStep({
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = "swapMEin-setup.json";
+    link.download = "recastfx-setup.json";
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -155,7 +155,7 @@ export function ReviewStep({
             <Box>
               <Typography fontWeight={600}>
                 {accessMode === "credits"
-                  ? "swapMEin credits"
+                  ? "recastfx credits"
                   : `Your ${provider} account`}
               </Typography>
               <Typography variant="body2" color="text.secondary">

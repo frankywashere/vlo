@@ -149,7 +149,7 @@ function ApiKeyPreviewEditor({
           </Box>
           <Alert severity="info" id="charswap-api-settings-notice">
             {live
-              ? `Your key is used only for this tab and sent securely through swapMEin to ${provider}. Video generation starts only after your final review.`
+              ? `Your key is used only for this tab and sent securely through recastfx to ${provider}. Video generation starts only after your final review.`
               : "Use the sample key to try this step. This preview sends no requests and does not verify API keys."}
           </Alert>
           <Stack direction="row" spacing={3}>

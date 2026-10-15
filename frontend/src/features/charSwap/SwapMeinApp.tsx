@@ -1,31 +1,38 @@
-import { useCallback, useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Alert,
   Box,
   Button,
   CssBaseline,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   GlobalStyles,
+  LinearProgress,
   Stack,
   Typography,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
-import DownloadRounded from "@mui/icons-material/DownloadRounded";
-import AddRounded from "@mui/icons-material/AddRounded";
+import Google from "@mui/icons-material/Google";
 import { CharSwapWalkthrough } from "./CharSwapWalkthrough";
 import { AppHeader } from "./components/AppHeader";
 import { LandingPage } from "./components/LandingPage";
+import { AccountLibrary } from "./components/AccountLibrary";
+import { useAccount } from "./hooks/useAccount";
+import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
-import type { LivePipelineJob } from "./services/livePipeline";
 
-interface SessionVideo {
-  id: string;
-  title: string;
-  url: string;
-}
+type AccountState = ReturnType<typeof useAccount>;
 
 export function SwapMeinApp() {
+  const account = useAccount();
+  const [destination, setDestination] = useState<"home" | "create" | "library">(
+    "home",
+  );
   const [colorMode, setColorMode] = useState<"light" | "dark">(() => {
     try {
-      return localStorage.getItem("swapmein:appearance") === "dark"
+      return localStorage.getItem("recastfx:appearance") === "dark"
         ? "dark"
         : "light";
     } catch {
@@ -36,30 +43,11 @@ export function SwapMeinApp() {
     const next = colorMode === "light" ? "dark" : "light";
     setColorMode(next);
     try {
-      localStorage.setItem("swapmein:appearance", next);
+      localStorage.setItem("recastfx:appearance", next);
     } catch {
-      /* Browser storage can be unavailable. */
+      /* Appearance is optional. */
     }
   }
-  const [view, setView] = useState<"home" | "create" | "library">("home");
-  const [started, setStarted] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [videos, setVideos] = useState<SessionVideo[]>([]);
-  function navigate(next: typeof view) {
-    if (next === "create") setStarted(true);
-    setView(next);
-    window.scrollTo({ top: 0, behavior: "instant" });
-  }
-  const rememberJob = useCallback((job: LivePipelineJob, title: string) => {
-    if (job.status !== "completed" || !job.output_url) return;
-    const video = { id: job.id, title, url: job.output_url };
-    setVideos((items) => {
-      const existing = items.find((item) => item.id === video.id);
-      if (existing?.url === video.url && existing.title === title) return items;
-      return [video, ...items.filter((item) => item.id !== video.id)];
-    });
-  }, []);
   return (
     <ThemeProvider
       theme={colorMode === "dark" ? swapMeinDarkTheme : swapMeinTheme}
@@ -82,157 +70,177 @@ export function SwapMeinApp() {
           },
         }}
       />
-      <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
-        {view !== "create" && (
-          <AppHeader
+      <AccountWorkspace
+        key={account.user?.uid ?? "signed-out"}
+        account={account}
+        destination={destination}
+        onDestination={setDestination}
+        colorMode={colorMode}
+        toggleAppearance={toggleAppearance}
+      />
+    </ThemeProvider>
+  );
+}
+
+function AccountWorkspace({
+  account,
+  colorMode,
+  toggleAppearance,
+  destination,
+  onDestination,
+}: {
+  account: AccountState;
+  destination: "home" | "create" | "library";
+  onDestination: (next: "home" | "create" | "library") => void;
+  colorMode: "light" | "dark";
+  toggleAppearance: () => void;
+}) {
+  const [view, setView] = useState<"home" | "create" | "library">(
+    account.user ? destination : "home",
+  );
+  const [started, setStarted] = useState(
+    !!account.user && destination === "create",
+  );
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [pending, setPending] = useState<"create" | "library" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  useEffect(() => () => useCharSwapStore.getState().reset(), []);
+  function navigate(next: typeof view) {
+    onDestination(next);
+    if (next !== "home" && !account.user) {
+      setPending(next);
+      setAccountOpen(true);
+      return;
+    }
+    if (next === "create") setStarted(true);
+    setView(next);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+  async function login() {
+    setAuthBusy(true);
+    try {
+      await account.signIn();
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+  // The workspace is keyed by account: changing accounts unmounts the wizard,
+  // clearing its provider key and object URLs before showing another library.
+  const label = account.user ? "Account" : "Sign in";
+  return (
+    <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
+      {account.loading && (
+        <LinearProgress aria-label="Restoring your account" />
+      )}
+      {view !== "create" && (
+        <AppHeader
+          active={view}
+          colorMode={colorMode}
+          onToggleAppearance={toggleAppearance}
+          onHome={() => navigate("home")}
+          onCreate={() => navigate("create")}
+          onLibrary={() => navigate("library")}
+          onSettings={() => {
+            navigate("create");
+            if (account.user) setSettingsOpen(true);
+          }}
+          locked={busy || account.loading}
+          accountLabel={label}
+          onAccount={() => setAccountOpen(true)}
+        />
+      )}
+      {view === "home" && <LandingPage onStart={() => navigate("create")} />}
+      {started && account.user && (
+        <Box hidden={view !== "create"}>
+          <CharSwapWalkthrough
             colorMode={colorMode}
             onToggleAppearance={toggleAppearance}
-            active={view}
             onHome={() => navigate("home")}
-            onCreate={() => navigate("create")}
             onLibrary={() => navigate("library")}
-            onSettings={() => {
-              navigate("create");
-              setSettingsOpen(true);
-            }}
-            locked={busy}
+            onBusyChange={setBusy}
+            settingsOpen={settingsOpen}
+            onSettingsClose={() => setSettingsOpen(false)}
+            accountLabel={label}
+            onAccount={() => setAccountOpen(true)}
           />
-        )}
-        {view === "home" && <LandingPage onStart={() => navigate("create")} />}
-        {/* Keep the wizard mounted when browsing Home or Library: it owns keys,
-          upload object URLs and active polling for this tab. */}
-        {started && (
-          <Box hidden={view !== "create"}>
-            <CharSwapWalkthrough
-              colorMode={colorMode}
-              onToggleAppearance={toggleAppearance}
-              onHome={() => navigate("home")}
-              onLibrary={() => navigate("library")}
-              onJobChange={rememberJob}
-              onBusyChange={setBusy}
-              settingsOpen={settingsOpen}
-              onSettingsClose={() => setSettingsOpen(false)}
-            />
-          </Box>
-        )}
-        {view === "library" && (
-          <Box
-            component="main"
-            sx={{
-              maxWidth: 1200,
-              mx: "auto",
-              px: { xs: 3, md: 5 },
-              py: { xs: 5, md: 7 },
-            }}
-          >
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              justifyContent="space-between"
-              gap={3}
-              sx={{ mb: 4 }}
-            >
-              <Box>
-                <Typography
-                  variant="overline"
-                  color="primary"
-                  sx={{ letterSpacing: ".12em", fontWeight: 700 }}
-                >
-                  Your workspace
+        </Box>
+      )}
+      {view === "library" && account.user && (
+        <AccountLibrary onCreate={() => navigate("create")} />
+      )}
+      <Dialog
+        open={accountOpen}
+        onClose={() => {
+          if (!authBusy) setAccountOpen(false);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>
+          {account.user ? "Your account" : "Welcome to recastfx"}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2}>
+            {account.user ? (
+              <>
+                <Typography fontWeight={650}>
+                  {account.user.displayName ?? "Google account"}
                 </Typography>
-                <Typography component="h1" variant="h2" sx={{ fontSize: 40 }}>
-                  Your library
+                <Typography color="text.secondary">
+                  {account.user.email}
                 </Typography>
-                <Typography color="text.secondary" sx={{ mt: 1 }}>
-                  Videos completed in this tab. Download a copy before closing
-                  it or the links expire.
+                <Typography variant="body2" color="text.secondary">
+                  Your library is private to this account. Provider keys stay in
+                  this tab and are cleared when you sign out.
                 </Typography>
-              </Box>
-              <Button
-                variant="contained"
-                startIcon={<AddRounded />}
-                onClick={() => navigate("create")}
-                sx={{ alignSelf: "flex-start" }}
-              >
-                Create a swap
-              </Button>
-            </Stack>
-            {videos.length ? (
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: {
-                    xs: "1fr",
-                    sm: "repeat(2, minmax(0, 1fr))",
-                    lg: "repeat(3, minmax(0, 1fr))",
-                  },
-                  gap: 3,
-                }}
-              >
-                {videos.map((video) => (
-                  <Box
-                    key={video.id}
-                    sx={{
-                      minWidth: 0,
-                      borderRadius: 2,
-                      bgcolor: "background.paper",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <video
-                      controls
-                      playsInline
-                      preload="metadata"
-                      aria-label={video.title}
-                      src={video.url}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        aspectRatio: "16 / 9",
-                        background: "#231b19",
-                      }}
-                    />
-                    <Box sx={{ p: 2 }}>
-                      <Typography noWrap fontWeight={650}>
-                        {video.title}
-                      </Typography>
-                      <Button
-                        component="a"
-                        href={video.url}
-                        download
-                        startIcon={<DownloadRounded />}
-                        sx={{ px: 0 }}
-                      >
-                        Download video
-                      </Button>
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
+                {busy && (
+                  <Alert severity="info">
+                    A job is running. You can return to its status from your
+                    library after signing in again with the same provider key.
+                  </Alert>
+                )}
+              </>
             ) : (
-              <Box
-                sx={{
-                  py: 8,
-                  px: 3,
-                  textAlign: "center",
-                  border: 1,
-                  borderColor: "divider",
-                  borderRadius: 2,
-                }}
-              >
-                <Typography variant="h6">
-                  Your first swap starts here.
+              <>
+                <Typography>
+                  Sign in to create swaps and keep your finished videos in your
+                  private library.
                 </Typography>
-                <Typography color="text.secondary" sx={{ mt: 1, mb: 3 }}>
-                  Completed videos will appear here while this tab stays open.
-                </Typography>
-                <Button variant="contained" onClick={() => navigate("create")}>
-                  Start creating
+                <Button
+                  startIcon={<Google />}
+                  variant="contained"
+                  disabled={authBusy || account.loading}
+                  onClick={() => void login()}
+                >
+                  Continue with Google
                 </Button>
-              </Box>
+                <Typography variant="caption" color="text.secondary">
+                  By continuing, you allow recastfx to save your jobs and
+                  finished videos to your account. Videos are kept for 30 days.
+                </Typography>
+              </>
             )}
-          </Box>
-        )}
-      </Box>
-    </ThemeProvider>
+            {pending && !account.user && (
+              <Typography variant="body2" color="text.secondary">
+                Sign in to continue to{" "}
+                {pending === "library" ? "your library" : "your new swap"}.
+              </Typography>
+            )}
+            {account.error && <Alert severity="error">{account.error}</Alert>}
+            {authBusy && <LinearProgress />}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={authBusy} onClick={() => setAccountOpen(false)}>
+            Close
+          </Button>
+          {account.user && (
+            <Button onClick={() => void account.signOut()}>Sign out</Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 }

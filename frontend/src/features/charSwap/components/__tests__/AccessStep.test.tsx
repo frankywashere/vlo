@@ -25,7 +25,7 @@ describe("generation access choice", () => {
     expect(screen.getByRole("radio", { name: /Use my API key/ })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Add API key" }));
     expect(props.onApiSettings).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("radio", { name: /swapMEin credits/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /recastfx credits/ }));
     expect(props.onAccessModeChange).toHaveBeenCalledExactlyOnceWith("credits");
     expect(screen.queryByText("Sample balance")).not.toBeInTheDocument();
   });

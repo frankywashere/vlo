@@ -13,6 +13,7 @@ from .media import Setup, finish, normalize, original_guide, select_label
 from .storage import Records, claim_job, release_preparation
 from .tracking import analyze_tracking
 from .tracking_preview import create_selection_preview
+from .accounts import archive_completed, LIBRARY_SECONDS
 
 
 class Pipeline:
@@ -214,9 +215,16 @@ class Pipeline:
                 self.cloud.download(job["normalized_uri"], original)
                 self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
                 output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded, audio_start=job["setup"]["trim"][0])
-                output_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/swapMEin-{uuid.uuid4().hex}.mp4", output, "video/mp4")
-                self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
+                prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
+                output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
+                completed = self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
+                    library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"])
+                try:
+                    archive_completed(self.records, completed)
+                except Exception as error:
+                    # An index retry must never turn a valid exported video into a failure.
+                    emit("account_library_save_pending", error=error, job_id=job_id)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
             self.update_job(job_id, status="failed", message=error.message)

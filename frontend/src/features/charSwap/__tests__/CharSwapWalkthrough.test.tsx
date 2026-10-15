@@ -151,7 +151,7 @@ describe("CharSwap walkthrough", () => {
     expect(screen.getByRole("button", { name: "Choose access" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Not visible here" }));
     await user.click(screen.getByRole("button", { name: "Choose access" }));
-    await user.click(screen.getByRole("radio", { name: /swapMEin credits/ }));
+    await user.click(screen.getByRole("radio", { name: /recastfx credits/ }));
     await user.click(screen.getByRole("button", { name: "Review setup" }));
     expect(
       screen.getByRole("heading", { name: "Review your swap" }),

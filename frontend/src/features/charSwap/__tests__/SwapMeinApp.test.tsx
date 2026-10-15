@@ -10,9 +10,32 @@ import userEvent from "@testing-library/user-event";
 import { SwapMeinApp } from "../SwapMeinApp";
 import { useCharSwapStore } from "../useCharSwapStore";
 
+const auth = vi.hoisted(() => ({
+  user: {
+    uid: "test-user",
+    displayName: "Test",
+    email: "test@example.com",
+  } as { uid: string; displayName: string; email: string } | null,
+  loading: false,
+  error: null,
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+}));
+vi.mock("../hooks/useAccount", () => ({ useAccount: () => auth }));
+vi.mock("../services/accounts", () => ({
+  loadAccountJobs: vi.fn().mockResolvedValue([]),
+  resumeAccountJob: vi.fn(),
+  setJobHidden: vi.fn(),
+}));
+
 beforeEach(() => {
+  auth.user = {
+    uid: "test-user",
+    displayName: "Test",
+    email: "test@example.com",
+  };
   useCharSwapStore.getState().reset();
-  localStorage.removeItem("swapmein:appearance");
+  localStorage.removeItem("recastfx:appearance");
   vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(
     () => undefined,
@@ -26,10 +49,45 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  localStorage.removeItem("swapmein:appearance");
+  localStorage.removeItem("recastfx:appearance");
 });
 
-describe("swapMEin app shell", () => {
+describe("recastfx app shell", () => {
+  it("requires Google sign-in before opening a private workspace", async () => {
+    auth.user = null;
+    const user = userEvent.setup();
+    render(<SwapMeinApp />);
+    await user.click(screen.getByRole("button", { name: "Start creating" }));
+    expect(
+      screen.getByRole("heading", { name: "Welcome to recastfx" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Choose video" }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Continue with Google" }),
+    );
+    expect(auth.signIn).toHaveBeenCalledOnce();
+  });
+  it("clears the wizard and provider key when the signed-in account changes", async () => {
+    const user = userEvent.setup();
+    const app = render(<SwapMeinApp />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.type(screen.getByLabelText("reAPI API key"), "private-test-key");
+    await user.click(screen.getByRole("button", { name: "Save for preview" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    auth.user = {
+      uid: "different-user",
+      displayName: "Other",
+      email: "other@example.com",
+    };
+    app.rerender(<SwapMeinApp />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByLabelText("reAPI API key")).toHaveValue("");
+  });
+
   it("shows the actual bundled before/after media and opens the existing easy-mode flow", async () => {
     const user = userEvent.setup();
     render(<SwapMeinApp />);
@@ -73,7 +131,7 @@ describe("swapMEin app shell", () => {
       screen.getByRole("heading", { name: "Your library" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Completed videos will appear here/),
+      screen.getByText(/Your saved jobs and completed videos will appear here/),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create" }));
     expect(screen.getByText("my-take.mp4")).toBeInTheDocument();
@@ -94,7 +152,7 @@ describe("swapMEin app shell", () => {
     await user.click(
       screen.getByRole("button", { name: "Switch to dark mode" }),
     );
-    expect(localStorage.getItem("swapmein:appearance")).toBe("dark");
+    expect(localStorage.getItem("recastfx:appearance")).toBe("dark");
     await user.click(screen.getByRole("button", { name: "Start creating" }));
     expect(
       screen.getByRole("button", { name: "Switch to light mode" }),

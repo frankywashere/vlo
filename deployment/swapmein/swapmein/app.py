@@ -26,14 +26,16 @@ from .pipeline import Pipeline
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
-from .storage import Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation
+from .storage import (Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation,
+                      check_queue_capacity, reserve_queued_preparation, claim_queued_slot)
 from .tracking import resolve_tracking
 from .diagnostics import emit
+from .accounts import verify_account, bind_job, archive_completed, index_path
 
 settings = Settings.from_env()
 app = FastAPI(title="swapMEin single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins),
-    allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key"], max_age=600)
+    allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key", "X-Firebase-Token"], max_age=600)
 
 
 class BodyLimitMiddleware:
@@ -128,7 +130,10 @@ def authenticate(authorization: str | None):
     records, _, _ = services()
     session_id = digest(bearer_token(authorization))
     session, _ = records.read("sessions/" + session_id + ".json")
-    return session_id, check_session(session)
+    session = check_session(session)
+    if settings.require_account and not session.get("account_id"):
+        raise PublicError("Sign in with Google to continue.", 401)
+    return session.get("owner", session_id), session
 
 
 def owned_job(job_id: str, authorization: str | None):
@@ -179,7 +184,8 @@ def view(job: dict):
 @app.get("/api/config")
 def config():
     return {"live": True, "providers": ["reAPI", "ToAPIs"], "provider": "reAPI", "model": "minimax-h3", "delivery": "native",
-            "beta": "single-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES}
+            "beta": "single-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
+            "accounts_required": settings.require_account}
 
 
 @app.get("/health")
@@ -193,14 +199,16 @@ class ProviderSelection(BaseModel):
 
 
 @app.post("/api/session")
-def session(options: ProviderSelection = Body(default=ProviderSelection()), x_reapi_key: str | None = Header(default=None)):
+def session(options: ProviderSelection = Body(default=ProviderSelection()), x_reapi_key: str | None = Header(default=None),
+            x_firebase_token: str | None = Header(default=None)):
     records, _, provider = services()
+    account = verify_account(x_firebase_token, settings.project) if settings.require_account or x_firebase_token else {}
     key = provider_key(x_reapi_key)
     provider = selected_provider(options.provider)
     balance = provider.balance(key)
     token = secrets.token_urlsafe(32)
     expires_at = time.time() + settings.session_seconds
-    records.create("sessions/" + digest(token) + ".json", {"expires_at": expires_at, "key_fingerprint": digest(key), "provider": options.provider})
+    records.create("sessions/" + digest(token) + ".json", {"expires_at": expires_at, "key_fingerprint": digest(key), "provider": options.provider, **account})
     return {"token": token, "expires_at": expires_at, "balance": balance}
 
 
@@ -247,6 +255,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
                "source_uri": source_uri, "reference_uri": reference_uri}
+        job = await run_in_threadpool(bind_job, records, job, active_session)
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
         record_created = True
         enqueue_attempted = True
@@ -272,11 +281,13 @@ class UploadRequest(BaseModel):
     source_bytes: int = Field(strict=True, gt=0, le=MAX_SOURCE_BYTES)
     reference_bytes: int = Field(strict=True, gt=0, le=MAX_REFERENCE_BYTES)
     setup: Setup
+    title: str = Field(default="Your clip", max_length=120)
 
 
 def check_available_preparation(records, now):
     preparation, _ = records.read("control/preparation.json")
-    check_preparation_capacity(preparation, now, settings.monthly_preparations, settings.daily_preparations)
+    checker = check_queue_capacity if settings.require_account else check_preparation_capacity
+    checker(preparation, now, settings.monthly_preparations, settings.daily_preparations)
     uploads, _ = records.read("control/uploads.json")
     check_preparation_capacity(uploads, now, settings.monthly_preparations, settings.daily_preparations,
                                limit_prefix="upload")
@@ -312,6 +323,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "raw_reference_uri": reference_uri, "source_bytes": options.source_bytes,
         "reference_bytes": options.reference_bytes, "setup": options.setup.model_dump(),
         "provider": active_session.get("provider", "reAPI"),
+        "title": options.title,
     })
     return {"id": job_id, "source": source, "reference": reference}
 
@@ -320,7 +332,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
 def complete_upload(job_id: str, authorization: str | None = Header(default=None)):
     if not ID_PATTERN.fullmatch(job_id):
         raise PublicError("Upload not found.", 404)
-    owner, _ = authenticate(authorization)
+    owner, active_session = authenticate(authorization)
     records, cloud, _ = services()
     manifest_path = f"uploads/{job_id}/manifest.json"
     manifest, _ = records.read(manifest_path)
@@ -345,16 +357,24 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
             cloud.download(manifest["raw_reference_uri"], raw_reference, MAX_REFERENCE_BYTES)
             normalize_reference(raw_reference, image)
             reference_uri = cloud.upload(settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
-        records.update("control/preparation.json", lambda current: reserve_preparation(
-            current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+        records.update("control/preparation.json", lambda current: reserve_queued_preparation(
+            current, time.time(), settings.monthly_preparations, settings.daily_preparations)
+            if settings.require_account else reserve_preparation(
+                current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
         reserved = True
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uri}
+        job = bind_job(records, job, active_session, manifest.get("title", "Your clip"))
         records.create(f"jobs/{job_id}.json", job)
         record_created = True
         enqueue_attempted = True
-        cloud.enqueue("prepare", job_id)
+        if settings.require_account:
+            admission_token = uuid.uuid4().hex
+            records.update(f"jobs/{job_id}.json", lambda current: {**current, "admission_token": admission_token})
+            cloud.enqueue("admit", job_id, task_token=admission_token)
+        else:
+            cloud.enqueue("prepare", job_id)
         records.update(manifest_path, lambda current: {**current, "status": "queued"})
         return {"id": job_id, "status": "queued"}
     except Exception:
@@ -376,18 +396,26 @@ def job_status(job_id: str, authorization: str | None = Header(default=None)):
 
 
 def refresh_stale_job(job: dict):
-    # A killed process must never leave the UI falsely promising work forever.
+    # Admission waits do not own a worker yet and have a separate two-hour
+    # bound. Processing still has the original 35-minute watchdog.
     records, _, _ = services()
+    def timed_out(current):
+        if current["status"] == "queued" and current.get("account_id") and current.get("admission_token"):
+            return time.time() - current["created_at"] > 7200
+        return (current["status"] in {"queued", "preparing", "matching", "finalizing", "finishing"}
+                and time.time() - current["updated_at"] > 2100)
+
     def mutate(current):
         current = dict(current)
-        age = time.time() - current["updated_at"]
-        if current["status"] in {"queued", "preparing", "matching", "finalizing", "finishing"} and age > 2100:
-            current.update(status="failed", message="Processing timed out. The backup shutdown has been scheduled; no automatic retry is made.")
-        elif current["status"] == "submitting" and age > 90:
+        if timed_out(current):
+            if current["status"] == "queued" and current.get("admission_token"):
+                current.update(status="failed", message="The preparation queue timed out. No generation was submitted.")
+            else:
+                current.update(status="failed", message="Processing timed out. The backup shutdown has been scheduled; no automatic retry is made.")
+        elif current["status"] == "submitting" and time.time() - current["updated_at"] > 90:
             current.update(status="submission_unknown", message="Submission outcome is unknown. Check your provider history before creating another generation.")
         return current
-    if ((job["status"] in {"queued", "preparing", "matching", "finalizing", "finishing"} and time.time() - job["updated_at"] > 2100)
-            or (job["status"] == "submitting" and time.time() - job["updated_at"] > 90)):
+    if timed_out(job) or (job["status"] == "submitting" and time.time() - job["updated_at"] > 90):
         return records.update(f"jobs/{job['id']}.json", mutate)
     return job
 
@@ -483,6 +511,88 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
 class Approval(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     approved: bool
+
+
+def account_job(job_id: str, token: str | None):
+    account = verify_account(token, settings.project)
+    if not ID_PATTERN.fullmatch(job_id):
+        raise PublicError("Clip not found.", 404)
+    records, _, _ = services()
+    item, _ = records.read(index_path(account["account_id"], job_id))
+    if not item:
+        raise PublicError("Clip not found.", 404)
+    job, _ = records.read(f"jobs/{job_id}.json")
+    if job and job.get("account_id") != account["account_id"]:
+        raise PublicError("Clip not found.", 404)
+    return account, item, job
+
+
+@app.get("/api/account/jobs")
+def account_jobs(x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, cloud, _ = services()
+    listing, _ = records.read(f"accounts/{account['account_id']}/index.json")
+    items = []
+    for job_id in (listing or {}).get("jobs", [])[:50]:
+        if not isinstance(job_id, str) or not ID_PATTERN.fullmatch(job_id):
+            continue
+        item, _ = records.read(index_path(account["account_id"], job_id))
+        if not item or item.get("hidden"):
+            continue
+        job, _ = records.read(f"jobs/{job_id}.json")
+        if job and job.get("account_id") == account["account_id"]:
+            job = refresh_stale_job(job)
+            if job.get("status") == "completed" and not item.get("output_uri"):
+                archive_completed(records, job)
+            public = view(job)
+            if job.get("reference_uri"):
+                public["reference_url"] = cloud.signed_url(job["reference_uri"])
+        else:
+            public = {"id": job_id, "provider": item.get("provider", "reAPI"),
+                      "status": item.get("status", "failed"), "message": "Preparation records have expired."}
+            if item.get("output_uri") and item.get("expires_at", 0) > time.time():
+                public.update(status="completed", output_url=cloud.signed_url(item["output_uri"]),
+                              message="Your saved video is ready.")
+            elif item.get("status") == "completed":
+                public.update(status="expired", message="The 30-day video retention period has ended.")
+            else:
+                public.update(status="expired")
+        items.append({**public, "title": item.get("title", "Your clip"), "created_at": item.get("created_at"),
+                      "expires_at": item.get("expires_at") or job and job.get("library_expires_at")})
+    return {"jobs": items, "retention_days": 30, "limit": 50}
+
+
+@app.post("/api/account/jobs/{job_id}/session")
+def resume_account_job(job_id: str, x_firebase_token: str | None = Header(default=None),
+                       x_reapi_key: str | None = Header(default=None)):
+    account, _, job = account_job(job_id, x_firebase_token)
+    if not job:
+        raise PublicError("This preparation has expired. Start a new swap.", 410)
+    key = provider_key(x_reapi_key)
+    check_key_binding(job, key)
+    records, _, _ = services()
+    token = secrets.token_urlsafe(32)
+    expires_at = time.time() + settings.session_seconds
+    records.create("sessions/" + digest(token) + ".json", {
+        **account, "owner": job["owner"], "expires_at": expires_at,
+        "key_fingerprint": digest(key), "provider": job.get("provider", "reAPI"),
+    })
+    emit("account_job_resumed", job_id=job_id)
+    return {"token": token, "expires_at": expires_at}
+
+
+class LibraryVisibility(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    hidden: bool
+
+
+@app.post("/api/account/jobs/{job_id}/visibility")
+def library_visibility(job_id: str, options: LibraryVisibility,
+                       x_firebase_token: str | None = Header(default=None)):
+    account, _, _ = account_job(job_id, x_firebase_token)
+    records, _, _ = services()
+    records.update(index_path(account["account_id"], job_id), lambda current: {**current, "hidden": options.hidden})
+    return {"hidden": options.hidden}
 
 
 @app.post("/api/jobs/{job_id}/generate")
@@ -606,4 +716,30 @@ def prepare(task: InternalTask, authorization: str | None = Header(default=None)
 @app.post("/internal/finish")
 def finish_task(task: InternalTask, authorization: str | None = Header(default=None)):
     internal_pipeline(task, authorization).finalize(task.job_id)
+    return {"ok": True}
+
+
+@app.post("/internal/admit")
+def admit_preparation(task: InternalTask, authorization: str | None = Header(default=None)):
+    pipeline = internal_pipeline(task, authorization)
+    records, cloud, _ = services()
+    job, _ = records.read(f"jobs/{task.job_id}.json")
+    if not job or job.get("status") != "queued" or job.get("admission_token") != task.task_token:
+        return {"ok": True}
+    if time.time() - job.get("created_at", 0) > 7200:
+        records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "status": "failed", "message": "The preparation queue timed out. No generation was submitted."})
+        return {"ok": True}
+    try:
+        records.update("control/preparation.json", lambda current: claim_queued_slot(current, task.job_id, time.time()))
+    except PublicError as error:
+        if error.code != "preparation_busy":
+            records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "status": "failed", "message": error.message})
+            return {"ok": True}
+        next_token = uuid.uuid4().hex
+        records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "admission_token": next_token,
+            "message": "Your clip is queued. Waiting for the current preparation to finish.", "updated_at": time.time()})
+        cloud.enqueue("admit", task.job_id, task_token=next_token, delay_seconds=30)
+        return {"ok": True}
+    emit("queued_preparation_admitted", job_id=task.job_id)
+    pipeline.prepare(task.job_id)
     return {"ok": True}

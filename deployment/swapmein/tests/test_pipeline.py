@@ -7,12 +7,13 @@ from swapmein.config import Settings
 from swapmein.pipeline import Pipeline
 
 
-def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch):
+@pytest.mark.parametrize("account_id", [None, "b" * 64])
+def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id):
     job_id = "a" * 32
     path = f"jobs/{job_id}.json"
     class Records:
         def __init__(self):
-            self.data = {path: {"id": job_id, "status": "finalizing", "duration": 5,
+            self.data = {path: {"id": job_id, "status": "finalizing", "duration": 5, "account_id": account_id, "created_at": 1000000,
                 "provider_output": "https://cdn.reapi.ai/raw.mp4", "normalized_uri": "gs://private-app/normalized.mp4",
                 "source_uri": "gs://private-app/upload.bin", "setup": {"trim": [1.25, 6.25]}}}
 
@@ -57,7 +58,12 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     pipeline.finalize(job_id)
     assert records.data[path]["output_uri"] != first_uri
     assert len(set(cloud.uploads)) == 2
-    assert all(re.fullmatch(rf"outputs/{job_id}/swapMEin-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
+    prefix = f"library/{account_id}/{job_id}" if account_id else f"outputs/{job_id}"
+    assert all(re.fullmatch(rf"{prefix}/recastfx-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
+    if account_id:
+        archived = records.data[f"accounts/{account_id}/jobs/{job_id}.json"]
+        assert archived["output_uri"] == records.data[path]["output_uri"]
+        assert archived["status"] == "completed"
 
 
 @pytest.mark.parametrize("easy", [None, False, True])

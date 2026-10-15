@@ -291,9 +291,19 @@ def ensure_bucket(temp: Path, origins: list[str]):
     if current:
         # The storage CLI's normalized bucket display omits projectNumber.
         # The Storage JSON API exposes the authoritative owner independently.
-        owner = str(google_get(f"https://storage.googleapis.com/storage/v1/b/{APP_BUCKET}").get("projectNumber", ""))
+        details = google_get(f"https://storage.googleapis.com/storage/v1/b/{APP_BUCKET}")
+        owner = str(details.get("projectNumber", ""))
         if owner != PROJECT_NUMBER:
             raise SetupError("The application bucket is not owned by the expected project. Refusing to change it.")
+        # Two Hosting releases share this bucket. Redeploying either API must
+        # preserve the other's upload origins and completed-library retention.
+        existing_origins = [origin for entry in details.get("cors", []) for origin in entry.get("origin", [])]
+        cors[0]["origin"] = list(dict.fromkeys([*origins, *existing_origins]))
+        cors_file.write_text(json.dumps(cors))
+        for rule in details.get("lifecycle", {}).get("rule", []):
+            if rule.get("condition", {}).get("matchesPrefix") == ["library/"] and rule not in lifecycle["rule"]:
+                lifecycle["rule"].append(rule)
+        lifecycle_file.write_text(json.dumps(lifecycle))
         gcloud("storage", "buckets", "update", "gs://" + APP_BUCKET,
                "--uniform-bucket-level-access", "--public-access-prevention", "--soft-delete-duration=0",
                "--lifecycle-file=" + str(lifecycle_file), "--cors-file=" + str(cors_file))

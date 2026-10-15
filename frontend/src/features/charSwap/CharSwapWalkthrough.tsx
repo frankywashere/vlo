@@ -92,7 +92,7 @@ const STEP_INFO = {
   access: {
     title: "How would you like to pay?",
     short: "Access",
-    description: "Use your own API key or explore swapMEin credits.",
+    description: "Use your own API key or explore recastfx credits.",
     icon: KeyOutlined,
   },
   review: {
@@ -245,6 +245,8 @@ interface CharSwapWalkthroughProps {
   onToggleAppearance?: () => void;
   onHome?: () => void;
   onLibrary?: () => void;
+  accountLabel?: string;
+  onAccount?: () => void;
   onJobChange?: (job: LivePipelineJob, title: string) => void;
   onBusyChange?: (busy: boolean) => void;
   settingsOpen?: boolean;
@@ -256,6 +258,8 @@ export function CharSwapWalkthrough({
   onToggleAppearance,
   onHome,
   onLibrary,
+  accountLabel,
+  onAccount,
   onJobChange,
   onBusyChange,
   settingsOpen = false,
@@ -545,6 +549,8 @@ export function CharSwapWalkthrough({
           onHome={onHome ?? (() => {})}
           onCreate={() => {}}
           onLibrary={onLibrary}
+          accountLabel={accountLabel}
+          onAccount={onAccount}
           onSettings={() => setApiSettingsOpen(true)}
           locked={lockedAccess}
         />
@@ -605,13 +611,13 @@ export function CharSwapWalkthrough({
                   !live ||
                   Boolean(
                     pipeline.job &&
-                      [
-                        "ready",
-                        "generating",
-                        "finalizing",
-                        "completed",
-                        "submission_unknown",
-                      ].includes(pipeline.job.status),
+                    [
+                      "ready",
+                      "generating",
+                      "finalizing",
+                      "completed",
+                      "submission_unknown",
+                    ].includes(pipeline.job.status),
                   )
                 }
                 blockedForward={
@@ -958,7 +964,7 @@ export function CharSwapWalkthrough({
         >
           <Button
             component="a"
-            href="https://github.com/frankywashere/vlo"
+            href="https://github.com/frankywashere/vlo/tree/launch"
             target="_blank"
             rel="noreferrer"
             size="small"

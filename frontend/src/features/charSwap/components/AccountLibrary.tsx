@@ -1,0 +1,480 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  LinearProgress,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
+import {
+  loadAccountJobs,
+  resumeAccountJob,
+  setJobHidden,
+} from "../services/accounts";
+import type { AccountJob } from "../services/accounts";
+import {
+  generateLiveJob,
+  pollLiveProvider,
+  resolveLiveTracking,
+} from "../services/livePipeline";
+import { SceneTrackingReview } from "./SceneTrackingReview";
+
+const ACTIVE = new Set(["queued", "preparing", "generating", "finalizing"]);
+interface AccountLibraryProps {
+  onCreate: () => void;
+}
+
+export function AccountLibrary({ onCreate }: AccountLibraryProps) {
+  const [jobs, setJobs] = useState<AccountJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<AccountJob | null>(null);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [autoCheck, setAutoCheck] = useState(false);
+  const [removed, setRemoved] = useState<AccountJob | null>(null);
+  const mounted = useRef(true);
+  const mediaCache = useRef(
+    new Map<string, { job: AccountJob; savedAt: number }>(),
+  );
+  const controller = useRef<AbortController | null>(null);
+  const refresh = useCallback(async () => {
+    try {
+      const received = await loadAccountJobs();
+      if (mounted.current) {
+        // Renew links well before their one-hour expiry without restarting a
+        // playing video on every status refresh.
+        const result = received.map((job) => {
+          const previous = mediaCache.current.get(job.id);
+          const next = { ...job };
+          const now = Date.now();
+          const reusable =
+            previous &&
+            now - previous.savedAt < 30 * 60 * 1000 &&
+            previous.job.tracking_revision === job.tracking_revision;
+          if (reusable) {
+            for (const field of [
+              "output_url",
+              "guide_url",
+              "reference_url",
+              "tracking_url",
+              "source_preview_url",
+            ] as const) {
+              const oldUrl = previous.job[field];
+              const newUrl = job[field];
+              if (
+                oldUrl &&
+                newUrl &&
+                oldUrl.split("?")[0] === newUrl.split("?")[0]
+              )
+                next[field] = oldUrl;
+            }
+          }
+          mediaCache.current.set(job.id, {
+            job: next,
+            savedAt: reusable ? previous.savedAt : now,
+          });
+          return next;
+        });
+        setJobs(result);
+        setSelected((current) =>
+          current
+            ? (result.find((item) => item.id === current.id) ?? current)
+            : null,
+        );
+        setError(null);
+      }
+    } catch (cause) {
+      if (mounted.current)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "The library could not be loaded.",
+        );
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    const timer = globalThis.setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, 15000);
+    return () => {
+      mounted.current = false;
+      globalThis.clearInterval(timer);
+      controller.current?.abort();
+    };
+  }, [refresh]);
+  function close() {
+    if (busy) return;
+    setAutoCheck(false);
+    setSelected(null);
+    setKey("");
+    setError(null);
+  }
+  const act = useCallback(
+    async (generate: boolean) => {
+      if (!selected || busy) return;
+      setBusy(true);
+      setError(null);
+      controller.current = new AbortController();
+      try {
+        const session = await resumeAccountJob(selected.id, key);
+        const result = await (generate ? generateLiveJob : pollLiveProvider)(
+          selected.id,
+          session.token,
+          key,
+          controller.current.signal,
+        );
+        if (mounted.current) {
+          setSelected({ ...selected, ...result });
+          setAutoCheck(result.status === "generating");
+          await refresh();
+        }
+      } catch (cause) {
+        setAutoCheck(false);
+        if (mounted.current)
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "The request did not finish. Refresh status before retrying.",
+          );
+      } finally {
+        if (mounted.current) setBusy(false);
+      }
+    },
+    [selected, busy, key, refresh],
+  );
+
+  useEffect(() => {
+    if (!autoCheck || busy || !key.trim() || selected?.status !== "generating")
+      return;
+    const timer = globalThis.setTimeout(() => {
+      void act(false);
+    }, 10000);
+    return () => globalThis.clearTimeout(timer);
+  }, [autoCheck, busy, key, selected?.status, act]);
+
+  async function hide(job: AccountJob, hidden: boolean) {
+    try {
+      await setJobHidden(job.id, hidden);
+      if (!mounted.current) return;
+      setRemoved(hidden ? job : null);
+      await refresh();
+    } catch (cause) {
+      if (mounted.current)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "This change could not be saved.",
+        );
+    }
+  }
+  return (
+    <Box
+      component="main"
+      sx={{ maxWidth: 1200, mx: "auto", px: { xs: 3, md: 5 }, py: 6 }}
+    >
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        gap={2}
+        sx={{ mb: 3 }}
+      >
+        <Box>
+          <Typography variant="overline" color="primary">
+            Your workspace
+          </Typography>
+          <Typography component="h1" variant="h3">
+            Your library
+          </Typography>
+        </Box>
+        <Button
+          onClick={onCreate}
+          variant="contained"
+          sx={{ alignSelf: "center" }}
+        >
+          Create a swap
+        </Button>
+      </Stack>
+      <Typography color="text.secondary" sx={{ mb: 3 }}>
+        Your latest 50 swaps, saved to your Google account. Finished videos are
+        kept for 30 days. Download the ones you want to keep.
+      </Typography>
+      <Alert severity="info" sx={{ mb: 3 }}>
+        Preparation and export continue if you leave. To check a provider render
+        after reopening, enter the same provider key using “Open job.” Keys are
+        never saved to your account.
+      </Alert>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+      {removed && (
+        <Alert
+          severity="success"
+          action={
+            <Button onClick={() => void hide(removed, false)}>Undo</Button>
+          }
+          sx={{ mb: 2 }}
+        >
+          Removed from your library.
+        </Alert>
+      )}
+      <Button onClick={() => void refresh()} disabled={loading} sx={{ mb: 2 }}>
+        Refresh library
+      </Button>
+      {loading && <LinearProgress aria-label="Loading your library" />}
+      {!loading && !jobs.length && (
+        <Box
+          sx={{
+            p: 6,
+            textAlign: "center",
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 3,
+          }}
+        >
+          <Typography variant="h6">Your first swap starts here.</Typography>
+          <Typography color="text.secondary" sx={{ my: 2 }}>
+            Your saved jobs and completed videos will appear here.
+          </Typography>
+          <Button variant="contained" onClick={onCreate}>
+            Start creating
+          </Button>
+        </Box>
+      )}
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "1fr",
+            sm: "repeat(2, minmax(0,1fr))",
+            lg: "repeat(3, minmax(0,1fr))",
+          },
+          gap: 3,
+        }}
+      >
+        {jobs.map((job) => (
+          <Box
+            key={job.id}
+            sx={{
+              border: 1,
+              borderColor: "divider",
+              bgcolor: "background.paper",
+              borderRadius: 3,
+              overflow: "hidden",
+            }}
+          >
+            {job.output_url && (
+              <Box
+                component="video"
+                controls
+                playsInline
+                preload="metadata"
+                src={job.output_url}
+                aria-label={job.title}
+                sx={{
+                  display: "block",
+                  width: "100%",
+                  aspectRatio: "16/9",
+                  bgcolor: "#211e1d",
+                }}
+              />
+            )}
+            <Box sx={{ p: 2.5 }}>
+              <Typography variant="h6" noWrap>
+                {job.title}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {new Date(job.created_at * 1000).toLocaleDateString()} ·{" "}
+                {job.provider ?? "reAPI"}
+              </Typography>
+              <Box sx={{ my: 1.5 }}>
+                <Chip
+                  size="small"
+                  label={job.status.replaceAll("_", " ")}
+                  color={job.status === "completed" ? "success" : "default"}
+                />
+              </Box>
+              {ACTIVE.has(job.status) && (
+                <LinearProgress
+                  aria-label={`${job.title} ${job.status}`}
+                  sx={{ my: 2 }}
+                />
+              )}
+              <Typography variant="body2" color="text.secondary">
+                {job.message}
+              </Typography>
+              <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 2 }}>
+                {job.output_url ? (
+                  <Button component="a" href={job.output_url} download>
+                    Download video
+                  </Button>
+                ) : (
+                  job.status !== "expired" && (
+                    <Button
+                      onClick={() => {
+                        setKey("");
+                        setSelected(job);
+                        setError(null);
+                      }}
+                    >
+                      Open job
+                    </Button>
+                  )
+                )}
+                {!ACTIVE.has(job.status) && (
+                  <Button color="inherit" onClick={() => void hide(job, true)}>
+                    Remove
+                  </Button>
+                )}
+              </Stack>
+            </Box>
+          </Box>
+        ))}
+      </Box>
+      <Dialog open={!!selected} onClose={close} maxWidth="md" fullWidth>
+        <DialogTitle>{selected?.title}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2}>
+            <Typography>{selected?.message}</Typography>
+            {selected?.guide_url && (
+              <Box
+                component="video"
+                controls
+                playsInline
+                src={selected.guide_url}
+                aria-label="Prepared guide"
+                sx={{ width: "100%", maxHeight: 420, bgcolor: "#211e1d" }}
+              />
+            )}
+            {selected?.reference_url && (
+              <Box
+                component="img"
+                src={selected.reference_url}
+                alt="Replacement reference"
+                sx={{ maxWidth: 160, maxHeight: 160, objectFit: "contain" }}
+              />
+            )}
+            {selected?.status === "ready" && (
+              <Alert severity="info">
+                Review the guide and reference. Approving below starts a paid
+                generation using your {selected.provider} balance
+                {selected.estimated_cost_usd !== undefined
+                  ? ` (estimated US$${selected.estimated_cost_usd.toFixed(2)})`
+                  : ""}
+                .
+              </Alert>
+            )}
+            {selected &&
+              ["ready", "generating", "tracking_review"].includes(
+                selected.status,
+              ) && (
+                <TextField
+                  label={`${selected.provider ?? "reAPI"} API key`}
+                  type="password"
+                  value={key}
+                  onChange={(event) => setKey(event.target.value)}
+                  autoComplete="off"
+                  helperText="Use the same key as this job. Kept only while this dialog is open."
+                  disabled={busy}
+                />
+              )}
+            {selected?.status === "submission_unknown" && (
+              <Alert severity="warning">
+                The provider may have received this request. Check your provider
+                task history before starting another generation. This job will
+                not be resubmitted automatically.
+              </Alert>
+            )}
+            {selected?.status === "tracking_review" &&
+              selected.source_preview_url && (
+                <SceneTrackingReview
+                  sourceUrl={selected.source_preview_url}
+                  trackingUrl={selected.tracking_url}
+                  segments={selected.tracking_segments ?? []}
+                  target={{
+                    id: "selected",
+                    name: "Selected person",
+                    color: "#06b6d4",
+                    anchor: { x: 0.5, y: 0.5, time: 0 },
+                  }}
+                  duration={selected.duration ?? 0}
+                  width={selected.width ?? 854}
+                  height={selected.height ?? 480}
+                  busy={busy || !key.trim()}
+                  initialChoices={selected.tracking_choices}
+                  onRefresh={() => void refresh()}
+                  onApply={async (choices) => {
+                    setBusy(true);
+                    setError(null);
+                    controller.current = new AbortController();
+                    try {
+                      const session = await resumeAccountJob(selected.id, key);
+                      const result = await resolveLiveTracking(
+                        selected.id,
+                        session.token,
+                        selected.tracking_revision ?? 0,
+                        choices,
+                        controller.current.signal,
+                      );
+                      if (mounted.current) {
+                        setSelected({ ...selected, ...result });
+                        await refresh();
+                      }
+                      return true;
+                    } catch (cause) {
+                      if (mounted.current)
+                        setError(
+                          cause instanceof Error
+                            ? cause.message
+                            : "Scene matches could not be saved.",
+                        );
+                      return false;
+                    } finally {
+                      if (mounted.current) setBusy(false);
+                    }
+                  }}
+                />
+              )}
+            {busy && <LinearProgress aria-label="Updating job" />}
+            {error && <Alert severity="error">{error}</Alert>}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={busy} onClick={close}>
+            Close
+          </Button>
+          {selected?.status === "generating" && (
+            <Button
+              disabled={busy || !key.trim()}
+              onClick={() => void act(false)}
+            >
+              Check provider status
+            </Button>
+          )}
+          {selected?.status === "ready" && (
+            <Button
+              variant="contained"
+              disabled={busy || !key.trim()}
+              onClick={() => void act(true)}
+            >
+              Approve and generate
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}

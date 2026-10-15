@@ -2,6 +2,7 @@ import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
+import { accountToken } from "./accountContext";
 
 export type GenerationProvider = "reAPI" | "ToAPIs";
 
@@ -184,8 +185,10 @@ async function requestJson(
   signal.addEventListener("abort", abort, { once: true });
   const timer = globalThis.setTimeout(abort, REQUEST_TIMEOUT_MS);
   try {
+    const firebaseToken = await accountToken();
     const response = await fetch(path, {
       ...init,
+      headers: {...init.headers, ...(firebaseToken ? {"X-Firebase-Token": firebaseToken} : {})},
       signal: controller.signal,
       credentials: "omit",
       cache: "no-store",
@@ -558,6 +561,7 @@ export async function createLiveJob(
       method: "POST",
       headers: { ...sessionHeaders(token), "Content-Type": "application/json" },
       body: JSON.stringify({
+        title: clip.name.slice(0, 120),
         source_bytes: sourceFile.size,
         reference_bytes: referenceFile.size,
         setup: {

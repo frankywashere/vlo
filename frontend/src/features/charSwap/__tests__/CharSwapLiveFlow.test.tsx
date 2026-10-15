@@ -189,7 +189,7 @@ describe("live generation approval", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
-    await user.click(screen.getByRole("radio", { name: /swapMEin credits/ }));
+    await user.click(screen.getByRole("radio", { name: /recastfx credits/ }));
     await user.click(screen.getByRole("button", { name: "Review setup" }));
     expect(
       screen.getByRole("button", { name: "Generate replacements" }),

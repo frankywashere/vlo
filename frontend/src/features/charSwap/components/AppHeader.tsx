@@ -9,6 +9,8 @@ interface AppHeaderProps {
   onCreate: () => void;
   onLibrary?: () => void;
   onSettings?: () => void;
+  accountLabel?: string;
+  onAccount?: () => void;
   locked?: boolean;
   colorMode?: "light" | "dark";
   onToggleAppearance?: () => void;
@@ -20,6 +22,8 @@ export function AppHeader({
   onCreate,
   onLibrary,
   onSettings,
+  accountLabel,
+  onAccount,
   locked = false,
   colorMode = "light",
   onToggleAppearance,
@@ -46,7 +50,7 @@ export function AppHeader({
         }}
       >
         <Button
-          aria-label="swapMEin home"
+          aria-label="recastfx home"
           onClick={onHome}
           sx={{
             color: "text.primary",
@@ -57,11 +61,10 @@ export function AppHeader({
             letterSpacing: "-.075em",
           }}
         >
-          swap
+          recast
           <Box component="span" sx={{ color: "primary.main" }}>
-            ME
+            fx
           </Box>
-          in
         </Button>
         <Stack
           component="nav"
@@ -112,6 +115,14 @@ export function AppHeader({
                 <DarkModeOutlined fontSize="small" />
               )}
             </IconButton>
+          )}
+          {onAccount && (
+            <Button
+              onClick={onAccount}
+              sx={{ minWidth: 0, px: 1, fontSize: 12 }}
+            >
+              {accountLabel ?? "Sign in"}
+            </Button>
           )}
           {onSettings && (
             <IconButton

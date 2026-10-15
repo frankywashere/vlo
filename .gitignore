@@ -88,3 +88,5 @@ deployment/swapmein/deployment-report.json
 .firebase/
 firebase-debug.log
 deployment/swapmein/deploy-report.json
+
+deployment/swapmein/deploy-launch-report.json

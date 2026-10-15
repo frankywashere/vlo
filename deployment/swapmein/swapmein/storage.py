@@ -55,6 +55,9 @@ class Records:
     def create(self, path: str, data: dict):
         self.write(path, data, 0)
 
+    def list_paths(self, prefix: str, maximum: int = 100):
+        return [blob.name for blob in self.client.list_blobs(self.bucket, prefix=prefix, max_results=maximum)]
+
 
 def check_preparation_capacity(current: dict | None, now: float,
                                monthly_limit: int = Settings.monthly_preparations,
@@ -93,6 +96,32 @@ def reserve_preparation(current: dict | None, job_id: str, now: float,
     available = check_preparation_capacity(current, now, monthly_limit, daily_limit, limit_prefix=limit_prefix)
     return {**available, "month_count": available["month_count"] + 1,
             "day_count": available["day_count"] + 1, "active": {"job_id": job_id, "until": now + 1800}}
+
+
+def check_queue_capacity(current, now, monthly_limit, daily_limit):
+    current = current or {}
+    active = current.get("active")
+    if active and (active.get("blocked") or active.get("until", 0) <= now):
+        raise PublicError("A previous preparation needs operator recovery before new clips can queue.", 503,
+                          code="preparation_recovery")
+    return check_preparation_capacity({k: v for k, v in current.items() if k != "active"},
+                                      now, monthly_limit, daily_limit)
+
+
+def reserve_queued_preparation(current, now, monthly_limit, daily_limit):
+    counts = check_queue_capacity(current, now, monthly_limit, daily_limit)
+    return {**(current or {}), **counts, "month_count": counts["month_count"] + 1,
+            "day_count": counts["day_count"] + 1}
+
+
+def claim_queued_slot(current, job_id, now):
+    current = current or {}
+    active = current.get("active")
+    if active and (active.get("blocked") or active.get("until", 0) <= now):
+        raise PublicError("Preparation requires operator recovery.", 503, code="preparation_recovery")
+    if active and active.get("job_id") != job_id:
+        raise PublicError("Waiting for the current preparation to finish.", 429, code="preparation_busy")
+    return {**current, "active": {"job_id": job_id, "until": now + 1800}}
 
 
 def release_preparation(current: dict | None, job_id: str):

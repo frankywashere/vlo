@@ -13,7 +13,7 @@ from google.auth.transport.requests import Request
 from google.cloud import storage, tasks_v2
 from google.oauth2 import id_token
 import httpx
-from google.protobuf import duration_pb2
+from google.protobuf import duration_pb2, timestamp_pb2
 
 from .config import Settings
 from .errors import PublicError
@@ -57,7 +57,7 @@ class Cloud:
         self.shutdown_tasks = []
         self.job_id = None
 
-    def enqueue(self, kind: str, job_id: str, *, task_token: str | None = None):
+    def enqueue(self, kind: str, job_id: str, *, task_token: str | None = None, delay_seconds: int = 0):
         settings = self.settings
         if task_token is not None and (not isinstance(task_token, str)
                 or not re.fullmatch(r"[a-f0-9]{32}", task_token)):
@@ -80,6 +80,10 @@ class Cloud:
             ),
             dispatch_deadline=duration_pb2.Duration(seconds=1800),
         )
+        if delay_seconds:
+            scheduled = timestamp_pb2.Timestamp()
+            scheduled.FromDatetime(datetime.now(timezone.utc) + timedelta(seconds=min(120, max(0, delay_seconds))))
+            task.schedule_time = scheduled
         self.tasks.create_task(parent=self.tasks.queue_path(settings.project, settings.region, settings.task_queue),
                                task=task, retry=None, timeout=20)
 

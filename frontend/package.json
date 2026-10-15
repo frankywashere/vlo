@@ -39,6 +39,7 @@
     "@mui/material": "^7.3.6",
     "@revideo/player-react": "^0.11.0",
     "@tanstack/react-virtual": "^3.14.3",
+    "firebase": "^13.0.0",
     "idb": "^8.0.3",
     "mdast-util-to-string": "^4.0.0",
     "mediabunny": "^1.58.1",
@@ -82,5 +83,8 @@
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.6"
   }
 }

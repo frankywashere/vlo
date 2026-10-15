@@ -7,11 +7,10 @@ export function GenerationProgress({ job, provider }: {
   job: LivePipelineJob;
   provider: "reAPI" | "ToAPIs";
 }) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const active = job.status === "generating" || job.status === "finalizing";
   useEffect(() => {
     if (!active) return;
-    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [active, job.id]);

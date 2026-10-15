@@ -75,7 +75,7 @@ export function AccessStep({
           control={<Radio sx={{ minWidth: 44, minHeight: 44 }} />}
           label={
             <Box>
-              <Typography fontWeight={600}>swapMEin credits</Typography>
+              <Typography fontWeight={600}>recastfx credits</Typography>
               <Typography variant="body2" color="text.secondary">
                 Buy credits here. Coming soon.
               </Typography>
