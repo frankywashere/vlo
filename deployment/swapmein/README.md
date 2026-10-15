@@ -29,14 +29,14 @@ records its checks and the remaining generation-quality limits.
   dimensions at 24 fps; it neither downsizes to the guide nor upscales to the
   uploaded source dimensions.
 
-Multiple-person generation, identity continuity across cuts, automated face
+Multiple-person generation, automatic identity continuity across cuts, automated face
 re-identification, payments and purchased app credits are not implemented.
 The walkthrough may illustrate later capabilities, but those services are not
 implemented. “Check all scenes” prepares the selected section. With masking off,
-detected cuts or selected-label gaps require whole-guide review with an explicit
-identity warning; there is no automatic cross-scene matching or per-scene target
-assignment. SAM coverage is not proof of identity. With masking on, cuts and
-missing selected-label coverage require review; absent mask frames stay unchanged.
+SAM is skipped and the user reviews the original-picture guide. With masking on,
+the user assigns the detected person in flagged sections, including every scene
+outside the original tap's healthy section. SAM coverage is not proof of identity.
+Explicitly absent sections stay unchanged in the guide.
 The cut detector is a heuristic and
 may flag strong lighting changes or abrupt motion.
 
@@ -55,16 +55,20 @@ may flag strong lighting changes or abrupt motion.
    them in either masking mode. Only enhanced masking activates Depth Anything then SAM 3 on `proof-gpu`,
    validates the mask archive and actual label under the clicked point, then shuts
    the GPU worker down. Masking off uses the normalized tap and timestamp directly. Absent-label frames remain unchanged; identity matching across cuts requires review.
-5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Enhanced mode calls
-   its `/compose` endpoint with `fill_mode: depth`; masking-off mode uses gateway CPU FFmpeg to
+5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Enhanced mode
+   publishes `tracking_review` when sections need matching, retaining depth,
+   masks and vocals for reuse. Otherwise it calls `/compose` with `fill_mode: depth`.
+   Masking-off mode uses gateway CPU FFmpeg to
    remux normalized RGB with those vocals, bypassing mask-based composition. The
    audio worker is shut down, private review links are published, and the job
-   becomes `ready`.
+   becomes `ready`, or pauses at `tracking_review` with both workers off.
    Masking-off remux honors the existing 100 ms vocal-duration tolerance by
    padding a short tail to the selected length; it does not retime vocals.
-6. The user reviews the tracking preview and guide, or the whole source guide with
-   an unverified-identity warning when cuts or label gaps exist, then approves one
-   provider submission. The gateway binds that submission to the session's
+6. Flagged sections show translucent masks on the original footage. The user
+   taps the correct person or marks them absent, then applies the matches. A
+   separately claimed CPU task rebuilds the depth guide using those assignments.
+   Sections without flags skip this interaction. The complete guide is reviewed
+   before the user approves one provider submission. The gateway binds that submission to the session's
    provider and key fingerprint. It never automatically retries the paid POST.
 7. The browser refreshes provider status. On completion, the gateway enqueues
    export. It downloads and checks the result, removes only permitted extra tail
@@ -101,9 +105,10 @@ environment variables.
 | `POST /api/uploads/{id}/complete` | Same session bearer after both PUTs | HTTP 202 `{id,status:"queued"}`; repeat completion returns the existing job status |
 | `POST /api/jobs` | Legacy endpoint; session bearer; multipart `clip`, `reference`, `setup` JSON string | HTTP 202 `{id,status:"queued"}` |
 | `GET /api/jobs/{id}` | Session bearer that owns the job | Public status, messages and available review/result URLs |
+| `POST /api/jobs/{id}/tracking-review` | Same session bearer; JSON `{revision,choices}` | HTTP 202; validates all matches and queues one CPU guide rebuild |
 | `POST /api/jobs/{id}/generate` | Session bearer plus `X-Reapi-Key`; JSON `{approved:true}` | Current public job status; submits at most once |
 | `GET /api/jobs/{id}/provider` | Session bearer plus `X-Reapi-Key` | Refreshes provider state and queues one export on completion |
-| `POST /internal/prepare` | Exact Google OIDC task identity and audience; JSON `{job_id}` | `{ok:true}` |
+| `POST /internal/prepare` | Exact Google OIDC task identity and audience; JSON `{job_id,task_token?}` | `{ok:true}` |
 | `POST /internal/finish` | Same task identity; JSON `{job_id}` | `{ok:true}` |
 
 `expires_at` is Unix seconds. `balance` and `actual_provider_credits` use the
@@ -173,12 +178,14 @@ The UI translates these codes into a specific reason and local reset time where
 known. Other errors retain a sanitized `message`; raw provider responses and
 credentials are not reflected.
 
-Public statuses are `queued`, `preparing`, `ready`, `generating`, `finalizing`,
+Public statuses are `queued`, `preparing`, `tracking_review`, `ready`, `generating`, `finalizing`,
 `completed`, `failed`, and `submission_unknown`. Internal `submitting` and
-`finishing` map to `generating` and `finalizing`. Status includes `provider`, `id`,
+`finishing` map to `generating` and `finalizing`; internal `matching` maps to `queued`. Status includes `provider`, `id`,
 `status` and `message`, then `duration`, `width`, `height`, `selected_label`,
 `scene_cut_count`, `tracking_continuous`,
-`tracking_url`, `guide_url`, and `output_url` as available. Optional cost fields
+`tracking_url`, `guide_url`, and `output_url` as available. Tracking-review jobs also
+expose `tracking_revision`, `tracking_segments`, `tracking_reviewed`,
+`source_preview_url` and previously applied `tracking_choices` when available. Optional cost fields
 are `estimated_cost_usd`, `estimate_note`, `estimate_source`,
 `estimate_verified_at`, and `actual_provider_credits`. Signed GET URLs last at
 most one hour. Private bucket URIs and session ownership are not returned.
@@ -478,9 +485,9 @@ disabled until the job is ready and the guide can play. It remains an explicit
 paid submission. Enhanced masking and the sample demo retain their overlay/match
 review step and confirmation requirements. App credits remain a preview only.
 
-### Scene tracking review — local change awaiting deployment
+### Scene tracking review
 
-The local implementation adds an owned `tracking_review` state for enhanced
+The implementation adds an owned `tracking_review` state for enhanced
 masking. After depth and SAM finish, `tracking.py` partitions the normalized
 24 fps clip at scene cuts, label disappearance/reappearance, and abrupt changes
 in mask area or position. These are review heuristics, not identity-confidence
@@ -517,5 +524,8 @@ Masking-off preparations and previously created jobs retain their existing flow.
 Reassigning existing labels cannot recover a person SAM never detected, repair
 missing body pixels, or guarantee the provider's identity/motion fidelity.
 
-This change is implemented and tested locally. The deployed site keeps its
-previous behavior until an explicitly authorized release.
+Released on 2026-10-14 with gateway revision `swapmein-api-00023-x4p`, serving
+100% traffic. Local validation includes 224 gateway tests, 145 walkthrough tests,
+and desktop/mobile browser checks with saved SAM masks. Release checks verify the
+new owned review route and the exact frontend bundle; no paid generation was run
+as part of deployment.

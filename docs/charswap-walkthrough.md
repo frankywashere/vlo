@@ -59,12 +59,17 @@ quality or identity correctness.
    the section, reference and cost, then explicitly clicks Generate. There is no
    separate tracking confirmation and no paid generation during preparation.
 
-With enhanced masking **on**, the seven-step flow retains its overlay review
-between References and Access. A provider key must be entered before this earlier
-preparation; the guide must be reviewed/confirmed before moving to Access.
-Scene cuts and absent-label frames are supported. Automatic cross-shot identity
-matching and per-scene target assignments are not implemented. The local demo
-retains its simulated matching flow.
+With enhanced masking **on**, preparation begins after References. The Matches
+step appears between References and Access when real tracking results contain
+scene cuts or suspicious gaps/changes. It shows translucent masks over original
+footage and lets the user tap the correct person or mark them absent in each
+flagged section. Applied matches rebuild the guide on CPU using saved masks,
+depth and vocals; they do not rerun SAM. With no flagged sections, the flow goes
+directly to Access. The complete guide is reviewed before generation in either
+case. A provider key must be entered before this earlier preparation.
+Automatic cross-shot identity matching remains unverified. Manual assignments
+can select existing SAM tracks, but cannot recover undetected people or missing
+body pixels. The local demo retains its separate simulated matching flow.
 
 Capacity is checked before upload and again before issuing upload links. Daily,
 monthly, busy and recovery errors are distinguished. A rejected masking-off
@@ -445,9 +450,9 @@ require relevant implementation tests and release validation.
 
 - Persistent accounts/session recovery and reliable unattended provider polling.
 - Real app-credit ledger, payments and provider-backed purchases.
-- Multi-person generation and identity continuity across camera cuts.
-- Measured uncertainty and a production reselection/matching flow; the current
-  anchor/label review is not a confidence system.
+- Multi-person generation and automatic identity continuity across camera cuts.
+- Calibrated identity uncertainty and detection recovery; the manual section
+  review uses cuts and mask geometry rather than identity-confidence scores.
 - Optional fractional-duration output handling, tested for source timing and cost.
 - Worker-source packaging, fully pinned rebuilds/model integrity and intentional
   retention/registry cleanup.
