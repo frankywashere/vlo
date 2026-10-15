@@ -27,7 +27,7 @@ export function PreparationProgress({
       : undefined;
 
   return (
-    <Box sx={{ ...PANEL, borderColor: "#42617c" }}>
+    <Box sx={{ ...PANEL, borderColor: "divider" }}>
       <Stack spacing={1.5}>
         <Stack
           direction="row"
@@ -58,7 +58,9 @@ export function PreparationProgress({
                 ? "Uploading clip and references"
                 : title
             }
-            variant={uploadPercent !== undefined ? "determinate" : "indeterminate"}
+            variant={
+              uploadPercent !== undefined ? "determinate" : "indeterminate"
+            }
             value={uploadPercent}
             sx={{ flex: 1, height: 5, borderRadius: 1 }}
           />
@@ -72,7 +74,8 @@ export function PreparationProgress({
           )}
         </Stack>
         <Typography variant="body2" color="text.secondary">
-          Keep this tab open. Generation starts only after you approve the result.
+          Keep this tab open. Generation starts only after you approve the
+          result.
         </Typography>
       </Stack>
     </Box>

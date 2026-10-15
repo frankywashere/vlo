@@ -66,7 +66,7 @@ export function AccessStep({
             ...PANEL,
             m: 0,
             alignItems: "flex-start",
-            borderColor: accessMode === "api-key" ? "#75baff" : "#30343b",
+            borderColor: accessMode === "api-key" ? "primary.main" : "divider",
             "& .MuiFormControlLabel-label": { pt: 1 },
           }}
         />
@@ -85,7 +85,7 @@ export function AccessStep({
             ...PANEL,
             m: 0,
             alignItems: "flex-start",
-            borderColor: accessMode === "credits" ? "#75baff" : "#30343b",
+            borderColor: accessMode === "credits" ? "primary.main" : "divider",
             "& .MuiFormControlLabel-label": { pt: 1 },
           }}
         />
@@ -100,7 +100,7 @@ export function AccessStep({
             alignItems={{ xs: "stretch", sm: "center" }}
           >
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <KeyOutlined sx={{ color: "#9abbdc" }} />
+              <KeyOutlined sx={{ color: "primary.main" }} />
               <Box>
                 <Typography fontWeight={600}>
                   Your {provider} API key
@@ -142,7 +142,7 @@ export function AccessStep({
             alignItems={{ xs: "stretch", sm: "center" }}
           >
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <AccountBalanceWalletOutlined sx={{ color: "#9abbdc" }} />
+              <AccountBalanceWalletOutlined sx={{ color: "primary.main" }} />
               <Box>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Typography fontWeight={600}>Sample balance</Typography>

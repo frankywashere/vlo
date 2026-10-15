@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { ThemeProvider, createTheme } from "@mui/material/styles";
+import { ThemeProvider } from "@mui/material/styles";
 import {
   Alert,
   Box,
@@ -15,7 +15,6 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import SwapHorizRounded from "@mui/icons-material/SwapHorizRounded";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import CheckRounded from "@mui/icons-material/CheckRounded";
@@ -27,7 +26,9 @@ import AutoAwesomeOutlined from "@mui/icons-material/AutoAwesomeOutlined";
 import ContentCutOutlined from "@mui/icons-material/ContentCutOutlined";
 import { AccessStep } from "./components/AccessStep";
 import KeyOutlined from "@mui/icons-material/KeyOutlined";
-import { darkTheme } from "../../shared/theme/darkTheme";
+import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
+import { AppHeader } from "./components/AppHeader";
+import type { LivePipelineJob } from "./services/livePipeline";
 import { useCharSwapStore, STEPS } from "./useCharSwapStore";
 import {
   canContinue,
@@ -55,41 +56,12 @@ import {
   ReviewStep,
 } from "./components/WalkthroughSteps";
 
-const theme = createTheme(darkTheme, {
-  palette: {
-    primary: { main: "#75baff", contrastText: "#0e2338" },
-    background: { default: "#121418", paper: "#1c1f25" },
-    text: { primary: "#f1f3f6", secondary: "#a3adba" },
-  },
-  typography: {
-    fontFamily:
-      'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    h4: { fontSize: "1.9rem", fontWeight: 650, letterSpacing: "-.035em" },
-    h6: { fontWeight: 600 },
-    button: { textTransform: "none", fontWeight: 600 },
-    body2: { lineHeight: 1.6 },
-  },
-  shape: { borderRadius: 8 },
-  components: {
-    MuiButton: {
-      defaultProps: { disableElevation: true },
-      styleOverrides: { root: { minHeight: 44, borderRadius: 8 } },
-    },
-    MuiChip: { styleOverrides: { root: { borderRadius: 6 } } },
-    MuiSlider: {
-      styleOverrides: {
-        thumb: { width: 18, height: 18 },
-        root: { padding: "16px 0" },
-      },
-    },
-  },
-});
-
 const STEP_INFO = {
   clip: {
-    title: "Choose your clip",
+    title: "Start with a clip.",
     short: "Clip",
-    description: "Start with a video you want to change.",
+    description:
+      "Choose the moment you want to reimagine. You’ll trim it next, then select the person and assign their new character.",
     icon: MovieOutlined,
   },
   trim: {
@@ -178,7 +150,9 @@ function ProgressNavigation({
     issues,
     decisions,
   };
-  const flowSteps = skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS;
+  const flowSteps = skipMaskReview
+    ? STEPS.filter((item) => item !== "matches")
+    : STEPS;
   const current = flowSteps.indexOf(step);
   const navigationRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -196,22 +170,26 @@ function ProgressNavigation({
       sx={{
         position: "relative",
         display: "flex",
-        flexDirection: { xs: "row", md: "column" },
-        gap: { xs: 0.5, md: 1 },
+        flexDirection: "row",
+        gap: { xs: 0.5, md: 1.5 },
         px: { xs: 0, md: 0 },
-        pb: { xs: 2.5, md: 0 },
-        borderBottom: { xs: "1px solid #292e36", md: "none" },
+        pb: 2,
+        borderBottom: 1,
+        borderColor: "divider",
         overflowX: "auto",
       }}
     >
       {flowSteps.map((item, index) => {
-        const Icon = STEP_INFO[item].icon;
         const active = item === step;
         const accessible =
           !locked &&
           canVisitStep(state, item) &&
           (item !== "review" || accessReady) &&
-          (skipMaskReview ? item !== "review" || reviewReady : item === step || !["matches", "access", "review"].includes(item) || trackingReady) &&
+          (skipMaskReview
+            ? item !== "review" || reviewReady
+            : item === step ||
+              !["matches", "access", "review"].includes(item) ||
+              trackingReady) &&
           (index <= current || !blockedForward);
         return (
           <Button
@@ -221,35 +199,37 @@ function ProgressNavigation({
             onClick={() => visit(item)}
             sx={{
               display: "flex",
-              flexDirection: { xs: "column", md: "row" },
-              justifyContent: { xs: "center", md: "flex-start" },
-              flex: { xs: "1 0 60px", md: "initial" },
-              minWidth: { xs: 60, md: "initial" },
-              gap: { xs: 0.7, md: 1.5 },
-              minHeight: { xs: 60, md: 54 },
-              fontSize: { xs: 11, md: 14 },
-              color: active ? "#a4d2ff" : "text.secondary",
-              bgcolor: active ? "#223248" : "transparent",
-              border: active ? "1px solid #365371" : "1px solid transparent",
-              "&.Mui-disabled": { color: "#777f8c" },
+              flexDirection: { xs: "column", sm: "row" },
+              justifyContent: "center",
+              flex: "1 0 60px",
+              minWidth: 60,
+              gap: 1,
+              minHeight: 54,
+              fontSize: { xs: 11, md: 13 },
+              color: active ? "primary.main" : "text.secondary",
+              bgcolor: active ? "action.selected" : "transparent",
+              border: "1px solid transparent",
+              "&.Mui-disabled": { color: "text.disabled" },
             }}
           >
             <Box
               component="span"
+              aria-hidden="true"
               sx={{
                 width: 28,
                 height: 28,
                 display: "grid",
                 placeItems: "center",
-                bgcolor: index < current ? "#294536" : "#303640",
-                color: index < current ? "#9bd9b4" : "inherit",
-                borderRadius: 1,
+                bgcolor: active ? "primary.main" : "background.paper",
+                color: active ? "primary.contrastText" : "inherit",
+                borderRadius: "50%",
+                fontWeight: 700,
               }}
             >
               {index < current ? (
                 <CheckRounded sx={{ fontSize: 17 }} />
               ) : (
-                <Icon sx={{ fontSize: 17 }} />
+                index + 1
               )}
             </Box>
             {STEP_INFO[item].short}
@@ -260,7 +240,27 @@ function ProgressNavigation({
   );
 }
 
-export function CharSwapWalkthrough() {
+interface CharSwapWalkthroughProps {
+  colorMode?: "light" | "dark";
+  onToggleAppearance?: () => void;
+  onHome?: () => void;
+  onLibrary?: () => void;
+  onJobChange?: (job: LivePipelineJob, title: string) => void;
+  onBusyChange?: (busy: boolean) => void;
+  settingsOpen?: boolean;
+  onSettingsClose?: () => void;
+}
+
+export function CharSwapWalkthrough({
+  colorMode = "light",
+  onToggleAppearance,
+  onHome,
+  onLibrary,
+  onJobChange,
+  onBusyChange,
+  settingsOpen = false,
+  onSettingsClose,
+}: CharSwapWalkthroughProps = {}) {
   const {
     step,
     clip,
@@ -334,6 +334,12 @@ export function CharSwapWalkthrough() {
   const lockedAccess = pipeline.busy || unknownSubmission;
   const liveJobId = pipeline.job?.id;
   useEffect(() => {
+    if (pipeline.job) onJobChange?.(pipeline.job, clip?.name ?? "Your swap");
+  }, [pipeline.job, clip?.name, onJobChange]);
+  useEffect(() => {
+    onBusyChange?.(lockedAccess);
+  }, [lockedAccess, onBusyChange]);
+  useEffect(() => {
     if (live) invalidateTracking();
   }, [liveJobId, live, invalidateTracking]);
   const referenceVersion = JSON.stringify(
@@ -355,9 +361,26 @@ export function CharSwapWalkthrough() {
     importClip,
     importReference,
   } = useLocalAssets();
-  const noFlaggedSections = live && enhancedCharacterMasking && pipeline.job && ["ready", "generating", "finalizing", "completed", "submission_unknown"].includes(pipeline.job.status) && pipeline.job.tracking_segments !== undefined && !pipeline.job.tracking_segments.some((segment) => segment.needs_review);
-  const skipMaskReview = (easyMode ?? true) || (clip?.mode === "upload" && !enhancedCharacterMasking) || Boolean(noFlaggedSections);
-  const flowSteps = skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS;
+  const noFlaggedSections =
+    live &&
+    enhancedCharacterMasking &&
+    pipeline.job &&
+    [
+      "ready",
+      "generating",
+      "finalizing",
+      "completed",
+      "submission_unknown",
+    ].includes(pipeline.job.status) &&
+    pipeline.job.tracking_segments !== undefined &&
+    !pipeline.job.tracking_segments.some((segment) => segment.needs_review);
+  const skipMaskReview =
+    (easyMode ?? true) ||
+    (clip?.mode === "upload" && !enhancedCharacterMasking) ||
+    Boolean(noFlaggedSections);
+  const flowSteps = skipMaskReview
+    ? STEPS.filter((item) => item !== "matches")
+    : STEPS;
   const current = flowSteps.indexOf(step);
   const state = {
     easyMode,
@@ -391,7 +414,11 @@ export function CharSwapWalkthrough() {
   const unresolved = getUnresolvedIssues(state).length;
 
   useEffect(() => {
-    if (step === "matches" && noFlaggedSections && pipeline.job?.status === "ready") {
+    if (
+      step === "matches" &&
+      noFlaggedSections &&
+      pipeline.job?.status === "ready"
+    ) {
       reviewTracking([]);
       visit("access");
     }
@@ -444,20 +471,33 @@ export function CharSwapWalkthrough() {
         pipeline.job.status === "completed"
       ) {
         invalidateTracking();
-        if (!await pipeline.prepare(state)) return;
+        if (!(await pipeline.prepare(state))) return;
       }
     }
-    if (step === "access" && skipMaskReview && live && accessMode === "api-key") {
+    if (
+      step === "access" &&
+      skipMaskReview &&
+      live &&
+      accessMode === "api-key"
+    ) {
       if (!hasKey || isSampleKey) {
         setError(`Add your ${provider} key before preparing your clip.`);
         setApiSettingsOpen(true);
         return;
       }
-      if (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) {
-        if (!await pipeline.prepare(state)) return;
+      if (
+        !pipeline.job ||
+        ["failed", "completed"].includes(pipeline.job.status)
+      ) {
+        if (!(await pipeline.prepare(state))) return;
       }
     }
-    if (step === "references" && clip?.mode === "demo" && demo && !(easyMode ?? true))
+    if (
+      step === "references" &&
+      clip?.mode === "demo" &&
+      demo &&
+      !(easyMode ?? true)
+    )
       reviewTracking(sampleReviewIssues(targets, demo, trim));
     next();
   }
@@ -469,20 +509,24 @@ export function CharSwapWalkthrough() {
         : step === "people"
           ? "Choose references"
           : step === "references"
-            ? skipMaskReview ? "Choose access" : "Check all scenes"
+            ? skipMaskReview
+              ? "Choose access"
+              : "Check all scenes"
             : step === "matches"
               ? "Choose access"
               : "Review setup";
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider
+      theme={colorMode === "dark" ? swapMeinDarkTheme : swapMeinTheme}
+    >
       <CssBaseline />
       <GlobalStyles
         styles={{
-          html: { colorScheme: "dark" },
+          html: { colorScheme: colorMode },
           body: { margin: 0, overflowX: "hidden" },
           "*": { boxSizing: "border-box" },
           "button:focus-visible, a:focus-visible": {
-            outline: "2px solid #a3d1ff",
+            outline: "2px solid #cc3f37",
             outlineOffset: 3,
           },
           "@media (prefers-reduced-motion: reduce)": {
@@ -494,86 +538,16 @@ export function CharSwapWalkthrough() {
         }}
       />
       <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
-        <Box
-          component="header"
-          sx={{ borderBottom: "1px solid #2d323b", bgcolor: "#171a20" }}
-        >
-          <Stack
-            direction="row"
-            alignItems="center"
-            justifyContent="space-between"
-            sx={{
-              maxWidth: 1200,
-              mx: "auto",
-              px: { xs: 2, md: 4 },
-              height: 76,
-            }}
-          >
-            <Stack direction="row" alignItems="center" spacing={1.5}>
-              <Box
-                sx={{
-                  width: 36,
-                  height: 36,
-                  display: "grid",
-                  placeItems: "center",
-                  borderRadius: 1.5,
-                  bgcolor: "#294569",
-                  color: "#a0d1ff",
-                }}
-              >
-                <SwapHorizRounded sx={{ fontSize: 26 }} />
-              </Box>
-              <Typography
-                sx={{ fontSize: 20, fontWeight: 650, letterSpacing: "-.04em" }}
-              >
-                swapMEin
-              </Typography>
-              <Chip
-                label={pipeline.enabled ? "Beta" : "UI preview"}
-                size="small"
-                sx={{
-                  display: { xs: "none", sm: "inline-flex" },
-                  color: "#b4bcc8",
-                  bgcolor: "#2b3039",
-                }}
-              />
-            </Stack>
-            <Stack
-              direction="row"
-              spacing={{ xs: 0.5, sm: 1 }}
-              alignItems="center"
-            >
-              <Button
-                aria-label="Settings"
-                disabled={lockedAccess}
-                onClick={() => setApiSettingsOpen(true)}
-                sx={{
-                  minWidth: { xs: 44, sm: 120 },
-                  px: { xs: 1, sm: 1.5 },
-                  color: "text.secondary",
-                  gap: 1,
-                }}
-              >
-                <KeyOutlined fontSize="small" />
-                <Box
-                  component="span"
-                  sx={{ display: { xs: "none", sm: "inline" } }}
-                >
-                  Settings
-                </Box>
-              </Button>
-              <Button
-                size="small"
-                variant="text"
-                sx={{ color: "text.secondary" }}
-                disabled={pipeline.busy}
-                onClick={() => (clip ? setResetDialog(true) : startNewSwap())}
-              >
-                New swap
-              </Button>
-            </Stack>
-          </Stack>
-        </Box>
+        <AppHeader
+          colorMode={colorMode}
+          onToggleAppearance={onToggleAppearance}
+          active="create"
+          onHome={onHome ?? (() => {})}
+          onCreate={() => {}}
+          onLibrary={onLibrary}
+          onSettings={() => setApiSettingsOpen(true)}
+          locked={lockedAccess}
+        />
         <Box
           sx={{
             maxWidth: 1200,
@@ -590,9 +564,14 @@ export function CharSwapWalkthrough() {
             alignItems="center"
             sx={{ mb: { xs: 2.5, md: 3 } }}
           >
-            <Typography variant="body2" color="text.secondary">
-              Create a replacement
-            </Typography>
+            <Button
+              size="small"
+              sx={{ color: "text.secondary", px: 0 }}
+              disabled={pipeline.busy}
+              onClick={() => (clip ? setResetDialog(true) : startNewSwap())}
+            >
+              New swap
+            </Button>
             <Chip
               size="small"
               label={
@@ -602,76 +581,92 @@ export function CharSwapWalkthrough() {
                     ? "Live beta · your API key"
                     : "Local preview · no paid runs"
               }
-              sx={{ fontSize: 11, bgcolor: "#20262f", color: "#b4c4d8" }}
+              sx={{
+                fontSize: 11,
+                bgcolor: "action.selected",
+                color: "text.secondary",
+              }}
             />
           </Stack>
           <Box
             sx={{
               display: "grid",
-              gridTemplateColumns: {
-                xs: "minmax(0, 1fr)",
-                md: "180px minmax(0, 1fr)",
-              },
+              gridTemplateColumns: "minmax(0, 1fr)",
               gap: { xs: 3, md: 5 },
               alignItems: "start",
             }}
           >
-            <Box sx={{ position: { md: "sticky" }, top: { md: 28 } }}>
+            <Box>
               <ProgressNavigation
                 locked={lockedAccess}
                 accessReady={accessMode === "credits" || hasKey}
                 skipMaskReview={skipMaskReview}
-                reviewReady={!live || Boolean(pipeline.job && ["ready", "generating", "finalizing", "completed", "submission_unknown"].includes(pipeline.job.status))}
+                reviewReady={
+                  !live ||
+                  Boolean(
+                    pipeline.job &&
+                      [
+                        "ready",
+                        "generating",
+                        "finalizing",
+                        "completed",
+                        "submission_unknown",
+                      ].includes(pipeline.job.status),
+                  )
+                }
                 blockedForward={
                   busy || loadingDemo || pendingReferences.length > 0
                 }
               />
+              {clip && (
+                <Stack
+                  direction="row"
+                  flexWrap="wrap"
+                  gap={1}
+                  sx={{ mt: 2 }}
+                  aria-label="Your setup"
+                >
+                  <Chip
+                    size="small"
+                    label={`${(trim[1] - trim[0]).toFixed(1)} second clip`}
+                  />
+                  <Chip
+                    size="small"
+                    label={`${targets.length} ${targets.length === 1 ? "person" : "people"} selected`}
+                  />
+                  <Chip size="small" label="Native resolution" />
+                  <Chip size="small" label="Original audio kept" />
+                </Stack>
+              )}
+            </Box>
+            <Box
+              component="main"
+              sx={{
+                minWidth: 0,
+                ...(step === "clip" && !clip
+                  ? {
+                      display: "grid",
+                      gridTemplateColumns: {
+                        xs: "minmax(0, 1fr)",
+                        md: "1.15fr .85fr",
+                      },
+                      columnGap: 6,
+                    }
+                  : {}),
+              }}
+            >
               <Box
                 sx={{
-                  display: { xs: "none", md: "block" },
-                  mt: 4,
-                  borderTop: "1px solid #2d323b",
-                  pt: 2.5,
+                  mb: 3,
+                  ...(step === "clip" && !clip
+                    ? {
+                        gridColumn: { md: 2 },
+                        gridRow: { md: 1 },
+                        alignSelf: "center",
+                      }
+                    : {}),
                 }}
               >
-                <Typography
-                  variant="caption"
-                  sx={{ letterSpacing: ".08em", color: "#8591a2" }}
-                >
-                  YOUR SETUP
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 1.5 }}>
-                  {clip
-                    ? `${(trim[1] - trim[0]).toFixed(1)} second clip`
-                    : "No clip yet"}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 0.75 }}
-                >
-                  {targets.length
-                    ? `${targets.length} ${targets.length === 1 ? "person" : "people"} selected`
-                    : "People not selected"}
-                </Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 0.75 }}
-                >
-                  Native resolution
-                </Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 0.75 }}
-                >
-                  Original audio kept
-                </Typography>
-              </Box>
-            </Box>
-            <Box component="main" sx={{ minWidth: 0 }}>
-              <Box sx={{ mb: 3 }}>
                 <Typography
                   variant="caption"
                   color="primary"
@@ -688,7 +683,7 @@ export function CharSwapWalkthrough() {
                     mt: 1,
                     mb: 1.25,
                     outline: "none",
-                    fontSize: { xs: "1.7rem", md: "1.95rem" },
+                    fontSize: { xs: "2rem", md: "2.5rem" },
                   }}
                 >
                   {STEP_INFO[step].title}
@@ -698,8 +693,12 @@ export function CharSwapWalkthrough() {
                 </Typography>
               </Box>
               {pipeline.preparationProgress && (
-                <Box sx={{mb: 2}}>
-                  <PreparationProgress title={skipMaskReview ? "Preparing your clip" : undefined} progress={pipeline.preparationProgress} elapsedSeconds={pipeline.preparationElapsedSeconds} />
+                <Box sx={{ mb: 2 }}>
+                  <PreparationProgress
+                    title={skipMaskReview ? "Preparing your clip" : undefined}
+                    progress={pipeline.preparationProgress}
+                    elapsedSeconds={pipeline.preparationElapsedSeconds}
+                  />
                 </Box>
               )}
               {(error || pipeline.error) && (
@@ -746,8 +745,8 @@ export function CharSwapWalkthrough() {
                 <>
                   {secureSite && (
                     <Alert severity="info" sx={{ mb: 2 }}>
-                      The length snaps to whole seconds (4–15). Your start can be between seconds.
-
+                      The length snaps to whole seconds (4–15). Your start can
+                      be between seconds.
                     </Alert>
                   )}
                   <TrimStep demo={demo} />
@@ -771,57 +770,63 @@ export function CharSwapWalkthrough() {
                   }}
                 />
               )}
-              {step === "matches" && !pipeline.preparationProgress &&
-                (live ? pipeline.job?.status === "tracking_review" && pipeline.job.source_preview_url && pipeline.job.tracking_segments && targets[0] ? (
-                  <SceneTrackingReview
-                    key={`${liveJobId}-${pipeline.job.tracking_revision}`}
-                    sourceUrl={pipeline.job.source_preview_url}
-                    trackingUrl={pipeline.job.tracking_url}
-                    segments={pipeline.job.tracking_segments}
-                    target={targets[0]}
-                    duration={pipeline.job.duration ?? trim[1] - trim[0]}
-                    width={pipeline.job.width ?? clip?.width ?? 854}
-                    height={pipeline.job.height ?? clip?.height ?? 480}
-                    busy={pipeline.busy}
-                    errorSegmentId={pipeline.trackingErrorSegmentId}
-                    message={pipeline.job.message}
-                    initialChoices={pipeline.job.tracking_choices}
-                    onApply={pipeline.resolveTracking}
-                    onRefresh={() => void pipeline.refresh()}
-                  />
-                ) : (
-                  <LiveTrackingStep
-                    key={pipeline.job?.guide_url ?? liveJobId ?? "empty"}
-                    status={pipeline.job?.status ?? "failed"}
-                    message={
-                      pipeline.job?.message ||
-                      pipeline.error ||
-                      "Preparation has not started. Go back to References to try again."
-                    }
-                    enhancedCharacterMasking={enhancedCharacterMasking}
-                    selectedLabel={pipeline.job?.selected_label}
-                    maskStyle={pipeline.job?.mask_style}
-                    trackingContinuous={pipeline.job?.tracking_continuous}
-                    trackingPerformed={pipeline.job?.tracking_performed}
-                    sceneCutCount={pipeline.job?.scene_cut_count}
-                    trackingReviewed={pipeline.job?.tracking_reviewed}
-                    guideUrl={pipeline.job?.guide_url}
-                    trackingUrl={pipeline.job?.tracking_url}
-                    duration={pipeline.job?.duration ?? trim[1] - trim[0]}
-                    width={pipeline.job?.width ?? clip?.width ?? 854}
-                    height={pipeline.job?.height ?? clip?.height ?? 480}
-                    confirmed={trackingReady}
-                    onConfirm={() => reviewTracking([])}
-                    onRefresh={() => {
-                      void pipeline.refresh();
-                    }}
-                    onGuideError={invalidateTracking}
-                    onReselect={() => {
-                      pipeline.reset();
-                      invalidateTracking();
-                      visit("people");
-                    }}
-                  />
+              {step === "matches" &&
+                !pipeline.preparationProgress &&
+                (live ? (
+                  pipeline.job?.status === "tracking_review" &&
+                  pipeline.job.source_preview_url &&
+                  pipeline.job.tracking_segments &&
+                  targets[0] ? (
+                    <SceneTrackingReview
+                      key={`${liveJobId}-${pipeline.job.tracking_revision}`}
+                      sourceUrl={pipeline.job.source_preview_url}
+                      trackingUrl={pipeline.job.tracking_url}
+                      segments={pipeline.job.tracking_segments}
+                      target={targets[0]}
+                      duration={pipeline.job.duration ?? trim[1] - trim[0]}
+                      width={pipeline.job.width ?? clip?.width ?? 854}
+                      height={pipeline.job.height ?? clip?.height ?? 480}
+                      busy={pipeline.busy}
+                      errorSegmentId={pipeline.trackingErrorSegmentId}
+                      message={pipeline.job.message}
+                      initialChoices={pipeline.job.tracking_choices}
+                      onApply={pipeline.resolveTracking}
+                      onRefresh={() => void pipeline.refresh()}
+                    />
+                  ) : (
+                    <LiveTrackingStep
+                      key={pipeline.job?.guide_url ?? liveJobId ?? "empty"}
+                      status={pipeline.job?.status ?? "failed"}
+                      message={
+                        pipeline.job?.message ||
+                        pipeline.error ||
+                        "Preparation has not started. Go back to References to try again."
+                      }
+                      enhancedCharacterMasking={enhancedCharacterMasking}
+                      selectedLabel={pipeline.job?.selected_label}
+                      maskStyle={pipeline.job?.mask_style}
+                      trackingContinuous={pipeline.job?.tracking_continuous}
+                      trackingPerformed={pipeline.job?.tracking_performed}
+                      sceneCutCount={pipeline.job?.scene_cut_count}
+                      trackingReviewed={pipeline.job?.tracking_reviewed}
+                      guideUrl={pipeline.job?.guide_url}
+                      trackingUrl={pipeline.job?.tracking_url}
+                      duration={pipeline.job?.duration ?? trim[1] - trim[0]}
+                      width={pipeline.job?.width ?? clip?.width ?? 854}
+                      height={pipeline.job?.height ?? clip?.height ?? 480}
+                      confirmed={trackingReady}
+                      onConfirm={() => reviewTracking([])}
+                      onRefresh={() => {
+                        void pipeline.refresh();
+                      }}
+                      onGuideError={invalidateTracking}
+                      onReselect={() => {
+                        pipeline.reset();
+                        invalidateTracking();
+                        visit("people");
+                      }}
+                    />
+                  )
                 ) : (
                   <MatchesStep demo={demo} />
                 ))}
@@ -864,7 +869,9 @@ export function CharSwapWalkthrough() {
                   component="footer"
                   sx={{
                     mt: 4,
-                    borderTop: "1px solid #2d323b",
+                    gridColumn: "1 / -1",
+                    borderTop: "1px solid",
+                    borderColor: "divider",
                     pt: 2.5,
                     pb: { xs: "max(16px, env(safe-area-inset-bottom))", md: 0 },
                     display: "flex",
@@ -877,7 +884,7 @@ export function CharSwapWalkthrough() {
                     right: 0,
                     zIndex: 10,
                     px: { xs: 2, md: 0 },
-                    bgcolor: { xs: "#171a20", md: "transparent" },
+                    bgcolor: { xs: "background.default", md: "transparent" },
                   }}
                 >
                   <Button
@@ -901,23 +908,38 @@ export function CharSwapWalkthrough() {
                       {pipeline.preparationProgress
                         ? "Preparing your clip"
                         : step === "matches" && !trackingReady
-                          ? pipeline.job?.status === "tracking_review" ? "Check the highlighted sections" : "Review your prepared guide"
-                        : step === "matches" && unresolved
-                          ? `${unresolved} sections left to check`
-                          : blocker}
+                          ? pipeline.job?.status === "tracking_review"
+                            ? "Check the highlighted sections"
+                            : "Review your prepared guide"
+                          : step === "matches" && unresolved
+                            ? `${unresolved} sections left to check`
+                            : blocker}
                     </Typography>
-                    {step === "matches" && pipeline.job?.status === "tracking_review" ? <Typography variant="body2" color="text.secondary" sx={{maxWidth: 230, textAlign: "right"}}>Apply your matches above to continue.</Typography> : <Button
-                      variant="contained"
-                      size="large"
-                      disabled={continueDisabled}
-                      onClick={() => {
-                        void continueFlow();
-                      }}
-                      endIcon={<ArrowForwardRounded />}
-                      sx={{ minWidth: { xs: 150, md: 190 } }}
-                    >
-                      {step === "references" && pipeline.preparationProgress ? "Checking all scenes…" : nextLabel}
-                    </Button>}
+                    {step === "matches" &&
+                    pipeline.job?.status === "tracking_review" ? (
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ maxWidth: 230, textAlign: "right" }}
+                      >
+                        Apply your matches above to continue.
+                      </Typography>
+                    ) : (
+                      <Button
+                        variant="contained"
+                        size="large"
+                        disabled={continueDisabled}
+                        onClick={() => {
+                          void continueFlow();
+                        }}
+                        endIcon={<ArrowForwardRounded />}
+                        sx={{ minWidth: { xs: 150, md: 190 } }}
+                      >
+                        {step === "references" && pipeline.preparationProgress
+                          ? "Checking all scenes…"
+                          : nextLabel}
+                      </Button>
+                    )}
                   </Box>
                 </Box>
               )}
@@ -936,7 +958,7 @@ export function CharSwapWalkthrough() {
         >
           <Button
             component="a"
-            href="https://github.com/frankywashere/vlo/tree/tasty"
+            href="https://github.com/frankywashere/vlo"
             target="_blank"
             rel="noreferrer"
             size="small"
@@ -946,7 +968,7 @@ export function CharSwapWalkthrough() {
           </Button>
         </Box>
         <ApiKeySettingsDialog
-          open={apiSettingsOpen}
+          open={apiSettingsOpen || settingsOpen}
           live={secureSite}
           provider={provider}
           onProviderChange={(value) => {
@@ -966,7 +988,10 @@ export function CharSwapWalkthrough() {
           apiKey={previewKey}
           onSave={saveKey}
           onClear={clearKey}
-          onClose={() => setApiSettingsOpen(false)}
+          onClose={() => {
+            setApiSettingsOpen(false);
+            onSettingsClose?.();
+          }}
         />
         <Dialog
           open={resetDialog}

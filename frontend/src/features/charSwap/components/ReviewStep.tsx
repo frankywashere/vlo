@@ -97,12 +97,12 @@ export function ReviewStep({
       output: { deliveryResolution: "native", restoreOriginalAudio: true },
       submitted: Boolean(
         job &&
-        [
-          "generating",
-          "finalizing",
-          "completed",
-          "submission_unknown",
-        ].includes(job.status),
+          [
+            "generating",
+            "finalizing",
+            "completed",
+            "submission_unknown",
+          ].includes(job.status),
       ),
     };
     const url = URL.createObjectURL(
@@ -151,7 +151,7 @@ export function ReviewStep({
             alignItems="center"
             sx={{ minWidth: 0 }}
           >
-            <KeyOutlined sx={{ color: "#9abbdc" }} />
+            <KeyOutlined sx={{ color: "primary.main" }} />
             <Box>
               <Typography fontWeight={600}>
                 {accessMode === "credits"
@@ -233,7 +233,7 @@ export function ReviewStep({
                 <Box sx={{ minWidth: 0 }}>
                   <PersonBadge person={person} compact stackedOnMobile />
                 </Box>
-                <ArrowForwardRounded sx={{ color: "#758293" }} />
+                <ArrowForwardRounded sx={{ color: "text.secondary" }} />
                 <Stack
                   direction={{ xs: "column", sm: "row" }}
                   alignItems="center"
@@ -276,7 +276,11 @@ export function ReviewStep({
               : live
                 ? job?.tracking_reviewed
                   ? "Scene matches checked and applied"
-                  : (job?.easy_mode && enhancedCharacterMasking) ? "Easy mode: automatic tracking, no scene matching" : enhancedCharacterMasking ? "Tracking checks completed" : "Person selected by position and timestamp"
+                  : job?.easy_mode && enhancedCharacterMasking
+                    ? "Easy mode: automatic tracking, no scene matching"
+                    : enhancedCharacterMasking
+                      ? "Tracking checks completed"
+                      : "Person selected by position and timestamp"
                 : "No uncertain sections"}
             {clip.mode === "demo" ? " (sample)" : ""}
           </Typography>
@@ -298,14 +302,24 @@ export function ReviewStep({
       </Alert>
       {live && job?.status === "ready" && job.guide_url && (
         <Box sx={PANEL}>
-          <Typography fontWeight={600} sx={{ mb: 2 }}>Review your prepared clip</Typography>
+          <Typography fontWeight={600} sx={{ mb: 2 }}>
+            Review your prepared clip
+          </Typography>
           <VideoPreview
             key={guideIdentity}
-            clip={{ ...clip, id: "prepared-guide", name: "Prepared guide", url: job.guide_url,
-              width: job.width ?? clip.width, height: job.height ?? clip.height,
-              duration: job.duration ?? trim[1] - trim[0] }}
+            clip={{
+              ...clip,
+              id: "prepared-guide",
+              name: "Prepared guide",
+              url: job.guide_url,
+              width: job.width ?? clip.width,
+              height: job.height ?? clip.height,
+              duration: job.duration ?? trim[1] - trim[0],
+            }}
             trim={[0, job.duration ?? trim[1] - trim[0]]}
-            onPlayableChange={(playable) => setPlayableGuide(playable ? guideIdentity : null)}
+            onPlayableChange={(playable) =>
+              setPlayableGuide(playable ? guideIdentity : null)
+            }
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {enhancedCharacterMasking

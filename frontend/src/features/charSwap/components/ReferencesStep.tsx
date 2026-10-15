@@ -77,7 +77,7 @@ function ReferenceCard({
             placeItems: "center",
             overflow: "hidden",
             transition: "border-color .15s, background-color .15s",
-            "&:hover": { borderColor: "#75baff", bgcolor: "#1c2938" },
+            "&:hover": { borderColor: "primary.main", bgcolor: "#1c2938" },
             "&.Mui-focusVisible": {
               outline: "2px solid #a3d1ff",
               outlineOffset: 3,
@@ -94,7 +94,7 @@ function ReferenceCard({
             />
           ) : (
             <AddPhotoAlternateOutlined
-              sx={{ color: "#768497", fontSize: 38 }}
+              sx={{ color: "text.secondary", fontSize: 38 }}
             />
           )}
         </ButtonBase>
@@ -155,7 +155,7 @@ function ReferenceCard({
           direction="row"
           spacing={1}
           alignItems="center"
-          sx={{ mt: 2, color: "#8acdb1" }}
+          sx={{ mt: 2, color: "success.main" }}
         >
           <CheckRounded fontSize="small" />
           <Typography variant="body2">Assigned to {person.name}</Typography>

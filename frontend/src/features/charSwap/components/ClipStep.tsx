@@ -42,7 +42,7 @@ export function ClipStep({
   );
   if (!clip)
     return (
-      <Stack spacing={3}>
+      <Stack spacing={3} sx={{ gridColumn: { md: 1 }, gridRow: { md: 1 } }}>
         {uploadInput}
         <Box
           onDragOver={(event) => {
@@ -58,7 +58,8 @@ export function ClipStep({
           }}
           sx={{
             minHeight: 320,
-            border: `1px dashed ${dragging ? "#75baff" : "#4a515d"}`,
+            border: "1px dashed",
+            borderColor: dragging ? "primary.main" : "text.disabled",
             borderRadius: 3,
             display: "flex",
             flexDirection: "column",
@@ -66,7 +67,7 @@ export function ClipStep({
             justifyContent: "center",
             gap: 1.5,
             p: 3,
-            bgcolor: dragging ? "#182b40" : "#1c1f25",
+            bgcolor: dragging ? "action.selected" : "background.paper",
           }}
         >
           <Box
@@ -75,14 +76,14 @@ export function ClipStep({
               display: "grid",
               placeItems: "center",
               borderRadius: 3,
-              bgcolor: "#25364b",
-              color: "#8ac6ff",
+              bgcolor: "action.selected",
+              color: "primary.main",
               mb: 1,
             }}
           >
             <MovieOutlined sx={{ fontSize: 32 }} />
           </Box>
-          <Typography variant="h6">Start with your clip</Typography>
+          <Typography variant="h6">Drop your video here</Typography>
           <Typography color="text.secondary" textAlign="center">
             Drop a video here or choose one from your device.
           </Typography>
