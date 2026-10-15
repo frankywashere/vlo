@@ -25,6 +25,7 @@ class Settings:
     gateway_service_account: str = ""
     task_service_account: str = ""
     task_queue: str = "swapmein-jobs"
+    render_task_queue: str = "recastfx-renders"
     shutdown_service_account: str = "proof-shutdown@charswap-franky-20261013.iam.gserviceaccount.com"
     gpu_url: str = ""
     audio_url: str = ""
@@ -50,6 +51,7 @@ class Settings:
             gateway_service_account=os.getenv("GATEWAY_SERVICE_ACCOUNT", ""),
             task_service_account=os.getenv("TASK_SERVICE_ACCOUNT", ""),
             task_queue=os.getenv("TASK_QUEUE", cls.task_queue),
+            render_task_queue=os.getenv("RENDER_TASK_QUEUE", cls.render_task_queue),
             shutdown_service_account=os.getenv("SHUTDOWN_SERVICE_ACCOUNT", cls.shutdown_service_account),
             gpu_url=os.getenv("GPU_URL", "").rstrip("/"),
             audio_url=os.getenv("AUDIO_URL", "").rstrip("/"),

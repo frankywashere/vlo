@@ -45,10 +45,13 @@ may flag strong lighting changes or abrupt motion.
 
 ## Normal application flow
 
-1. The browser calls `/api/config`, accepts the user's provider and key, and opens
-   a six-hour session with `/api/session`. The gateway validates the key and
-   available allowance through the selected provider.
-2. On “Check all scenes,” the browser checks `/api/preparation-capacity` before
+1. The browser calls `/api/config` and opens a six-hour session with
+   `/api/session`. Ordinary accounts use recastfx credits and the gateway's
+   private provider key when credit generation is enabled. Only accounts granted
+   API-key access can choose a personal provider key. For an Easy-mode job,
+   that key is encrypted for the job so submission and status checks can finish
+   after the browser closes; non-Easy jobs keep the key in the tab.
+2. On non-Easy “Check all scenes,” or final Easy “Submit swap,” the browser checks `/api/preparation-capacity` before
    opening/uploading media. `/api/uploads` rechecks availability and issues two
    signed PUT URLs. Files go directly to the private app bucket.
 3. The browser uploads both files and confirms with `/api/uploads/{id}/complete`.
@@ -70,10 +73,14 @@ may flag strong lighting changes or abrupt motion.
 6. Flagged sections show translucent masks on the original footage. The user
    taps the correct person or marks them absent, then applies the matches. A
    separately claimed CPU task rebuilds the depth guide using those assignments.
-   Sections without flags skip this interaction. The complete guide is reviewed
-   before the user approves one provider submission. The gateway binds that submission to the session's
-   provider and key fingerprint. It never automatically retries the paid POST.
-7. The browser refreshes provider status. On completion, the gateway enqueues
+   Sections without flags skip this interaction. Non-Easy mode reviews the
+   complete guide before approving one provider submission. Easy mode skips
+   guide review. Both credit-funded and authorized API-key Easy jobs enqueue
+   submission after preparation. The gateway never automatically retries a claimed paid POST.
+7. Easy-mode renders use a separate bounded `recastfx-renders` Cloud Tasks
+   queue to check provider status while the browser is closed. Non-Easy personal-key
+   renders can be checked after reopening the job and re-entering that key.
+   On completion, the gateway enqueues
    export. It downloads and checks the result, removes only permitted extra tail
    frames, restores audio directly from the original upload at the selected trim
    start, and publishes the final MP4.
@@ -82,8 +89,9 @@ The UI immediately reports access, capacity, upload, confirmation, queued and
 preparation stages with elapsed time. The live path uses an indeterminate bar;
 its upload implementation does not currently supply measured byte percentages.
 Worker feedback is based on actual job messages, not an invented percentage or
-ETA. A preparation rejected before queuing stays on Access when masking is off, or References with enhanced masking. Reloading clears the browser key
-and session; keep the tab open through generation and export.
+ETA. The tab must remain open until both uploads are confirmed. After that,
+jobs appear under “Current processing jobs” in the signed-in Library. Reloading
+clears the in-tab provider key and session, but does not delete the saved job.
 
 ## API contract
 
@@ -93,10 +101,14 @@ and `Referrer-Policy: no-referrer`. Configured website origins are enforced;
 CLI clients may omit `Origin`. CORS is not authentication. Session ownership uses
 an unpredictable bearer token, stored only as a SHA256 digest on the server.
 
-The compatibility header **`X-Reapi-Key` carries either provider's key**. The raw
-key is needed only on session creation, generation, and provider-status requests.
-It is not part of setup JSON, upload URLs, Cloud Tasks, saved records or deployment
-environment variables.
+The compatibility header **`X-Reapi-Key` carries either provider's personal key**.
+For an authorized API-key Easy job, the browser sends it again only when opening
+the upload ticket. The gateway encrypts it with a Cloud Secret Manager-backed
+key, binds it to that job ID and original key fingerprint, and retains the
+ciphertext in private records for at most two days. It removes the ciphertext
+when provider processing finishes. Raw keys never enter setup JSON, upload URLs,
+Cloud Tasks, or saved job records. Credit-funded jobs instead use the private
+`REAPI_SERVER_KEY` runtime secret, which is not exposed to the browser.
 
 | Endpoint | Authentication and input | Response |
 | --- | --- | --- |
@@ -109,8 +121,9 @@ environment variables.
 | `POST /api/jobs` | Legacy endpoint; session bearer; multipart `clip`, `reference`, `setup` JSON string | HTTP 202 `{id,status:"queued"}` |
 | `GET /api/jobs/{id}` | Session bearer that owns the job | Public status, messages and available review/result URLs |
 | `POST /api/jobs/{id}/tracking-review` | Same session bearer; JSON `{revision,choices}` | HTTP 202; validates all matches and queues one CPU guide rebuild |
-| `POST /api/jobs/{id}/generate` | Session bearer plus `X-Reapi-Key`; JSON `{approved:true}` | Current public job status; submits at most once |
-| `GET /api/jobs/{id}/provider` | Session bearer plus `X-Reapi-Key` | Refreshes provider state and queues one export on completion |
+| `POST /api/jobs/{id}/generate` | Session bearer; personal-key mode also sends `X-Reapi-Key`; JSON `{approved:true}` | Current public job status; submits at most once |
+| `GET /api/jobs/{id}/provider` | Session bearer; personal-key mode also sends `X-Reapi-Key` | Refreshes provider state and queues one export on completion |
+| `POST /internal/generate`, `/internal/poll-provider` | Cloud Tasks service identity; credit-funded jobs only | Unattended, bounded submission and status checks |
 | `POST /internal/prepare` | Exact Google OIDC task identity and audience; JSON `{job_id,task_token?}` | `{ok:true}` |
 | `POST /internal/finish` | Same task identity; JSON `{job_id}` | `{ok:true}` |
 
@@ -328,6 +341,7 @@ pause after 20 minutes; users can manually refresh without resubmitting.
 | App bucket | `charswap-franky-20261013-app`, uniform IAM/public-access prevention; short-lived app media and records |
 | Worker bucket | `charswap-franky-20261013-proof`, existing private model/proof assets |
 | App task queue | `swapmein-jobs`; one concurrent dispatch, one dispatch/minute, one attempt; queue pause is preserved |
+| RecastFX render queue | `recastfx-renders`; at most five concurrent dispatches and one dispatch/second for provider submission and status checks; no GPU work |
 | Backup queue | Existing `proof-shutdown`; must be RUNNING; deployment does not rewrite its rate/retry policy |
 | Gateway identity | `swapmein-gateway@charswap-franky-20261013.iam.gserviceaccount.com` |
 | Worker runtime identity | `proof-worker@charswap-franky-20261013.iam.gserviceaccount.com`; deployment derives/verifies the attached identities |
@@ -392,7 +406,9 @@ python3 deployment/swapmein/deploy.py
 `--service-only` checks the cap and bounds the existing gateway without a build or
 worker change. `--allowed-origin` may be repeated for authorized HTTPS origins.
 Do not add a provider key to CLI arguments or a plaintext environment file.
-The recastfx-funded path is designed to receive a Cloud Secret Manager binding at runtime.
+`deploy_launch.py` provisions the `recastfx-job-key` Secret Manager binding for
+temporary Easy-mode API-key encryption. The recastfx-funded path is designed to
+receive a separate `REAPI_SERVER_KEY` Secret Manager binding at runtime.
 
 Build staging includes only `Dockerfile`, `requirements.txt` and runtime Python
 files, rejecting source symlinks. It excludes local media, `.secrets`, ADC files,

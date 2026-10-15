@@ -505,21 +505,13 @@ export function CharSwapWalkthrough({
         if (!(await pipeline.prepare(state))) return;
       }
     }
-    if (
-      step === "access" &&
-      skipMaskReview &&
-      live &&
-      accessMode === "api-key"
-    ) {
-      if (!hasKey || isSampleKey) {
+    if (step === "access" && skipMaskReview && !(easyMode ?? true) && live) {
+      if (accessMode === "api-key" && (!hasKey || isSampleKey)) {
         setError(`Add your ${provider} key before preparing your clip.`);
         setApiSettingsOpen(true);
         return;
       }
-      if (
-        !pipeline.job ||
-        ["failed", "completed"].includes(pipeline.job.status)
-      ) {
+      if (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) {
         if (!(await pipeline.prepare(state))) return;
       }
     }
@@ -531,6 +523,15 @@ export function CharSwapWalkthrough({
     )
       reviewTracking(sampleReviewIssues(targets, demo, trim));
     next();
+  }
+  async function submitEasySwap() {
+    if (!live || (pipeline.job && pipeline.job.status !== "failed") || pipeline.busy) return;
+    if (accessMode === "api-key" && (!hasKey || isSampleKey)) {
+      setError(`Add your ${provider} key before submitting your swap.`);
+      setApiSettingsOpen(true);
+      return;
+    }
+    await pipeline.prepare(state, true);
   }
   const nextLabel =
     step === "clip"
@@ -900,7 +901,8 @@ export function CharSwapWalkthrough({
                     void pipeline.refresh();
                   }}
                   onGenerate={() => {
-                    void pipeline.generate();
+                    if (easyMode ?? true) void submitEasySwap();
+                    else void pipeline.generate();
                   }}
                   accessMode={accessMode}
                   sampleCreditBalance={sampleCreditBalance}

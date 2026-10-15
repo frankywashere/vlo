@@ -37,7 +37,7 @@ export interface LivePipelineHandle {
   trackingErrorSegmentId: string | null;
   preparationProgress: PreparationProgressState | null;
   preparationElapsedSeconds: number;
-  prepare: (state: WalkthroughState) => Promise<boolean>;
+  prepare: (state: WalkthroughState, autoGenerate?: boolean) => Promise<boolean>;
   generate: () => Promise<void>;
   refresh: () => Promise<void>;
   resolveTracking: (choices: TrackingReviewChoice[]) => Promise<boolean>;
@@ -231,7 +231,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     };
   }, [enabled, jobId, jobStatus, apiKey, accessMode, ensureSession, publishJob, pollRevision]);
 
-  const prepare = useCallback(async (state: WalkthroughState) => {
+  const prepare = useCallback(async (state: WalkthroughState, autoGenerate = false) => {
     if (operation.current) return false;
     try {
       if (!enabled) throw new LivePipelineError("Live preparation is unavailable on this page.");
@@ -256,7 +256,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       const access = await ensureSession(controller.signal);
       const prepared = await createLiveJob(state, access.token, controller.signal, (progress) => {
         if (!controller.signal.aborted && epoch.current === version) setPreparationProgress(progress);
-      });
+      }, autoGenerate, accessMode === "api-key" ? apiKey : "");
       if (controller.signal.aborted || epoch.current !== version) return false;
       pollStartedAt.current = Date.now();
       publishJob(prepared);

@@ -486,7 +486,8 @@ def promote_gateway_revision(image: str, revision_name: str, timeout_seconds: fl
         time.sleep(min(2, remaining()))
 
 
-def deploy_gateway(image: str, workers: dict, origins: list[str], temp: Path) -> str:
+def deploy_gateway(image: str, workers: dict, origins: list[str], temp: Path,
+                   secret_binding: str | None = None) -> str:
     existing = gcloud("run", "services", "describe", SERVICE, f"--region={REGION}", optional=True)
     if existing:
         # A revision-only maximum permits overlap at redeployment. Bound the
@@ -497,11 +498,12 @@ def deploy_gateway(image: str, workers: dict, origins: list[str], temp: Path) ->
     env_file.write_text(json.dumps(deployment_env(workers, origins, previous_url)))
     verify_cap()
     # A new gateway stays IAM-private until its own canonical task audience is configured.
+    deploy_args = ["--set-secrets=" + secret_binding] if secret_binding else []
     gcloud("run", "deploy", SERVICE, "--image=" + image, f"--region={REGION}",
            "--service-account=" + GATEWAY, "--max-instances=1", "--min-instances=0",
            "--concurrency=4", "--cpu=2", "--memory=2Gi", "--timeout=1800",
            "--cpu-throttling", "--execution-environment=gen2", "--port=8080",
-           "--env-vars-file=" + str(env_file),
+           "--env-vars-file=" + str(env_file), *deploy_args,
            "--allow-unauthenticated" if existing else "--no-allow-unauthenticated")
     deployed = gcloud("run", "services", "describe", SERVICE, f"--region={REGION}")
     url = deployed["status"]["url"]

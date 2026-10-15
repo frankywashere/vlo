@@ -74,8 +74,9 @@ export function PreparationProgress({
           )}
         </Stack>
         <Typography variant="body2" color="text.secondary">
-          Keep this tab open. Generation starts only after you approve the
-          result.
+          {progress.phase === "queued" || progress.phase === "preparing"
+            ? "You can leave now. Find this job under Current processing jobs in your Library."
+            : "Keep this tab open until the upload is confirmed. Your saved job will then appear in your Library."}
         </Typography>
       </Stack>
     </Box>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AccountLibrary } from "../AccountLibrary";
 import {
@@ -36,6 +36,22 @@ const job = {
 };
 
 describe("private account library", () => {
+  it("separates resumable preparation and renders from finished videos", async () => {
+    vi.mocked(loadAccountJobs).mockResolvedValue([
+      {...job, id: "b".repeat(32), status: "preparing", title: "Preparing clip"},
+      {...job, id: "c".repeat(32), status: "tracking_review", title: "Needs scene matches"},
+      {...job, id: "d".repeat(32), status: "generating", title: "Rendering clip"},
+      {...job, id: "e".repeat(32), status: "completed", title: "Finished clip", output_url: "https://storage.googleapis.com/done.mp4"},
+    ]);
+    render(<AccountLibrary onCreate={() => {}} />);
+    const current = await screen.findByRole("region", {name: "Current processing jobs"});
+    expect(within(current).getByText("Preparing clip")).toBeInTheDocument();
+    expect(within(current).getByRole("button", {name: "Check scene matches"})).toBeInTheDocument();
+    expect(within(current).getByRole("button", {name: "View render status"})).toBeInTheDocument();
+    expect(within(current).queryByText("Finished clip")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", {name: "Finished videos"})).getByText("Finished clip")).toBeInTheDocument();
+  });
+
   it("requires explicit paid approval and re-entered key before generation; closing clears it", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([job]);
     vi.mocked(resumeAccountJob).mockResolvedValue({
@@ -48,7 +64,7 @@ describe("private account library", () => {
     });
     const user = userEvent.setup();
     render(<AccountLibrary onCreate={() => {}} />);
-    await user.click(await screen.findByRole("button", { name: "Open job" }));
+    await user.click(await screen.findByRole("button", { name: "Review prepared clip" }));
     expect(screen.getByLabelText("Prepared guide")).toHaveAttribute(
       "src",
       job.guide_url,
@@ -78,7 +94,7 @@ describe("private account library", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
-    await user.click(screen.getByRole("button", { name: "Open job" }));
+    await user.click(screen.getByRole("button", { name: "Review prepared clip" }));
     expect(screen.getByLabelText("reAPI API key")).toHaveValue("");
   });
   it("shows a downloadable saved video and supports undoable library removal", async () => {

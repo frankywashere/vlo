@@ -188,6 +188,11 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         );
     }
   }
+  const sections = [
+    { title: "Current processing jobs", jobs: jobs.filter((item) => !["completed", "failed", "expired"].includes(item.status)) },
+    { title: "Finished videos", jobs: jobs.filter((item) => item.status === "completed") },
+    { title: "Needs attention", jobs: jobs.filter((item) => ["failed", "expired"].includes(item.status)) },
+  ];
   return (
     <Box
       component="main"
@@ -219,11 +224,10 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         Your latest 50 swaps, saved to your Google account. Finished videos are
         kept for 30 days. Download the ones you want to keep.
       </Typography>
-      {apiKeyAllowed && <Alert severity="info" sx={{ mb: 3 }}>
-        Preparation and export continue if you leave. To check a provider render
-        after reopening, enter the same provider key using “Open job.” Keys are
-        never saved to your account.
-      </Alert>}
+      <Alert severity="info" sx={{ mb: 3 }}>
+        Once the upload is confirmed, you can close this tab and return to your jobs here.
+        {apiKeyAllowed && " Easy-mode provider keys are encrypted only for that job and removed after provider completion. You may need to re-enter a key if a job needs manual attention."}
+      </Alert>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -263,18 +267,16 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           </Button>
         </Box>
       )}
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: {
-            xs: "1fr",
-            sm: "repeat(2, minmax(0,1fr))",
-            lg: "repeat(3, minmax(0,1fr))",
-          },
-          gap: 3,
-        }}
-      >
-        {jobs.map((job) => (
+      {sections.map((section) => (section.jobs.length > 0 || section.title === "Current processing jobs") && (
+        <Box key={section.title} component="section" aria-label={section.title} sx={{ mb: 5 }}>
+          <Typography component="h2" variant="h5" sx={{ mb: 2 }}>{section.title}</Typography>
+          {!section.jobs.length && <Typography color="text.secondary">No jobs processing right now.</Typography>}
+          <Box sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0,1fr))", lg: "repeat(3, minmax(0,1fr))" },
+            gap: 3,
+          }}>
+        {section.jobs.map((job) => (
           <Box
             key={job.id}
             sx={{
@@ -339,7 +341,9 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                         setError(null);
                       }}
                     >
-                      Open job
+                      {job.status === "tracking_review" ? "Check scene matches"
+                        : job.status === "ready" ? (job.easy_mode ? "Continue generation" : "Review prepared clip")
+                          : job.status === "generating" ? "View render status" : "Open job"}
                     </Button>
                   )
                 )}
@@ -352,13 +356,15 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
             </Box>
           </Box>
         ))}
-      </Box>
+          </Box>
+        </Box>
+      ))}
       <Dialog open={!!selected} onClose={close} maxWidth="md" fullWidth>
         <DialogTitle>{selected?.title}</DialogTitle>
         <DialogContent>
           <Stack spacing={2}>
             <Typography>{selected?.message}</Typography>
-            {selected?.guide_url && (
+            {selected?.guide_url && !selected.easy_mode && (
               <Box
                 component="video"
                 controls
@@ -378,8 +384,10 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
             )}
             {selected?.status === "ready" && (
               <Alert severity="info">
-                Review the guide and reference. Approving below starts a paid
-                generation using your {selected.access_mode === "credits" ? "recastfx credits" : apiKeyAllowed ? `${selected.provider} balance` : "account balance"}
+                {selected.easy_mode
+                  ? "Easy mode has prepared your clip. Continuing starts a paid generation"
+                  : "Review the guide and reference. Approving below starts a paid generation"}
+                {" "}using your {selected.access_mode === "credits" ? "recastfx credits" : apiKeyAllowed ? `${selected.provider} balance` : "account balance"}
                 {selected.estimated_cost_usd !== undefined
                   ? ` (estimated US$${selected.estimated_cost_usd.toFixed(2)})`
                   : ""}
@@ -479,7 +487,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
               disabled={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
               onClick={() => void act(true)}
             >
-              Approve and generate
+              {selected.easy_mode ? "Continue generation" : "Approve and generate"}
             </Button>
           )}
         </DialogActions>

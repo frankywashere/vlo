@@ -50,6 +50,7 @@ export interface LivePipelineJob {
   tracking_continuous?: boolean;
   tracking_performed?: boolean;
   easy_mode?: boolean;
+  auto_generate?: boolean;
   scene_cut_count?: number;
   mask_style?: "depth" | "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
@@ -248,6 +249,7 @@ function readJob(value: unknown): LivePipelineJob {
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
   if (typeof value.easy_mode === "boolean") job.easy_mode = value.easy_mode;
+  if (typeof value.auto_generate === "boolean") job.auto_generate = value.auto_generate;
   if (typeof value.tracking_performed === "boolean")
     job.tracking_performed = value.tracking_performed;
   if (typeof value.tracking_continuous === "boolean")
@@ -546,6 +548,8 @@ export async function createLiveJob(
   token: string,
   signal: AbortSignal,
   onProgress?: (progress: PreparationProgressState) => void,
+  autoGenerate = false,
+  autoKey = "",
 ): Promise<LivePipelineJob> {
   assertSecureOrigin();
   const { clip, reference, target } = validateLiveSetup(state);
@@ -565,7 +569,7 @@ export async function createLiveJob(
     "/api/uploads",
     {
       method: "POST",
-      headers: { ...sessionHeaders(token), "Content-Type": "application/json" },
+      headers: { ...sessionHeaders(token, autoGenerate ? autoKey : undefined), "Content-Type": "application/json" },
       body: JSON.stringify({
         title: clip.name.slice(0, 120),
         source_bytes: sourceFile.size,
@@ -576,6 +580,7 @@ export async function createLiveJob(
           target_name: target.name,
           enhanced_character_masking: state.enhancedCharacterMasking ?? true,
           easy_mode: state.easyMode ?? true,
+          auto_generate: autoGenerate,
         },
       }),
     },

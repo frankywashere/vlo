@@ -26,6 +26,7 @@ class Setup(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     enhanced_character_masking: bool = Field(default=True, strict=True)
     easy_mode: bool = Field(default=True, strict=True)
+    auto_generate: bool = Field(default=False, strict=True)
     trim: tuple[float, float]
     anchor: Anchor
     target_name: str = Field(default="Selected person", min_length=1, max_length=40)

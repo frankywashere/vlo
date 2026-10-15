@@ -9,10 +9,12 @@ import time
 from fastapi.testclient import TestClient
 from PIL import Image
 import pytest
+from cryptography.fernet import Fernet
 
 import swapmein.app as gateway
 from swapmein.errors import PublicError
 from swapmein.security import digest
+from swapmein.job_key import protect_key, recover_key
 
 
 class MemoryRecords:
@@ -61,7 +63,7 @@ class FakeCloud:
         Image.new("RGB", (256, 256), "blue").save(image, "PNG")
         path.write_bytes(image.getvalue())
 
-    def enqueue(self, kind, job_id, *, task_token=None):
+    def enqueue(self, kind, job_id, *, task_token=None, delay_seconds=0):
         self.enqueued.append((kind, job_id))
 
 
@@ -111,6 +113,94 @@ def ready_job(records, owner):
         "setup": {"trim": [0, 5], "anchor": {"x": .5, "y": .5, "time": 1}},
         "reference_uri": "gs://private-app/reference.jpg", "review_required": True})
     return job_id
+
+
+def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch):
+    client, records, cloud, provider = api
+    job_id = "b" * 32
+    account_id = "c" * 64
+    monkeypatch.setenv("REAPI_SERVER_KEY", "private-server-key-for-tests")
+    monkeypatch.setattr(gateway, "internal_pipeline", lambda task, authorization: None)
+    records.data["commerce/features.json"] = {"credit_generation": True}
+    records.data[f"accounts/{account_id}/wallet.json"] = {"balance": 200, "applied": {}, "transactions": []}
+    records.data[f"jobs/{job_id}.json"] = {
+        "id": job_id, "owner": "owner", "account_id": account_id,
+        "access_mode": "credits", "status": "ready", "duration": 5,
+        "guide_uri": "gs://private-app/guide.mp4", "reference_uri": "gs://private-app/ref.jpg",
+        "setup": {"trim": [0, 5], "anchor": {"x": .5, "y": .5, "time": 1},
+                  "easy_mode": True, "auto_generate": True},
+    }
+    submitted = client.post("/internal/generate", json={"job_id": job_id})
+    assert submitted.status_code == 200
+    assert len(provider.submissions) == 1
+    assert records.data[f"accounts/{account_id}/wallet.json"]["balance"] == 100
+    assert ("poll-provider", job_id) in cloud.enqueued
+    assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
+    assert len(provider.submissions) == 1
+
+    provider.status = lambda *_: {"status": "processing"}
+    first_token = records.data[f"jobs/{job_id}.json"]["provider_poll_token"]
+    assert client.post("/internal/poll-provider", json={"job_id": job_id, "task_token": first_token}).status_code == 200
+    second_token = records.data[f"jobs/{job_id}.json"]["provider_poll_token"]
+    assert second_token != first_token
+    assert client.post("/internal/poll-provider", json={"job_id": job_id, "task_token": first_token}).status_code == 200
+    assert records.data[f"jobs/{job_id}.json"]["provider_poll_token"] == second_token
+
+    provider.status = lambda *_: {"status": "completed", "output": {"video_urls": ["https://cdn.reapi.ai/result.mp4"]}}
+    assert client.post("/internal/poll-provider", json={"job_id": job_id, "task_token": second_token}).status_code == 200
+    assert records.data[f"jobs/{job_id}.json"]["status"] == "finalizing"
+    assert ("finish", job_id) in cloud.enqueued
+
+
+def test_authorized_easy_key_is_encrypted_and_background_render_finishes(api, monkeypatch):
+    client, records, cloud, provider = api
+    key = "admin-test-provider-key"
+    job_id = "d" * 32
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    headers, owner = authenticated(api, key)
+    setup = {"trim": [0, 5], "anchor": {"x": .5, "y": .5, "time": 1},
+             "easy_mode": True, "auto_generate": True}
+    ticket = client.post("/api/uploads", headers=headers, json={
+        "source_bytes": 1024, "reference_bytes": 1024, "setup": setup, "title": "Private test"})
+    assert ticket.status_code == 201
+    manifest = records.data[f"uploads/{ticket.json()['id']}/manifest.json"]
+    assert key not in json.dumps(records.data)
+    assert recover_key({"id": ticket.json()["id"], "key_fingerprint": digest(key),
+                        "auto_key_ciphertext": manifest["auto_key_ciphertext"]}) == key
+
+    monkeypatch.setattr(gateway, "internal_pipeline", lambda task, authorization: None)
+    records.data[f"jobs/{job_id}.json"] = {
+        "id": job_id, "owner": owner, "key_fingerprint": digest(key),
+        "access_mode": "api-key", "provider": "reAPI", "status": "ready", "duration": 5,
+        "guide_uri": "gs://private-app/guide.mp4", "reference_uri": "gs://private-app/ref.jpg",
+        "setup": setup, "auto_key_ciphertext": protect_key(job_id, key),
+    }
+    assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
+    assert len(provider.submissions) == 1
+    assert ("poll-provider", job_id) in cloud.enqueued
+    assert key not in json.dumps(records.data)
+    token = records.data[f"jobs/{job_id}.json"]["provider_poll_token"]
+    assert client.post("/internal/poll-provider", json={"job_id": job_id, "task_token": token}).status_code == 200
+    assert records.data[f"jobs/{job_id}.json"]["status"] == "finalizing"
+    assert records.data[f"jobs/{job_id}.json"]["auto_key_ciphertext"] is None
+    assert ("finish", job_id) in cloud.enqueued
+
+
+def test_background_status_error_keeps_a_bounded_followup(api, monkeypatch):
+    client, records, cloud, provider = api
+    job_id = "e" * 32
+    key = "admin-test-provider-key"
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    monkeypatch.setattr(gateway, "internal_pipeline", lambda task, authorization: None)
+    records.data[f"jobs/{job_id}.json"] = {
+        "id": job_id, "key_fingerprint": digest(key), "access_mode": "api-key",
+        "provider": "reAPI", "status": "generating", "provider_task": "task_example",
+        "provider_poll_token": "a" * 32, "auto_key_ciphertext": protect_key(job_id, key),
+    }
+    provider.status = lambda *_: (_ for _ in ()).throw(RuntimeError("temporary provider failure"))
+    assert client.post("/internal/poll-provider", json={"job_id": job_id, "task_token": "a" * 32}).status_code == 200
+    assert records.data[f"jobs/{job_id}.json"]["provider_poll_token"] != "a" * 32
+    assert ("poll-provider", job_id) in cloud.enqueued
 
 
 def test_provider_key_is_never_saved_and_other_sessions_cannot_read_the_job(api):
@@ -202,6 +292,8 @@ def test_origin_upload_and_task_authentication_boundaries(api):
     assert client.post("/api/session", headers={"Origin": "https://evil.test", "X-Reapi-Key": "valid-example-key"}).status_code == 403
     assert client.post("/api/jobs", headers={"Content-Length": str(32 * 1024 * 1024)}).status_code == 413
     assert client.post("/internal/prepare", json={"job_id": "a" * 32}).status_code == 401
+    assert client.post("/internal/generate", json={"job_id": "a" * 32}).status_code == 401
+    assert client.post("/internal/poll-provider", json={"job_id": "a" * 32}).status_code == 401
     response = client.post("/api/session", content=b"x" * 9000, headers={"X-Reapi-Key": "valid-example-key"})
     # Session has no body parameters and does not consume input, so test a parsing route.
     response = client.post("/internal/prepare", content=b"x" * 9000, headers={"Content-Type": "application/json"})

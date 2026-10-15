@@ -181,7 +181,7 @@ describe("live BYOK pipeline", () => {
     expect(ticket.source_bytes).toBe(6);
     expect(ticket.reference_bytes).toBe(9);
     expect(ticket.setup).toEqual({
-      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true, easy_mode: true,
+      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true, easy_mode: true, auto_generate: false,
     });
     expect(String(upload?.body)).not.toContain(USER_KEY);
     expect(String(upload?.body)).not.toContain(SESSION_TOKEN);
@@ -197,6 +197,16 @@ describe("live BYOK pipeline", () => {
     expect(JSON.stringify(result.current)).not.toContain(USER_KEY);
     expect(JSON.stringify(result.current)).not.toContain(SESSION_TOKEN);
     expect(localWrites).not.toHaveBeenCalled();
+  });
+
+  it("sends an authorized Easy-mode key only with the upload ticket for background submission", async () => {
+    const {result} = await renderLive();
+    await act(async () => { await result.current.prepare(setup(), true); });
+    const upload = calls("/api/uploads")[0][1];
+    expect(upload?.headers).toMatchObject({"X-Reapi-Key": USER_KEY, Authorization: `Bearer ${SESSION_TOKEN}`});
+    expect(JSON.parse(String(upload?.body)).setup.auto_generate).toBe(true);
+    expect(String(upload?.body)).not.toContain(USER_KEY);
+    expect(calls("/api/uploads/job-1/complete")[0][1]?.headers).not.toHaveProperty("X-Reapi-Key");
   });
 
   it.each([

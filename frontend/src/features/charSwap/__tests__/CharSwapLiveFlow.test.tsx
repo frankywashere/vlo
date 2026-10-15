@@ -198,7 +198,7 @@ describe("live generation approval", () => {
 });
 
 
-it.each([{masking: false, easy: false}, {masking: true, easy: true}])("routes references to Access with masking=$masking and easy=$easy, then prepares and reviews before generation", async ({masking, easy}) => {
+it.each([{masking: false, easy: false}, {masking: true, easy: true}])("routes references to Access with masking=$masking and easy=$easy", async ({masking, easy}) => {
   const user = userEvent.setup();
   const store = useCharSwapStore.getState();
   store.setEnhancedCharacterMasking(masking);
@@ -222,18 +222,31 @@ it.each([{masking: false, easy: false}, {masking: true, easy: true}])("routes re
   await user.click(screen.getByRole("button", {name: "Save key"}));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   await user.click(screen.getByRole("button", {name: "Review setup"}));
-  expect(live.prepare).toHaveBeenCalledOnce();
-  expect(live.prepare.mock.calls[0][0]).toMatchObject({easyMode: easy, enhancedCharacterMasking: masking});
   expect(useCharSwapStore.getState().step).toBe("review");
-  expect(screen.getByRole("heading", {name: "Preparing your clip"})).toBeInTheDocument();
-  expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
+  if (easy) {
+    expect(live.prepare).not.toHaveBeenCalled();
+    expect(screen.queryByText("Review your prepared clip")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", {name: "Submit swap"}));
+    expect(live.prepare).toHaveBeenCalledOnce();
+    expect(live.prepare.mock.calls[0][1]).toBe(true); // Easy mode continues after the tab closes
+  } else {
+    expect(live.prepare).toHaveBeenCalledOnce();
+    expect(screen.getByRole("heading", {name: "Preparing your clip"})).toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
+  }
+  expect(live.prepare.mock.calls[0][0]).toMatchObject({easyMode: easy, enhancedCharacterMasking: masking});
   expect(live.generate).not.toHaveBeenCalled();
   live.job.status = "ready";
   live.preparationProgress = null;
   rerender(<CharSwapWalkthrough />);
-  expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", live.job.guide_url);
-  expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
-  fireEvent.loadedData(screen.getByLabelText("Clip preview"));
-  await user.click(screen.getByRole("button", {name: "Generate replacements"}));
-  expect(live.generate).toHaveBeenCalledOnce();
+  if (easy) {
+    expect(screen.queryByText("Review your prepared clip")).not.toBeInTheDocument();
+    expect(live.generate).not.toHaveBeenCalled(); // the authenticated server task submits it
+  } else {
+    expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", live.job.guide_url);
+    expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
+    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
+    await user.click(screen.getByRole("button", {name: "Generate replacements"}));
+    expect(live.generate).toHaveBeenCalledOnce();
+  }
 });

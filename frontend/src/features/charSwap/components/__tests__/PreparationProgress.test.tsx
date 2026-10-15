@@ -26,9 +26,7 @@ describe("scene check progress", () => {
     expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
     expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Keep this tab open. Generation starts only after you approve the result.",
-      ),
+      screen.getByText("Keep this tab open until the upload is confirmed. Your saved job will then appear in your Library."),
     ).toBeInTheDocument();
   });
 
@@ -66,5 +64,6 @@ describe("scene check progress", () => {
     );
     expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
     expect(screen.queryByText("100%")).not.toBeInTheDocument();
+    expect(screen.getByText("You can leave now. Find this job under Current processing jobs in your Library.")).toBeInTheDocument();
   });
 });

@@ -59,6 +59,7 @@ class Cloud:
 
     def enqueue(self, kind: str, job_id: str, *, task_token: str | None = None, delay_seconds: int = 0):
         settings = self.settings
+        queue = settings.render_task_queue if kind in {"generate", "poll-provider"} else settings.task_queue
         if task_token is not None and (not isinstance(task_token, str)
                 or not re.fullmatch(r"[a-f0-9]{32}", task_token)):
             raise PublicError("Invalid task token.", 400)
@@ -67,7 +68,7 @@ class Cloud:
         if task_token is not None:
             body["task_token"] = task_token
         task = tasks_v2.Task(
-            name=self.tasks.task_path(settings.project, settings.region, settings.task_queue, name),
+            name=self.tasks.task_path(settings.project, settings.region, queue, name),
             http_request=tasks_v2.HttpRequest(
                 http_method=tasks_v2.HttpMethod.POST,
                 url=settings.service_url + "/internal/" + kind,
@@ -84,7 +85,7 @@ class Cloud:
             scheduled = timestamp_pb2.Timestamp()
             scheduled.FromDatetime(datetime.now(timezone.utc) + timedelta(seconds=min(120, max(0, delay_seconds))))
             task.schedule_time = scheduled
-        self.tasks.create_task(parent=self.tasks.queue_path(settings.project, settings.region, settings.task_queue),
+        self.tasks.create_task(parent=self.tasks.queue_path(settings.project, settings.region, queue),
                                task=task, retry=None, timeout=20)
 
     def blob(self, bucket: str, key: str):

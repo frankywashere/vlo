@@ -44,7 +44,8 @@ export function GenerationProgress({ job, provider }: {
                 : "Checking automatically; no reliable percentage or finish time is available."}`}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Keep this tab open. You do not need to submit again.
+          You can leave now. This render remains in Current processing jobs in your Library.
+          {job.access_mode !== "credits" && !job.auto_generate && " You may need to re-enter your provider key there to check the finished result."}
         </Typography>
       </Stack>
     </Box>

@@ -71,7 +71,7 @@ class Pipeline:
                 self.cloud.download(job["source_uri"], source, MAX_SOURCE_BYTES)
                 # Jobs created before the Easy mode option retain their scene-review policy.
                 options = Setup.model_validate({"enhanced_character_masking": True, "easy_mode": False, **job["setup"]})
-                self.update_job(job_id, easy_mode=options.easy_mode)
+                self.update_job(job_id, easy_mode=options.easy_mode, auto_generate=options.auto_generate)
                 emit("preparation_mode", job_id=job_id, easy_mode=options.easy_mode,
                      enhanced_character_masking=options.enhanced_character_masking)
                 metadata = normalize(source, normalized, options)
@@ -150,20 +150,30 @@ class Pipeline:
                     message = "Review every scene. Only your selected person should be covered by colored depth imagery. Identity across cuts or gaps is not verified."
                 else:
                     message = "Review your prepared clip. SAM tracking was skipped; MiniMax will identify the selected person using your tap position and timestamp."
+                if options.easy_mode:
+                    message = "Preparation is complete. Continue generation here or reopen this job in your Library."
+                if options.auto_generate:
+                    message = "Preparation is complete. Your generation is queued."
                 self.update_job(job_id, status="ready", message=message,
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
                     normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"].get("time", metadata["anchor"]["frame"] / 24)},
                     mask_style="depth" if options.enhanced_character_masking else "none", tracking_performed=options.enhanced_character_masking, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous,
                     **tracking_fields)
+                if options.auto_generate:
+                    try:
+                        self.cloud.enqueue("generate", job_id)
+                    except Exception as error:
+                        emit("automatic_generation_queue_failed", error=error, job_id=job_id)
+                        self.update_job(job_id, message="Preparation is ready, but automatic submission could not be confirmed. Open this job in your Library to continue; do not create another swap.")
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
-                message=error.message)
+                auto_key_ciphertext=None, message=error.message)
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
-                message="Preparation failed. No provider generation was submitted.")
+                auto_key_ciphertext=None, message="Preparation failed. No provider generation was submitted.")
         finally:
             emit("preparation_cleanup", job_id=job_id, shutdown_verified=self.cloud.shutdown_verified)
             if self.cloud.shutdown_verified:

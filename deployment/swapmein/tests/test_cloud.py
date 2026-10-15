@@ -61,6 +61,20 @@ def test_task_enqueue_preserves_legacy_name_and_request_without_a_token():
     assert task.dispatch_deadline.seconds == 1800
 
 
+def test_render_tasks_use_separate_bounded_queue():
+    cloud = enqueue_cloud()
+    job_id = "a" * 32
+    cloud.enqueue("generate", job_id)
+    cloud.enqueue("poll-provider", job_id, task_token="b" * 32, delay_seconds=30)
+    assert len(cloud.tasks.created) == 2
+    for name, task in cloud.tasks.created.items():
+        assert "/queues/recastfx-renders/tasks/" in name
+        assert task.http_request.url in {
+            "https://gateway.run.app/internal/generate",
+            "https://gateway.run.app/internal/poll-provider",
+        }
+
+
 def test_rebuild_task_tokens_avoid_retained_initial_and_failed_task_names():
     cloud = enqueue_cloud()
     job_id, first_token, retry_token = "a" * 32, "b" * 32, "c" * 32

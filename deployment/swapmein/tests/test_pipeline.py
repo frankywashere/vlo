@@ -112,6 +112,9 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         shutdown_verified = True
         def __init__(self):
             self.calls = []
+            self.enqueued = []
+        def enqueue(self, kind, queued_id):
+            self.enqueued.append((kind, queued_id))
         def download(self, uri, destination, *_):
             destination.write_bytes(b"input")
         def upload(self, bucket, key, *_):
@@ -129,7 +132,11 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
     records, cloud = Records(enabled), Cloud()
     if easy is not None:
         records.data[path]["setup"]["easy_mode"] = easy
+    auto_generate = easy is True and enabled and not scene_cuts and all(coverage)
+    if auto_generate:
+        records.data[path]["setup"]["auto_generate"] = True
     Pipeline(Settings(), records, cloud).prepare(job_id)
+    assert cloud.enqueued == ([("generate", job_id)] if auto_generate else [])
     assert records.data[path]["status"] == ("tracking_review" if enabled and needs_review else "ready")
     assert records.data[path]["easy_mode"] is (easy is True)
     assert records.data[path]["selected_label"] == (2 if enabled else None)
@@ -143,7 +150,8 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert records.data[path]["mask_style"] == "depth"
         if easy is True:
             assert "tracking_plan" not in records.data[path]
-            assert "Identity across cuts or gaps is not verified" in records.data[path]["message"]
+            if not auto_generate:
+                assert "Continue generation" in records.data[path]["message"]
         else:
             assert records.data[path]["tracking_plan"] == plan
         if needs_review:
@@ -160,7 +168,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert records.data[path]["tracking_uri"] is None
         assert records.data[path]["mask_frames"] == 0
         assert composed_original == [True]
-        assert "SAM tracking was skipped" in records.data[path]["message"]
+        assert ("Continue generation" if easy is True else "SAM tracking was skipped") in records.data[path]["message"]
 
 
 def test_reviewed_matches_rebuild_only_cpu_guide_and_ignore_stale_tasks(monkeypatch):

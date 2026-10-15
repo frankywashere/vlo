@@ -272,12 +272,15 @@ export function ReviewStep({
       <Alert severity="info" role="note">
         {live
           ? accessMode === "credits"
-            ? job?.message || "Credit checkout is being configured. Generation will be available when pricing is ready."
-            : job?.message ||
-              `Review the prepared guide before generating. This uses your own ${provider} credits.`
+            ? job?.message || ((easyMode ?? true)
+              ? "Submit once to prepare your clip and queue generation with recastfx credits. You can follow the job in your Library."
+              : "Credit checkout is being configured. Generation will be available when pricing is ready.")
+            : job?.message || ((easyMode ?? true)
+              ? `Submit once to prepare your clip and start generation with your ${provider} key. If you leave before preparation finishes, reopen the job from your Library and enter the key to continue.`
+              : `Review the prepared guide before generating. This uses your own ${provider} credits.`)
           : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
       </Alert>
-      {live && job?.status === "ready" && job.guide_url && (
+      {live && !(easyMode ?? true) && job?.status === "ready" && job.guide_url && (
         <Box sx={PANEL}>
           <Typography fontWeight={600} sx={{ mb: 2 }}>
             Review your prepared clip
@@ -352,12 +355,13 @@ export function ReviewStep({
             !live ||
             (accessMode === "api-key" && (!hasPreviewKey || isSampleKey)) ||
             generating ||
-            job?.status !== "ready" ||
-            !guidePlayable
+            ((easyMode ?? true)
+              ? !!job && job.status !== "failed"
+              : job?.status !== "ready" || !guidePlayable)
           }
           sx={{ flex: 1 }}
         >
-          {generating ? "Processing…" : "Generate replacements"}
+          {generating ? "Processing…" : (easyMode ?? true) ? "Submit swap" : "Generate replacements"}
         </Button>
         <Button
           variant="outlined"

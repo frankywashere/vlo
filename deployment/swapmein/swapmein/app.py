@@ -35,6 +35,7 @@ from .accounts import verify_account, bind_job, archive_completed, index_path
 from .commerce import (CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
                        save_catalog, staff_role, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
+from .job_key import protect_key, recover_key
 
 settings = Settings.from_env()
 app = FastAPI(title="recastfx single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
@@ -145,6 +146,23 @@ def job_estimate(job):
     return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
 
 
+def check_automatic_generation(records, setup: Setup, active_session: dict):
+    if not setup.auto_generate:
+        return
+    if not setup.easy_mode:
+        raise PublicError("Automatic generation requires Easy mode.", 409)
+    if active_session.get("access_mode") == "api-key":
+        return
+    if active_session.get("access_mode") != "credits":
+        raise PublicError("Choose recastfx credits or an authorized API key.", 409)
+    if not feature_view(records)["credit_generation"]:
+        raise PublicError("Credit-funded generation is not available yet.", 503)
+    catalog = public_catalog(records)
+    expected_charge = catalog["credits_per_second"] * round(setup.trim[1] - setup.trim[0])
+    if expected_charge <= 0 or wallet_view(records, active_session["account_id"])["balance"] < expected_charge:
+        raise PublicError("Add enough recastfx credits before submitting this swap.", 402)
+
+
 def authenticate(authorization: str | None):
     records, _, _ = services()
     session_id = digest(bearer_token(authorization))
@@ -193,7 +211,7 @@ def view(job: dict):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode"]:
+    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
@@ -418,7 +436,8 @@ async def save_upload(upload: UploadFile, path: Path, maximum: int):
 
 @app.post("/api/jobs", status_code=202)
 async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), setup: str = Form(),
-                     authorization: str | None = Header(default=None)):
+                     authorization: str | None = Header(default=None),
+                     x_reapi_key: str | None = Header(default=None)):
     owner, active_session = await run_in_threadpool(authenticate, authorization)
     records, cloud, _ = services()
     if len(setup) > 4096:
@@ -427,7 +446,10 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         options = Setup.model_validate_json(setup)
     except ValidationError:
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
+    check_automatic_generation(records, options, active_session)
     job_id = uuid.uuid4().hex
+    auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
+                if options.auto_generate and active_session.get("access_mode") == "api-key" else None)
     await run_in_threadpool(records.update, "control/preparation.json", lambda current: reserve_preparation(
         current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
     record_created = False
@@ -445,6 +467,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
                "source_uri": source_uri, "reference_uri": reference_uri,
                "access_mode": active_session.get("access_mode", "api-key")}
+        if auto_key:
+            job["auto_key_ciphertext"] = auto_key
         job = await run_in_threadpool(bind_job, records, job, active_session)
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
         record_created = True
@@ -492,11 +516,15 @@ def preparation_capacity(authorization: str | None = Header(default=None)):
 
 
 @app.post("/api/uploads", status_code=201)
-def start_upload(options: UploadRequest, authorization: str | None = Header(default=None)):
+def start_upload(options: UploadRequest, authorization: str | None = Header(default=None),
+                 x_reapi_key: str | None = Header(default=None)):
     owner, active_session = authenticate(authorization)
     records, cloud, _ = services()
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
+    check_automatic_generation(records, options.setup, active_session)
+    auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
+                if options.setup.auto_generate and active_session.get("access_mode") == "api-key" else None)
     # Bound abandoned upload storage separately; no preparation slot or worker is
     # activated until the complete endpoint verifies both immutable objects.
     records.update("control/uploads.json", lambda current: release_preparation(reserve_preparation(
@@ -507,7 +535,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     reference_uri = f"gs://{settings.app_bucket}/{prefix}reference.bin"
     source = cloud.signed_upload(source_uri, options.source_bytes)
     reference = cloud.signed_upload(reference_uri, options.reference_bytes)
-    records.create(prefix + "manifest.json", {
+    manifest = {
         "id": job_id, "owner": owner, "status": "uploading", "created_at": time.time(),
         "expires_at": time.time() + UPLOAD_SECONDS, "source_uri": source_uri,
         "raw_reference_uri": reference_uri, "source_bytes": options.source_bytes,
@@ -515,7 +543,10 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
         "title": options.title,
-    })
+    }
+    if auto_key:
+        manifest["auto_key_ciphertext"] = auto_key
+    records.create(prefix + "manifest.json", manifest)
     return {"id": job_id, "source": source, "reference": reference}
 
 
@@ -534,6 +565,10 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         return {"id": job_id, "status": job["status"]}
     if manifest["expires_at"] <= time.time():
         raise PublicError("This upload expired. Prepare the clip again.", 409)
+    check_automatic_generation(records, Setup.model_validate(manifest["setup"]), active_session)
+    if (manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
+            and not manifest.get("auto_key_ciphertext")):
+        raise PublicError("Re-enter your API key before submitting this job.", 409)
     # A lost confirmation never creates a second job or duplicate task.
     manifest = records.update(manifest_path, lambda current: claim_job(current, {"uploading"}, "confirming"))
     reserved = False
@@ -557,6 +592,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uri,
                "access_mode": manifest.get("access_mode", "api-key")}
+        if manifest.get("auto_key_ciphertext"):
+            job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         job = bind_job(records, job, active_session, manifest.get("title", "Your clip"))
         records.create(f"jobs/{job_id}.json", job)
         record_created = True
@@ -567,7 +604,9 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
             cloud.enqueue("admit", job_id, task_token=admission_token)
         else:
             cloud.enqueue("prepare", job_id)
-        records.update(manifest_path, lambda current: {**current, "status": "queued"})
+        records.update(manifest_path, lambda current: {
+            **{key: value for key, value in current.items() if key != "auto_key_ciphertext"},
+            "status": "queued"})
         return {"id": job_id, "status": "queued"}
     except Exception:
         if record_created and enqueue_attempted:
@@ -601,9 +640,11 @@ def refresh_stale_job(job: dict):
         current = dict(current)
         if timed_out(current):
             if current["status"] == "queued" and current.get("admission_token"):
-                current.update(status="failed", message="The preparation queue timed out. No generation was submitted.")
+                current.update(status="failed", auto_key_ciphertext=None,
+                               message="The preparation queue timed out. No generation was submitted.")
             else:
-                current.update(status="failed", message="Processing timed out. The backup shutdown has been scheduled; no automatic retry is made.")
+                current.update(status="failed", auto_key_ciphertext=None,
+                               message="Processing timed out. The backup shutdown has been scheduled; no automatic retry is made.")
         elif current["status"] == "submitting" and time.time() - current["updated_at"] > 90:
             current.update(status="submission_unknown", message="Submission outcome is unknown. Check your provider history before creating another generation.")
         return current
@@ -807,6 +848,10 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     key = key_for_session(active_session, x_reapi_key)
     if not approval.approved:
         raise PublicError("Review the guide and approve the selected person before generating.")
+    return submit_generation(job_id, job, active_session, key)
+
+
+def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     if job["status"] != "ready":
         # Idempotent response after any completed/claimed submission; never POST again.
         return view(job)
@@ -855,7 +900,8 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
         status = "submission_unknown" if error.status_code >= 500 else "failed"
         if credits_mode and status == "failed":
             apply_wallet_change(records, job["account_id"], "refund:" + job_id, charge, "refund")
-        updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": status, "message": error.message})
+        updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": status,
+            "auto_key_ciphertext": None, "message": error.message})
         return view(updated)
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "generating",
@@ -863,6 +909,17 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     except Exception:
         # The durable submitting claim is retained. A caller timeout may not retry the charge.
         raise PublicError("Submitted to the provider, but its task could not be saved. Check its dashboard; do not submit again.", 502) from None
+    if credits_mode or job.get("setup", {}).get("auto_generate"):
+        try:
+            token = uuid.uuid4().hex
+            records.update(f"jobs/{job_id}.json", lambda current: {**current, "provider_poll_token": token}
+                           if current["status"] == "generating" else current)
+            cloud.enqueue("poll-provider", job_id, task_token=token, delay_seconds=30)
+        except Exception as error:
+            emit("provider_poll_queue_failed", error=error, job_id=job_id)
+            records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                "message": "Generation started. Automatic status checks are delayed; open this job in your Library to check it. Do not submit again."}
+                if current["status"] == "generating" else current)
     return view(updated)
 
 
@@ -878,25 +935,33 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
     if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
         raise PublicError("This clip needs its original access method.", 403)
     key = key_for_session(active_session, x_reapi_key)
+    return provider_status(job_id, job, key)
+
+
+def provider_status(job_id: str, job: dict, key: str):
     if job["status"] != "generating" or not job.get("provider_task"):
         return view(job)
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
     body = provider.status(key, job["provider_task"])
     if body.get("status") == "failed":
-        if job.get("access_mode") == "credits":
-            apply_wallet_change(records, job["account_id"], "refund:" + job_id,
-                                job["app_credits_charged"], "refund")
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
+            "auto_key_ciphertext": None,
             "message": ("The generation failed. Your recastfx credits were returned."
                         if job.get("access_mode") == "credits" else
                         "The provider rejected or failed the generation. Check its task details and refund in your dashboard.")
         } if current["status"] == "generating" and current.get("provider_task") == job["provider_task"] else current)
+        if updated["status"] == "failed" and job.get("access_mode") == "credits":
+            apply_wallet_change(records, job["account_id"], "refund:" + job_id,
+                                job["app_credits_charged"], "refund")
         return view(updated)
     if body.get("status") != "completed":
         reported = body.get("status")
         state = reported if isinstance(reported, str) and reported in {"queued", "pending", "processing", "running", "generating"} else "unknown"
-        return {**view(job), "provider_state": state, "provider_checked_at": time.time()}
+        checked = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+            "provider_state": state, "provider_checked_at": time.time()}
+            if current["status"] == "generating" else current)
+        return view(checked)
     try:
         output_url = body["output"]["video_urls"][0]
         validate_media_url(output_url)
@@ -906,6 +971,7 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
             **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url,
+            "auto_key_ciphertext": None,
             "actual_credits": usage if isinstance(usage, (int, float)) else None,
             "message": "Restoring the original soundtrack and preserving the generated resolution."})
     except PublicError as error:
@@ -946,6 +1012,65 @@ def prepare(task: InternalTask, authorization: str | None = Header(default=None)
 @app.post("/internal/finish")
 def finish_task(task: InternalTask, authorization: str | None = Header(default=None)):
     internal_pipeline(task, authorization).finalize(task.job_id)
+    return {"ok": True}
+
+
+@app.post("/internal/generate")
+def generate_task(task: InternalTask, authorization: str | None = Header(default=None)):
+    internal_pipeline(task, authorization)
+    records, _, _ = services()
+    job, _ = records.read(f"jobs/{task.job_id}.json")
+    if not job or job.get("status") != "ready" or not job.get("setup", {}).get("auto_generate"):
+        return {"ok": True}
+    if job.get("access_mode") not in {"credits", "api-key"} or not job.get("setup", {}).get("easy_mode"):
+        return {"ok": True}
+    try:
+        key = (key_for_session({"access_mode": "credits"}, None)
+               if job["access_mode"] == "credits" else recover_key(job))
+        submit_generation(task.job_id, job, {"access_mode": job["access_mode"]}, key)
+    except PublicError as error:
+        emit("automatic_generation_failed", error=error, job_id=task.job_id)
+        records.update(f"jobs/{task.job_id}.json", lambda current: {**current,
+            "message": "Preparation is ready, but generation needs attention. Open this job in your Library to continue."}
+            if current.get("status") == "ready" else current)
+    return {"ok": True}
+
+
+@app.post("/internal/poll-provider")
+def poll_provider_task(task: InternalTask, authorization: str | None = Header(default=None)):
+    internal_pipeline(task, authorization)
+    records, cloud, _ = services()
+    job, _ = records.read(f"jobs/{task.job_id}.json")
+    if (not job or job.get("status") != "generating" or job.get("access_mode") not in {"credits", "api-key"}
+            or job.get("provider_poll_token") != task.task_token):
+        return {"ok": True}
+    try:
+        key = (provider_key(os.getenv("REAPI_SERVER_KEY", ""))
+               if job["access_mode"] == "credits" else recover_key(job))
+        provider_status(task.job_id, job, key)
+    except Exception as error:
+        emit("automatic_provider_check_failed", error=error, job_id=task.job_id)
+    current, _ = records.read(f"jobs/{task.job_id}.json")
+    if not current or current.get("status") != "generating" or current.get("provider_poll_token") != task.task_token:
+        return {"ok": True}
+    checks = current.get("provider_checks", 0) + 1
+    if checks >= 120:
+        records.update(f"jobs/{task.job_id}.json", lambda value: {**value,
+            "provider_checks": checks,
+            "message": "Automatic status checks paused after 120 checks. Open this job in your Library to continue; do not resubmit."}
+            if value.get("status") == "generating" else value)
+        return {"ok": True}
+    next_token = uuid.uuid4().hex
+    records.update(f"jobs/{task.job_id}.json", lambda value: {**value,
+        "provider_checks": checks, "provider_poll_token": next_token}
+        if value.get("status") == "generating" and value.get("provider_poll_token") == task.task_token else value)
+    try:
+        cloud.enqueue("poll-provider", task.job_id, task_token=next_token, delay_seconds=30)
+    except Exception as error:
+        emit("automatic_provider_check_queue_failed", error=error, job_id=task.job_id)
+        records.update(f"jobs/{task.job_id}.json", lambda value: {**value,
+            "message": "Automatic status checks are delayed. Open this job in your Library to continue; do not resubmit."}
+            if value.get("status") == "generating" else value)
     return {"ok": True}
 
 
