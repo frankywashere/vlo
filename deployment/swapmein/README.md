@@ -551,3 +551,8 @@ No GPU model or worker image changes are required; the gateway and frontend must
 be released together. Existing saved jobs lacking `easy_mode` keep the prior
 review behavior. Logs record `preparation_mode` and `tracking_selection`, including
 the selected label and count of frames where its mask is missing.
+
+Released on 2026-10-14 with gateway revision `swapmein-api-00024-vzf` and the
+Firebase Hosting site above. The release passed 163 frontend walkthrough tests,
+235 gateway tests, and the production frontend build. Both model workers remained
+off; no generation was submitted.
