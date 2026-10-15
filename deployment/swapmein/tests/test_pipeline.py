@@ -75,6 +75,13 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert enabled and require_continuous is False
         return 2, coverage
     monkeypatch.setattr("swapmein.pipeline.select_label", selected)
+    needs_review = bool(scene_cuts or not all(coverage))
+    plan = {"version": 1, "review_required": needs_review, "segments": [{
+        "id": "segment-000", "start_frame": 0, "end_frame": 120,
+        "start": 0, "end": 5, "seek_time": 1, "reason": "scene_cut" if scene_cuts else "selected_person",
+        "needs_review": needs_review, "selected_label": None if needs_review else 2}]}
+    monkeypatch.setattr("swapmein.pipeline.analyze_tracking", lambda *_: plan)
+    monkeypatch.setattr("swapmein.pipeline.create_selection_preview", lambda _source, _masks, output, _metadata: output.write_bytes(b"translucent-selection-preview"))
     composed_original = []
     def original_guide(source, vocals, output, checked):
         assert vocals.read_bytes() == b"input" and checked == metadata
@@ -86,6 +93,8 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
             self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/input.bin",
                 "setup": {"trim": [0, 5], "anchor": {"x": .6, "y": .4, "time": 1}, "enhanced_character_masking": enabled}},
                 "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
+        def read(self, key):
+            return copy.deepcopy(self.data.get(key)), 1
         def update(self, key, mutation):
             self.data[key] = mutation(copy.deepcopy(self.data.get(key)))
             return copy.deepcopy(self.data[key])
@@ -109,20 +118,25 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
             yield invoke
     records, cloud = Records(enabled), Cloud()
     Pipeline(Settings(), records, cloud).prepare(job_id)
-    assert records.data[path]["status"] == "ready"
+    assert records.data[path]["status"] == ("tracking_review" if enabled and needs_review else "ready")
     assert records.data[path]["selected_label"] == (2 if enabled else None)
     assert records.data[path]["tracking_performed"] is enabled
     assert records.data[path]["normalized_anchor"]["time"] == 1
     assert records.data[path]["scene_cut_count"] == len(scene_cuts)
     assert records.data[path]["tracking_continuous"] is (enabled and not scene_cuts and all(coverage))
     if enabled:
-        assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio", "audio"]
+        assert [kind for kind, _, _ in cloud.calls] == (["gpu", "audio"] if needs_review else ["gpu", "audio", "audio"])
         assert cloud.calls[0][2]["operation"] == "both"
-        assert cloud.calls[-1][2]["fill_mode"] == "depth"
-        assert cloud.calls[-1][2]["depth_uri"].endswith("depth.mp4")
         assert records.data[path]["mask_style"] == "depth"
-        assert cloud.calls[-1][2]["selected_label"] == 2
-        assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
+        assert records.data[path]["tracking_plan"] == plan
+        if needs_review:
+            assert "guide_uri" not in records.data[path]
+            assert records.data[path]["tracking_masks_uri"].endswith("masks.zip")
+        else:
+            assert cloud.calls[-1][2]["fill_mode"] == "depth"
+            assert cloud.calls[-1][2]["depth_uri"].endswith("depth.mp4")
+            assert cloud.calls[-1][2]["selected_label"] == 2
+            assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
         assert not composed_original
     else:
         assert [kind for kind, _, _ in cloud.calls] == ["audio"]
@@ -130,3 +144,83 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert records.data[path]["mask_frames"] == 0
         assert composed_original == [True]
         assert "SAM tracking was skipped" in records.data[path]["message"]
+
+
+def test_reviewed_matches_rebuild_only_cpu_guide_and_ignore_stale_tasks(monkeypatch):
+    from contextlib import contextmanager
+    import time
+    job_id, token = "c" * 32, "d" * 32
+    path = f"jobs/{job_id}.json"
+    class Records:
+        def __init__(self):
+            self.data = {path: {"id": job_id, "status": "queued", "tracking_task_token": token,
+                "preparation_kind": "tracking_rebuild", "tracking_applied_revision": 1,
+                "normalized_uri": "gs://worker/source.mp4", "reviewed_masks_uri": "gs://worker/reviewed.zip",
+                "tracking_vocals_uri": "gs://worker/vocals.wav", "tracking_depth_uri": "gs://worker/depth.mp4",
+                "tracking_metadata": {"frames": 120}, "reviewed_coverage": [100] * 48 + [0] * 72,
+                "tracking_plan": {"segments": [{"id": "first"}, {"id": "second"}]}},
+                "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
+        def read(self, key):
+            return copy.deepcopy(self.data.get(key)), 1
+        def update(self, key, mutation):
+            self.data[key] = mutation(copy.deepcopy(self.data.get(key)))
+            return copy.deepcopy(self.data[key])
+    class Cloud:
+        shutdown_verified = True
+        def __init__(self):
+            self.calls = []
+        @contextmanager
+        def worker(self, kind):
+            assert kind == "audio"
+            def invoke(endpoint, payload, timeout):
+                assert endpoint == "/compose" and payload["selected_label"] == 1
+                assert payload["masks_uri"].endswith("reviewed.zip")
+                self.calls.append(payload)
+                return {}
+            yield invoke
+        def worker_output(self, result, run, filename):
+            return f"gs://worker/{run}/{filename}"
+        def copy(self, uri, bucket, key):
+            return f"gs://{bucket}/{key}"
+    records, cloud = Records(), Cloud()
+    pipeline = Pipeline(Settings(), records, cloud)
+    before = copy.deepcopy(records.data)
+    pipeline.prepare(job_id)  # Initial task cannot consume a rebuild's queue slot.
+    pipeline.prepare(job_id, "e" * 32)
+    assert records.data == before and not cloud.calls
+    pipeline.prepare(job_id, token)
+    assert len(cloud.calls) == 1
+    job = records.data[path]
+    assert job["status"] == "ready" and job["tracking_reviewed"] is True
+    assert job["tracking_revision"] == 2
+    assert job["mask_coverage_min"] == 0
+    assert "guide-reviewed-" in job["guide_uri"]
+    assert "active" not in records.data["control/preparation.json"]
+    pipeline.prepare(job_id, token)
+    assert len(cloud.calls) == 1
+
+
+def test_expired_old_task_does_not_fail_a_newer_rebuild_lease():
+    from swapmein.errors import PublicError
+    job_id, old_token, new_token = "c" * 32, "d" * 32, "e" * 32
+    path = f"jobs/{job_id}.json"
+    class Records:
+        def __init__(self):
+            self.job = {"id": job_id, "status": "queued", "tracking_task_token": old_token}
+        def read(self, key):
+            assert key == path
+            return copy.deepcopy(self.job), 1
+        def update(self, key, mutation):
+            if key == "control/preparation.json":
+                # A newer reviewed attempt replaces the old one just as its
+                # delayed task discovers its preparation lease has expired.
+                self.job["tracking_task_token"] = new_token
+                raise PublicError("The preparation slot expired.", 409)
+            self.job = mutation(copy.deepcopy(self.job))
+            return copy.deepcopy(self.job)
+    class Cloud:
+        pass
+    records = Records()
+    Pipeline(Settings(), records, Cloud()).prepare(job_id, old_token)
+    assert records.job["status"] == "queued"
+    assert records.job["tracking_task_token"] == new_token

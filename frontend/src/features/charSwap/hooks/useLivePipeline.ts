@@ -11,6 +11,7 @@ import {
   isSecureLiveOrigin,
   LivePipelineError,
   pollLiveProvider,
+  resolveLiveTracking,
   validateLiveSetup,
 } from "../services/livePipeline";
 import type {
@@ -18,6 +19,7 @@ import type {
   LivePipelineConfig,
   LivePipelineJob,
   LivePipelineSession,
+  TrackingReviewChoice,
 } from "../services/livePipeline";
 
 const POLL_INTERVAL_MS = 5000;
@@ -30,11 +32,13 @@ export interface LivePipelineHandle {
   job: LivePipelineJob | null;
   busy: boolean;
   error: string | null;
+  trackingErrorSegmentId: string | null;
   preparationProgress: PreparationProgressState | null;
   preparationElapsedSeconds: number;
   prepare: (state: WalkthroughState) => Promise<boolean>;
   generate: () => Promise<void>;
   refresh: () => Promise<void>;
+  resolveTracking: (choices: TrackingReviewChoice[]) => Promise<boolean>;
   clear: () => void;
   reset: () => void;
 }
@@ -57,6 +61,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   const preparing = preparationProgress !== null;
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
   const [pollRevision, setPollRevision] = useState(0);
   const epoch = useRef(0);
   const operation = useRef<AbortController | null>(null);
@@ -99,6 +104,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     setPreparationElapsedSeconds(0);
     setWorking(false);
     setError(null);
+    setTrackingErrorSegmentId(null);
   }, [cancelRequests]);
 
   const clear = useCallback(() => {
@@ -145,7 +151,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       ...published,
       ...(published.message ? { message: safeMessage(published.message, apiKey, session.current?.token) } : {}),
     };
-    for (const field of ["tracking_url", "guide_url", "output_url"] as const) {
+    for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url"] as const) {
       if ([apiKey.trim(), session.current?.token].some((secret) => secret && clean[field]?.includes(secret))) {
         delete clean[field];
       }
@@ -163,13 +169,13 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   }, [apiKey]);
 
   const ensureSession = useCallback(async (signal: AbortSignal, ownsJob = false) => {
-    assertLiveKey(apiKey);
     if (ownsJob) {
       if (!session.current || session.current.expiresAt <= Date.now()) {
         throw new LivePipelineError("This job's access has expired. The job is retained; do not submit generation again.");
       }
       return session.current;
     }
+    assertLiveKey(apiKey);
     if (session.current && session.current.expiresAt > Date.now() + 30000) return session.current;
     const created = await createLiveSession(apiKey, signal, provider);
     signal.throwIfAborted();
@@ -267,6 +273,55 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       }
     }
   }, [enabled, apiKey, reset, ensureSession, publishJob]);
+
+  const resolveTracking = useCallback(async (choices: TrackingReviewChoice[]) => {
+    const active = currentJob.current;
+    if (operation.current) return false;
+    if (!enabled || active?.status !== "tracking_review" || active.tracking_revision === undefined) {
+      setError("Refresh the scene review before applying matches.");
+      return false;
+    }
+    const required = active.tracking_segments?.filter((segment) => segment.needs_review) ?? [];
+    if (required.length !== choices.length || new Set(choices.map((choice) => choice.segment_id)).size !== required.length || required.some((segment) => {
+      const choice = choices.find((item) => item.segment_id === segment.id);
+      if (!choice || typeof choice.absent !== "boolean") return true;
+      if (choice.absent) return choice.anchor !== null;
+      const anchor = choice.anchor;
+      return !anchor || ![anchor.x, anchor.y, anchor.time].every(Number.isFinite) || anchor.x < 0 || anchor.x > 1 || anchor.y < 0 || anchor.y > 1 || anchor.time < segment.start || anchor.time >= segment.end;
+    })) {
+      setError("Choose the person or mark them not visible in every highlighted section.");
+      return false;
+    }
+    const version = epoch.current;
+    const controller = new AbortController();
+    operation.current = controller;
+    setWorking(true);
+    setError(null);
+    setTrackingErrorSegmentId(null);
+    try {
+      const access = await ensureSession(controller.signal, true);
+      const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal);
+      if (controller.signal.aborted || epoch.current !== version) return false;
+      preparationStartedAt.current = Date.now();
+      setPreparationElapsedSeconds(0);
+      pollStartedAt.current = Date.now();
+      publishJob(next);
+      setPollRevision((revision) => revision + 1);
+      return true;
+    } catch (cause) {
+      if (!controller.signal.aborted && epoch.current === version) {
+        const message = cause instanceof LivePipelineError ? cause.message : "Your matches could not be applied. They are kept here; refresh the job before trying again.";
+        setError(safeMessage(message, apiKey, session.current?.token));
+        setTrackingErrorSegmentId(cause instanceof LivePipelineError && required.some((segment) => segment.id === cause.segmentId) ? cause.segmentId : null);
+      }
+      return false;
+    } finally {
+      if (epoch.current === version) {
+        operation.current = null;
+        setWorking(false);
+      }
+    }
+  }, [enabled, apiKey, ensureSession, publishJob]);
 
   const generate = useCallback(async () => {
     const active = currentJob.current;
@@ -368,9 +423,11 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     job,
     busy: working || Boolean(job && ACTIVE_STATUSES.has(job.status)),
     error,
+    trackingErrorSegmentId,
     prepare,
     generate,
     refresh,
+    resolveTracking,
     clear,
     reset,
   };

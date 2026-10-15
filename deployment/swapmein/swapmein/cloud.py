@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import re
 import time
 import uuid
 
@@ -56,15 +57,22 @@ class Cloud:
         self.shutdown_tasks = []
         self.job_id = None
 
-    def enqueue(self, kind: str, job_id: str):
+    def enqueue(self, kind: str, job_id: str, *, task_token: str | None = None):
         settings = self.settings
+        if task_token is not None and (not isinstance(task_token, str)
+                or not re.fullmatch(r"[a-f0-9]{32}", task_token)):
+            raise PublicError("Invalid task token.", 400)
+        name = f"{kind}-{job_id}" + (f"-{task_token}" if task_token is not None else "")
+        body = {"job_id": job_id}
+        if task_token is not None:
+            body["task_token"] = task_token
         task = tasks_v2.Task(
-            name=self.tasks.task_path(settings.project, settings.region, settings.task_queue, f"{kind}-{job_id}"),
+            name=self.tasks.task_path(settings.project, settings.region, settings.task_queue, name),
             http_request=tasks_v2.HttpRequest(
                 http_method=tasks_v2.HttpMethod.POST,
                 url=settings.service_url + "/internal/" + kind,
                 headers={"Content-Type": "application/json"},
-                body=json.dumps({"job_id": job_id}).encode(),
+                body=json.dumps(body).encode(),
                 oidc_token=tasks_v2.OidcToken(
                     service_account_email=settings.task_service_account,
                     audience=settings.service_url,

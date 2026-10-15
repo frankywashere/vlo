@@ -43,6 +43,7 @@ import { MAX_SOURCE_BYTES } from "./limits";
 import { isSecureLiveOrigin } from "./services/livePipeline";
 import { PreparationProgress } from "./components/PreparationProgress";
 import { LiveTrackingStep } from "./components/LiveTrackingStep";
+import { SceneTrackingReview } from "./components/SceneTrackingReview";
 import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
 import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
 import {
@@ -111,9 +112,9 @@ const STEP_INFO = {
     icon: ImageOutlined,
   },
   matches: {
-    title: "Prepare and review your clip",
-    short: "Prepare",
-    description: "Prepare the audio and check the video guide before generation.",
+    title: "Check scene matches",
+    short: "Matches",
+    description: "Confirm your person in the sections that need a second look.",
     icon: FactCheckOutlined,
   },
   access: {
@@ -210,7 +211,7 @@ function ProgressNavigation({
           !locked &&
           canVisitStep(state, item) &&
           (item !== "review" || accessReady) &&
-          (skipMaskReview ? item !== "review" || reviewReady : !["matches", "access", "review"].includes(item) || trackingReady) &&
+          (skipMaskReview ? item !== "review" || reviewReady : item === step || !["matches", "access", "review"].includes(item) || trackingReady) &&
           (index <= current || !blockedForward);
         return (
           <Button
@@ -350,7 +351,8 @@ export function CharSwapWalkthrough() {
     importClip,
     importReference,
   } = useLocalAssets();
-  const skipMaskReview = clip?.mode === "upload" && !enhancedCharacterMasking;
+  const noFlaggedSections = live && enhancedCharacterMasking && pipeline.job && ["ready", "generating", "finalizing", "completed", "submission_unknown"].includes(pipeline.job.status) && pipeline.job.tracking_segments !== undefined && !pipeline.job.tracking_segments.some((segment) => segment.needs_review);
+  const skipMaskReview = (clip?.mode === "upload" && !enhancedCharacterMasking) || Boolean(noFlaggedSections);
   const flowSteps = skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS;
   const current = flowSteps.indexOf(step);
   const state = {
@@ -382,6 +384,13 @@ export function CharSwapWalkthrough() {
     (step === "matches" && !trackingReady) ||
     (step === "access" && accessMode === "api-key" && !hasKey);
   const unresolved = getUnresolvedIssues(state).length;
+
+  useEffect(() => {
+    if (step === "matches" && noFlaggedSections && pipeline.job?.status === "ready") {
+      reviewTracking([]);
+      visit("access");
+    }
+  }, [step, noFlaggedSections, pipeline.job?.status, reviewTracking, visit]);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -758,7 +767,24 @@ export function CharSwapWalkthrough() {
                 />
               )}
               {step === "matches" && !pipeline.preparationProgress &&
-                (live ? (
+                (live ? pipeline.job?.status === "tracking_review" && pipeline.job.source_preview_url && pipeline.job.tracking_segments && targets[0] ? (
+                  <SceneTrackingReview
+                    key={`${liveJobId}-${pipeline.job.tracking_revision}`}
+                    sourceUrl={pipeline.job.source_preview_url}
+                    trackingUrl={pipeline.job.tracking_url}
+                    segments={pipeline.job.tracking_segments}
+                    target={targets[0]}
+                    duration={pipeline.job.duration ?? trim[1] - trim[0]}
+                    width={pipeline.job.width ?? clip?.width ?? 854}
+                    height={pipeline.job.height ?? clip?.height ?? 480}
+                    busy={pipeline.busy}
+                    errorSegmentId={pipeline.trackingErrorSegmentId}
+                    message={pipeline.job.message}
+                    initialChoices={pipeline.job.tracking_choices}
+                    onApply={pipeline.resolveTracking}
+                    onRefresh={() => void pipeline.refresh()}
+                  />
+                ) : (
                   <LiveTrackingStep
                     key={pipeline.job?.guide_url ?? liveJobId ?? "empty"}
                     status={pipeline.job?.status ?? "failed"}
@@ -773,6 +799,7 @@ export function CharSwapWalkthrough() {
                     trackingContinuous={pipeline.job?.tracking_continuous}
                     trackingPerformed={pipeline.job?.tracking_performed}
                     sceneCutCount={pipeline.job?.scene_cut_count}
+                    trackingReviewed={pipeline.job?.tracking_reviewed}
                     guideUrl={pipeline.job?.guide_url}
                     trackingUrl={pipeline.job?.tracking_url}
                     duration={pipeline.job?.duration ?? trim[1] - trim[0]}
@@ -869,12 +896,12 @@ export function CharSwapWalkthrough() {
                       {pipeline.preparationProgress
                         ? "Preparing your clip"
                         : step === "matches" && !trackingReady
-                          ? "Tracking connection needed"
+                          ? pipeline.job?.status === "tracking_review" ? "Check the highlighted sections" : "Review your prepared guide"
                         : step === "matches" && unresolved
                           ? `${unresolved} sections left to check`
                           : blocker}
                     </Typography>
-                    <Button
+                    {step === "matches" && pipeline.job?.status === "tracking_review" ? <Typography variant="body2" color="text.secondary" sx={{maxWidth: 230, textAlign: "right"}}>Apply your matches above to continue.</Typography> : <Button
                       variant="contained"
                       size="large"
                       disabled={continueDisabled}
@@ -885,7 +912,7 @@ export function CharSwapWalkthrough() {
                       sx={{ minWidth: { xs: 150, md: 190 } }}
                     >
                       {step === "references" && pipeline.preparationProgress ? "Checking all scenes…" : nextLabel}
-                    </Button>
+                    </Button>}
                   </Box>
                 </Box>
               )}

@@ -61,7 +61,7 @@ class FakeCloud:
         Image.new("RGB", (256, 256), "blue").save(image, "PNG")
         path.write_bytes(image.getvalue())
 
-    def enqueue(self, kind, job_id):
+    def enqueue(self, kind, job_id, *, task_token=None):
         self.enqueued.append((kind, job_id))
 
 

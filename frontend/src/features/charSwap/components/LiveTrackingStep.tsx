@@ -17,6 +17,7 @@ interface LiveTrackingStepProps {
   trackingContinuous?: boolean;
   trackingPerformed?: boolean;
   sceneCutCount?: number;
+  trackingReviewed?: boolean;
   status: string;
   message?: string;
   guideUrl?: string;
@@ -38,6 +39,7 @@ export function LiveTrackingStep({
   trackingContinuous,
   trackingPerformed = true,
   sceneCutCount,
+  trackingReviewed = false,
   status,
   message,
   guideUrl,
@@ -74,7 +76,9 @@ export function LiveTrackingStep({
       )}
       {ready && wholeClipReview && (
         <Alert severity="warning">
-          {trackingPerformed
+          {trackingReviewed
+            ? "Your scene matches have been applied. Review the guide to check that only your selected person is covered in each section."
+            : trackingPerformed
             ? "Automatic identity matching across scene cuts has not been verified. The model may change other people. Review every scene before approving."
             : "Masking is off, so SAM tracking is skipped. MiniMax uses your selected position and timestamp to identify the person. Review your selection before approving."}
         </Alert>

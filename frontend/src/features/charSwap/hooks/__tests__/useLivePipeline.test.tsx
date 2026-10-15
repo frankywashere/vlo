@@ -88,6 +88,58 @@ afterEach(() => {
 });
 
 describe("live BYOK pipeline", () => {
+  it("pauses polling for scene review, validates complete choices, and resumes the same job without a paid submission", async () => {
+    const review = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 2, tracking_segments: [
+      {id: "segment-001", start_frame: 48, end_frame: 120, start: 2, end: 5, seek_time: 3, reason: "scene_cut", needs_review: true},
+    ]};
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? Promise.resolve(json(review))
+      : input === "/api/jobs/job-1/tracking-review" ? Promise.resolve(json({id: "job-1", status: "queued"})) : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    expect(result.current.job?.status).toBe("tracking_review");
+    expect(result.current.busy).toBe(false);
+    expect(result.current.preparationProgress).toBeNull();
+    vi.useFakeTimers();
+    await act(async () => {vi.advanceTimersByTime(10000);});
+    expect(calls("/api/jobs/job-1")).toHaveLength(0);
+    await act(async () => {await result.current.resolveTracking([]);});
+    expect(result.current.error).toContain("every highlighted section");
+    expect(calls("/api/jobs/job-1/tracking-review")).toHaveLength(0);
+    const choice = {segment_id: "segment-001", absent: false, anchor: {x: 0.5, y: 0.4, time: 3}};
+    await act(async () => {await result.current.resolveTracking([choice]);});
+    expect(calls("/api/jobs/job-1/tracking-review")).toHaveLength(1);
+    const request = calls("/api/jobs/job-1/tracking-review")[0][1];
+    expect(request?.headers).toEqual({Authorization: `Bearer ${SESSION_TOKEN}`, "Content-Type": "application/json"});
+    expect(JSON.parse(String(request?.body))).toEqual({revision: 2, choices: [choice]});
+    expect(result.current.busy).toBe(true);
+    expect(result.current.preparationProgress?.phase).toBe("queued");
+    expect(calls("/api/uploads")).toHaveLength(1);
+    expect(calls("/api/jobs/job-1/generate")).toHaveLength(0);
+    await act(async () => {await vi.advanceTimersByTimeAsync(5000);});
+    expect(calls("/api/jobs/job-1")).toHaveLength(1);
+  });
+
+  it("retains the review and controls when a tap is rejected, and blocks simultaneous match applications", async () => {
+    const review = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 1, tracking_segments: [
+      {id: "segment-001", start_frame: 0, end_frame: 120, start: 0, end: 5, seek_time: 2, reason: "missing_mask", needs_review: true},
+    ]};
+    const response = deferred<Response>();
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? Promise.resolve(json(review))
+      : input === "/api/jobs/job-1/tracking-review" ? response.promise : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    const choices = [{segment_id: "segment-001", absent: false, anchor: {x: 0.5, y: 0.4, time: 2}}];
+    let pending!: Promise<boolean>;
+    await act(async () => {pending = result.current.resolveTracking(choices); await result.current.resolveTracking(choices);});
+    expect(calls("/api/jobs/job-1/tracking-review")).toHaveLength(1);
+    await act(async () => {response.resolve(json({code: "tracking_background", segment_id: "segment-001", message: USER_KEY}, 400)); await pending;});
+    expect(result.current.job?.status).toBe("tracking_review");
+    expect(result.current.error).toContain("clearer frame");
+    expect(result.current.error).not.toContain(USER_KEY);
+    expect(result.current.trackingErrorSegmentId).toBe("segment-001");
+    expect(result.current.busy).toBe(false);
+  });
+
   it("leaves the local preview offline and never sends its key", async () => {
     vi.stubGlobal("location", { protocol: "http:", hostname: "localhost", origin: "http://localhost:5173" });
     const { result } = renderHook(() => useLivePipeline(USER_KEY));

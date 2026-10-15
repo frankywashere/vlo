@@ -17,6 +17,7 @@ export interface LivePipelineConfig {
 export type LiveJobStatus =
   | "queued"
   | "preparing"
+  | "tracking_review"
   | "ready"
   | "generating"
   | "finalizing"
@@ -30,6 +31,11 @@ export interface LivePipelineJob {
   status: LiveJobStatus;
   message?: string;
   tracking_url?: string;
+  source_preview_url?: string;
+  tracking_segments?: TrackingReviewSegment[];
+  tracking_revision?: number;
+  tracking_reviewed?: boolean;
+  tracking_choices?: TrackingReviewChoice[];
   guide_url?: string;
   output_url?: string;
   duration?: number;
@@ -47,6 +53,24 @@ export interface LivePipelineJob {
   actual_provider_credits?: number;
 }
 
+export interface TrackingReviewSegment {
+  id: string;
+  start_frame: number;
+  end_frame: number;
+  start: number;
+  end: number;
+  seek_time: number;
+  reason: string;
+  needs_review: boolean;
+  selected_label?: number | null;
+}
+
+export interface TrackingReviewChoice {
+  segment_id: string;
+  absent: boolean;
+  anchor: { x: number; y: number; time: number } | null;
+}
+
 export interface LivePipelineSession {
   token: string;
   expiresAt: number;
@@ -56,6 +80,7 @@ const REQUEST_TIMEOUT_MS = 45000;
 const JOB_STATUSES: ReadonlySet<string> = new Set([
   "queued",
   "preparing",
+  "tracking_review",
   "ready",
   "generating",
   "finalizing",
@@ -66,11 +91,13 @@ const JOB_STATUSES: ReadonlySet<string> = new Set([
 
 export class LivePipelineError extends Error {
   readonly status: number | null;
+  readonly segmentId: string | null;
 
-  constructor(message: string, status: number | null = null) {
+  constructor(message: string, status: number | null = null, segmentId: string | null = null) {
     super(message);
     this.name = "LivePipelineError";
     this.status = status;
+    this.segmentId = segmentId;
   }
 }
 
@@ -132,6 +159,8 @@ function capacityMessage(value: unknown): string | null {
     upload_daily_limit: "Today's upload limit has been reached.",
     upload_monthly_limit: "This month's upload limit has been reached.",
     preparation_recovery: "Cloud preparation is paused while a previous job is checked. The site operator needs to restore availability.",
+    tracking_background: "That tap did not land on a detected person. Choose a clearer frame and tap inside the person's body, then apply your matches again.",
+    tracking_review_invalid: "This scene review has changed. Refresh the review before applying your matches again.",
   };
   const message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
   if (!message) return null;
@@ -164,7 +193,8 @@ async function requestJson(
     if (!response.ok) {
       let detail: unknown;
       try { detail = await response.json(); } catch { /* Never echo raw error bodies. */ }
-      throw new LivePipelineError(capacityMessage(detail) ?? requestMessage(response.status), response.status);
+      const segmentId = isRecord(detail) && detail.code === "tracking_background" && typeof detail.segment_id === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(detail.segment_id) ? detail.segment_id : null;
+      throw new LivePipelineError(capacityMessage(detail) ?? requestMessage(response.status), response.status, segmentId);
     }
     return await response.json();
   } catch (error) {
@@ -213,6 +243,7 @@ function readJob(value: unknown): LivePipelineJob {
     job.tracking_performed = value.tracking_performed;
   if (typeof value.tracking_continuous === "boolean")
     job.tracking_continuous = value.tracking_continuous;
+  if (typeof value.tracking_reviewed === "boolean") job.tracking_reviewed = value.tracking_reviewed;
   if (
     typeof value.scene_cut_count === "number" &&
     Number.isInteger(value.scene_cut_count) &&
@@ -221,7 +252,7 @@ function readJob(value: unknown): LivePipelineJob {
     job.scene_cut_count = value.scene_cut_count;
   if (["queued", "pending", "processing", "running", "generating", "unknown"].includes(String(value.provider_state)))
     job.provider_state = value.provider_state as LivePipelineJob["provider_state"];
-  for (const field of ["tracking_url", "guide_url", "output_url"] as const) {
+  for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url"] as const) {
     const url = value[field];
     if (typeof url !== "string") continue;
     try {
@@ -253,6 +284,56 @@ function readJob(value: unknown): LivePipelineJob {
     ) {
       job[field] = value[field];
     }
+  }
+  if (typeof value.tracking_revision === "number" && Number.isSafeInteger(value.tracking_revision) && value.tracking_revision >= 0)
+    job.tracking_revision = value.tracking_revision;
+  if (value.tracking_segments !== undefined) {
+    const segments = value.tracking_segments;
+    const ids = new Set<string>();
+    if (!Array.isArray(segments) || segments.length > 60 || segments.some((segment: unknown) => {
+      if (!isRecord(segment) || typeof segment.id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(segment.id) || ids.has(segment.id)) return true;
+      ids.add(segment.id);
+      return typeof segment.needs_review !== "boolean" || typeof segment.reason !== "string" || segment.reason.length > 500 ||
+        typeof segment.start_frame !== "number" || !Number.isSafeInteger(segment.start_frame) || segment.start_frame < 0 ||
+        typeof segment.end_frame !== "number" || !Number.isSafeInteger(segment.end_frame) || segment.end_frame <= segment.start_frame ||
+        typeof segment.start !== "number" || !Number.isFinite(segment.start) || segment.start < 0 ||
+        typeof segment.end !== "number" || !Number.isFinite(segment.end) || segment.end <= segment.start ||
+        typeof segment.seek_time !== "number" || !Number.isFinite(segment.seek_time) || segment.seek_time < segment.start || segment.seek_time >= segment.end ||
+        (job.duration !== undefined && (segment.end > job.duration + 1e-6 || segment.end_frame > Math.round(job.duration * 24))) ||
+        Math.abs(segment.start - segment.start_frame / 24) > 1e-6 || Math.abs(segment.end - segment.end_frame / 24) > 1e-6 ||
+        (segment.selected_label !== undefined && segment.selected_label !== null && (typeof segment.selected_label !== "number" || !Number.isSafeInteger(segment.selected_label) || segment.selected_label < 1));
+    })) throw new LivePipelineError("The service returned an unreadable scene review. Refresh the job before continuing.");
+    job.tracking_segments = (segments as TrackingReviewSegment[]).map((segment) => ({
+      id: segment.id, start_frame: segment.start_frame, end_frame: segment.end_frame,
+      start: segment.start, end: segment.end, seek_time: segment.seek_time,
+      reason: segment.reason, needs_review: segment.needs_review,
+      ...(segment.selected_label !== undefined ? {selected_label: segment.selected_label} : {}),
+    }));
+    if (job.tracking_segments.some((segment, index, all) => index > 0 && segment.start_frame < all[index - 1].end_frame))
+      throw new LivePipelineError("The service returned overlapping scene review sections. Refresh the job before continuing.");
+  }
+  if (job.status === "tracking_review" && (!job.source_preview_url || job.tracking_revision === undefined || !job.duration || !job.width || !job.height || !job.tracking_segments?.some((segment) => segment.needs_review))) {
+    throw new LivePipelineError("The service returned an incomplete scene review. Refresh the job before continuing.");
+  }
+  if (value.tracking_choices !== undefined) {
+    const choices = value.tracking_choices;
+    const required = job.tracking_segments?.filter((segment) => segment.needs_review) ?? [];
+    const chosenIds = new Set<string>();
+    if (!Array.isArray(choices) || choices.length > 60 || choices.length !== required.length || choices.some((choice: unknown) => {
+      if (!isRecord(choice) || typeof choice.segment_id !== "string" || chosenIds.has(choice.segment_id) || typeof choice.absent !== "boolean") return true;
+      chosenIds.add(choice.segment_id);
+      const section = required.find((segment) => segment.id === choice.segment_id);
+      if (!section) return true;
+      if (choice.absent) return choice.anchor !== null;
+      const anchor = choice.anchor;
+      return !isRecord(anchor) || typeof anchor.x !== "number" || !Number.isFinite(anchor.x) || anchor.x < 0 || anchor.x > 1 ||
+        typeof anchor.y !== "number" || !Number.isFinite(anchor.y) || anchor.y < 0 || anchor.y > 1 ||
+        typeof anchor.time !== "number" || !Number.isFinite(anchor.time) || anchor.time < section.start || anchor.time >= section.end;
+    })) throw new LivePipelineError("The service returned unreadable saved scene matches. Refresh the job before continuing.");
+    job.tracking_choices = (choices as TrackingReviewChoice[]).map((choice) => ({
+      segment_id: choice.segment_id, absent: choice.absent,
+      anchor: choice.anchor ? {x: choice.anchor.x, y: choice.anchor.y, time: choice.anchor.time} : null,
+    }));
   }
   return job;
 }
@@ -535,6 +616,20 @@ export async function getLiveJob(
       signal,
     ),
   );
+}
+
+export async function resolveLiveTracking(
+  id: string,
+  token: string,
+  revision: number,
+  choices: TrackingReviewChoice[],
+  signal: AbortSignal,
+): Promise<LivePipelineJob> {
+  return readJob(await requestJson(`/api/jobs/${encodeURIComponent(id)}/tracking-review`, {
+    method: "POST",
+    headers: {...sessionHeaders(token), "Content-Type": "application/json"},
+    body: JSON.stringify({revision, choices}),
+  }, signal));
 }
 
 export async function generateLiveJob(

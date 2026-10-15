@@ -477,3 +477,45 @@ preparation; progress and the resulting guide appear in Review. Generate remains
 disabled until the job is ready and the guide can play. It remains an explicit
 paid submission. Enhanced masking and the sample demo retain their overlay/match
 review step and confirmation requirements. App credits remain a preview only.
+
+### Scene tracking review — local change awaiting deployment
+
+The local implementation adds an owned `tracking_review` state for enhanced
+masking. After depth and SAM finish, `tracking.py` partitions the normalized
+24 fps clip at scene cuts, label disappearance/reappearance, and abrupt changes
+in mask area or position. These are review heuristics, not identity-confidence
+scores. The healthy section containing the original tap can be retained;
+every other scene and suspicious section needs an explicit match.
+
+The walkthrough shows translucent masks over the normalized original video in
+short, scrub-friendly sections with the selected person's thumbnail. The masks
+are rendered on CPU from SAM's exact label maps, without numbers. A display toggle
+lets the user inspect the original alone. The user taps a colored person or
+chooses **Not visible here** for each section. Their reference stays assigned.
+No flagged sections means the walkthrough proceeds directly to Access; the
+prepared guide still requires visual approval at final Review.
+
+`POST /api/jobs/{id}/tracking-review` accepts the owning session token and JSON
+`{revision, choices:[{segment_id, absent, anchor:{x,y,time}|null}]}`. Times are
+relative to the trimmed, normalized clip; section ends are exclusive. Taps are
+checked against actual SAM label maps. Background taps preserve the editable
+review, and foreign, duplicate, missing or stale choices are rejected. The
+request body is bounded to 32 KiB and at most 60 section choices.
+
+Reviewed maps retain label `1` only for the selected person in each section;
+explicitly absent sections contain no target pixels. The original maps stay
+unchanged. A new preparation task activates only the CPU audio worker's existing
+`/compose` operation to rebuild the depth guide. It reuses saved depth and vocals:
+there is no extra SAM run, audio separation or paid generation. This extra guide
+rebuild reserves the normal preparation lease and counts toward its daily/monthly
+limits. Each attempt has a unique, persisted task token so Cloud Tasks' retained
+names cannot block a rebuild; retries cannot repeat a claimed attempt.
+
+The job becomes `ready` only after composition succeeds. The user then reviews
+the whole corrected guide. Generation is blocked while matches are unresolved.
+Masking-off preparations and previously created jobs retain their existing flow.
+Reassigning existing labels cannot recover a person SAM never detected, repair
+missing body pixels, or guarantee the provider's identity/motion fidelity.
+
+This change is implemented and tested locally. The deployed site keeps its
+previous behavior until an explicitly authorized release.

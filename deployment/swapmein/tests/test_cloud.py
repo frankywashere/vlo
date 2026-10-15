@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import AlreadyExists, NotFound
 from google.auth.credentials import Credentials, Signing
 from google.cloud.storage import Client
 import httpx
@@ -22,6 +22,67 @@ class Tasks:
 
     def delete_task(self, name, *, retry=None, timeout=20):
         self.events.append(("delete", name))
+
+
+class NamedTasks:
+    """Retain completed task names just as Cloud Tasks deduplication does."""
+    def __init__(self):
+        self.created = {}
+
+    def task_path(self, project, region, queue, name):
+        return f"{self.queue_path(project, region, queue)}/tasks/{name}"
+
+    def queue_path(self, project, region, queue):
+        return f"projects/{project}/locations/{region}/queues/{queue}"
+
+    def create_task(self, *, parent, task, retry=None, timeout=20):
+        assert retry is None and timeout == 20
+        assert task.name.startswith(parent + "/tasks/")
+        if task.name in self.created:
+            raise AlreadyExists("A previously completed task retains this name.")
+        self.created[task.name] = task
+
+
+def enqueue_cloud():
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), service_url="https://gateway.run.app")
+    cloud.tasks = NamedTasks()
+    return cloud
+
+
+def test_task_enqueue_preserves_legacy_name_and_request_without_a_token():
+    cloud = enqueue_cloud()
+    job_id = "a" * 32
+    cloud.enqueue("prepare", job_id)
+    name, task = next(iter(cloud.tasks.created.items()))
+    assert name.endswith("/tasks/prepare-" + job_id)
+    assert json.loads(task.http_request.body) == {"job_id": job_id}
+    assert task.http_request.url == "https://gateway.run.app/internal/prepare"
+    assert task.dispatch_deadline.seconds == 1800
+
+
+def test_rebuild_task_tokens_avoid_retained_initial_and_failed_task_names():
+    cloud = enqueue_cloud()
+    job_id, first_token, retry_token = "a" * 32, "b" * 32, "c" * 32
+    cloud.enqueue("prepare", job_id)
+    cloud.enqueue("prepare", job_id, task_token=first_token)
+    with pytest.raises(AlreadyExists):
+        cloud.enqueue("prepare", job_id, task_token=first_token)
+    cloud.enqueue("prepare", job_id, task_token=retry_token)
+    assert len(cloud.tasks.created) == 3
+    for token in (first_token, retry_token):
+        task = next(task for name, task in cloud.tasks.created.items() if name.endswith("-" + token))
+        assert json.loads(task.http_request.body) == {"job_id": job_id, "task_token": token}
+        assert task.http_request.url.endswith("/internal/prepare")
+
+
+@pytest.mark.parametrize("token", ["", "a" * 31, "a" * 33, "g" * 32, "A" * 32,
+                                    "../" + "a" * 29, 1, True])
+def test_task_enqueue_rejects_invalid_tokens_before_creating_a_task(token):
+    cloud = enqueue_cloud()
+    with pytest.raises(PublicError, match="Invalid task token"):
+        cloud.enqueue("prepare", "a" * 32, task_token=token)
+    assert not cloud.tasks.created
 
 
 @pytest.fixture

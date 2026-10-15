@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Alert, Avatar, Box, Button, Stack, Typography } from "@mui/material";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
@@ -64,8 +64,9 @@ export function ReviewStep({
       visit: s.visit,
     })),
   );
-  const [guidePlayable, setGuidePlayable] = useState(false);
-  useEffect(() => setGuidePlayable(false), [job?.id, job?.guide_url]);
+  const [playableGuide, setPlayableGuide] = useState<string | null>(null);
+  const guideIdentity = `${job?.id}:${job?.guide_url}`;
+  const guidePlayable = playableGuide === guideIdentity;
   if (!clip) return null;
   function saveSetup() {
     // Local object URLs and thumbnail data are deliberately excluded from the handoff.
@@ -267,7 +268,9 @@ export function ReviewStep({
             {issues.length
               ? `${issues.length} review ${issues.length === 1 ? "section" : "sections"} confirmed`
               : live
-                ? "Selected person visually confirmed"
+                ? job?.tracking_reviewed
+                  ? "Scene matches checked and applied"
+                  : enhancedCharacterMasking ? "Tracking checks completed" : "Person selected by position and timestamp"
                 : "No uncertain sections"}
             {clip.mode === "demo" ? " (sample)" : ""}
           </Typography>
@@ -287,18 +290,21 @@ export function ReviewStep({
               `Review the prepared guide before generating. This uses your own ${provider} credits.`
           : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
       </Alert>
-      {live && !enhancedCharacterMasking && job?.status === "ready" && job.guide_url && (
+      {live && job?.status === "ready" && job.guide_url && (
         <Box sx={PANEL}>
           <Typography fontWeight={600} sx={{ mb: 2 }}>Review your prepared clip</Typography>
           <VideoPreview
+            key={guideIdentity}
             clip={{ ...clip, id: "prepared-guide", name: "Prepared guide", url: job.guide_url,
               width: job.width ?? clip.width, height: job.height ?? clip.height,
               duration: job.duration ?? trim[1] - trim[0] }}
             trim={[0, job.duration ?? trim[1] - trim[0]]}
-            onPlayableChange={setGuidePlayable}
+            onPlayableChange={(playable) => setPlayableGuide(playable ? guideIdentity : null)}
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            Check your section before generating. MiniMax uses your selected position and timestamp; the original soundtrack is restored on export.
+            {enhancedCharacterMasking
+              ? "Watch every scene. The colored depth guide should cover only your selected person. The original soundtrack is restored on export."
+              : "Check your section before generating. MiniMax uses your selected position and timestamp; the original soundtrack is restored on export."}
           </Typography>
         </Box>
       )}
@@ -361,7 +367,7 @@ export function ReviewStep({
             isSampleKey ||
             generating ||
             job?.status !== "ready" ||
-            (!enhancedCharacterMasking && !guidePlayable)
+            !guidePlayable
           }
           sx={{ flex: 1 }}
         >

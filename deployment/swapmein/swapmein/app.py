@@ -2,6 +2,7 @@
 from functools import lru_cache
 from pathlib import Path
 import secrets
+import re
 import tempfile
 import time
 import uuid
@@ -12,7 +13,7 @@ from fastapi import Body, FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
@@ -20,12 +21,14 @@ from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
-from .media import Setup, normalize_reference
+from .media import Anchor, Setup, normalize_reference
 from .pipeline import Pipeline
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
 from .storage import Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation
+from .tracking import resolve_tracking
+from .diagnostics import emit
 
 settings = Settings.from_env()
 app = FastAPI(title="swapMEin single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
@@ -41,7 +44,9 @@ class BodyLimitMiddleware:
         if scope["type"] != "http":
             return await self.application(scope, receive, send)
         total = 0
-        maximum = 31 * 1024 * 1024 if scope.get("path") == "/api/jobs" else 8192
+        path = scope.get("path", "")
+        maximum = (31 * 1024 * 1024 if path == "/api/jobs" else
+                   32768 if path.endswith("/tracking-review") else 8192)
         async def bounded_receive():
             nonlocal total
             message = await receive()
@@ -81,6 +86,9 @@ async def public_error(_request, error):
         content["code"] = error.code
     if error.retry_after is not None:
         content["retry_after"] = error.retry_after
+    segment_id = getattr(error, "segment_id", None)
+    if error.code == "tracking_background" and isinstance(segment_id, str) and re.fullmatch(r"segment-[0-9]{3}", segment_id):
+        content["segment_id"] = segment_id
     headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
     return JSONResponse(content, status_code=error.status_code, headers=headers)
 
@@ -88,6 +96,9 @@ async def public_error(_request, error):
 @app.exception_handler(RequestValidationError)
 async def invalid_request(_request, _error):
     # FastAPI's default response can echo raw input; do not reflect credentials or media.
+    if _request.url.path.endswith("/tracking-review"):
+        return JSONResponse({"message": "Check each tracking section and choose a person or mark them absent.",
+            "code": "tracking_review_invalid"}, status_code=422)
     return JSONResponse({"message": "Invalid request. Check the clip, reference and selected person."}, status_code=422)
 
 
@@ -136,6 +147,8 @@ def view(job: dict):
         status = "finalizing"
     if status == "submitting":
         status = "generating"
+    if status == "matching":
+        status = "queued"
     result = {"provider": job.get("provider", "reAPI"), "id": job["id"], "status": status, "message": job.get("message", "")}
     if "duration" in job:
         result["duration"] = job["duration"]
@@ -146,12 +159,18 @@ def view(job: dict):
     if job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "mask_style"]:
+    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "mask_style", "tracking_revision", "tracking_reviewed"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
         if job.get(field):
             result[output] = cloud.signed_url(job[field])
+    if job.get("tracking_plan"):
+        result["tracking_segments"] = job["tracking_plan"]["segments"]
+        if job.get("tracking_choices"):
+            result["tracking_choices"] = job["tracking_choices"]
+        if job.get("normalized_uri"):
+            result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
     if job.get("actual_credits") is not None:
         result["actual_provider_credits"] = job["actual_credits"]
     return result
@@ -362,15 +381,103 @@ def refresh_stale_job(job: dict):
     def mutate(current):
         current = dict(current)
         age = time.time() - current["updated_at"]
-        if current["status"] in {"queued", "preparing", "finalizing", "finishing"} and age > 2100:
+        if current["status"] in {"queued", "preparing", "matching", "finalizing", "finishing"} and age > 2100:
             current.update(status="failed", message="Processing timed out. The backup shutdown has been scheduled; no automatic retry is made.")
         elif current["status"] == "submitting" and age > 90:
             current.update(status="submission_unknown", message="Submission outcome is unknown. Check your provider history before creating another generation.")
         return current
-    if ((job["status"] in {"queued", "preparing", "finalizing", "finishing"} and time.time() - job["updated_at"] > 2100)
+    if ((job["status"] in {"queued", "preparing", "matching", "finalizing", "finishing"} and time.time() - job["updated_at"] > 2100)
             or (job["status"] == "submitting" and time.time() - job["updated_at"] > 90)):
         return records.update(f"jobs/{job['id']}.json", mutate)
     return job
+
+
+class TrackingChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    segment_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+    absent: bool = Field(strict=True)
+    anchor: Anchor | None = None
+
+    @model_validator(mode="after")
+    def require_person_or_absence(self):
+        if self.absent == (self.anchor is not None):
+            raise ValueError("Choose a person or mark them absent.")
+        return self
+
+
+class TrackingReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1, le=100, strict=True)
+    choices: list[TrackingChoice] = Field(min_length=1, max_length=60)
+
+
+@app.post("/api/jobs/{job_id}/tracking-review", status_code=202)
+def apply_tracking_review(job_id: str, review: TrackingReview,
+                          authorization: str | None = Header(default=None)):
+    job, _ = owned_job(job_id, authorization)
+    records, cloud, _ = services()
+    invalid = "These tracking sections have changed. Refresh the review before applying matches."
+    if job["status"] != "tracking_review":
+        if (job.get("tracking_applied_revision") == review.revision
+                and job["status"] in {"matching", "queued", "preparing", "ready", "generating", "finalizing", "finishing", "completed"}):
+            return view(job)  # A lost reply cannot create another task or charge.
+        raise PublicError(invalid, 409, code="tracking_review_invalid")
+    plan = job.get("tracking_plan", {})
+    expected = {section["id"] for section in plan.get("segments", []) if section["needs_review"]}
+    supplied = [choice.segment_id for choice in review.choices]
+    if (review.revision != job.get("tracking_revision") or not expected
+            or len(supplied) != len(expected) or set(supplied) != expected):
+        raise PublicError(invalid, 400, code="tracking_review_invalid")
+    current, _ = records.read("control/preparation.json")
+    check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
+    reserved = claimed = queued = False
+    try:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
+            cloud.download(job["tracking_masks_uri"], archive, 80 * 1024 * 1024)
+            choices = [choice.model_dump() for choice in review.choices]
+            # Validate taps against the real masks before claiming compute or
+            # changing the job. A background tap stays editable in the browser.
+            resolved = resolve_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
+            records.update("control/preparation.json", lambda current: reserve_preparation(
+                current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+            reserved = True
+            task_token = uuid.uuid4().hex
+            def claim(current):
+                if current.get("tracking_revision") != review.revision:
+                    raise PublicError(invalid, 409, code="tracking_review_invalid")
+                return {**claim_job(current, {"tracking_review"}, "matching"),
+                    "tracking_applied_revision": review.revision, "tracking_task_token": task_token}
+            records.update(f"jobs/{job_id}.json", claim)
+            claimed = True
+            uri = cloud.upload(settings.worker_bucket,
+                f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
+        job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+            "status": "queued", "preparation_kind": "tracking_rebuild", "reviewed_masks_uri": uri,
+            "reviewed_coverage": resolved["coverage"], "tracking_assignments": resolved["assignments"],
+            "tracking_choices": choices,
+            "message": "Your matches are saved. The corrected guide is queued.", "updated_at": time.time()})
+        queued = True
+        try:
+            cloud.enqueue("prepare", job_id, task_token=task_token)
+        except Exception:
+            job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                "message": "Your matches are saved. Queue confirmation is pending; check this job before retrying."
+            } if current["status"] == "queued" else current)
+        emit("tracking_matches_applied", job_id=job_id, section_count=len(choices),
+            absent_sections=sum(choice["absent"] for choice in choices))
+        return view(job)
+    except Exception as error:
+        if claimed and not queued:
+            records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                "status": "tracking_review", "message": "The matches could not be saved. Your tracking review is retained.",
+                "updated_at": time.time()} if current["status"] == "matching" else current)
+        if reserved and not queued:
+            records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
+        if isinstance(error, PublicError):
+            raise
+        emit("tracking_review_failed", error=error, job_id=job_id)
+        raise PublicError("The matches could not be saved. Your tracking review is retained.", 503) from None
 
 
 class Approval(BaseModel):
@@ -390,6 +497,8 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     if job["status"] != "ready":
         # Idempotent response after any completed/claimed submission; never POST again.
         return view(job)
+    if job.get("tracking_plan", {}).get("review_required") and not job.get("tracking_reviewed"):
+        raise PublicError("Confirm your scene matches before generating.", 409, code="tracking_review_invalid")
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
     image_url, video_url = cloud.signed_url(job["reference_uri"]), cloud.signed_url(job["guide_uri"])
@@ -476,6 +585,7 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
 class InternalTask(BaseModel):
     model_config = ConfigDict(extra="forbid")
     job_id: str
+    task_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 def internal_pipeline(task: InternalTask, authorization: str | None):
@@ -489,7 +599,7 @@ def internal_pipeline(task: InternalTask, authorization: str | None):
 
 @app.post("/internal/prepare")
 def prepare(task: InternalTask, authorization: str | None = Header(default=None)):
-    internal_pipeline(task, authorization).prepare(task.job_id)
+    internal_pipeline(task, authorization).prepare(task.job_id, task.task_token)
     return {"ok": True}
 
 

@@ -31,6 +31,7 @@ const live = vi.hoisted(() => ({
   prepare: vi.fn(),
   generate: vi.fn(),
   refresh: vi.fn(),
+  resolveTracking: vi.fn(),
   reset: vi.fn(),
   clear: vi.fn(),
 }));
@@ -45,6 +46,10 @@ beforeEach(() => {
   live.prepare.mockReset();
   delete live.job.tracking_continuous;
   delete live.job.scene_cut_count;
+  delete live.job.tracking_segments;
+  delete live.job.tracking_revision;
+  delete live.job.source_preview_url;
+  delete live.job.tracking_reviewed;
   vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(
     () => undefined,
@@ -80,6 +85,49 @@ afterEach(() => {
 });
 
 describe("live generation approval", () => {
+  it("shows real flagged scene review, applies choices, then requires review of the rebuilt guide", async () => {
+    const user = userEvent.setup();
+    live.job.status = "tracking_review";
+    live.job.source_preview_url = "https://storage.googleapis.com/test/source.mp4?signature=test";
+    live.job.tracking_revision = 1;
+    live.job.tracking_segments = [{id: "segment-001", start_frame: 48, end_frame: 120, start: 2, end: 5, seek_time: 3, reason: "scene_cut", needs_review: true}];
+    const {rerender} = render(<CharSwapWalkthrough />);
+    expect(screen.getByRole("heading", {name: "Check scene matches"})).toBeInTheDocument();
+    expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", live.job.source_preview_url);
+    expect(screen.queryByRole("button", {name: "Choose access"})).not.toBeInTheDocument();
+    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
+    await user.click(screen.getByRole("button", {name: "Not visible here"}));
+    await user.click(screen.getByRole("button", {name: "Apply matches"}));
+    expect(live.resolveTracking).toHaveBeenCalledWith([{segment_id: "segment-001", absent: true, anchor: null}]);
+    expect(live.generate).not.toHaveBeenCalled();
+    live.job.status = "ready";
+    live.job.tracking_reviewed = true;
+    live.job.tracking_continuous = false;
+    live.job.scene_cut_count = 1;
+    rerender(<CharSwapWalkthrough />);
+    expect(screen.getByText(/Your scene matches have been applied/)).toBeInTheDocument();
+    expect(screen.queryByText(/Automatic identity matching across scene cuts has not been verified/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", live.job.guide_url);
+    expect(screen.getByRole("button", {name: "Choose access"})).toBeDisabled();
+    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
+    await user.click(screen.getByRole("button", {name: "I reviewed the whole clip"}));
+    await user.click(screen.getByRole("button", {name: "Choose access"}));
+    expect(useCharSwapStore.getState().step).toBe("access");
+    expect(live.generate).not.toHaveBeenCalled();
+  });
+
+  it("skips the optional matches step when the real tracking plan has no flagged sections", async () => {
+    live.job.tracking_segments = [{id: "segment-000", start_frame: 0, end_frame: 120, start: 0, end: 5, seek_time: 1, reason: "selected_person", needs_review: false, selected_label: 1}];
+    const {rerender} = render(<CharSwapWalkthrough />);
+    await waitFor(() => expect(useCharSwapStore.getState().step).toBe("access"));
+    expect(screen.queryByRole("button", {name: "Matches"})).not.toBeInTheDocument();
+    live.job.status = "generating";
+    rerender(<CharSwapWalkthrough />);
+    expect(screen.queryByRole("button", {name: "Matches"})).not.toBeInTheDocument();
+    expect(live.resolveTracking).not.toHaveBeenCalled();
+    expect(live.generate).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("allows scene changes when enhanced masking is %s", (enhanced) => {
     useCharSwapStore.getState().setEnhancedCharacterMasking(enhanced);
     useCharSwapStore.getState().visit("trim");
@@ -147,6 +195,8 @@ describe("live generation approval", () => {
     await user.click(within(nav).getByRole("button", { name: "Access" }));
     await user.click(screen.getByRole("radio", { name: /Use my API key/ }));
     await user.click(screen.getByRole("button", { name: "Review setup" }));
+    expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
+    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
     await user.click(
       screen.getByRole("button", { name: "Generate replacements" }),
     );
