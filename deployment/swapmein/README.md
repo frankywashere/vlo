@@ -604,3 +604,12 @@ Released on 2026-10-14 with gateway revision `swapmein-api-00024-vzf` and the
 Firebase Hosting site above. The release passed 163 frontend walkthrough tests,
 235 gateway tests, and the production frontend build. Both model workers remained
 off; no generation was submitted.
+
+
+### Audit events and owner credit grants
+
+Owners can use Admin → Grant user credits with an existing Google sign-in email, a positive whole-credit amount, and a reason. Pricing staff cannot grant credits. This changes only the RecastFX wallet; it does not charge Stripe or buy provider credits. The gateway resolves Firebase's user ID with read-only `firebaseauth.users.get` access (`roles/firebaseauth.viewer` during deployment), then applies the grant atomically. A client operation ID is bound to the recipient, amount, owner and reason; retrying after an uncertain response does not duplicate credits. Private `commerce/grants/<request_id>.json` records retain the owner, reason, recipient and completion state. Wallet entries retain the adjustment and reason.
+
+Structured Cloud Logging events include wallet changes, Stripe Checkout creation/fulfillment/refunds, price quotes, pricing and permission changes, background task queueing, provider state changes, successful export and Library saves, as well as existing preparation and shutdown diagnostics. Correlate by `job_id`, `account_id`, `order_ref`, or grant `request_id`. Replayed webhook/grant events are not additional wallet transactions; `wallet_change_applied` is emitted only after a newly applied mutation. Financial ledger and grant records remain the durable source of truth, since logs cannot be committed atomically with GCS records.
+
+The signed-in frontend reports uncaught errors, promise rejections, React failures and handled pipeline/commerce request failures to `/api/diagnostics`. Reports contain only allowlisted category/error type, optional HTTP status and owned job ID. No error messages, stacks, media URLs, form values or keys are sent. Browser and server each limit reports to ten per minute; server ingestion requires Firebase authentication. Errors before sign-in and offline reports are intentionally not collected. Reporting failures never interrupt jobs.

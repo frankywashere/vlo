@@ -21,7 +21,10 @@ class Pipeline:
         self.settings, self.records, self.cloud = settings, records, cloud
 
     def update_job(self, job_id: str, **fields):
-        return self.records.update(f"jobs/{job_id}.json", lambda current: {**current, **fields, "updated_at": time.time()})
+        updated = self.records.update(f"jobs/{job_id}.json", lambda current: {**current, **fields, "updated_at": time.time()})
+        if "status" in fields:
+            emit("job_status_changed", job_id=job_id, status=fields["status"])
+        return updated
 
     def prepare(self, job_id: str, task_token: str | None = None):
         current, _ = self.records.read(f"jobs/{job_id}.json")
@@ -230,8 +233,10 @@ class Pipeline:
                 completed = self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"])
+                emit("video_export_completed", job_id=job_id, width=output_dimensions["width"], height=output_dimensions["height"])
                 try:
                     archive_completed(self.records, completed)
+                    emit("account_library_saved", job_id=job_id)
                 except Exception as error:
                     # An index retry must never turn a valid exported video into a failure.
                     emit("account_library_save_pending", error=error, job_id=job_id)

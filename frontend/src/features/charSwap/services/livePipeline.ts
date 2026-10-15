@@ -2,6 +2,7 @@ import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
+import { reportClientError } from "./diagnostics";
 import { accountToken } from "./accountContext";
 
 export type GenerationProvider = "reAPI" | "ToAPIs";
@@ -209,7 +210,11 @@ async function requestJson(
     return await response.json();
   } catch (error) {
     if (signal.aborted) throw error;
-    if (error instanceof LivePipelineError) throw error;
+    if (error instanceof LivePipelineError) {
+      if (error.status !== null && error.status >= 500) reportClientError("pipeline_request", undefined, error.status);
+      throw error;
+    }
+    reportClientError("pipeline_request", error);
     // Request bodies, headers and provider responses can contain credentials.
     // Only controlled messages leave this boundary, even for malformed replies.
     throw new LivePipelineError(

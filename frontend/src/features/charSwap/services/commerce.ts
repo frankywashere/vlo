@@ -1,3 +1,4 @@
+import { reportClientError } from "./diagnostics";
 import { accountToken } from "./accountContext";
 
 export interface CreditPack {
@@ -37,7 +38,7 @@ export interface CreditAdmin {
     revision: number;
     packs: CreditPack[];
     credits_per_generation: number;
-  credits_per_second?: number;
+    credits_per_second?: number;
   };
 }
 
@@ -54,6 +55,11 @@ export interface AccountAccess {
   role: "owner" | "pricing_admin" | "viewer" | null;
 }
 
+export class CommerceRequestError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) { super(message); this.name = "CommerceRequestError"; this.status = status; }
+}
+
 async function commerceRequest<T>(path: string, body?: unknown): Promise<T> {
   const token = await accountToken();
   if (!token) throw new Error("Sign in to access recastfx credits.");
@@ -66,12 +72,13 @@ async function commerceRequest<T>(path: string, body?: unknown): Promise<T> {
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "omit",
     cache: "no-store",
-  });
+  }).catch((error: unknown) => { reportClientError("commerce_request", error); throw error; });
   if (!response.ok) {
+    if (response.status >= 500) reportClientError("commerce_request", undefined, response.status);
     const result: unknown = await response.json().catch(() => null);
     const message = result && typeof result === "object" && "message" in result &&
       typeof result.message === "string" ? result.message : "Credits are unavailable right now.";
-    throw new Error(message);
+    throw new CommerceRequestError(message, response.status);
   }
   return (await response.json()) as T;
 }
@@ -115,4 +122,10 @@ export function savePrivateProviderKey(key: string) {
 
 export function setCreditStaff(email: string, role: "pricing_admin" | "viewer", active: boolean) {
   return commerceRequest("/api/commerce/admin/staff", {email, role, active});
+}
+
+
+export function grantAccountCredits(email: string, credits: number, reason: string, requestId: string) {
+  return commerceRequest<{email: string; credits: number; balance: number; request_id: string}>(
+    "/api/commerce/admin/grant-credits", {email, credits, reason, request_id: requestId});
 }

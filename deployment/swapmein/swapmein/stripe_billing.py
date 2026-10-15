@@ -10,6 +10,7 @@ from functools import lru_cache
 import stripe
 
 from .commerce import apply_wallet_change, MIN_PACK_CENTS, stripe_key_ready, stripe_livemode
+from .diagnostics import emit
 from .errors import PublicError
 
 ORDER_PATTERN = re.compile(r"[a-f0-9]{32}")
@@ -70,6 +71,7 @@ def create_checkout(records, account: dict, pack: dict, return_origin: str) -> s
     if not session.url or not session.id.startswith(expected_prefix) or session.livemode is not live:
         raise PublicError("Stripe returned a checkout for the wrong payment environment.", 503)
     records.update(order_path, lambda current: {**current, "status": "open", "session_id": session.id})
+    emit("stripe_checkout_created", order_ref=order_ref, account_id=account["account_id"], credits=pack["credits"], price_cents=pack["price_cents"], livemode=live)
     return session.url
 
 
@@ -120,6 +122,7 @@ def fulfill_checkout(records, event) -> bool:
     funded = records.update(order_path, lambda current: {**current, "status": "fulfilled",
         "session_id": session["id"], "fulfilled_at": time.time()})
     _apply_refund_operations(records, funded)
+    emit("stripe_credits_fulfilled", order_ref=order_ref, account_id=account_id, credits=credits, event_id=event.get("id"), replayed=order.get("status") == "fulfilled")
     return True
 
 
@@ -157,4 +160,5 @@ def reverse_refunded_credits(records, event) -> bool:
 
     updated = records.update(path, reserve)
     _apply_refund_operations(records, updated)
+    emit("stripe_credits_refunded", order_ref=order_ref, account_id=order["account_id"], refunded_credits=refunded, event_id=event.get("id"))
     return True

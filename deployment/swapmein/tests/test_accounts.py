@@ -163,3 +163,21 @@ def test_queue_wait_does_not_use_the_processing_watchdog(api):
     result = gateway.refresh_stale_job(expired)
     assert result["status"] == "failed" and "queue timed out" in result["message"]
     assert "shutdown has been scheduled" not in result["message"]
+
+
+@pytest.mark.parametrize("change", [{}, {"disabled": True}, {"emailVerified": False}, {"providerUserInfo": []}, {"email": "other@example.com"}])
+def test_grant_recipient_resolves_only_active_verified_google_identity(monkeypatch, change):
+    import httpx
+    from swapmein import cloud
+    monkeypatch.setattr(cloud, "access_token", lambda: "private-access-token")
+    user = {"localId": "firebase-uid", "email": "customer@example.com", "emailVerified": True, "providerUserInfo": [{"providerId": "google.com"}], **change}
+    def lookup(url, **kwargs):
+        assert url == "https://identitytoolkit.googleapis.com/v1/projects/project/accounts:lookup"
+        assert kwargs["json"] == {"email": ["customer@example.com"]}
+        return httpx.Response(200, json={"users": [user]}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(httpx, "post", lookup)
+    if change:
+        with pytest.raises(PublicError):
+            accounts.lookup_credit_recipient("project", "customer@example.com")
+    else:
+        assert accounts.lookup_credit_recipient("project", "customer@example.com")["account_id"] == digest("firebase-uid")

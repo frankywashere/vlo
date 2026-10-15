@@ -3,6 +3,7 @@ import os
 import re
 import time
 
+from .diagnostics import emit
 from .errors import PublicError
 from .security import digest
 from .provider_credentials import provider_key_ready
@@ -66,7 +67,8 @@ def save_features(records, actor: dict, revision: int, checkout: bool, credit_ge
         return {"revision": revision + 1, "checkout": checkout,
                 "credit_generation": credit_generation, "updated_by": actor["email"], "updated_at": time.time()}
 
-    records.update(FEATURES_PATH, mutate)
+    saved = records.update(FEATURES_PATH, mutate)
+    emit("admin_features_changed", actor_id=digest(actor["email"]), revision=saved["revision"], checkout=checkout, credit_generation=credit_generation)
     return feature_view(records)
 
 
@@ -157,7 +159,9 @@ def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits
         return {"revision": revision + 1, "packs": packs,
                 "credits_per_generation": credits_per_generation, "history": history}
 
-    return records.update(CATALOG_PATH, mutate)
+    saved = records.update(CATALOG_PATH, mutate)
+    emit("admin_pricing_changed", actor_id=digest(actor["email"]), revision=saved["revision"], credits_for_15_seconds=credits_per_generation, pack_count=len(packs))
+    return saved
 
 
 def wallet_path(account_id: str) -> str:
@@ -173,11 +177,14 @@ def wallet_view(records, account_id: str) -> dict:
             "transactions": current.get("transactions", [])[-20:][::-1]}
 
 
-def apply_wallet_change(records, account_id: str, reference: str, amount: int, kind: str) -> dict:
+def apply_wallet_change(records, account_id: str, reference: str, amount: int, kind: str, *, details: dict | None = None) -> dict:
     if not reference or len(reference) > 160 or type(amount) is not int or amount == 0:
         raise ValueError("Invalid wallet transaction")
 
+    applied_now = False
     def mutate(current):
+        nonlocal applied_now
+        applied_now = False
         current = current or {"balance": 0, "applied": {}, "transactions": []}
         applied = current.get("applied", {})
         if reference in applied:
@@ -187,9 +194,36 @@ def apply_wallet_change(records, account_id: str, reference: str, amount: int, k
         balance = current.get("balance", 0)
         if amount < 0 and kind == "generation" and balance < -amount:
             raise PublicError("Add recastfx credits before generating.", 402)
-        entry = {"reference": reference, "amount": amount, "kind": kind, "at": time.time()}
+        applied_now = True
+        entry = {"reference": reference, "amount": amount, "kind": kind, "at": time.time(), **({"details": details} if details else {})}
         return {**current, "balance": balance + amount,
                 "applied": {**applied, reference: amount},
                 "transactions": [*current.get("transactions", []), entry][-500:]}
 
-    return records.update(wallet_path(account_id), mutate)
+    saved = records.update(wallet_path(account_id), mutate)
+    if applied_now:
+        emit("wallet_change_applied", account_id=account_id, reference=reference, amount=amount, kind=kind, balance=saved["balance"])
+    return saved
+
+
+def grant_credits(records, actor: dict, recipient: dict, amount: int, reason: str, request_id: str) -> dict:
+    """Reserve an immutable operation before the atomic, idempotent wallet credit."""
+    require_staff(records, actor, {"owner"})
+    reason = reason.strip()
+    if (type(amount) is not int or not 1 <= amount <= 1000000 or not 3 <= len(reason) <= 300
+            or not re.fullmatch(r"[a-f0-9]{32}", request_id)):
+        raise PublicError("Enter a positive whole-credit amount and a reason.")
+    operation = {"account_id": recipient["account_id"], "email": recipient["email"],
+                 "amount": amount, "reason": reason, "actor_id": digest(actor["email"]), "actor_email": actor["email"]}
+    def reserve(current):
+        if current and any(current.get(key) != value for key, value in operation.items()):
+            raise PublicError("This grant request was already used for a different change.", 409)
+        return current or {**operation, "created_at": time.time(), "status": "pending"}
+    path = f"commerce/grants/{request_id}.json"
+    saved = records.update(path, reserve)
+    wallet = apply_wallet_change(records, recipient["account_id"], "grant:" + request_id, amount,
+        "admin_grant", details={"actor_id": operation["actor_id"], "reason": reason})
+    records.update(path, lambda current: {**current, "status": "completed", "completed_at": current.get("completed_at", time.time())})
+    emit("admin_credits_granted", actor_id=operation["actor_id"], account_id=recipient["account_id"],
+         request_id=request_id, credits=amount, replayed=saved.get("status") == "completed")
+    return {"email": recipient["email"], "credits": amount, "balance": wallet["balance"], "request_id": request_id}

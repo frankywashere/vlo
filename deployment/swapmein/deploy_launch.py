@@ -138,6 +138,9 @@ def main():
         ensure_render_queue()
         ensure_job_key_secret(temp)
         ensure_private_provider_secret()
+        # Owner-only credit grants resolve existing Firebase users by verified email.
+        deploy.gcloud("projects", "add-iam-policy-binding", deploy.PROJECT,
+                      "--member=" + deploy.MEMBER, "--role=roles/firebaseauth.viewer")
         image = deploy.build_image(temp)
         url = deploy.deploy_gateway(image, before, ORIGINS, temp,
                                     secret_binding=secret_binding)

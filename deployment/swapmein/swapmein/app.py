@@ -31,8 +31,8 @@ from .storage import (Records, check_preparation_capacity, claim_job, reserve_pr
                       check_queue_capacity, reserve_queued_preparation, claim_queued_slot)
 from .tracking import resolve_tracking
 from .diagnostics import emit
-from .accounts import verify_account, bind_job, archive_completed, index_path
-from .commerce import (generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
+from .accounts import lookup_credit_recipient, verify_account, bind_job, archive_completed, index_path
+from .commerce import (grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
                        save_catalog, staff_role, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 from .job_key import protect_key, recover_key
@@ -90,6 +90,7 @@ async def protect_requests(request: Request, call_next):
 
 @app.exception_handler(PublicError)
 async def public_error(_request, error):
+    emit("api_request_rejected", error=error, route=_request.scope.get("route").path if _request.scope.get("route") else "unmatched", http_status=error.status_code, public_code=error.code)
     content = {"message": error.message}
     if error.code is not None:
         content["code"] = error.code
@@ -100,6 +101,13 @@ async def public_error(_request, error):
         content["segment_id"] = segment_id
     headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
     return JSONResponse(content, status_code=error.status_code, headers=headers)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request, error):
+    emit("api_unexpected_error", error=error,
+         route=request.scope.get("route").path if request.scope.get("route") else "unmatched")
+    return JSONResponse({"message": "The request could not be completed. Your existing jobs are retained."}, status_code=500)
 
 
 @app.exception_handler(RequestValidationError)
@@ -251,6 +259,52 @@ class ProviderSelection(BaseModel):
     access_mode: Literal["api-key", "credits"] = "api-key"
 
 
+class CreditGrant(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    email: str = Field(min_length=3, max_length=254)
+    credits: int = Field(ge=1, le=1000000)
+    reason: str = Field(min_length=3, max_length=300)
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class ClientDiagnostic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request"]
+    error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "Unknown"] = "Unknown"
+    http_status: int | None = Field(default=None, ge=400, le=599)
+    job_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+
+
+@app.post("/api/diagnostics", status_code=202)
+def client_diagnostic(body: ClientDiagnostic, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    # Bound ingestion per account in storage so multiple gateway instances agree.
+    bucket = int(time.time() // 60)
+    def reserve(current):
+        count = current.get("count", 0) if current and current.get("minute") == bucket else 0
+        if count >= 10:
+            raise PublicError("Diagnostic limit reached.", 429)
+        return {"minute": bucket, "count": count + 1}
+    records.update(f"accounts/{account['account_id']}/diagnostics-limit.json", reserve)
+    if body.job_id:
+        job, _ = records.read(f"jobs/{body.job_id}.json")
+        if not job or job.get("account_id") != account["account_id"]:
+            raise PublicError("Clip not found.", 404)
+    emit("frontend_error", severity="ERROR", account_id=account["account_id"], **body.model_dump())
+    return {"received": True}
+
+
+@app.post("/api/commerce/admin/grant-credits")
+def admin_grant_credits(body: CreditGrant, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, actor, {"owner"})
+    email = valid_account_email(body.email)
+    recipient = lookup_credit_recipient(settings.project, email)
+    return grant_credits(records, actor, recipient, body.credits, body.reason, body.request_id)
+
+
 class CreditPack(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str
@@ -356,7 +410,7 @@ def update_private_provider_key(body: PrivateProviderKey, x_firebase_token: str 
     key = provider_key(body.key)
     balance = selected_provider("reAPI").balance(key)
     save_server_provider_key(key)
-    emit("private_provider_key_saved")
+    emit("private_provider_key_saved", actor_id=digest(account["email"]))
     return {"configured": True, "balance_usd": round(balance / 1000, 3)}
 
 
@@ -369,6 +423,7 @@ def update_commerce_staff(body: StaffUpdate, x_firebase_token: str | None = Head
     path = f"commerce/staff/{digest(email)}.json"
     record = records.update(path, lambda current: {"email": email, "role": body.role,
         "active": body.active, "updated_at": time.time(), "updated_by": account["email"]})
+    emit("admin_staff_changed", actor_id=digest(account["email"]), target_id=digest(email), role=body.role, active=body.active)
     return {"email": record["email"], "role": record["role"], "active": record["active"]}
 
 
@@ -381,6 +436,7 @@ def update_api_key_access(body: ApiKeyAccessUpdate, x_firebase_token: str | None
     path = f"commerce/api-key-access/{digest(email)}.json"
     record = records.update(path, lambda current: {"email": email, "enabled": body.enabled,
         "updated_at": time.time(), "updated_by": actor["email"]})
+    emit("admin_key_access_changed", actor_id=digest(actor["email"]), target_id=digest(email), enabled=body.enabled)
     return {"email": record["email"], "enabled": record["enabled"]}
 
 
@@ -489,6 +545,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
             job["generation_credits"] = generation_credit_cost(options.trim[1] - options.trim[0], public_catalog(records)["credits_per_generation"])
+            emit("generation_quote_created", job_id=job_id, duration=options.trim[1] - options.trim[0], credits=job["generation_credits"])
         job = await run_in_threadpool(bind_job, records, job, active_session)
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
         record_created = True
@@ -568,6 +625,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         manifest["auto_key_ciphertext"] = auto_key
     if manifest["access_mode"] == "credits":
         manifest["generation_credits"] = generation_credit_cost(options.setup.trim[1] - options.setup.trim[0], public_catalog(records)["credits_per_generation"])
+        emit("generation_quote_created", job_id=job_id, duration=options.setup.trim[1] - options.setup.trim[0], credits=manifest["generation_credits"])
     records.create(prefix + "manifest.json", manifest)
     return {"id": job_id, "source": source, "reference": reference}
 
@@ -968,6 +1026,8 @@ def provider_status(job_id: str, job: dict, key: str):
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
     body = provider.status(key, job["provider_task"])
+    if body.get("status") != job.get("provider_state"):
+        emit("provider_state_changed", job_id=job_id, provider=job.get("provider"), state=body.get("status") if isinstance(body.get("status"), str) and body.get("status") in {"failed", "completed", "queued", "pending", "processing", "running", "generating"} else "unknown")
     if body.get("status") == "failed":
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
             "auto_key_ciphertext": None,
@@ -986,6 +1046,7 @@ def provider_status(job_id: str, job: dict, key: str):
             "provider_state": state, "provider_checked_at": time.time()}
             if current["status"] == "generating" else current)
         return view(checked)
+    emit("provider_generation_completed", job_id=job_id, provider=job.get("provider"))
     try:
         output_url = body["output"]["video_urls"][0]
         validate_media_url(output_url)

@@ -87,6 +87,7 @@ class Cloud:
             task.schedule_time = scheduled
         self.tasks.create_task(parent=self.tasks.queue_path(settings.project, settings.region, queue),
                                task=task, retry=None, timeout=20)
+        emit("background_task_queued", job_id=job_id, kind=kind, queue=queue, delay_seconds=delay_seconds)
 
     def blob(self, bucket: str, key: str):
         if ".." in key or key.startswith("/"):

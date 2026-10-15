@@ -61,3 +61,24 @@ def archive_completed(records, job: dict):
         "expires_at": time.time() + LIBRARY_SECONDS, "output_uri": job["output_uri"],
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),
     })
+
+
+def lookup_credit_recipient(project: str, email: str) -> dict:
+    """Resolve the existing Firebase identity, never a caller-supplied account ID."""
+    import httpx
+    from .cloud import access_token
+    try:
+        response = httpx.post(f"https://identitytoolkit.googleapis.com/v1/projects/{project}/accounts:lookup",
+            headers={"Authorization": "Bearer " + access_token()}, json={"email": [email]}, timeout=15)
+        response.raise_for_status()
+        users = response.json().get("users", [])
+    except Exception as error:
+        from .diagnostics import emit
+        emit("admin_account_lookup_failed", error=error)
+        raise PublicError("Account lookup is unavailable. No credits were granted.", 503) from None
+    matches = [user for user in users if user.get("email", "").strip().lower() == email
+               and user.get("emailVerified") is True and not user.get("disabled")
+               and any(provider.get("providerId") == "google.com" for provider in user.get("providerUserInfo", []))]
+    if len(matches) != 1 or not isinstance(matches[0].get("localId"), str) or not matches[0]["localId"]:
+        raise PublicError("No active Google account found. Ask the user to sign in to recastfx first.", 404)
+    return {"account_id": digest(matches[0]["localId"]), "email": email}
