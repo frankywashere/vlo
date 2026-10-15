@@ -35,6 +35,7 @@ const live = vi.hoisted(() => ({
   reset: vi.fn(),
   clear: vi.fn(),
 }));
+vi.mock("../hooks/useLiveCredits", () => ({useLiveCredits: () => ({catalog: null, wallet: {balance: 2000}, error: ""})}));
 vi.mock("../hooks/useLivePipeline", () => ({ useLivePipeline: () => live }));
 vi.mock("../services/livePipeline", () => ({ isSecureLiveOrigin: () => true }));
 vi.mock("../services/commerce", () => ({ loadAccountAccess: async () => ({api_key_enabled: true, role: null}) }));

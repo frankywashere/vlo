@@ -118,6 +118,14 @@ function AccountWorkspace({
     return () => { active = false; };
   }, [account.user]);
   useEffect(() => () => useCharSwapStore.getState().reset(), []);
+  useEffect(() => {
+    if (!account.user) return;
+    const url = new URL(globalThis.location.href);
+    if (!["success", "cancelled"].includes(url.searchParams.get("checkout") ?? "")) return;
+    setCommerceOpen(true);
+    url.searchParams.delete("checkout");
+    globalThis.history.replaceState(null, "", url.toString());
+  }, [account.user]);
   function navigate(next: typeof view) {
     onDestination(next);
     if (next !== "home" && !account.user) {
@@ -177,6 +185,7 @@ function AccountWorkspace({
             onSettingsClose={() => setSettingsOpen(false)}
             accountLabel={label}
             onAccount={() => setAccountOpen(true)}
+            onCredits={() => setCommerceOpen(true)}
           />
         </Box>
       )}
@@ -256,7 +265,7 @@ function AccountWorkspace({
           )}
         </DialogActions>
       </Dialog>
-      {account.user && <CommerceDialog open={commerceOpen} onClose={() => setCommerceOpen(false)} />}
+      {account.user && <CommerceDialog open={commerceOpen} onClose={() => {setCommerceOpen(false); globalThis.dispatchEvent(new Event("recastfx:credits-updated"));}} />}
     </Box>
   );
 }

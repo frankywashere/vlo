@@ -31,9 +31,12 @@ records its checks and the remaining generation-quality limits.
 
 Multiple-person generation, automatic identity continuity across cuts, and automated face
 re-identification are not implemented. The Admin page exposes owner-only switches
-for sandbox credit checkout and credit-funded generation. Both default off and
-require private gateway credentials. Checkout accepts Stripe test keys only;
-live payments remain blocked pending webhook delivery and refund review.
+for credit checkout and credit-funded generation. Both default off and require
+private gateway credentials. `STRIPE_MODE` explicitly selects test or live keys,
+sessions and webhook events; the live account ID must be pinned.
+Prices are in USD: one credit is US$0.01, packs start at US$20.00, and the initial
+flat generation charge is 150 credits (US$1.50), regardless of clip duration.
+The owner/pricing admin can edit pack prices and the flat generation price.
 The walkthrough may illustrate later capabilities, but those services are not
 implemented. “Check all scenes” prepares the selected section. With masking off,
 SAM is skipped and the user reviews the original-picture guide. With masking on,
@@ -107,8 +110,10 @@ the upload ticket. The gateway encrypts it with a Cloud Secret Manager-backed
 key, binds it to that job ID and original key fingerprint, and retains the
 ciphertext in private records for at most two days. It removes the ciphertext
 when provider processing finishes. Raw keys never enter setup JSON, upload URLs,
-Cloud Tasks, or saved job records. Credit-funded jobs instead use the private
-`REAPI_SERVER_KEY` runtime secret, which is not exposed to the browser.
+Cloud Tasks, or saved job records. Credit-funded jobs instead load the private
+key from the scoped `recastfx-provider-key` Google Secret Manager secret, cached
+for at most one minute. The legacy `REAPI_SERVER_KEY` environment binding remains
+supported when `REAPI_SECRET_NAME` is unset. Neither key is exposed to customers.
 
 | Endpoint | Authentication and input | Response |
 | --- | --- | --- |
@@ -407,8 +412,29 @@ python3 deployment/swapmein/deploy.py
 worker change. `--allowed-origin` may be repeated for authorized HTTPS origins.
 Do not add a provider key to CLI arguments or a plaintext environment file.
 `deploy_launch.py` provisions the `recastfx-job-key` Secret Manager binding for
-temporary Easy-mode API-key encryption. The recastfx-funded path is designed to
-receive a separate `REAPI_SERVER_KEY` Secret Manager binding at runtime.
+temporary Easy-mode API-key encryption. It also provisions the scoped
+`recastfx-provider-key` secret; only the gateway can read/add versions, and only
+the owner can save a validated provider key through Admin.
+
+For live payments, first create the dedicated Stripe key and live webhook
+endpoint, then store their secrets as `recastfx-stripe-live-key` and
+`recastfx-stripe-live-webhook` in Secret Manager. Never pass secret values on
+command lines or commit them. Deploy with:
+
+```sh
+python3 deployment/swapmein/deploy_launch.py --stripe-live-account acct_REVIEWED_LIVE_ACCOUNT
+```
+
+Later deployments preserve payment mode, account ID and secret bindings.
+Hosted Checkout disables Adaptive Pricing so charges remain in USD. A private
+order snapshot is saved before creating the session; only signed, paid events
+from the configured mode can fund its account wallet, exactly once. Subscribe
+the live webhook at `https://recastfx.com/api/commerce/stripe-webhook` to
+`checkout.session.completed`, `checkout.session.async_payment_succeeded` and
+`charge.refunded`. Dashboard refunds reverse the corresponding credits,
+including partial/reordered refunds; a spent balance can become negative and
+cannot fund another generation. Disputes require operator review. A browser
+success return never grants credits. Stripe Tax is not enabled automatically.
 
 Build staging includes only `Dockerfile`, `requirements.txt` and runtime Python
 files, rejecting source symlinks. It excludes local media, `.secrets`, ADC files,

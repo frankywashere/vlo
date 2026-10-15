@@ -6,6 +6,8 @@ Does not activate workers or replace the original API service.
 """
 import json
 import base64
+import argparse
+import re
 from pathlib import Path
 import secrets
 import tempfile
@@ -17,6 +19,41 @@ ORIGINS = ["https://recastfx-franky.web.app", "https://recastfx-franky.firebasea
 ORIGINAL_ORIGINS = [f"https://{deploy.PROJECT}.web.app", f"https://{deploy.PROJECT}.firebaseapp.com"]
 RENDER_QUEUE = "recastfx-renders"
 JOB_KEY_SECRET = "recastfx-job-key"
+PROVIDER_KEY_SECRET = "recastfx-provider-key"
+
+
+def ensure_private_provider_secret():
+    existing = deploy.gcloud("secrets", "describe", PROVIDER_KEY_SECRET, optional=True)
+    if not existing:
+        deploy.gcloud("secrets", "create", PROVIDER_KEY_SECRET, "--replication-policy=automatic")
+    for role in ("roles/secretmanager.secretAccessor", "roles/secretmanager.secretVersionAdder"):
+        deploy.gcloud("secrets", "add-iam-policy-binding", PROVIDER_KEY_SECRET,
+                      "--member=" + deploy.MEMBER, "--role=" + role)
+
+
+def runtime_settings(current: dict, live_account: str | None = None):
+    env = current.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])
+    values = {item["name"]: item["value"] for item in env
+              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID"} and "value" in item}
+    bindings = {}
+    for item in env:
+        ref = item.get("valueFrom", {}).get("secretKeyRef")
+        if ref:
+            bindings[item["name"]] = ref["name"] + ":" + ref["key"]
+    bindings["RECASTFX_JOB_KEY"] = JOB_KEY_SECRET + ":latest"
+    if live_account:
+        if not re.fullmatch(r"acct_[a-zA-Z0-9]+", live_account):
+            raise deploy.SetupError("A valid live Stripe account ID is required")
+        values.update(STRIPE_MODE="live", STRIPE_ACCOUNT_ID=live_account)
+        for name, secret in {"STRIPE_SECRET_KEY": "recastfx-stripe-live-key",
+                             "STRIPE_WEBHOOK_SECRET": "recastfx-stripe-live-webhook"}.items():
+            version = deploy.gcloud("secrets", "versions", "describe", "latest", "--secret=" + secret)
+            if version.get("state") != "ENABLED":
+                raise deploy.SetupError("Live payment secret is unavailable: " + secret)
+            deploy.gcloud("secrets", "add-iam-policy-binding", secret,
+                          "--member=" + deploy.MEMBER, "--role=roles/secretmanager.secretAccessor")
+            bindings[name] = secret + ":latest"
+    return values, ",".join(name + "=" + ref for name, ref in sorted(bindings.items()))
 
 
 def ensure_job_key_secret(temp: Path):
@@ -55,14 +92,20 @@ def ensure_render_queue():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stripe-live-account", help="Bind the reviewed live Stripe secrets to this verified account ID.")
+    args = parser.parse_args()
     deploy.SERVICE = "recastfx-api"
     deploy.IMAGE_REPOSITORY = f"{deploy.REGION}-docker.pkg.dev/{deploy.PROJECT}/proof/recastfx-gateway"
     base_env = deploy.deployment_env
+    runtime_env = {}
     deploy.deployment_env = lambda workers, origins, url: {
         **base_env(workers, origins, url), "REQUIRE_ACCOUNT": "true",
         "RENDER_TASK_QUEUE": RENDER_QUEUE,
         "COMMERCE_OWNER_EMAILS": "frank@whipsnapfilms.com",
         "RECASTFX_CHECKOUT_RETURN_ORIGIN": "https://recastfx.com",
+        "REAPI_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{PROVIDER_KEY_SECRET}",
+        **runtime_env,
     }
     project = deploy.gcloud("projects", "describe", deploy.PROJECT)
     if str(project.get("projectNumber")) != deploy.PROJECT_NUMBER:
@@ -71,6 +114,8 @@ def main():
     if not billing.get("billingEnabled") or billing.get("billingAccountName") != "billingAccounts/" + deploy.BILLING_ACCOUNT:
         raise deploy.SetupError("Unexpected billing account")
     deploy.verify_cap()
+    current = deploy.gcloud("run", "services", "describe", deploy.SERVICE, f"--region={deploy.REGION}", optional=True) or {}
+    runtime_env, secret_binding = runtime_settings(current, args.stripe_live_account)
     before = deploy.worker_details()
     original = deploy.gcloud("run", "services", "describe", "swapmein-api", f"--region={deploy.REGION}")
     deploy.verify_scaler_scope()
@@ -92,9 +137,10 @@ def main():
                 raise deploy.SetupError("Required queue is paused")
         ensure_render_queue()
         ensure_job_key_secret(temp)
+        ensure_private_provider_secret()
         image = deploy.build_image(temp)
         url = deploy.deploy_gateway(image, before, ORIGINS, temp,
-                                    secret_binding=f"RECASTFX_JOB_KEY={JOB_KEY_SECRET}:latest")
+                                    secret_binding=secret_binding)
     after = deploy.worker_details()
     current_original = deploy.gcloud("run", "services", "describe", "swapmein-api", f"--region={deploy.REGION}")
     if before != after or original.get("status", {}).get("latestReadyRevisionName") != current_original.get("status", {}).get("latestReadyRevisionName"):

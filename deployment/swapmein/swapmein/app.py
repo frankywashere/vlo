@@ -36,6 +36,7 @@ from .commerce import (CATALOG_PATH, api_key_permission, apply_wallet_change, de
                        save_catalog, staff_role, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 from .job_key import protect_key, recover_key
+from .provider_credentials import server_provider_key, save_server_provider_key
 
 settings = Settings.from_env()
 app = FastAPI(title="recastfx single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
@@ -129,7 +130,7 @@ def selected_provider(provider_name: str):
 
 def key_for_session(active_session: dict, supplied_key: str | None) -> str:
     if active_session.get("access_mode") == "credits":
-        key = os.getenv("REAPI_SERVER_KEY", "")
+        key = server_provider_key()
         if not feature_view(services()[0])["credit_generation"] or not key:
             raise PublicError("Credit-funded generation is not available yet.", 503)
         return provider_key(key)
@@ -158,7 +159,7 @@ def check_automatic_generation(records, setup: Setup, active_session: dict):
     if not feature_view(records)["credit_generation"]:
         raise PublicError("Credit-funded generation is not available yet.", 503)
     catalog = public_catalog(records)
-    expected_charge = catalog["credits_per_second"] * round(setup.trim[1] - setup.trim[0])
+    expected_charge = catalog["credits_per_generation"]
     if expected_charge <= 0 or wallet_view(records, active_session["account_id"])["balance"] < expected_charge:
         raise PublicError("Add enough recastfx credits before submitting this swap.", 402)
 
@@ -211,7 +212,7 @@ def view(job: dict):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate"]:
+    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
@@ -263,7 +264,7 @@ class CatalogUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     revision: int = Field(ge=0)
     packs: list[CreditPack]
-    credits_per_second: int
+    credits_per_generation: int
 
 
 class FeatureUpdate(BaseModel):
@@ -271,6 +272,11 @@ class FeatureUpdate(BaseModel):
     revision: int = Field(ge=0)
     checkout: bool
     credit_generation: bool
+
+
+class PrivateProviderKey(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    key: str = Field(min_length=8, max_length=512)
 
 
 class CheckoutRequest(BaseModel):
@@ -339,7 +345,19 @@ def update_commerce_features(body: FeatureUpdate, x_firebase_token: str | None =
 def update_commerce_catalog(body: CatalogUpdate, x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_second)
+    return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_generation)
+
+
+@app.post("/api/commerce/admin/provider-key")
+def update_private_provider_key(body: PrivateProviderKey, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, account, {"owner"})
+    key = provider_key(body.key)
+    balance = selected_provider("reAPI").balance(key)
+    save_server_provider_key(key)
+    emit("private_provider_key_saved")
+    return {"configured": True, "balance_usd": round(balance / 1000, 3)}
 
 
 @app.post("/api/commerce/admin/staff")
@@ -379,7 +397,7 @@ def commerce_checkout(body: CheckoutRequest, x_firebase_token: str | None = Head
     origin = os.getenv("RECASTFX_CHECKOUT_RETURN_ORIGIN", "https://recastfx.com").rstrip("/")
     if origin not in settings.allowed_origins:
         raise PublicError("Checkout return URL is not configured.", 503)
-    return {"url": create_checkout(account, pack, origin)}
+    return {"url": create_checkout(records, account, pack, origin)}
 
 
 @app.post("/api/commerce/stripe-webhook")
@@ -469,6 +487,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "access_mode": active_session.get("access_mode", "api-key")}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
+        if job["access_mode"] == "credits":
+            job["generation_credits"] = public_catalog(records)["credits_per_generation"]
         job = await run_in_threadpool(bind_job, records, job, active_session)
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
         record_created = True
@@ -546,6 +566,8 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     }
     if auto_key:
         manifest["auto_key_ciphertext"] = auto_key
+    if manifest["access_mode"] == "credits":
+        manifest["generation_credits"] = public_catalog(records)["credits_per_generation"]
     records.create(prefix + "manifest.json", manifest)
     return {"id": job_id, "source": source, "reference": reference}
 
@@ -594,6 +616,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "access_mode": manifest.get("access_mode", "api-key")}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
+        if manifest.get("generation_credits") is not None:
+            job["generation_credits"] = manifest["generation_credits"]
         job = bind_job(records, job, active_session, manifest.get("title", "Your clip"))
         records.create(f"jobs/{job_id}.json", job)
         record_created = True
@@ -868,7 +892,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)
-        charge = catalog["credits_per_second"] * job["duration"]
+        charge = job.get("generation_credits", catalog["credits_per_generation"])
         if not 0 < charge <= 1000000:
             raise PublicError("Credit pricing is not configured yet.", 503)
     else:
@@ -1045,7 +1069,7 @@ def poll_provider_task(task: InternalTask, authorization: str | None = Header(de
             or job.get("provider_poll_token") != task.task_token):
         return {"ok": True}
     try:
-        key = (provider_key(os.getenv("REAPI_SERVER_KEY", ""))
+        key = (provider_key(server_provider_key())
                if job["access_mode"] == "credits" else recover_key(job))
         provider_status(task.job_id, job, key)
     except Exception as error:

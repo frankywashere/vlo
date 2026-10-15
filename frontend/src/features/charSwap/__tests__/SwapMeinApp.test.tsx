@@ -21,6 +21,7 @@ const auth = vi.hoisted(() => ({
   signIn: vi.fn(),
   signOut: vi.fn(),
 }));
+vi.mock("../hooks/useLiveCredits", () => ({useLiveCredits: () => ({catalog: null, wallet: {balance: 2000}, error: ""})}));
 vi.mock("../hooks/useAccount", () => ({ useAccount: () => auth }));
 vi.mock("../services/commerce", () => ({loadAccountAccess: async () => ({api_key_enabled: true, role: null})}));
 vi.mock("../services/accounts", () => ({

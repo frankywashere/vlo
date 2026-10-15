@@ -5,19 +5,33 @@ import time
 
 from .errors import PublicError
 from .security import digest
+from .provider_credentials import provider_key_ready
 
 ACCOUNT_PATTERN = re.compile(r"[a-f0-9]{64}")
 PACK_PATTERN = re.compile(r"[a-z][a-z0-9-]{1,31}")
 CATALOG_PATH = "commerce/catalog.json"
 FEATURES_PATH = "commerce/features.json"
+MIN_PACK_CENTS = 2000
+USD_CENTS_PER_CREDIT = 1
+
+
+def stripe_livemode() -> bool:
+    return os.getenv("STRIPE_MODE", "test") == "live"
+
+
+def stripe_key_ready() -> bool:
+    if stripe_livemode() and not re.fullmatch(r"acct_[a-zA-Z0-9]+", os.getenv("STRIPE_ACCOUNT_ID", "")):
+        return False
+    prefixes = ("sk_live_", "rk_live_") if stripe_livemode() else ("sk_test_", "rk_test_")
+    return os.getenv("STRIPE_SECRET_KEY", "").startswith(prefixes)
 
 
 def feature_readiness() -> dict:
     """Server-side prerequisites; never expose credential values to the client."""
     return {
-        "checkout": bool(os.getenv("STRIPE_SECRET_KEY", "").startswith("sk_test_")
+        "checkout": bool(stripe_key_ready()
                          and os.getenv("STRIPE_WEBHOOK_SECRET", "").startswith("whsec_")),
-        "credit_generation": bool(os.getenv("REAPI_SERVER_KEY")),
+        "credit_generation": provider_key_ready(),
     }
 
 
@@ -26,6 +40,7 @@ def feature_view(records) -> dict:
     current = current or {}
     ready = feature_readiness()
     return {"revision": current.get("revision", 0),
+            "stripe_mode": "live" if stripe_livemode() else "test",
             "checkout": current.get("checkout") is True and ready["checkout"],
             "credit_generation": current.get("credit_generation") is True and ready["credit_generation"],
             "readiness": ready}
@@ -37,10 +52,10 @@ def save_features(records, actor: dict, revision: int, checkout: bool, credit_ge
     catalog, _ = records.read(CATALOG_PATH)
     catalog = catalog or default_catalog()
     if checkout and (not any(pack.get("active") for pack in catalog.get("packs", []))
-                     or catalog.get("credits_per_second", 0) <= 0):
+                     or catalog.get("credits_per_generation", 0) <= 0):
         raise PublicError("Configure an active credit pack and generation price before enabling checkout.", 409)
     if checkout and not ready["checkout"]:
-        raise PublicError("Configure Stripe sandbox checkout and webhook secrets before enabling checkout.", 409)
+        raise PublicError("Configure the matching Stripe key and webhook secret before enabling checkout.", 409)
     if credit_generation and not ready["credit_generation"]:
         raise PublicError("Configure the private provider key before enabling credit-funded generation.", 409)
 
@@ -56,11 +71,11 @@ def save_features(records, actor: dict, revision: int, checkout: bool, credit_ge
 
 
 def default_catalog() -> dict:
-    """Editable sandbox starting prices, used until staff saves a catalog."""
+    """USD credit value and editable flat generation pricing."""
     return {"revision": 0, "packs": [
-        {"id": "starter", "name": "Starter", "credits": 100, "price_cents": 500, "active": True},
-        {"id": "value", "name": "Value", "credits": 500, "price_cents": 2000, "active": True},
-    ], "credits_per_second": 20, "history": []}
+        {"id": "starter", "name": "Starter", "credits": 2000, "price_cents": 2000, "active": True},
+        {"id": "value", "name": "Value", "credits": 5000, "price_cents": 5000, "active": True},
+    ], "credits_per_generation": 150, "history": []}
 
 
 def api_key_permission(records, account: dict) -> bool:
@@ -98,24 +113,28 @@ def public_catalog(records) -> dict:
         "packs": [dict(id=pack["id"], name=pack["name"], credits=pack["credits"],
                        price_cents=pack["price_cents"])
                   for pack in current.get("packs", []) if pack.get("active")],
-        "credits_per_second": current.get("credits_per_second", 0),
-        "configured": any(pack.get("active") for pack in current.get("packs", [])) and current.get("credits_per_second", 0) > 0,
+        "credits_per_generation": current.get("credits_per_generation", 150),
+        "usd_cents_per_credit": USD_CENTS_PER_CREDIT,
+        "minimum_pack_cents": MIN_PACK_CENTS,
+        "stripe_mode": "live" if stripe_livemode() else "test",
+        "configured": any(pack.get("active") for pack in current.get("packs", [])) and current.get("credits_per_generation", 150) > 0,
         "checkout_enabled": feature_view(records)["checkout"],
     }
 
 
-def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_second: int) -> dict:
+def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int) -> dict:
     require_staff(records, actor, {"owner", "pricing_admin"})
-    if not 1 <= credits_per_second <= 100000 or not 1 <= len(packs) <= 8:
+    if not 1 <= credits_per_generation <= 100000 or not 1 <= len(packs) <= 8:
         raise PublicError("Set a valid credit rate and one to eight packs.")
     seen = set()
     for pack in packs:
         if (not PACK_PATTERN.fullmatch(pack["id"]) or pack["id"] in seen
                 or not 1 <= len(pack["name"]) <= 60
                 or not 1 <= pack["credits"] <= 1000000
-                or not 50 <= pack["price_cents"] <= 1000000
+                or not MIN_PACK_CENTS <= pack["price_cents"] <= 1000000
+                or pack["credits"] * USD_CENTS_PER_CREDIT != pack["price_cents"]
                 or type(pack["active"]) is not bool):
-            raise PublicError("Check pack IDs, names, prices and credit amounts.")
+            raise PublicError("Packs must cost at least US$20.00, with one credit per US cent. Check pack IDs and names.")
         seen.add(pack["id"])
 
     def mutate(current):
@@ -124,9 +143,9 @@ def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits
             raise PublicError("Prices changed in another session. Reload before saving.", 409)
         history = current.get("history", [])[-49:]
         history.append({"revision": revision + 1, "actor": actor["email"], "at": time.time(),
-                        "packs": packs, "credits_per_second": credits_per_second})
+                        "packs": packs, "credits_per_generation": credits_per_generation})
         return {"revision": revision + 1, "packs": packs,
-                "credits_per_second": credits_per_second, "history": history}
+                "credits_per_generation": credits_per_generation, "history": history}
 
     return records.update(CATALOG_PATH, mutate)
 

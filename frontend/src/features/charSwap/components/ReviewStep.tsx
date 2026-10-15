@@ -22,6 +22,8 @@ interface ReviewStepProps {
   onRefresh?: () => void;
   accessMode?: "api-key" | "credits";
   sampleCreditBalance?: number;
+  creditBalance?: number;
+  generationCredits?: number;
   hasPreviewKey: boolean;
   isSampleKey: boolean;
   onApiSettings: () => void;
@@ -37,6 +39,8 @@ export function ReviewStep({
   onRefresh,
   accessMode = "api-key",
   sampleCreditBalance = 100,
+  creditBalance,
+  generationCredits = 150,
   hasPreviewKey,
   isSampleKey,
   onApiSettings,
@@ -137,7 +141,7 @@ export function ReviewStep({
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {accessMode === "credits" ? (
-                  live ? "Account credits" : `${sampleCreditBalance} sample credits · Preview`
+                  live ? `${creditBalance === undefined ? "—" : creditBalance.toLocaleString()} credits available` : `${sampleCreditBalance} sample credits · Preview`
                 ) : (
                   <>
                     MiniMax H3 ·{" "}
@@ -171,7 +175,7 @@ export function ReviewStep({
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {accessMode === "credits"
-            ? "Credit checkout is being configured. Your current balance will appear here when pricing is ready."
+            ? `This generation costs ${generationCredits} credits (US$${(generationCredits / 100).toFixed(2)}), regardless of clip length.`
             : `When connected, video generation uses your ${provider} credit balance.`}
         </Typography>
       </Box>
@@ -274,9 +278,9 @@ export function ReviewStep({
           ? accessMode === "credits"
             ? job?.message || ((easyMode ?? true)
               ? "Submit once to prepare your clip and queue generation with recastfx credits. You can follow the job in your Library."
-              : "Credit checkout is being configured. Generation will be available when pricing is ready.")
+              : "Review the prepared guide, then submit once using your recastfx credits. You can follow the job in your Library.")
             : job?.message || ((easyMode ?? true)
-              ? `Submit once to prepare your clip and start generation with your ${provider} key. If you leave before preparation finishes, reopen the job from your Library and enter the key to continue.`
+              ? `Submit once to prepare your clip and start generation with your ${provider} key. The key is encrypted for this job so it can finish after you close the tab.`
               : `Review the prepared guide before generating. This uses your own ${provider} credits.`)
           : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
       </Alert>
@@ -354,6 +358,7 @@ export function ReviewStep({
           disabled={
             !live ||
             (accessMode === "api-key" && (!hasPreviewKey || isSampleKey)) ||
+            (accessMode === "credits" && (creditBalance ?? -1) < generationCredits) ||
             generating ||
             ((easyMode ?? true)
               ? !!job && job.status !== "failed"

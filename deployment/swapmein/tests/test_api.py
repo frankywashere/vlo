@@ -115,7 +115,8 @@ def ready_job(records, owner):
     return job_id
 
 
-def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch):
+@pytest.mark.parametrize("duration", [5, 15])
+def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch, duration):
     client, records, cloud, provider = api
     job_id = "b" * 32
     account_id = "c" * 64
@@ -125,15 +126,15 @@ def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monke
     records.data[f"accounts/{account_id}/wallet.json"] = {"balance": 200, "applied": {}, "transactions": []}
     records.data[f"jobs/{job_id}.json"] = {
         "id": job_id, "owner": "owner", "account_id": account_id,
-        "access_mode": "credits", "status": "ready", "duration": 5,
+        "access_mode": "credits", "status": "ready", "duration": duration,
         "guide_uri": "gs://private-app/guide.mp4", "reference_uri": "gs://private-app/ref.jpg",
-        "setup": {"trim": [0, 5], "anchor": {"x": .5, "y": .5, "time": 1},
+        "setup": {"trim": [0, duration], "anchor": {"x": .5, "y": .5, "time": 1},
                   "easy_mode": True, "auto_generate": True},
     }
     submitted = client.post("/internal/generate", json={"job_id": job_id})
     assert submitted.status_code == 200
     assert len(provider.submissions) == 1
-    assert records.data[f"accounts/{account_id}/wallet.json"]["balance"] == 100
+    assert records.data[f"accounts/{account_id}/wallet.json"]["balance"] == 50
     assert ("poll-provider", job_id) in cloud.enqueued
     assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
     assert len(provider.submissions) == 1

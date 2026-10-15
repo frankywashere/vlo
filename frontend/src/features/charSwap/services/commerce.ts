@@ -11,7 +11,10 @@ export interface CreditPack {
 export interface CreditCatalog {
   currency: "usd";
   packs: CreditPack[];
-  credits_per_second: number;
+  credits_per_generation: number;
+  usd_cents_per_credit: number;
+  minimum_pack_cents: number;
+  stripe_mode: "live" | "test";
   configured: boolean;
   checkout_enabled: boolean;
 }
@@ -32,7 +35,7 @@ export interface CreditAdmin {
   catalog: {
     revision: number;
     packs: CreditPack[];
-    credits_per_second: number;
+    credits_per_generation: number;
   };
 }
 
@@ -40,6 +43,7 @@ export interface CreditFeatures {
   revision: number;
   checkout: boolean;
   credit_generation: boolean;
+  stripe_mode?: "live" | "test";
   readiness: { checkout: boolean; credit_generation: boolean };
 }
 
@@ -101,6 +105,10 @@ export function saveCreditFeatures(features: Pick<CreditFeatures, "revision" | "
 
 export function saveCreditCatalog(catalog: CreditAdmin["catalog"]) {
   return commerceRequest<CreditAdmin["catalog"]>("/api/commerce/admin/catalog", catalog);
+}
+
+export function savePrivateProviderKey(key: string) {
+  return commerceRequest<{configured: boolean; balance_usd: number}>("/api/commerce/admin/provider-key", {key});
 }
 
 export function setCreditStaff(email: string, role: "pricing_admin" | "viewer", active: boolean) {

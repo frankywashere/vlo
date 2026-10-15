@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { CharSwapWalkthrough } from "../CharSwapWalkthrough";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { DemoManifest } from "../services/demo";
+vi.mock("../hooks/useLiveCredits", () => ({useLiveCredits: () => ({catalog: null, wallet: {balance: 2000}, error: ""})}));
 vi.mock("../services/commerce", () => ({loadAccountAccess: async () => ({api_key_enabled: true, role: null})}));
 
 const sample: DemoManifest = {

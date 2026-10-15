@@ -32,6 +32,7 @@ export interface LivePipelineJob {
   provider?: GenerationProvider;
   access_mode?: GenerationAccessMode;
   app_credits_charged?: number;
+  generation_credits?: number;
   id: string;
   status: LiveJobStatus;
   message?: string;
@@ -244,6 +245,7 @@ function readJob(value: unknown): LivePipelineJob {
     id: value.id,
     status: value.status as LiveJobStatus,
   };
+  if (value.access_mode === "credits" || value.access_mode === "api-key") job.access_mode = value.access_mode;
   if (["depth", "cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
@@ -287,6 +289,8 @@ function readJob(value: unknown): LivePipelineJob {
     "actual_provider_credits",
     "generation_started_at",
     "provider_checked_at",
+    "generation_credits",
+    "app_credits_charged",
   ] as const) {
     if (
       typeof value[field] === "number" &&

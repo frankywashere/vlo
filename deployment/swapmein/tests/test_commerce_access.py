@@ -14,21 +14,26 @@ from swapmein.stripe_billing import fulfill_checkout
 from test_api import api
 
 
-def test_sandbox_starting_prices_are_editable_and_checkout_stays_off(api, monkeypatch):
+def test_usd_prices_start_at_twenty_and_generation_has_one_flat_price(api, monkeypatch):
     _, records, _, _ = api
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
     monkeypatch.setenv("RECASTFX_CHECKOUT_ENABLED", "false")
     initial = public_catalog(records)
-    assert [(pack["credits"], pack["price_cents"]) for pack in initial["packs"]] == [(100, 500), (500, 2000)]
-    assert initial["credits_per_second"] == 20
+    assert [(pack["credits"], pack["price_cents"]) for pack in initial["packs"]] == [(2000, 2000), (5000, 5000)]
+    assert initial["credits_per_generation"] == 150
+    assert initial["currency"] == "usd" and initial["usd_cents_per_credit"] == 1
     assert not initial["checkout_enabled"]
     owner = {"email": "frank@whipsnapfilms.com"}
     updated = save_catalog(records, owner, 0, [
-        {"id": "starter", "name": "Starter", "credits": 100, "price_cents": 700, "active": True},
-    ], 15)
+        {"id": "starter", "name": "Starter", "credits": 3000, "price_cents": 3000, "active": True},
+    ], 175)
     assert updated["revision"] == 1
-    assert public_catalog(records)["packs"][0]["price_cents"] == 700
-    assert public_catalog(records)["credits_per_second"] == 15
+    assert public_catalog(records)["packs"][0]["price_cents"] == 3000
+    assert public_catalog(records)["credits_per_generation"] == 175
+    for credits, price in [(1999, 1999), (2000, 3000)]:
+        with pytest.raises(PublicError):
+            save_catalog(records, owner, 1, [{"id": "bad", "name": "Invalid", "credits": credits,
+                "price_cents": price, "active": True}], 150)
 
 
 def test_owner_feature_switches_require_credentials_and_are_revisioned(api, monkeypatch):
@@ -58,6 +63,18 @@ def test_owner_feature_switches_require_credentials_and_are_revisioned(api, monk
     assert not disabled["checkout"] and not disabled["credit_generation"]
 
 
+def test_live_checkout_requires_live_key_and_pinned_account(api, monkeypatch):
+    _, records, _, _ = api
+    monkeypatch.setenv("STRIPE_MODE", "live")
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_example")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_example")
+    assert not feature_view(records)["readiness"]["checkout"]
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "rk_live_example")
+    assert not feature_view(records)["readiness"]["checkout"]
+    monkeypatch.setenv("STRIPE_ACCOUNT_ID", "acct_example")
+    assert feature_view(records)["readiness"]["checkout"]
+
+
 def test_feature_switch_endpoint_is_owner_only(api, monkeypatch):
     client, _, _, _ = api
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
@@ -68,6 +85,23 @@ def test_feature_switch_endpoint_is_owner_only(api, monkeypatch):
     response = client.post("/api/commerce/admin/features", headers={"X-Firebase-Token": "owner"}, json=body)
     assert response.status_code == 200
     assert response.json()["revision"] == 1
+
+
+def test_private_provider_key_is_owner_only_validated_and_never_echoed(api, monkeypatch):
+    client, _, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "owner@example.com")
+    monkeypatch.setattr(gateway, "verify_account", lambda token, project: {
+        "account_id": digest(token), "email": token + "@example.com"})
+    saved = []
+    monkeypatch.setattr(gateway, "save_server_provider_key", saved.append)
+    endpoint = "/api/commerce/admin/provider-key"
+    key = "private-generation-example-key"
+    assert client.post(endpoint, headers={"X-Firebase-Token": "user"}, json={"key": key}).status_code == 403
+    assert saved == []
+    response = client.post(endpoint, headers={"X-Firebase-Token": "owner"}, json={"key": key})
+    assert response.status_code == 200 and response.json()["configured"]
+    assert saved == [key]
+    assert key not in response.text
 
 
 def test_owner_controls_api_key_access_and_revocation_blocks_existing_session(api, monkeypatch):
@@ -100,21 +134,68 @@ def test_owner_controls_api_key_access_and_revocation_blocks_existing_session(ap
     assert client.get("/api/preparation-capacity", headers={"Authorization": "Bearer " + token}).status_code == 403
 
 
-def test_paid_sandbox_checkout_grants_wallet_once(api):
-    _, records, _, _ = api
+def paid_event(records, live=False, order_ref="a" * 32):
     account_id = digest("buyer")
-    event = {"type": "checkout.session.completed", "data": {"object": {
-        "id": "cs_test_example", "livemode": False, "mode": "payment", "payment_status": "paid",
-        "currency": "usd", "amount_total": 500, "client_reference_id": account_id,
+    session_id = "cs_live_example" if live else "cs_test_example"
+    records.data[f"commerce/orders/{order_ref}.json"] = {
+        "account_id": account_id, "credits": 2000, "price_cents": 2000,
+        "livemode": live, "currency": "usd", "session_id": session_id, "status": "open"}
+    return {"type": "checkout.session.completed", "livemode": live, "data": {"object": {
+        "id": session_id, "livemode": live, "mode": "payment", "payment_status": "paid",
+        "currency": "usd", "amount_total": 2000, "client_reference_id": account_id,
         "metadata": {"kind": "recastfx_credits", "account_id": account_id,
-                     "credits": "100", "price_cents": "500", "order_ref": "a" * 32},
+                     "credits": "2000", "price_cents": "2000", "order_ref": order_ref},
     }}}
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_paid_checkout_grants_wallet_once_and_rejects_other_environment(api, monkeypatch, live):
+    _, records, _, _ = api
+    monkeypatch.setenv("STRIPE_MODE", "live" if live else "test")
+    account_id = digest("buyer")
+    event = paid_event(records, live)
     assert fulfill_checkout(records, event)
     assert fulfill_checkout(records, event)
-    assert wallet_view(records, account_id)["balance"] == 100
-    event["data"]["object"]["livemode"] = True
+    assert wallet_view(records, account_id)["balance"] == 2000
+    event["data"]["object"]["livemode"] = not live
     assert not fulfill_checkout(records, event)
-    assert wallet_view(records, account_id)["balance"] == 100
+    assert wallet_view(records, account_id)["balance"] == 2000
+
+
+def test_fulfillment_requires_saved_order_snapshot_and_paid_usd(api):
+    _, records, _, _ = api
+    event = paid_event(records)
+    event["data"]["object"]["payment_status"] = "unpaid"
+    assert not fulfill_checkout(records, event)
+    event["data"]["object"]["payment_status"] = "paid"
+    event["data"]["object"]["currency"] = "cad"
+    assert not fulfill_checkout(records, event)
+    event["data"]["object"]["currency"] = "usd"
+    records.data[f"commerce/orders/{'a' * 32}.json"]["credits"] = 3000
+    with pytest.raises(PublicError):
+        fulfill_checkout(records, event)
+    assert wallet_view(records, digest("buyer"))["balance"] == 0
+
+
+@pytest.mark.parametrize("refund_first", [False, True])
+def test_refunds_reverse_only_the_refunded_credits_once_even_if_reordered(api, refund_first):
+    _, records, _, _ = api
+    paid = paid_event(records)
+    charge = {"livemode": False, "currency": "usd", "amount": 2000, "amount_refunded": 500,
+              "metadata": paid["data"]["object"]["metadata"]}
+    refunded = {"type": "charge.refunded", "livemode": False, "data": {"object": charge}}
+    if refund_first:
+        assert fulfill_checkout(records, refunded)
+        assert wallet_view(records, digest("buyer"))["balance"] == 0
+    assert fulfill_checkout(records, paid)
+    assert fulfill_checkout(records, refunded)
+    assert fulfill_checkout(records, refunded)
+    assert wallet_view(records, digest("buyer"))["balance"] == 1500
+    charge["amount_refunded"] = 1200
+    assert fulfill_checkout(records, refunded)
+    charge["amount_refunded"] = 500  # delayed earlier notification cannot recredit or debit twice
+    assert fulfill_checkout(records, refunded)
+    assert wallet_view(records, digest("buyer"))["balance"] == 800
 
 
 def test_pricing_staff_cannot_grant_provider_key_access(api, monkeypatch):
@@ -129,8 +210,8 @@ def test_pricing_staff_cannot_grant_provider_key_access(api, monkeypatch):
     assert client.post("/api/commerce/admin/api-key-access", headers=editor_headers,
                        json={"email": "someone@example.com", "enabled": True}).status_code == 403
     assert client.post("/api/commerce/admin/catalog", headers=editor_headers, json={
-        "revision": 0, "credits_per_second": 10,
-        "packs": [{"id": "starter", "name": "Starter", "credits": 100, "price_cents": 500, "active": True}],
+        "revision": 0, "credits_per_generation": 150,
+        "packs": [{"id": "starter", "name": "Starter", "credits": 2000, "price_cents": 2000, "active": True}],
     }).status_code == 200
 
 
@@ -138,13 +219,8 @@ def test_webhook_requires_valid_raw_body_signature(api, monkeypatch):
     client, records, _, _ = api
     secret = "whsec_testonly"
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", secret)
-    account_id = digest("webhook-buyer")
-    event = {"id": "evt_test", "object": "event", "type": "checkout.session.completed",
-             "data": {"object": {"id": "cs_test_webhook", "livemode": False,
-                  "mode": "payment", "payment_status": "paid", "currency": "usd",
-                  "amount_total": 500, "client_reference_id": account_id,
-                  "metadata": {"kind": "recastfx_credits", "account_id": account_id,
-                               "credits": "100", "price_cents": "500", "order_ref": "b" * 32}}}}
+    account_id = digest("buyer")
+    event = {"id": "evt_test", "object": "event", **paid_event(records, order_ref="b" * 32)}
     payload = json.dumps(event, separators=(",", ":")).encode()
     timestamp = int(time.time())
     digest_hex = hmac.new(secret.encode(), f"{timestamp}.".encode() + payload, hashlib.sha256).hexdigest()
@@ -154,25 +230,34 @@ def test_webhook_requires_valid_raw_body_signature(api, monkeypatch):
     assert wallet_view(records, account_id)["balance"] == 0
     assert client.post(endpoint, content=payload, headers={"Stripe-Signature": signature}).status_code == 200
     assert client.post(endpoint, content=payload, headers={"Stripe-Signature": signature}).status_code == 200
-    assert wallet_view(records, account_id)["balance"] == 100
+    assert wallet_view(records, account_id)["balance"] == 2000
 
 
-def test_checkout_binds_verified_account_and_pack_snapshot(monkeypatch):
+@pytest.mark.parametrize("live", [False, True])
+def test_checkout_binds_verified_account_and_pack_snapshot(api, monkeypatch, live):
+    _, records, _, _ = api
+    monkeypatch.setenv("STRIPE_MODE", "live" if live else "test")
     captured = {}
     class Sessions:
         def create(self, params, options):
             captured.update(params=params, options=options)
-            return type("Session", (), {"id": "cs_test_example", "url": "https://checkout.stripe.com/c/pay/test"})()
+            return type("Session", (), {"id": "cs_live_example" if live else "cs_test_example", "livemode": live,
+                "url": "https://checkout.stripe.com/c/pay/example"})()
     class Client:
         v1 = type("V1", (), {"checkout": type("Checkout", (), {"sessions": Sessions()})()})()
     monkeypatch.setattr(billing, "stripe_client", lambda: Client())
     account = {"account_id": digest("checkout-buyer"), "email": "buyer@example.com"}
-    pack = {"id": "starter", "name": "Starter", "credits": 100, "price_cents": 500}
-    assert billing.create_checkout(account, pack, "https://recastfx.com").startswith("https://checkout.stripe.com/")
+    pack = {"id": "starter", "name": "Starter", "credits": 2000, "price_cents": 2000}
+    assert billing.create_checkout(records, account, pack, "https://recastfx.com").startswith("https://checkout.stripe.com/")
     params = captured["params"]
     assert params["client_reference_id"] == account["account_id"]
     assert params["customer_email"] == account["email"]
-    assert params["line_items"][0]["price_data"]["unit_amount"] == 500
-    assert params["metadata"]["credits"] == "100"
+    assert params["line_items"][0]["price_data"]["unit_amount"] == 2000
+    assert params["line_items"][0]["price_data"]["currency"] == "usd"
+    assert params["adaptive_pricing"] == {"enabled": False}
+    assert "payment_method_types" not in params
+    assert params["metadata"]["credits"] == "2000"
     assert params["payment_intent_data"]["metadata"] == params["metadata"]
     assert captured["options"]["idempotency_key"].startswith("recastfx-checkout-")
+    order = records.data["commerce/orders/" + params["metadata"]["order_ref"] + ".json"]
+    assert order["livemode"] is live and order["status"] == "open"

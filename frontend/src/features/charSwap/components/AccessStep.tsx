@@ -24,6 +24,11 @@ interface AccessStepProps {
   isSampleKey: boolean;
   onApiSettings: () => void;
   sampleCreditBalance: number;
+  creditBalance?: number;
+  generationCredits?: number;
+  creditsAvailable?: boolean;
+  creditError?: string;
+  onCredits?: () => void;
   onAddSampleCredits: () => void;
 }
 
@@ -37,6 +42,11 @@ export function AccessStep({
   isSampleKey,
   onApiSettings,
   sampleCreditBalance,
+  creditBalance,
+  generationCredits = 150,
+  creditsAvailable = false,
+  creditError,
+  onCredits,
   onAddSampleCredits,
 }: AccessStepProps) {
   return (
@@ -81,7 +91,7 @@ export function AccessStep({
             <Box>
               <Typography fontWeight={600}>recastfx credits</Typography>
               <Typography variant="body2" color="text.secondary">
-                Buy credits here. Coming soon.
+                Buy credits here in USD.
               </Typography>
             </Box>
           }
@@ -153,7 +163,7 @@ export function AccessStep({
                   {!live && <Chip label="Preview" size="small" />}
                 </Stack>
                 <Typography variant="body2" color="text.secondary">
-                  {live ? "Open Credits and account access from your profile to see your balance." : `${sampleCreditBalance.toLocaleString()} sample credits`}
+                  {live ? creditBalance === undefined ? "Checking your balance…" : `${creditBalance.toLocaleString()} credits available` : `${sampleCreditBalance.toLocaleString()} sample credits`}
                 </Typography>
               </Box>
             </Stack>
@@ -165,10 +175,14 @@ export function AccessStep({
             >
               Add sample credits
             </Button>}
+            {live && onCredits && <Button variant="outlined" onClick={onCredits} sx={{minHeight: 44}}>Buy credits</Button>}
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            {live ? "Credit pack pricing is being configured. Checkout is unavailable until the owner sets prices." : "App credit purchases are coming soon. This balance and top-up are a preview; no payment is taken and these credits cannot generate videos yet."}
+            {live ? `${generationCredits} credits (US$${(generationCredits / 100).toFixed(2)}) per generation, regardless of clip length. One credit equals US$0.01; credit packs start at US$20.00.` : "App credit purchases are coming soon. This balance and top-up are a preview; no payment is taken and these credits cannot generate videos yet."}
           </Typography>
+          {live && !creditsAvailable && <Alert severity="info" sx={{mt: 2}}>Credit-funded generation is temporarily unavailable.</Alert>}
+          {live && creditBalance !== undefined && creditBalance < generationCredits && <Alert severity="info" sx={{mt: 2}}>Add credits before submitting a generation.</Alert>}
+          {live && creditError && <Alert severity="error" sx={{mt: 2}}>{creditError}</Alert>}
         </Box>
       )}
     </Stack>

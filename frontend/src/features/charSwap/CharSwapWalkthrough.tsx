@@ -40,6 +40,7 @@ import { loadDemo, sampleReviewIssues } from "./services/demo";
 import type { DemoManifest } from "./services/demo";
 import { useLocalAssets } from "./hooks/useLocalAssets";
 import { useLivePipeline } from "./hooks/useLivePipeline";
+import { useLiveCredits } from "./hooks/useLiveCredits";
 import { MAX_SOURCE_BYTES } from "./limits";
 import { isSecureLiveOrigin } from "./services/livePipeline";
 import { PreparationProgress } from "./components/PreparationProgress";
@@ -249,6 +250,7 @@ interface CharSwapWalkthroughProps {
   onAdmin?: () => void;
   accountLabel?: string;
   onAccount?: () => void;
+  onCredits?: () => void;
   onJobChange?: (job: LivePipelineJob, title: string) => void;
   onBusyChange?: (busy: boolean) => void;
   settingsOpen?: boolean;
@@ -263,6 +265,7 @@ export function CharSwapWalkthrough({
   onAdmin,
   accountLabel,
   onAccount,
+  onCredits,
   onJobChange,
   onBusyChange,
   settingsOpen = false,
@@ -356,6 +359,8 @@ export function CharSwapWalkthrough({
   const { reset: resetPipeline } = pipeline;
   const secureSite = isSecureLiveOrigin();
   const live = pipeline.enabled && clip?.mode !== "demo";
+  const creditAccount = useLiveCredits(live && accessMode === "credits", pipeline.job?.status);
+  const generationCredits = pipeline.job?.generation_credits ?? creditAccount.catalog?.credits_per_generation ?? 150;
   const unknownSubmission = pipeline.job?.status === "submission_unknown";
   const lockedAccess = pipeline.busy || unknownSubmission;
   const liveJobId = pipeline.job?.id;
@@ -437,6 +442,7 @@ export function CharSwapWalkthrough({
     pendingReferences.length > 0 ||
     (step === "matches" && !trackingReady) ||
     (live && accessMode === "credits" && !pipeline.creditsAvailable && step === "access") ||
+    (live && accessMode === "credits" && step === "access" && (creditAccount.wallet?.balance ?? -1) < generationCredits) ||
     (step === "access" && accessMode === "api-key" && !hasKey);
   const unresolved = getUnresolvedIssues(state).length;
 
@@ -885,6 +891,11 @@ export function CharSwapWalkthrough({
                   isSampleKey={isSampleKey}
                   onApiSettings={() => setApiSettingsOpen(true)}
                   sampleCreditBalance={sampleCreditBalance}
+                  creditBalance={creditAccount.wallet?.balance}
+                  generationCredits={generationCredits}
+                  creditsAvailable={pipeline.creditsAvailable}
+                  creditError={creditAccount.error}
+                  onCredits={onCredits}
                   onAddSampleCredits={() =>
                     setSampleCreditBalance((balance) => balance + 100)
                   }
@@ -906,6 +917,8 @@ export function CharSwapWalkthrough({
                   }}
                   accessMode={accessMode}
                   sampleCreditBalance={sampleCreditBalance}
+                  creditBalance={creditAccount.wallet?.balance}
+                  generationCredits={generationCredits}
                   hasPreviewKey={hasKey}
                   isSampleKey={isSampleKey}
                   onApiSettings={() => setApiSettingsOpen(true)}
