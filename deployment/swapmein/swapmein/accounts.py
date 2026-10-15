@@ -53,11 +53,12 @@ def bind_job(records, job: dict, session: dict, title: str = "Your clip") -> dic
 def archive_completed(records, job: dict):
     if not job.get("account_id"):
         return
+    completed_at = job.get("completed_at") or job.get("updated_at") or time.time()
     records.update(index_path(job["account_id"], job["id"]), lambda current: {
         **(current or {}), "id": job["id"], "title": job.get("title", "Your clip"),
         "status": "completed", "provider": job.get("provider", "reAPI"),
         "access_mode": job.get("access_mode", "api-key"),
-        "created_at": job["created_at"], "completed_at": time.time(),
+        "created_at": job["created_at"], "completed_at": (current or {}).get("completed_at") or completed_at,
         "expires_at": time.time() + LIBRARY_SECONDS, "output_uri": job["output_uri"],
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),
     })

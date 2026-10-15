@@ -24,6 +24,7 @@ import {
   pollLiveProvider,
   resolveLiveTracking,
 } from "../services/livePipeline";
+import { JobElapsedTime } from "./JobElapsedTime";
 import { SceneTrackingReview } from "./SceneTrackingReview";
 import { loadAccountAccess } from "../services/commerce";
 
@@ -318,6 +319,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                   color={job.status === "completed" ? "success" : "default"}
                 />
               </Box>
+              <JobElapsedTime job={job} />
               {ACTIVE.has(job.status) && (
                 <LinearProgress
                   aria-label={`${job.title} ${job.status}`}
@@ -364,6 +366,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         <DialogContent>
           <Stack spacing={2}>
             <Typography>{selected?.message}</Typography>
+            {selected && <JobElapsedTime job={selected} />}
             {selected?.guide_url && !selected.easy_mode && (
               <Box
                 component="video"

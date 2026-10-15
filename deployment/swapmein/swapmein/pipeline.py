@@ -230,7 +230,7 @@ class Pipeline:
                 output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded, audio_start=job["setup"]["trim"][0])
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
-                completed = self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
+                completed = self.update_job(job_id, status="completed", completed_at=time.time(), message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"])
                 emit("video_export_completed", job_id=job_id, width=output_dimensions["width"], height=output_dimensions["height"],

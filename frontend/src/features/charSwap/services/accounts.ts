@@ -5,6 +5,8 @@ export interface AccountJob extends Omit<LivePipelineJob, "status"> {
   status: LivePipelineJob["status"] | "expired";
   title: string;
   created_at: number;
+  completed_at?: number;
+  updated_at?: number;
   expires_at?: number;
   reference_url?: string;
 }

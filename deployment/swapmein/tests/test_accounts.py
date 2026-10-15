@@ -77,11 +77,14 @@ def test_saved_video_survives_short_lived_preparation_records(api, monkeypatch):
     client, records, *_ = api
     account = digest("a")
     monkeypatch.setattr(gateway, "verify_account", lambda token, project: {"account_id": account})
-    job = {"id": "b" * 32, "account_id": account, "key_fingerprint": digest("key"), "status": "completed", "created_at": time.time(), "title": "Saved", "output_uri": "gs://private-app/library/saved.mp4"}
+    job = {"id": "b" * 32, "account_id": account, "key_fingerprint": digest("key"), "status": "completed", "created_at": time.time(), "title": "Saved", "completed_at": time.time() - 10, "output_uri": "gs://private-app/library/saved.mp4"}
     accounts.bind_job(records, job, job, "Saved")
     accounts.archive_completed(records, job)
     result = client.get("/api/account/jobs").json()["jobs"][0]
     assert result["status"] == "completed" and "output_url" in result
+    assert result["completed_at"] == job["completed_at"]
+    accounts.archive_completed(records, {**job, "completed_at": time.time()})
+    assert client.get("/api/account/jobs").json()["jobs"][0]["completed_at"] == job["completed_at"]
     records.data[accounts.index_path(account, job["id"])]["expires_at"] = time.time() - 1
     result = client.get("/api/account/jobs").json()["jobs"][0]
     assert result["status"] == "expired" and "output_url" not in result

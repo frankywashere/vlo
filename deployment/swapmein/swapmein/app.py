@@ -220,7 +220,7 @@ def view(job: dict):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits"]:
+    for field in ["created_at", "completed_at", "updated_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
@@ -894,6 +894,7 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
             else:
                 public.update(status="expired")
         items.append({**public, "title": item.get("title", "Your clip"), "created_at": item.get("created_at"),
+                      "completed_at": public.get("completed_at") or item.get("completed_at"),
                       "expires_at": item.get("expires_at") or job and job.get("library_expires_at")})
     return {"jobs": items, "retention_days": 30, "limit": 50}
 
