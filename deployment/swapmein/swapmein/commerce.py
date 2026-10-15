@@ -70,8 +70,17 @@ def save_features(records, actor: dict, revision: int, checkout: bool, credit_ge
     return feature_view(records)
 
 
+def generation_credit_cost(duration: float, credits_for_15_seconds: int = 150) -> int:
+    """Round the duration quote up to a whole credit, without float noise."""
+    from decimal import Decimal, ROUND_CEILING
+    import math
+    if not math.isfinite(duration) or not 0 < duration <= 15 or not math.isfinite(credits_for_15_seconds) or credits_for_15_seconds <= 0:
+        raise PublicError("Set a valid clip duration and credit rate.")
+    return int((Decimal(str(round(duration, 6))) * Decimal(str(credits_for_15_seconds)) / Decimal(15)).to_integral_value(rounding=ROUND_CEILING))
+
+
 def default_catalog() -> dict:
-    """USD credit value and editable flat generation pricing."""
+    """USD credit value and editable duration-based generation pricing."""
     return {"revision": 0, "packs": [
         {"id": "starter", "name": "Starter", "credits": 2000, "price_cents": 2000, "active": True},
         {"id": "value", "name": "Value", "credits": 5000, "price_cents": 5000, "active": True},
@@ -114,6 +123,7 @@ def public_catalog(records) -> dict:
                        price_cents=pack["price_cents"])
                   for pack in current.get("packs", []) if pack.get("active")],
         "credits_per_generation": current.get("credits_per_generation", 150),
+        "credits_per_second": current.get("credits_per_generation", 150) / 15,
         "usd_cents_per_credit": USD_CENTS_PER_CREDIT,
         "minimum_pack_cents": MIN_PACK_CENTS,
         "stripe_mode": "live" if stripe_livemode() else "test",

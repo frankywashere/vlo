@@ -10,9 +10,10 @@ import { resizeTrim } from "../utils/trimRange";
 
 interface TrimStepProps {
   demo: DemoManifest | null;
+  estimatedCredits?: number;
 }
 
-export function TrimStep({ demo }: TrimStepProps) {
+export function TrimStep({ demo, estimatedCredits }: TrimStepProps) {
   const { clip, trim, targets, changeTrim } = useCharSwapStore(
     useShallow((s) => ({
       clip: s.clip,
@@ -44,6 +45,7 @@ export function TrimStep({ demo }: TrimStepProps) {
             label={`${(trim[1] - trim[0]).toFixed(1)} seconds`}
           />
         </Stack>
+        {estimatedCredits !== undefined && <Typography role="status" aria-label="Credit estimate" aria-live="polite">Estimated cost: {estimatedCredits} credits</Typography>}
         <TrimRangeSlider value={trim} duration={clip.duration} onChange={changeTrim} />
         <Stack direction="row" spacing={2}>
           <BufferedNumberInput

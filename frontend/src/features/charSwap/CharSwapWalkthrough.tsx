@@ -360,7 +360,9 @@ export function CharSwapWalkthrough({
   const secureSite = isSecureLiveOrigin();
   const live = pipeline.enabled && clip?.mode !== "demo";
   const creditAccount = useLiveCredits(live && accessMode === "credits", pipeline.job?.status);
-  const generationCredits = pipeline.job?.generation_credits ?? creditAccount.catalog?.credits_per_generation ?? 150;
+  const creditsPerSecond = creditAccount.catalog?.credits_per_second ?? (creditAccount.catalog?.credits_per_generation ?? 150) / 15;
+  const trimCredits = Math.ceil(Number(((trim[1] - trim[0]) * creditsPerSecond).toFixed(6)));
+  const generationCredits = pipeline.job?.generation_credits ?? trimCredits;
   const unknownSubmission = pipeline.job?.status === "submission_unknown";
   const lockedAccess = pipeline.busy || unknownSubmission;
   const liveJobId = pipeline.job?.id;
@@ -790,7 +792,7 @@ export function CharSwapWalkthrough({
                       be between seconds.
                     </Alert>
                   )}
-                  <TrimStep demo={demo} />
+                  <TrimStep demo={demo} estimatedCredits={accessMode === "credits" ? trimCredits : undefined} />
                 </>
               )}
               {step === "people" && (

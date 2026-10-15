@@ -35,8 +35,9 @@ for credit checkout and credit-funded generation. Both default off and require
 private gateway credentials. `STRIPE_MODE` explicitly selects test or live keys,
 sessions and webhook events; the live account ID must be pinned.
 Prices are in USD: one credit is US$0.01, packs start at US$20.00, and the initial
-flat generation charge is 150 credits (US$1.50), regardless of clip duration.
-The owner/pricing admin can edit pack prices and the flat generation price.
+generation rate is 10 credits per second: 5 seconds costs 50 credits and 15 seconds costs 150 credits (US$1.50). Quotes round up to whole credits.
+Trim and Review show the selected clip’s credit cost; Review does not show a dollar generation price.
+The owner/pricing admin can edit pack prices and the per-second generation price. The persisted `credits_per_generation` field remains the 15-second price for compatibility; the public catalog exposes `credits_per_second`. New jobs snapshot their duration-based quote before preparation, and existing job quotes remain unchanged.
 The walkthrough may illustrate later capabilities, but those services are not
 implemented. “Check all scenes” prepares the selected section. With masking off,
 SAM is skipped and the user reviews the original-picture guide. With masking on,

@@ -15,7 +15,7 @@ it("shows owner service switches but blocks activation until credentials are rea
   expect(screen.getByRole("switch", { name: "Enable credit checkout" })).toBeDisabled();
   expect(screen.getByRole("switch", { name: "Enable generation using recastfx credits" })).toBeDisabled();
   expect(screen.getByRole("heading", { name: "Account permissions" })).toBeInTheDocument();
-  expect(screen.getByLabelText("Price per generation (USD)")).toHaveValue(1.5);
+  expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.1);
   expect(screen.getByLabelText("Pack price (USD)")).toHaveValue(20);
   expect(screen.getByLabelText("Private reAPI key")).toHaveAttribute("type", "password");
 });

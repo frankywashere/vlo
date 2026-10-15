@@ -32,7 +32,7 @@ export function CommerceDialog({ open, onClose }: CommerceDialogProps) {
     <DialogContent dividers><Stack spacing={2}>
       {error && <Alert severity="error">{error}</Alert>}
       <Typography>{wallet ? wallet.balance.toLocaleString() : "—"} credits available</Typography>
-      {catalog?.configured && <Typography>{catalog.credits_per_generation} credits (US${(catalog.credits_per_generation / 100).toFixed(2)}) per generation. One credit equals US$0.01.</Typography>}
+      {catalog?.configured && <Typography>{catalog.credits_per_second ?? catalog.credits_per_generation / 15} credits per second. A 15-second clip costs {catalog.credits_per_generation} credits.</Typography>}
       {catalog?.stripe_mode === "test" && <Alert severity="info">Sandbox checkout: no real payment is taken.</Alert>}
       {checkoutUrl && <Alert severity="info" action={<Button component="a" href={checkoutUrl} target="_blank" rel="noopener noreferrer">Continue to Stripe</Button>}>Your secure checkout is ready. It opens in another tab so your clip setup stays here.</Alert>}
       <Typography fontWeight={700}>Buy credits</Typography>

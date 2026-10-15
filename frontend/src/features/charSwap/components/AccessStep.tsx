@@ -178,7 +178,7 @@ export function AccessStep({
             {live && onCredits && <Button variant="outlined" onClick={onCredits} sx={{minHeight: 44}}>Buy credits</Button>}
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            {live ? `${generationCredits} credits (US$${(generationCredits / 100).toFixed(2)}) per generation, regardless of clip length. One credit equals US$0.01; credit packs start at US$20.00.` : "App credit purchases are coming soon. This balance and top-up are a preview; no payment is taken and these credits cannot generate videos yet."}
+            {live ? `Your selected clip costs ${generationCredits} credits.` : "App credit purchases are coming soon. This balance and top-up are a preview; no payment is taken and these credits cannot generate videos yet."}
           </Typography>
           {live && !creditsAvailable && <Alert severity="info" sx={{mt: 2}}>Credit-funded generation is temporarily unavailable.</Alert>}
           {live && creditBalance !== undefined && creditBalance < generationCredits && <Alert severity="info" sx={{mt: 2}}>Add credits before submitting a generation.</Alert>}

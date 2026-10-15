@@ -175,7 +175,7 @@ export function ReviewStep({
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {accessMode === "credits"
-            ? `This generation costs ${generationCredits} credits (US$${(generationCredits / 100).toFixed(2)}), regardless of clip length.`
+            ? `This generation costs ${generationCredits} credits.`
             : `When connected, video generation uses your ${provider} credit balance.`}
         </Typography>
       </Box>

@@ -5,6 +5,7 @@ import { useCharSwapStore } from "../../useCharSwapStore";
 import type { ClipAsset, TargetPerson } from "../../model/model";
 import { ClipStep } from "../ClipStep";
 import { TrimStep } from "../TrimStep";
+import { ReviewStep } from "../ReviewStep";
 
 vi.mock("../VideoPreview", () => ({
   VideoPreview: ({ trim }: { trim: [number, number] }) => (
@@ -195,4 +196,22 @@ describe("trim step", () => {
     ).not.toBeInTheDocument();
     expect(useCharSwapStore.getState().trim).toEqual([3, 8]);
   });
+});
+
+
+it("shows the credit estimate without a dollar price and updates it when the quote changes", () => {
+  const { rerender } = render(<TrimStep demo={null} estimatedCredits={150} />);
+  expect(screen.getByRole("status", {name: "Credit estimate"})).toHaveTextContent("Estimated cost: 150 credits");
+  rerender(<TrimStep demo={null} estimatedCredits={50} />);
+  expect(screen.getByRole("status", {name: "Credit estimate"})).toHaveTextContent("Estimated cost: 50 credits");
+  expect(screen.getByRole("status", {name: "Credit estimate"}).textContent).not.toContain("$");
+});
+
+
+it("shows only the quoted credits for a customer generation in review", () => {
+  render(<ReviewStep live accessMode="credits" creditBalance={100} generationCredits={50}
+    hasPreviewKey={false} isSampleKey={false} onApiSettings={() => {}} />);
+  expect(screen.getByText("This generation costs 50 credits.")).toBeInTheDocument();
+  expect(screen.queryByText(/US\$/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/regardless of clip length/)).not.toBeInTheDocument();
 });

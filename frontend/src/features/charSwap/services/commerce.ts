@@ -12,6 +12,7 @@ export interface CreditCatalog {
   currency: "usd";
   packs: CreditPack[];
   credits_per_generation: number;
+  credits_per_second?: number;
   usd_cents_per_credit: number;
   minimum_pack_cents: number;
   stripe_mode: "live" | "test";
@@ -36,6 +37,7 @@ export interface CreditAdmin {
     revision: number;
     packs: CreditPack[];
     credits_per_generation: number;
+  credits_per_second?: number;
   };
 }
 

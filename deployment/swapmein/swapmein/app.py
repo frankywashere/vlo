@@ -32,7 +32,7 @@ from .storage import (Records, check_preparation_capacity, claim_job, reserve_pr
 from .tracking import resolve_tracking
 from .diagnostics import emit
 from .accounts import verify_account, bind_job, archive_completed, index_path
-from .commerce import (CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
+from .commerce import (generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
                        save_catalog, staff_role, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 from .job_key import protect_key, recover_key
@@ -159,7 +159,7 @@ def check_automatic_generation(records, setup: Setup, active_session: dict):
     if not feature_view(records)["credit_generation"]:
         raise PublicError("Credit-funded generation is not available yet.", 503)
     catalog = public_catalog(records)
-    expected_charge = catalog["credits_per_generation"]
+    expected_charge = generation_credit_cost(setup.trim[1] - setup.trim[0], catalog["credits_per_generation"])
     if expected_charge <= 0 or wallet_view(records, active_session["account_id"])["balance"] < expected_charge:
         raise PublicError("Add enough recastfx credits before submitting this swap.", 402)
 
@@ -488,7 +488,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
-            job["generation_credits"] = public_catalog(records)["credits_per_generation"]
+            job["generation_credits"] = generation_credit_cost(options.trim[1] - options.trim[0], public_catalog(records)["credits_per_generation"])
         job = await run_in_threadpool(bind_job, records, job, active_session)
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
         record_created = True
@@ -567,7 +567,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     if auto_key:
         manifest["auto_key_ciphertext"] = auto_key
     if manifest["access_mode"] == "credits":
-        manifest["generation_credits"] = public_catalog(records)["credits_per_generation"]
+        manifest["generation_credits"] = generation_credit_cost(options.setup.trim[1] - options.setup.trim[0], public_catalog(records)["credits_per_generation"])
     records.create(prefix + "manifest.json", manifest)
     return {"id": job_id, "source": source, "reference": reference}
 
@@ -892,7 +892,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)
-        charge = job.get("generation_credits", catalog["credits_per_generation"])
+        charge = job.get("generation_credits", generation_credit_cost(job["duration"], catalog["credits_per_generation"]))
         if not 0 < charge <= 1000000:
             raise PublicError("Credit pricing is not configured yet.", 503)
     else:

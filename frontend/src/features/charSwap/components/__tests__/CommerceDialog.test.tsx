@@ -29,7 +29,7 @@ it("shows USD pricing and opens secure live checkout without losing the clip set
   render(<CommerceDialog open onClose={vi.fn()} />);
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", {name: /2,000 credits · US\$20.00/}));
-  expect(screen.getByText(/150 credits \(US\$1.50\) per generation/)).toBeInTheDocument();
+  expect(screen.getByText(/10 credits per second.*15-second clip costs 150 credits/)).toBeInTheDocument();
   const link = await screen.findByRole("link", {name: "Continue to Stripe"});
   expect(link).toHaveAttribute("href", "https://checkout.stripe.com/c/pay/example");
   expect(link).toHaveAttribute("target", "_blank");

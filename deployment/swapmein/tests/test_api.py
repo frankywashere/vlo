@@ -115,8 +115,8 @@ def ready_job(records, owner):
     return job_id
 
 
-@pytest.mark.parametrize("duration", [5, 15])
-def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch, duration):
+@pytest.mark.parametrize("duration,quoted", [(5, None), (15, None), (5, 60)])
+def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch, duration, quoted):
     client, records, cloud, provider = api
     job_id = "b" * 32
     account_id = "c" * 64
@@ -131,10 +131,12 @@ def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monke
         "setup": {"trim": [0, duration], "anchor": {"x": .5, "y": .5, "time": 1},
                   "easy_mode": True, "auto_generate": True},
     }
+    if quoted is not None:
+        records.data[f"jobs/{job_id}.json"]["generation_credits"] = quoted
     submitted = client.post("/internal/generate", json={"job_id": job_id})
     assert submitted.status_code == 200
     assert len(provider.submissions) == 1
-    assert records.data[f"accounts/{account_id}/wallet.json"]["balance"] == 50
+    assert records.data[f"accounts/{account_id}/wallet.json"]["balance"] == 200 - (quoted if quoted is not None else duration * 10)
     assert ("poll-provider", job_id) in cloud.enqueued
     assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
     assert len(provider.submissions) == 1

@@ -14,13 +14,14 @@ from swapmein.stripe_billing import fulfill_checkout
 from test_api import api
 
 
-def test_usd_prices_start_at_twenty_and_generation_has_one_flat_price(api, monkeypatch):
+def test_usd_packs_start_at_twenty_and_duration_rate_is_editable(api, monkeypatch):
     _, records, _, _ = api
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
     monkeypatch.setenv("RECASTFX_CHECKOUT_ENABLED", "false")
     initial = public_catalog(records)
     assert [(pack["credits"], pack["price_cents"]) for pack in initial["packs"]] == [(2000, 2000), (5000, 5000)]
     assert initial["credits_per_generation"] == 150
+    assert initial["credits_per_second"] == 10
     assert initial["currency"] == "usd" and initial["usd_cents_per_credit"] == 1
     assert not initial["checkout_enabled"]
     owner = {"email": "frank@whipsnapfilms.com"}
@@ -261,3 +262,37 @@ def test_checkout_binds_verified_account_and_pack_snapshot(api, monkeypatch, liv
     assert captured["options"]["idempotency_key"].startswith("recastfx-checkout-")
     order = records.data["commerce/orders/" + params["metadata"]["order_ref"] + ".json"]
     assert order["livemode"] is live and order["status"] == "open"
+
+
+@pytest.mark.parametrize("duration,expected", [(4,40),(5,50),(7.5,75),(8,80),(15,150),(4.01,41)])
+def test_duration_credit_quotes(duration, expected):
+    from swapmein.commerce import generation_credit_cost
+    assert generation_credit_cost(duration) == expected
+
+@pytest.mark.parametrize("duration", [0, -1, 16, float("nan"), float("inf")])
+def test_credit_quote_rejects_invalid_duration(duration):
+    from swapmein.commerce import generation_credit_cost
+    with pytest.raises(PublicError):
+        generation_credit_cost(duration)
+
+
+def test_custom_rate_keeps_exact_fifteen_second_price():
+    from swapmein.commerce import generation_credit_cost
+    assert generation_credit_cost(15, 175) == 175
+    assert generation_credit_cost(5, 175) == 59
+
+
+def test_easy_preflight_checks_selected_duration_instead_of_maximum(api, monkeypatch):
+    monkeypatch.setenv("REAPI_SERVER_KEY", "private-server-key-for-tests")
+    from swapmein.media import Setup
+    _, records, _, _ = api
+    account_id = "c" * 64
+    records.data["commerce/features.json"] = {"credit_generation": True}
+    records.data[f"accounts/{account_id}/wallet.json"] = {"balance": 75, "applied": {}, "transactions": []}
+    session = {"access_mode": "credits", "account_id": account_id}
+    def setup(duration):
+        return Setup(trim=[1.3, 1.3 + duration], anchor={"x": .5, "y": .5, "time": 2}, easy_mode=True, auto_generate=True)
+    gateway.check_automatic_generation(records, setup(5), session)
+    with pytest.raises(PublicError) as error:
+        gateway.check_automatic_generation(records, setup(15), session)
+    assert "Add enough" in str(error.value)

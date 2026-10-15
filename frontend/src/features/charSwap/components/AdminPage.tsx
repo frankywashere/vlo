@@ -20,7 +20,7 @@ export function AdminPage() {
       if (!active) return;
       setAdmin(result);
       setPacks(result.catalog.packs);
-      setRate((result.catalog.credits_per_generation / 100).toFixed(2));
+      setRate((result.catalog.credits_per_generation / 1500).toFixed(2));
     }).catch((cause: unknown) => {
       if (active) setError(cause instanceof Error ? cause.message : "Admin settings are unavailable.");
     });
@@ -74,8 +74,8 @@ export function AdminPage() {
         </Stack></CardContent></Card>
         {(admin.role === "owner" || admin.role === "pricing_admin") && <Card variant="outlined"><CardContent><Stack spacing={2}>
           <Typography variant="h5">Credit pricing</Typography>
-          <Typography color="text.secondary">All prices are in USD. One credit equals US$0.01. Every generation has one flat price, regardless of clip length. Credit packs start at US$20.00.</Typography>
-          <TextField label="Price per generation (USD)" type="number" value={rate} onChange={(event) => setRate(event.target.value)} inputProps={{min: 0.01, step: 0.01}} helperText={`${Math.round(Number(rate) * 100) || 0} credits per generation`} />
+          <Typography color="text.secondary">All prices are in USD. One credit equals US$0.01. Generation pricing scales with clip length. Credit packs start at US$20.00.</Typography>
+          <TextField label="Price per video second (USD)" type="number" value={rate} onChange={(event) => setRate(event.target.value)} inputProps={{min: 0.01, step: 0.01}} helperText={`${Math.round(Number(rate) * 100) || 0} credits per second`} />
           {packs.map((pack, index) => <Stack key={index} spacing={1} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
             <TextField label="Pack ID" value={pack.id} onChange={(event) => updatePack(index, { id: event.target.value })} />
             <TextField label="Pack name" value={pack.name} onChange={(event) => updatePack(index, { name: event.target.value })} />
@@ -84,7 +84,7 @@ export function AdminPage() {
             <Button color="error" onClick={() => setPacks((current) => current.filter((_, i) => i !== index))}>Remove pack</Button>
           </Stack>)}
           <Stack direction="row" spacing={1}><Button disabled={busy || packs.length >= 8} onClick={() => setPacks((current) => [...current, { id: "", name: "", credits: 2000, price_cents: 2000, active: false }])}>Add pack</Button>
-            <Button variant="contained" disabled={busy || !rate || packs.length === 0} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, credits_per_generation: Math.round(Number(rate) * 100) }); setAdmin({ ...admin, catalog }); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
+            <Button variant="contained" disabled={busy || !rate || packs.length === 0} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, credits_per_generation: Math.round(Number(rate) * 100) * 15 }); setAdmin({ ...admin, catalog }); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
         </Stack></CardContent></Card>}
         {admin.role === "owner" && <Card variant="outlined"><CardContent><Stack spacing={2}>
           <Typography variant="h5">Private generation account</Typography>
