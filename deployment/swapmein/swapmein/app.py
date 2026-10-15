@@ -32,7 +32,7 @@ from .storage import (Records, check_preparation_capacity, claim_job, reserve_pr
 from .tracking import resolve_tracking
 from .diagnostics import emit
 from .accounts import verify_account, bind_job, archive_completed, index_path
-from .commerce import (CATALOG_PATH, api_key_permission, apply_wallet_change, public_catalog, require_staff,
+from .commerce import (CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
                        save_catalog, staff_role, wallet_view)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 
@@ -301,7 +301,7 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "catalog": catalog or {"revision": 0, "packs": [], "credits_per_second": 0, "history": []}}
+    return {"role": role, "catalog": catalog or default_catalog()}
 
 
 @app.post("/api/commerce/admin/catalog")

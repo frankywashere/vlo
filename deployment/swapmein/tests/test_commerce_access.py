@@ -6,10 +6,27 @@ import time
 
 import swapmein.app as gateway
 import swapmein.stripe_billing as billing
-from swapmein.commerce import api_key_permission, wallet_view
+from swapmein.commerce import api_key_permission, public_catalog, save_catalog, wallet_view
 from swapmein.security import digest
 from swapmein.stripe_billing import fulfill_checkout
 from test_api import api
+
+
+def test_sandbox_starting_prices_are_editable_and_checkout_stays_off(api, monkeypatch):
+    _, records, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
+    monkeypatch.setenv("RECASTFX_CHECKOUT_ENABLED", "false")
+    initial = public_catalog(records)
+    assert [(pack["credits"], pack["price_cents"]) for pack in initial["packs"]] == [(100, 500), (500, 2000)]
+    assert initial["credits_per_second"] == 20
+    assert not initial["checkout_enabled"]
+    owner = {"email": "frank@whipsnapfilms.com"}
+    updated = save_catalog(records, owner, 0, [
+        {"id": "starter", "name": "Starter", "credits": 100, "price_cents": 700, "active": True},
+    ], 15)
+    assert updated["revision"] == 1
+    assert public_catalog(records)["packs"][0]["price_cents"] == 700
+    assert public_catalog(records)["credits_per_second"] == 15
 
 
 def test_owner_controls_api_key_access_and_revocation_blocks_existing_session(api, monkeypatch):

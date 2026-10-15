@@ -11,6 +11,14 @@ PACK_PATTERN = re.compile(r"[a-z][a-z0-9-]{1,31}")
 CATALOG_PATH = "commerce/catalog.json"
 
 
+def default_catalog() -> dict:
+    """Editable sandbox starting prices, used until staff saves a catalog."""
+    return {"revision": 0, "packs": [
+        {"id": "starter", "name": "Starter", "credits": 100, "price_cents": 500, "active": True},
+        {"id": "value", "name": "Value", "credits": 500, "price_cents": 2000, "active": True},
+    ], "credits_per_second": 20, "history": []}
+
+
 def api_key_permission(records, account: dict) -> bool:
     """BYOK is opt-in per verified Google account, including for staff."""
     email = account.get("email", "").strip().lower()
@@ -40,7 +48,7 @@ def require_staff(records, account: dict, roles: set[str]) -> str:
 
 def public_catalog(records) -> dict:
     current, _ = records.read(CATALOG_PATH)
-    current = current or {}
+    current = current or default_catalog()
     return {
         "currency": "usd",
         "packs": [dict(id=pack["id"], name=pack["name"], credits=pack["credits"],
