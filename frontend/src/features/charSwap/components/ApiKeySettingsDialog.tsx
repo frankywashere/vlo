@@ -64,7 +64,7 @@ export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
 }
 
 function ApiKeyPreviewEditor({
-  enhancedCharacterMasking = false,
+  enhancedCharacterMasking = true,
   maskingLocked = false,
   onMaskingChange,
   provider = "reAPI",
@@ -125,7 +125,7 @@ function ApiKeyPreviewEditor({
               }
             />
             <Typography variant="body2" color="text.secondary">
-              Highlight only the selected person with a translucent cyan overlay before
+              Cover only the selected person with colored depth guidance before
               generation. Turn off to keep the original person visible. Person
               tracking is skipped when masking is off; your tap position and timestamp identify the person.
             </Typography>

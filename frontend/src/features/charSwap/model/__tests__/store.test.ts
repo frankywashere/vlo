@@ -146,7 +146,7 @@ describe("walkthrough store readiness", () => {
     expect(reset.decisions).toEqual({});
     expect(reset.trackingReady).toBe(false);
     expect(reset.error).toBeNull();
-    expect(reset.enhancedCharacterMasking).toBe(false);
+    expect(reset.enhancedCharacterMasking).toBe(true);
   });
   it("changing masking invalidates approval and returns to preparation without losing references", () => {
     prepareReferences();
@@ -154,10 +154,10 @@ describe("walkthrough store readiness", () => {
     store.reviewTracking([]);
     store.visit("review");
     const before = useCharSwapStore.getState();
-    expect(before.enhancedCharacterMasking).toBe(false);
-    store.setEnhancedCharacterMasking(true);
+    expect(before.enhancedCharacterMasking).toBe(true);
+    store.setEnhancedCharacterMasking(false);
     const after = useCharSwapStore.getState();
-    expect(after.enhancedCharacterMasking).toBe(true);
+    expect(after.enhancedCharacterMasking).toBe(false);
     expect(after.trackingReady).toBe(false);
     expect(after.step).toBe("references");
     expect(after.selectionVersion).toBe(before.selectionVersion + 1);

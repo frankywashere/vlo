@@ -72,7 +72,7 @@ export function ReviewStep({
     const setup = {
       version: 1,
       provider,
-      enhancedCharacterMasking: enhancedCharacterMasking ?? false,
+      enhancedCharacterMasking: enhancedCharacterMasking ?? true,
       previewOnly: !live,
       clip: { name: clip!.name, duration: clip!.duration, trim },
       people: targets.map((person) => ({
@@ -122,20 +122,13 @@ export function ReviewStep({
             <Typography fontWeight={600}>{clip.name}</Typography>
             <Typography variant="body2" color="text.secondary">
               Enhanced character masking:{" "}
-              {(enhancedCharacterMasking ?? false) ? "On" : "Off"}
+              {(enhancedCharacterMasking ?? true) ? "On" : "Off"}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {formatTime(trim[0])}–{formatTime(trim[1])} ·{" "}
               {(trim[1] - trim[0]).toFixed(1)} seconds
             </Typography>
           </Box>
-          <Button
-            size="small"
-            disabled={generating}
-            onClick={() => visit("trim")}
-          >
-            Edit clip
-          </Button>
         </Stack>
       </Box>
       <Box sx={PANEL}>

@@ -309,7 +309,7 @@ def test_direct_upload_accepts_100mib_without_body_or_worker_and_confirms_once(a
         assert result.status_code == 202 and result.json()["status"] == "queued"
     assert cloud.enqueued == [("prepare", ticket["id"])]
     job = records.data[f"jobs/{ticket['id']}.json"]
-    assert job["setup"]["enhanced_character_masking"] is False
+    assert job["setup"]["enhanced_character_masking"] is True
     assert job["source_uri"].endswith("/source.bin")
     assert records.data["control/preparation.json"]["month_count"] == 1
     assert "valid-example-key" not in json.dumps(records.data)

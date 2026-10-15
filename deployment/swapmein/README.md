@@ -17,10 +17,11 @@ records its checks and the remaining generation-quality limits.
 - A 4–15-second selection with a whole-second duration; the trim start and target
   timestamp may be fractional. The application does not yet round a fractional
   selection up for generation and trim it back afterward.
-- SAM tracks the original RGB video only when enhanced masking is on. With it off, SAM and the GPU worker are skipped. Depth Anything and face mesh are omitted.
-- **Enhanced character masking is off by default.** With it off, the generation
-  guide keeps the original person visible. With it on, the CPU compositor blends a 50%-opacity cyan overlay into
-  only the selected SAM label, without numbers, and keeps the rest of the original frame.
+- **Enhanced character masking is on by default.** The GPU worker runs Depth Anything
+  on the normalized clip, then SAM 3 on that colored depth video. The CPU worker
+  places the depth pixels only inside the selected person's mask over the original
+  background, without numbers or face mesh. With masking off, the guide keeps the
+  original person visible; SAM and the GPU worker are skipped.
 - Both modes use Demucs-separated vocals shifted up three semitones, without a
   timing change. The final export restores the source soundtrack.
 - Preparation uses a normalized guide of at most 854×480 at 24 fps. Standard H3
@@ -35,7 +36,8 @@ implemented. “Check all scenes” prepares the selected section. With masking 
 detected cuts or selected-label gaps require whole-guide review with an explicit
 identity warning; there is no automatic cross-scene matching or per-scene target
 assignment. SAM coverage is not proof of identity. With masking on, cuts and
-missing selected-label coverage remain errors. The cut detector is a heuristic and
+missing selected-label coverage require review; absent mask frames stay unchanged.
+The cut detector is a heuristic and
 may flag strong lighting changes or abrupt motion.
 
 ## Normal application flow
@@ -50,11 +52,11 @@ may flag strong lighting changes or abrupt motion.
    The gateway verifies their actual sizes, normalizes the image, atomically
    reserves a preparation slot, saves the job, and enqueues its preparation task.
 4. The task trims and normalizes the source, records detected cuts, and allows
-   them in either masking mode. Only enhanced masking activates SAM on `proof-gpu`,
+   them in either masking mode. Only enhanced masking activates Depth Anything then SAM 3 on `proof-gpu`,
    validates the mask archive and actual label under the clicked point, then shuts
    the GPU worker down. Masking off uses the normalized tap and timestamp directly. Absent-label frames remain unchanged; identity matching across cuts requires review.
-5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Overlay mode calls
-   its `/compose` endpoint with `fill_mode: color`; masking-off mode uses gateway CPU FFmpeg to
+5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Enhanced mode calls
+   its `/compose` endpoint with `fill_mode: depth`; masking-off mode uses gateway CPU FFmpeg to
    remux normalized RGB with those vocals, bypassing mask-based composition. The
    audio worker is shut down, private review links are published, and the job
    becomes `ready`.
@@ -203,7 +205,7 @@ Both integrations are implemented in [provider.py](swapmein/provider.py), with
 one reference image, one guide video, integer duration, adaptive aspect ratio
 and a replacement prompt that preserves the source scene and other people.
 Without gray fill, the prompt identifies the selected person using normalized
-anchor coordinates and clip-relative time; with colored masking, it identifies the cyan overlay. There is no paid fallback to another provider.
+anchor coordinates and clip-relative time; with enhanced masking, it identifies the selected person covered by colored depth imagery. There is no paid fallback to another provider.
 
 | Operation | reAPI | ToAPIs |
 | --- | --- | --- |
@@ -442,14 +444,14 @@ Cloud Tasks RPC timeouts stay below its 30-second server limit. A controlled
 cloud diagnostic reproduced `INVALID_ARGUMENT` at the 30-second boundary; task
 creation and deletion now use 20 seconds to leave transport/clock headroom.
 
-## Colored masking revision
+## Enhanced masking guide
 
-Enhanced masking now submits a translucent cyan overlay (RGB 0,220,255, opacity
-0.5) on only the selected label, with no numbers. Scene cuts and zero-coverage
-frames are accepted; zero coverage does not select a different label. The
-review must still confirm identity in every scene. Legacy ready gray guides
-retain the gray prompt via their absent `mask_style` field. New masked guides
-store `mask_style: cyan_overlay`.
+Enhanced masking submits the colored depth image inside only the selected SAM
+label, with the original scene outside it and no numbers. Scene cuts and
+zero-coverage frames are accepted; zero coverage does not select a different
+label. The user must confirm identity in every scene. New guides store
+`mask_style: depth`. Previously prepared cyan or gray guides retain their
+respective prompt when submitted.
 
 The versioned CPU worker patch is in `worker_patch/`; it overlays the existing
 immutable audio image without reinstalling models. Original gray/original

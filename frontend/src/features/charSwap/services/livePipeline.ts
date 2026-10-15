@@ -39,7 +39,7 @@ export interface LivePipelineJob {
   tracking_continuous?: boolean;
   tracking_performed?: boolean;
   scene_cut_count?: number;
-  mask_style?: "cyan_overlay" | "gray" | "none";
+  mask_style?: "depth" | "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
   provider_checked_at?: number;
   provider_state?: "queued" | "pending" | "processing" | "running" | "generating" | "unknown";
@@ -205,7 +205,7 @@ function readJob(value: unknown): LivePipelineJob {
     id: value.id,
     status: value.status as LiveJobStatus,
   };
-  if (["cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
+  if (["depth", "cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
@@ -481,7 +481,7 @@ export async function createLiveJob(
           trim: state.trim,
           anchor: target.anchor,
           target_name: target.name,
-          enhanced_character_masking: state.enhancedCharacterMasking ?? false,
+          enhanced_character_masking: state.enhancedCharacterMasking ?? true,
         },
       }),
     },

@@ -22,6 +22,13 @@ def test_prompt_identifies_cyan_overlay_and_preserves_legacy_gray_guides():
     assert 'gray silhouette' in legacy
 
 
+def test_depth_prompt_identifies_only_selected_person():
+    prompt = generation_payload(5, 'image', 'video', True, mask_style='depth')['prompt']
+    assert 'selected person covered by colored depth imagery' in prompt
+    assert 'Keep all other people unchanged' in prompt
+    assert 'cyan' not in prompt and 'gray silhouette' not in prompt
+
+
 def test_color_compositor_changes_only_selected_label_and_allows_missing_scene(tmp_path, monkeypatch):
     patch = Path(__file__).parents[1] / 'worker_patch/composite.py'
     monkeypatch.setitem(sys.modules, 'common', SimpleNamespace(probe=probe))
@@ -52,3 +59,32 @@ def test_color_compositor_changes_only_selected_label_and_allows_missing_scene(t
     expected = original[0,25,70].astype(float)*.5 + np.array([0,220,255])*.5
     assert np.abs(actual[0,25,70].astype(float)-expected).max() < 8
     assert float(next(s for s in probe(output)['streams'] if s['codec_type']=='audio')['duration']) >= .99
+
+
+def test_depth_compositor_replaces_only_selected_pixels_and_preserves_missing_frames(tmp_path, monkeypatch):
+    patch = Path(__file__).parents[1] / 'worker_patch/composite.py'
+    monkeypatch.setitem(sys.modules, 'common', SimpleNamespace(probe=probe))
+    spec = importlib.util.spec_from_file_location('tested_depth_composite', patch)
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    source, depth, audio, archive, output = [tmp_path / s for s in ('source.mp4', 'depth.mp4', 'vocals.wav', 'masks.zip', 'output.mp4')]
+    for path, color in ((source, 'red'), (depth, 'blue')):
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'color=c={color}:s=96x64:r=24:d=1',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(path)], check=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=duration=0.95', str(audio)], check=True)
+    with zipfile.ZipFile(archive, 'w') as z:
+        for index in range(24):
+            labels = np.zeros((64, 96), dtype=np.uint16)
+            labels[10:50, 10:35] = 1
+            if index < 12: labels[10:50, 60:85] = 2
+            raw = BytesIO(); Image.fromarray(labels).save(raw, format='PNG')
+            z.writestr(f'labels/labels_{index:05d}.png', raw.getvalue())
+    metrics = module.compose(source, archive, audio, output, 2, 'depth', depth)
+    assert metrics['depth'] is True and metrics['face_mesh'] is False
+    assert metrics['mask_pixels_per_frame'][12:] == [0] * 12
+    def frames(path):
+        data = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(path), '-map', '0:v:0', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+        return np.frombuffer(data, np.uint8).reshape(-1, 64, 96, 3).astype(float)
+    original, colored, actual = frames(source), frames(depth), frames(output)
+    assert np.abs(actual[:,20:40,15:30]-original[:,20:40,15:30]).mean() < 5
+    assert np.abs(actual[12:]-original[12:]).mean() < 5
+    assert np.abs(actual[0,25,70]-colored[0,25,70]).max() < 8

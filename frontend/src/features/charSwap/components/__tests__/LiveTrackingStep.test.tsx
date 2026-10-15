@@ -70,11 +70,12 @@ describe("live guide review", () => {
     expect(screen.queryByText(/Automatic identity matching/)).not.toBeInTheDocument();
   });
 
-  it("keeps the gray guide and masking check when enhanced masking is enabled", () => {
-    render(<LiveTrackingStep {...properties()} enhancedCharacterMasking />);
+  it("shows the depth guide and masking check when enhanced masking is enabled", () => {
+    render(<LiveTrackingStep {...properties()} enhancedCharacterMasking maskStyle="depth" />);
     expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", guideUrl);
     expect(screen.getByText("Your generation guide")).toBeInTheDocument();
-    expect(screen.getByText(/The selected-person overlay should follow your person/)).toBeInTheDocument();
+    expect(screen.getByText(/The colored depth guide should cover your selected person/)).toBeInTheDocument();
+    expect(screen.getByText(/Only the selected person is covered by colored depth imagery/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "This is the right person" })).toBeDisabled();
   });
 

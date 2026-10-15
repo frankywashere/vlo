@@ -13,7 +13,7 @@ import { PANEL } from "./stepStyles";
 interface LiveTrackingStepProps {
   enhancedCharacterMasking?: boolean;
   selectedLabel?: number;
-  maskStyle?: "cyan_overlay" | "gray" | "none";
+  maskStyle?: "depth" | "cyan_overlay" | "gray" | "none";
   trackingContinuous?: boolean;
   trackingPerformed?: boolean;
   sceneCutCount?: number;
@@ -80,7 +80,7 @@ export function LiveTrackingStep({
         </Alert>
       )}
       {ready && enhancedCharacterMasking && guideUrl && <Typography variant="body2">
-        {maskStyle === "gray" || !maskStyle ? "This older guide uses solid gray masking." : "Only the selected person is tinted cyan. This guide is sent to MiniMax without numbers."}
+        {maskStyle === "depth" ? "Only the selected person is covered by colored depth imagery. The original background stays visible. This guide is sent to MiniMax without face mesh or numbers." : maskStyle === "gray" || !maskStyle ? "This older guide uses solid gray masking." : "Only the selected person is tinted cyan. This guide is sent to MiniMax without numbers."}
       </Typography>}
       {ready && guideUrl && (
         <Box sx={PANEL}>
@@ -113,7 +113,7 @@ export function LiveTrackingStep({
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {enhancedCharacterMasking
-              ? "Review the whole clip. The selected-person overlay should follow your person without covering anyone else."
+              ? "Review the whole clip. The colored depth guide should cover your selected person without covering anyone else."
               : wholeClipReview
                 ? "Watch the whole guide, including every scene change. Confirm the correct person in each scene."
                 : `Check that person label ${selectedLabel ?? "shown"} follows your selected person throughout this tracking preview. The generation guide keeps the original person visible.`}{" "}

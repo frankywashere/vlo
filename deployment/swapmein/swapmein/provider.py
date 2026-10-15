@@ -27,6 +27,18 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
             "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
             "Replace this person rather than adding another character. Keep all other people unchanged."
         )
+    if mask_style == "depth":
+        return (
+            "Use reference video 1 as the source scene and precise motion guide. "
+            "Replace only the selected person covered by colored depth imagery with the character from reference image 1, "
+            "including their entire head, hands, body and feet. The depth colors describe the person's shape and motion, "
+            "not their appearance. Remove all depth-map colors from the completed character. "
+            "Follow the selected person through scene changes. In frames where they are absent, preserve the scene "
+            "and do not replace another person. Keep all other people unchanged. "
+            f"Preserve the background, camera, lighting, motion and exact {duration}-second timing. "
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
+            "Replace the selected person rather than adding another character."
+        )
     if mask_style == "cyan_overlay":
         return (
             "Use reference video 1 as the source scene and precise motion guide. "

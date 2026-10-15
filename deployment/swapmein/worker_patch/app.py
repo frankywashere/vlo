@@ -22,7 +22,7 @@ class Request(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ready", "device": "cpu", "version": "audio-color-overlay-v4", "operations": ["audio", "compose"]}
+    return {"status": "ready", "device": "cpu", "version": "audio-depth-guide-v5", "operations": ["audio", "compose"]}
 
 
 class ComposeRequest(BaseModel):
@@ -30,7 +30,8 @@ class ComposeRequest(BaseModel):
     masks_uri: str
     guide_audio_uri: str
     selected_label: int = Field(ge=1, le=65535)
-    fill_mode: Literal['gray','original','color'] = 'gray'
+    fill_mode: Literal['gray','original','color','depth'] = 'gray'
+    depth_uri: str | None = None
     run_id: str
 
 
@@ -47,7 +48,12 @@ def composite(request: ComposeRequest):
             download_input(request.input_uri,str(source))
             download_input(request.masks_uri,str(masks))
             download_input(request.guide_audio_uri,str(vocals))
-            metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode)
+            depth_source=None
+            if request.fill_mode=='depth':
+                if not request.depth_uri:raise HTTPException(400,'Depth source required')
+                depth_source=root/'depth.mp4'
+                download_input(request.depth_uri,str(depth_source))
+            metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode,depth_source)
             metrics['request_processing_seconds']=time.monotonic()-started
             (output/'metrics.json').write_text(json.dumps(metrics,indent=2))
             return {'metrics':metrics,'files':upload_tree(output,request.run_id)}

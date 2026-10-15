@@ -117,7 +117,10 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
     assert records.data[path]["tracking_continuous"] is (enabled and not scene_cuts and all(coverage))
     if enabled:
         assert [kind for kind, _, _ in cloud.calls] == ["gpu", "audio", "audio"]
-        assert cloud.calls[-1][2]["fill_mode"] == "color"
+        assert cloud.calls[0][2]["operation"] == "both"
+        assert cloud.calls[-1][2]["fill_mode"] == "depth"
+        assert cloud.calls[-1][2]["depth_uri"].endswith("depth.mp4")
+        assert records.data[path]["mask_style"] == "depth"
         assert cloud.calls[-1][2]["selected_label"] == 2
         assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
         assert not composed_original

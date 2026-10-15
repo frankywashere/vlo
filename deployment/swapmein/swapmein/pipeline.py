@@ -61,10 +61,11 @@ class Pipeline:
                 label, coverage, preview = None, [], None
                 tracking_continuous = False
                 if options.enhanced_character_masking:
-                    self.update_job(job_id, message="Tracking the selected person.")
+                    self.update_job(job_id, message="Preparing depth guidance and tracking the selected person.")
                     sam_run = "sm-sam-" + job_id
                     with self.cloud.worker("gpu") as invoke:
-                        result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "sam"}, remaining())
+                        result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both"}, remaining())
+                    depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
                     masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
                     preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
                     masks = root / "masks.zip"
@@ -78,11 +79,12 @@ class Pipeline:
                     audio = invoke("/benchmark", {"input_uri": source_uri, "run_id": audio_run}, remaining())
                     vocals_uri = self.cloud.worker_output(audio, audio_run, "vocals_plus3.wav")
                     if options.enhanced_character_masking:
-                        # Overlay only the selected label; empty frames remain unchanged.
+                        # Insert depth only inside the selected label; absent frames stay unchanged.
+                        depth_input = self.cloud.copy(depth_uri, self.settings.worker_bucket, prefix + "depth.mp4")
                         masks_input = self.cloud.copy(masks_uri, self.settings.worker_bucket, prefix + "masks.zip")
                         vocals_input = self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
                         composed = invoke("/compose", {"input_uri": source_uri, "masks_uri": masks_input,
-                            "guide_audio_uri": vocals_input, "selected_label": label, "fill_mode": "color", "run_id": guide_run}, remaining())
+                            "guide_audio_uri": vocals_input, "selected_label": label, "depth_uri": depth_input, "fill_mode": "depth", "run_id": guide_run}, remaining())
                 if options.enhanced_character_masking:
                     prepared = self.cloud.worker_output(composed, guide_run, "prepared_guide.mp4")
                     guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, f"outputs/{job_id}/guide.mp4")
@@ -92,13 +94,13 @@ class Pipeline:
                     original_guide(normalized, vocals, guide, metadata)
                     guide_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/guide.mp4", guide, "video/mp4")
                 if options.enhanced_character_masking:
-                    message = "Review every scene. Only your selected person should have a translucent cyan overlay. Identity across cuts or gaps is not verified."
+                    message = "Review every scene. Only your selected person should be covered by colored depth imagery. Identity across cuts or gaps is not verified."
                 else:
                     message = "Review your prepared clip. SAM tracking was skipped; MiniMax will identify the selected person using your tap position and timestamp."
                 self.update_job(job_id, status="ready", message=message,
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
                     normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"].get("time", metadata["anchor"]["frame"] / 24)},
-                    mask_style="cyan_overlay" if options.enhanced_character_masking else "none", tracking_performed=options.enhanced_character_masking, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
+                    mask_style="depth" if options.enhanced_character_masking else "none", tracking_performed=options.enhanced_character_masking, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
