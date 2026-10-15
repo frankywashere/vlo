@@ -65,23 +65,6 @@ describe("CharSwap walkthrough", () => {
     store.assignReference("person-1", sample.reference);
     store.reviewTracking([]);
     store.visit("review");
-    let savedBlob: Blob | undefined;
-    const OriginalURL = globalThis.URL;
-    vi.stubGlobal(
-      "URL",
-      class extends OriginalURL {
-        static createObjectURL(blob: Blob | MediaSource) {
-          if (blob instanceof Blob) savedBlob = blob;
-          return "blob:test-export";
-        }
-        static revokeObjectURL() {
-          /* No browser resource is allocated in this test. */
-        }
-      },
-    );
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
-      () => undefined,
-    );
     render(<CharSwapWalkthrough />);
     await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.type(
@@ -96,19 +79,8 @@ describe("CharSwap walkthrough", () => {
     expect(
       screen.getByRole("button", { name: "Generate replacements" }),
     ).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Save setup" }));
-    expect(savedBlob).toBeDefined();
-    const exported = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Could not read exported setup"));
-      reader.readAsText(savedBlob!);
-    });
-    expect(exported).not.toContain("preview-only-private-token");
-    expect(JSON.parse(exported)).toMatchObject({
-      previewOnly: true,
-      submitted: false,
-    });
+    expect(screen.getByRole("button", { name: "Download video" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save setup" })).not.toBeInTheDocument();
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 

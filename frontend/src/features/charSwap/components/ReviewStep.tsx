@@ -50,7 +50,6 @@ export function ReviewStep({
     references,
     assignments,
     issues,
-    decisions,
     visit,
   } = useCharSwapStore(
     useShallow((s) => ({
@@ -62,57 +61,35 @@ export function ReviewStep({
       references: s.references,
       assignments: s.assignments,
       issues: s.issues,
-      decisions: s.decisions,
       visit: s.visit,
     })),
   );
   const [playableGuide, setPlayableGuide] = useState<string | null>(null);
   const guideIdentity = `${job?.id}:${job?.guide_url}`;
   const guidePlayable = playableGuide === guideIdentity;
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   if (!clip) return null;
-  function saveSetup() {
-    // Local object URLs and thumbnail data are deliberately excluded from the handoff.
-    const setup = {
-      version: 1,
-      provider,
-      enhancedCharacterMasking: enhancedCharacterMasking ?? true,
-      easyMode: easyMode ?? true,
-      previewOnly: !live,
-      clip: { name: clip!.name, duration: clip!.duration, trim },
-      people: targets.map((person) => ({
-        id: person.id,
-        name: person.name,
-        anchor: person.anchor,
-        reference: references.find((ref) => ref.id === assignments[person.id])
-          ?.name,
-      })),
-      matches: issues.map((issue) => ({
-        id: issue.id,
-        targetId: issue.targetId,
-        start: issue.start,
-        end: issue.end,
-        decision: decisions[issue.id],
-        simulated: clip!.mode === "demo",
-      })),
-      output: { deliveryResolution: "native", restoreOriginalAudio: true },
-      submitted: Boolean(
-        job &&
-          [
-            "generating",
-            "finalizing",
-            "completed",
-            "submission_unknown",
-          ].includes(job.status),
-      ),
-    };
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(setup, null, 2)], { type: "application/json" }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "recastfx-setup.json";
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  async function downloadVideo() {
+    if (!job?.output_url || downloading) return;
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const response = await fetch(job.output_url);
+      if (!response.ok) throw new Error("Download failed");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "recastfx-video.mp4";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      setDownloadError("The video couldn’t download. Refresh the video links and try again.");
+    } finally {
+      setDownloading(false);
+    }
   }
   return (
     <Stack spacing={2.5}>
@@ -363,18 +340,9 @@ export function ReviewStep({
             }}
             trim={[0, job.duration ?? trim[1] - trim[0]]}
           />
-          <Button
-            component="a"
-            href={job.output_url}
-            target="_blank"
-            rel="noreferrer"
-            variant="contained"
-            startIcon={<DownloadRounded />}
-          >
-            Open video
-          </Button>
         </>
       )}
+      {downloadError && <Alert severity="error">{downloadError}</Alert>}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
         <Button
           variant="contained"
@@ -396,10 +364,11 @@ export function ReviewStep({
         <Button
           variant="outlined"
           startIcon={<DownloadRounded />}
-          onClick={saveSetup}
+          onClick={() => void downloadVideo()}
+          disabled={job?.status !== "completed" || !job.output_url || downloading}
           size="large"
         >
-          Save setup
+          {downloading ? "Downloading…" : "Download video"}
         </Button>
       </Stack>
     </Stack>
