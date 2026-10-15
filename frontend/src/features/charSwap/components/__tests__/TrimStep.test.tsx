@@ -134,6 +134,35 @@ describe("trim step", () => {
     expect(useCharSwapStore.getState().trim).toEqual([1.3, 7.3]);
   });
 
+  it.each([
+    { duration: 10, start: 1.3, expected: [1.3, 9.3] },
+    { duration: 20, start: 6, expected: [6, 20] },
+  ])("lets the start slider move forward and shortens the selection at the end of a $duration second clip",
+    ({ duration, start, expected }) => {
+      useCharSwapStore.getState().loadClip({ ...CLIP, duration });
+      render(<TrimStep demo={null} />);
+
+      fireEvent.change(screen.getByRole("slider", { name: "Clip start" }), {
+        target: { value: String(start) },
+      });
+
+      expect(useCharSwapStore.getState().trim).toEqual(expected);
+      expect(screen.getByLabelText("Preview range")).toHaveTextContent(expected.join(","));
+    },
+  );
+
+  it("lets the start field shorten a full selection while keeping at least four seconds", () => {
+    useCharSwapStore.getState().loadClip({ ...CLIP, duration: 6 });
+    render(<TrimStep demo={null} />);
+    const start = screen.getByRole("spinbutton", { name: "Start (seconds)" });
+    expect(start).toHaveAttribute("max", "2");
+
+    fireEvent.change(start, { target: { value: "100" } });
+    fireEvent.blur(start);
+
+    expect(useCharSwapStore.getState().trim).toEqual([2, 6]);
+  });
+
   it("previews the full uploaded clip without trim controls in the upload step", () => {
     useCharSwapStore.getState().changeTrim([3, 8]);
     render(

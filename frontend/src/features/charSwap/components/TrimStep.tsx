@@ -23,8 +23,9 @@ export function TrimStep({ demo }: TrimStepProps) {
   const minimumLength = Math.min(4, clip.duration);
   const maximumLength = Math.min(15, Math.floor(clip.duration));
   const changeStart = (value: number) => {
-    const length = Math.min(maximumLength, Math.max(minimumLength, Math.round(trim[1] - trim[0])));
-    const start = Math.max(0, Math.min(value, clip.duration - length));
+    const start = Math.max(0, Math.min(value, clip.duration - minimumLength));
+    const available = Math.floor(clip.duration - start + 1e-6);
+    const length = Math.min(maximumLength, available, Math.max(minimumLength, Math.round(trim[1] - trim[0])));
     changeTrim([start, start + length]);
   };
   const changeEnd = (value: number) => {
@@ -75,7 +76,7 @@ export function TrimStep({ demo }: TrimStepProps) {
                 changeStart(Number(value));
               }
             }}
-            inputProps={{ min: 0, max: clip.duration - (trim[1] - trim[0]), step: 0.1 }}
+            inputProps={{ min: 0, max: clip.duration - minimumLength, step: 0.1 }}
             sx={{ flex: 1, minWidth: 0 }}
           />
           <BufferedNumberInput
@@ -97,7 +98,7 @@ export function TrimStep({ demo }: TrimStepProps) {
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {targets.length
             ? "Changing this section clears your selected people and their assignments."
-            : "Moving the start keeps the length. The end snaps to whole-second lengths between 4 and 15 seconds."}
+            : "Moving the start keeps the length when it fits, and shortens it near the end of the file. Lengths stay between 4 and 15 whole seconds."}
         </Typography>
       </Box>
     </Stack>
