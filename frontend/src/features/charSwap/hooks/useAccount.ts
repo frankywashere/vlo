@@ -15,7 +15,7 @@ const firebase = initializeApp({
   projectId: "charswap-franky-20261013",
   appId: "1:634011479314:web:dcb75b9cbeeb4b260a97cb",
   apiKey: "AIzaSyAeeNhm75jLmCizILz4P0y8oYXR4qTHuys",
-  authDomain: "charswap-franky-20261013.firebaseapp.com",
+  authDomain: "recastfx.com",
 });
 const auth = getAuth(firebase);
 setAccountTokenSupplier(async () =>
