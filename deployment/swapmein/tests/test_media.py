@@ -102,6 +102,22 @@ def test_real_normalization_and_soundtrack_restoration(tmp_path):
     assert np.corrcoef(original[:shared], restored[:shared])[0, 1] > .99
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for media integration")
+def test_fractional_frame_rate_trim_at_source_end_keeps_last_frame(tmp_path):
+    source, output = tmp_path / "source.mp4", tmp_path / "normalized.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=red:s=320x180:r=24000/1001:d=15.940333", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=15.940333", "-map", "0:v", "-map", "1:a",
+                    "-t", "15.940333", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p",
+                    str(source)], check=True)
+    metadata = normalize(source, output, options(trim=[10.940333, 15.940333],
+        anchor={"x": .5, "y": .5, "time": 11}))
+    assert metadata["frames"] == 120
+    video = next(stream for stream in probe(output)["streams"] if stream["codec_type"] == "video")
+    assert int(video["nb_frames"]) == 120
+    assert decoded_audio_samples(output) >= 5 * 44100
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for independent input streams")
 @pytest.mark.parametrize("returned_duration", [5.167, 5.458333, 8])
 def test_five_second_dual_input_export_restores_audio_through_the_last_frame(tmp_path, returned_duration):

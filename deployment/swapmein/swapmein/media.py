@@ -103,7 +103,10 @@ def normalize(source: Path, output: Path, setup: Setup):
     sw, sh, width, height = dimensions(source_w, source_h)
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe", "-ss", str(start),
          "-i", str(source), "-t", str(duration), "-map", "0:v:0", "-map", "0:a:0",
-         "-vf", f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,scale={sw}:{sh},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+         # A fractional-frame-rate source can end one output frame short when
+         # the selection ends at the file boundary. Repeat only its last frame;
+         # larger deficits still fail the frame-count check below.
+         "-vf", f"fps=24,tpad=stop_mode=clone:stop=1,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,scale={sw}:{sh},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
          "-c:v", "libx264", "-threads", "2", "-crf", "18", "-pix_fmt", "yuv420p",
          "-af", "apad", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
          "-movflags", "+faststart", str(output)])
