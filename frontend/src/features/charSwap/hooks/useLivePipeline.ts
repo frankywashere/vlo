@@ -16,6 +16,7 @@ import {
 } from "../services/livePipeline";
 import type {
   GenerationProvider,
+  GenerationAccessMode,
   LivePipelineConfig,
   LivePipelineJob,
   LivePipelineSession,
@@ -29,6 +30,7 @@ const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
   enabled: boolean;
+  creditsAvailable: boolean;
   job: LivePipelineJob | null;
   busy: boolean;
   error: string | null;
@@ -52,7 +54,7 @@ function safeMessage(message: string, key: string, token?: string): string {
 }
 
 /** Credentials, session tokens and outstanding work belong to this mount. */
-export function useLivePipeline(apiKey: string, provider: GenerationProvider = "reAPI"): LivePipelineHandle {
+export function useLivePipeline(apiKey: string, provider: GenerationProvider = "reAPI", accessMode: GenerationAccessMode = "api-key"): LivePipelineHandle {
   const [config, setConfig] = useState<LivePipelineConfig | null>(null);
   const [job, setJob] = useState<LivePipelineJob | null>(null);
   const [preparationProgress, setPreparationProgress] = useState<PreparationProgressState | null>(null);
@@ -133,7 +135,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     setPreparationElapsedSeconds(0);
     setWorking(false);
     setError(null);
-  }, [apiKey, provider, cancelRequests]);
+  }, [apiKey, provider, accessMode, cancelRequests]);
 
   const publishJob = useCallback((next: LivePipelineJob) => {
     const previous = currentJob.current;
@@ -175,13 +177,13 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       }
       return session.current;
     }
-    assertLiveKey(apiKey);
+    if (accessMode === "api-key") assertLiveKey(apiKey);
     if (session.current && session.current.expiresAt > Date.now() + 30000) return session.current;
-    const created = await createLiveSession(apiKey, signal, provider);
+    const created = await createLiveSession(apiKey, signal, provider, accessMode);
     signal.throwIfAborted();
     session.current = created;
     return created;
-  }, [apiKey, provider]);
+  }, [apiKey, provider, accessMode]);
 
   useEffect(() => {
     if (!enabled || !jobId || !jobStatus || !POLL_STATUSES.has(jobStatus)) return;
@@ -207,7 +209,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         if (!active || !POLL_STATUSES.has(active.status)) return;
         const access = await ensureSession(controller.signal, true);
         const next = active.status === "generating"
-          ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal)
+          ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal, accessMode)
           : await getLiveJob(active.id, access.token, controller.signal);
         if (!controller.signal.aborted && epoch.current === version) publishJob(next);
       } catch (cause) {
@@ -227,13 +229,13 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       pollTimer.current = null;
       if (polling.current === controller) polling.current = null;
     };
-  }, [enabled, jobId, jobStatus, apiKey, ensureSession, publishJob, pollRevision]);
+  }, [enabled, jobId, jobStatus, apiKey, accessMode, ensureSession, publishJob, pollRevision]);
 
   const prepare = useCallback(async (state: WalkthroughState) => {
     if (operation.current) return false;
     try {
       if (!enabled) throw new LivePipelineError("Live preparation is unavailable on this page.");
-      assertLiveKey(apiKey);
+      if (accessMode === "api-key") assertLiveKey(apiKey);
       validateLiveSetup(state);
       if (currentJob.current && !["failed", "completed"].includes(currentJob.current.status)) {
         throw new LivePipelineError("Your current job is retained. Review it before preparing another swap.");
@@ -272,7 +274,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [enabled, apiKey, reset, ensureSession, publishJob]);
+  }, [enabled, apiKey, accessMode, reset, ensureSession, publishJob]);
 
   const resolveTracking = useCallback(async (choices: TrackingReviewChoice[]) => {
     const active = currentJob.current;
@@ -335,7 +337,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       return;
     }
     try {
-      assertLiveKey(apiKey);
+      if (accessMode === "api-key") assertLiveKey(apiKey);
     } catch (cause) {
       setError(cause instanceof LivePipelineError ? cause.message : "Add your own provider key first.");
       return;
@@ -354,7 +356,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       controller.signal.throwIfAborted();
       attemptedJobs.current.add(active.id);
       requestStarted = true;
-      const submitted = await generateLiveJob(active.id, access.token, apiKey, controller.signal);
+      const submitted = await generateLiveJob(active.id, access.token, apiKey, controller.signal, accessMode);
       if (!controller.signal.aborted && epoch.current === version) publishJob(submitted);
     } catch (cause) {
       if (!controller.signal.aborted && epoch.current === version) {
@@ -377,7 +379,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [enabled, apiKey, ensureSession, publishJob]);
+  }, [enabled, apiKey, accessMode, ensureSession, publishJob]);
 
   const refresh = useCallback(async () => {
     const active = currentJob.current;
@@ -394,7 +396,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     try {
       const access = await ensureSession(controller.signal, true);
       const next = active.status === "generating"
-        ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal)
+        ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal, accessMode)
         : await getLiveJob(active.id, access.token, controller.signal);
       if (controller.signal.aborted || epoch.current !== version) return;
       publishJob(next);
@@ -414,10 +416,11 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [enabled, apiKey, ensureSession, publishJob]);
+  }, [enabled, apiKey, accessMode, ensureSession, publishJob]);
 
   return {
     enabled,
+    creditsAvailable: config?.credits_available === true,
     preparationProgress,
     preparationElapsedSeconds,
     job,

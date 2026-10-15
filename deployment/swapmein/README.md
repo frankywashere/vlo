@@ -29,8 +29,10 @@ records its checks and the remaining generation-quality limits.
   dimensions at 24 fps; it neither downsizes to the guide nor upscales to the
   uploaded source dimensions.
 
-Multiple-person generation, automatic identity continuity across cuts, automated face
-re-identification, payments and purchased app credits are not implemented.
+Multiple-person generation, automatic identity continuity across cuts, and automated face
+re-identification are not implemented. Sandbox credit checkout code is staged on `launch`;
+checkout and credit-funded generation remain disabled until prices, private secrets,
+webhook delivery, and refund handling are verified.
 The walkthrough may illustrate later capabilities, but those services are not
 implemented. “Check all scenes” prepares the selected section. With masking off,
 SAM is skipped and the user reviews the original-picture guide. With masking on,
@@ -388,7 +390,8 @@ python3 deployment/swapmein/deploy.py
 `--setup-only` configures scoped resources without building or deploying.
 `--service-only` checks the cap and bounds the existing gateway without a build or
 worker change. `--allowed-origin` may be repeated for authorized HTTPS origins.
-Do not add a provider key to CLI arguments or environment configuration.
+Do not add a provider key to CLI arguments or a plaintext environment file.
+The recastfx-funded path is designed to receive a Cloud Secret Manager binding at runtime.
 
 Build staging includes only `Dockerfile`, `requirements.txt` and runtime Python
 files, rejecting source symlinks. It excludes local media, `.secrets`, ADC files,

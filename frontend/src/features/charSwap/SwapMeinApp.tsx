@@ -19,6 +19,7 @@ import { CharSwapWalkthrough } from "./CharSwapWalkthrough";
 import { AppHeader } from "./components/AppHeader";
 import { LandingPage } from "./components/LandingPage";
 import { AccountLibrary } from "./components/AccountLibrary";
+import { CommerceDialog } from "./components/CommerceDialog";
 import { useAccount } from "./hooks/useAccount";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
@@ -103,6 +104,7 @@ function AccountWorkspace({
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [commerceOpen, setCommerceOpen] = useState(false);
   const [pending, setPending] = useState<"create" | "library" | null>(null);
   const [busy, setBusy] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
@@ -192,13 +194,14 @@ function AccountWorkspace({
                   {account.user.email}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Your library is private to this account. Provider keys stay in
-                  this tab and are cleared when you sign out.
+                  Your library is private to this account.
                 </Typography>
+                <Button variant="outlined" onClick={() => { setAccountOpen(false); setCommerceOpen(true); }}>
+                  Credits and account access
+                </Button>
                 {busy && (
                   <Alert severity="info">
-                    A job is running. You can return to its status from your
-                    library after signing in again with the same provider key.
+                    A job is running. You can return to its status from your library.
                   </Alert>
                 )}
               </>
@@ -241,6 +244,7 @@ function AccountWorkspace({
           )}
         </DialogActions>
       </Dialog>
+      {account.user && <CommerceDialog open={commerceOpen} onClose={() => setCommerceOpen(false)} />}
     </Box>
   );
 }

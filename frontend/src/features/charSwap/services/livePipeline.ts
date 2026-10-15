@@ -5,6 +5,7 @@ import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 import { accountToken } from "./accountContext";
 
 export type GenerationProvider = "reAPI" | "ToAPIs";
+export type GenerationAccessMode = "api-key" | "credits";
 
 export interface LivePipelineConfig {
   live: boolean;
@@ -13,6 +14,7 @@ export interface LivePipelineConfig {
   model: "minimax-h3";
   delivery: "native" | "480p";
   beta: "single-person";
+  credits_available?: boolean;
 }
 
 export type LiveJobStatus =
@@ -28,6 +30,8 @@ export type LiveJobStatus =
 
 export interface LivePipelineJob {
   provider?: GenerationProvider;
+  access_mode?: GenerationAccessMode;
+  app_credits_charged?: number;
   id: string;
   status: LiveJobStatus;
   message?: string;
@@ -349,7 +353,7 @@ export async function getLiveConfig(
   const value = await requestJson("/api/config", {}, signal);
   if (
     !isRecord(value) ||
-    value.provider !== "reAPI" ||
+    (value.provider !== "reAPI" && value.provider !== "recastfx") ||
     value.model !== "minimax-h3" ||
     (value.delivery !== "480p" && value.delivery !== "native") ||
     value.beta !== "single-person"
@@ -365,6 +369,7 @@ export async function getLiveConfig(
     model: "minimax-h3",
     delivery: value.delivery,
     beta: "single-person",
+    credits_available: value.credits_available === true,
   };
 }
 
@@ -372,14 +377,15 @@ export async function createLiveSession(
   key: string,
   signal: AbortSignal,
   provider: GenerationProvider = "reAPI",
+  accessMode: GenerationAccessMode = "api-key",
 ): Promise<LivePipelineSession> {
-  assertLiveKey(key);
+  if (accessMode === "api-key") assertLiveKey(key);
   const value = await requestJson(
     "/api/session",
     {
       method: "POST",
-      headers: { "X-Reapi-Key": key.trim(), "Content-Type": "application/json" },
-      body: JSON.stringify({provider}),
+      headers: { ...(accessMode === "api-key" ? {"X-Reapi-Key": key.trim()} : {}), "Content-Type": "application/json" },
+      body: JSON.stringify({provider, access_mode: accessMode}),
     },
     signal,
   );
@@ -644,15 +650,16 @@ export async function generateLiveJob(
   token: string,
   key: string,
   signal: AbortSignal,
+  accessMode: GenerationAccessMode = "api-key",
 ): Promise<LivePipelineJob> {
-  assertLiveKey(key);
+  if (accessMode === "api-key") assertLiveKey(key);
   return readJob(
     await requestJson(
       `/api/jobs/${encodeURIComponent(id)}/generate`,
       {
         method: "POST",
         headers: {
-          ...sessionHeaders(token, key),
+          ...sessionHeaders(token, accessMode === "api-key" ? key : undefined),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ approved: true }),
@@ -667,12 +674,13 @@ export async function pollLiveProvider(
   token: string,
   key: string,
   signal: AbortSignal,
+  accessMode: GenerationAccessMode = "api-key",
 ): Promise<LivePipelineJob> {
-  assertLiveKey(key);
+  if (accessMode === "api-key") assertLiveKey(key);
   return readJob(
     await requestJson(
       `/api/jobs/${encodeURIComponent(id)}/provider`,
-      { headers: sessionHeaders(token, key) },
+      { headers: sessionHeaders(token, accessMode === "api-key" ? key : undefined) },
       signal,
     ),
   );

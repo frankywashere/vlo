@@ -8,6 +8,7 @@ import {
   setJobHidden,
 } from "../../services/accounts";
 import { generateLiveJob, pollLiveProvider } from "../../services/livePipeline";
+vi.mock("../../services/commerce", () => ({loadAccountAccess: async () => ({api_key_enabled: true, role: null})}));
 
 vi.mock("../../services/accounts", () => ({
   loadAccountJobs: vi.fn(),
@@ -69,6 +70,7 @@ describe("private account library", () => {
         "resumed-session",
         "private-provider-key",
         expect.any(AbortSignal),
+        "api-key",
       ),
     );
     expect(pollLiveProvider).not.toHaveBeenCalled();

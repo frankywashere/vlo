@@ -24,7 +24,7 @@ def verify_account(token: str | None, project: str) -> dict:
             raise ValueError("Invalid account claims")
     except Exception:
         raise PublicError("Your Google sign-in expired. Sign in again to continue.", 401) from None
-    return {"account_id": digest(uid)}
+    return {"account_id": digest(uid), "email": str(claims.get("email", "")).strip().lower()}
 
 
 def index_path(account_id: str, job_id: str) -> str:
@@ -42,6 +42,7 @@ def bind_job(records, job: dict, session: dict, title: str = "Your clip") -> dic
     records.create(index_path(account_id, job["id"]), {
         "id": job["id"], "title": job["title"], "created_at": job["created_at"],
         "status": job["status"], "provider": job.get("provider", "reAPI"),
+        "access_mode": job.get("access_mode", "api-key"),
     })
     records.update(f"accounts/{account_id}/index.json", lambda current: {
         "jobs": [job["id"], *[item for item in (current or {}).get("jobs", []) if item != job["id"]]][:50]
@@ -55,6 +56,7 @@ def archive_completed(records, job: dict):
     records.update(index_path(job["account_id"], job["id"]), lambda current: {
         **(current or {}), "id": job["id"], "title": job.get("title", "Your clip"),
         "status": "completed", "provider": job.get("provider", "reAPI"),
+        "access_mode": job.get("access_mode", "api-key"),
         "created_at": job["created_at"], "completed_at": time.time(),
         "expires_at": time.time() + LIBRARY_SECONDS, "output_uri": job["output_uri"],
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),

@@ -22,6 +22,7 @@ const auth = vi.hoisted(() => ({
   signOut: vi.fn(),
 }));
 vi.mock("../hooks/useAccount", () => ({ useAccount: () => auth }));
+vi.mock("../services/commerce", () => ({loadAccountAccess: async () => ({api_key_enabled: true, role: null})}));
 vi.mock("../services/accounts", () => ({
   loadAccountJobs: vi.fn().mockResolvedValue([]),
   resumeAccountJob: vi.fn(),

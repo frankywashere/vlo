@@ -6,6 +6,12 @@ import { ApiKeySettingsDialog } from "../ApiKeySettingsDialog";
 afterEach(() => cleanup());
 
 describe("API settings preview dialog", () => {
+  it("hides key entry and provider choice when account access is off", () => {
+    render(<ApiKeySettingsDialog open live apiKeyAllowed={false} apiKey="" onSave={vi.fn()} onClear={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.queryByLabelText("reAPI API key")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", {name: "Provider"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Save key"})).not.toBeInTheDocument();
+  });
   it("blocks empty saves and saves trimmed arbitrary key text only when requested", () => {
     const onSave = vi.fn();
     const onClose = vi.fn();

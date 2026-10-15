@@ -20,6 +20,12 @@ function setup(overrides: Partial<Parameters<typeof AccessStep>[0]> = {}) {
 }
 
 describe("generation access choice", () => {
+  it("shows no provider-key option to an unapproved account", () => {
+    setup({accessMode: "credits", apiKeyAllowed: false, live: true});
+    expect(screen.queryByText(/API key/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", {name: /Use my API key/})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: /sample credits/i})).not.toBeInTheDocument();
+  });
   it("opens key settings and presents app credits as a distinct choice", () => {
     const props = setup();
     expect(screen.getByRole("radio", { name: /Use my API key/ })).toBeChecked();

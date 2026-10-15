@@ -37,6 +37,7 @@ const live = vi.hoisted(() => ({
 }));
 vi.mock("../hooks/useLivePipeline", () => ({ useLivePipeline: () => live }));
 vi.mock("../services/livePipeline", () => ({ isSecureLiveOrigin: () => true }));
+vi.mock("../services/commerce", () => ({ loadAccountAccess: async () => ({api_key_enabled: true, role: null}) }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -156,7 +157,7 @@ describe("live generation approval", () => {
     expect(live.generate).not.toHaveBeenCalled();
   });
 
-  it("requires visual confirmation and own-key access; sample app credits cannot submit", async () => {
+  it("requires visual confirmation and restarts preparation when funding mode changes", async () => {
     const user = userEvent.setup();
     render(<CharSwapWalkthrough />);
     expect(
@@ -190,21 +191,9 @@ describe("live generation approval", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     await user.click(screen.getByRole("radio", { name: /recastfx credits/ }));
-    await user.click(screen.getByRole("button", { name: "Review setup" }));
-    expect(
-      screen.getByRole("button", { name: "Generate replacements" }),
-    ).toBeDisabled();
+    expect(useCharSwapStore.getState().step).toBe("references");
+    expect(live.clear).toHaveBeenCalled();
     expect(live.generate).not.toHaveBeenCalled();
-    const nav = screen.getByRole("navigation", { name: "Replacement steps" });
-    await user.click(within(nav).getByRole("button", { name: "Access" }));
-    await user.click(screen.getByRole("radio", { name: /Use my API key/ }));
-    await user.click(screen.getByRole("button", { name: "Review setup" }));
-    expect(screen.getByRole("button", {name: "Generate replacements"})).toBeDisabled();
-    fireEvent.loadedData(screen.getByLabelText("Clip preview"));
-    await user.click(
-      screen.getByRole("button", { name: "Generate replacements" }),
-    );
-    expect(live.generate).toHaveBeenCalledOnce();
   });
 });
 

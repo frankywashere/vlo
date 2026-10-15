@@ -24,6 +24,7 @@ import VisibilityOffOutlined from "@mui/icons-material/VisibilityOffOutlined";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 
 interface ApiKeySettingsDialogProps {
+  apiKeyAllowed?: boolean;
   easyMode?: boolean;
   onEasyModeChange?: (enabled: boolean) => void;
   enhancedCharacterMasking?: boolean;
@@ -66,6 +67,7 @@ export function ApiKeySettingsDialog(props: ApiKeySettingsDialogProps) {
 }
 
 function ApiKeyPreviewEditor({
+  apiKeyAllowed = true,
   easyMode = true,
   onEasyModeChange,
   enhancedCharacterMasking = true,
@@ -124,7 +126,7 @@ function ApiKeyPreviewEditor({
               Skip scene-by-scene matching. With enhanced masking on, SAM follows the person selected by your initial tap throughout the clip. Turn Easy mode off to select the matching person in each flagged section.
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Saved automatically, without an API key. Changing modes requires preparing a new guide. Review the final guide for changes of person across scenes.
+              Saved automatically. Changing modes requires preparing a new guide. Review the final guide for changes of person across scenes.
             </Typography>
           </Box>
           <Box>
@@ -144,9 +146,13 @@ function ApiKeyPreviewEditor({
               tracking is skipped when masking is off; your tap position and timestamp identify the person.
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Masking is saved automatically. No API key is needed to change it. Changing masking requires a new guide review.
+              Masking is saved automatically. Changing masking requires a new guide review.
             </Typography>
           </Box>
+          {!apiKeyAllowed && <Alert severity="info" id="charswap-api-settings-notice">
+            Generation uses recastfx credits. Your clip settings are saved automatically.
+          </Alert>}
+          {apiKeyAllowed && <>
           <Alert severity="info" id="charswap-api-settings-notice">
             {live
               ? `Your key is used only for this tab and sent securely through recastfx to ${provider}. Video generation starts only after your final review.`
@@ -239,6 +245,7 @@ function ApiKeyPreviewEditor({
             {provider === "ToAPIs" &&
               " Your token must allow MiniMax-H3 and have enough daily, monthly and remaining credits."}
           </Typography>
+          </>}
         </Stack>
       </DialogContent>
       <DialogActions
@@ -249,7 +256,7 @@ function ApiKeyPreviewEditor({
           pb: "max(16px, env(safe-area-inset-bottom))",
         }}
       >
-        <Button
+        {apiKeyAllowed && <Button
           disabled={!draft.trim() && !apiKey.trim()}
           onClick={() => {
             setDraft("");
@@ -259,18 +266,18 @@ function ApiKeyPreviewEditor({
           sx={{ minHeight: 44, mr: "auto" }}
         >
           Clear key
-        </Button>
+        </Button>}
         <Button onClick={onClose} sx={{ minHeight: 44 }}>
           Done
         </Button>
-        <Button
+        {apiKeyAllowed && <Button
           variant="contained"
           type="submit"
           disabled={!draft.trim()}
           sx={{ minHeight: 44 }}
         >
           {live ? "Save key" : "Save for preview"}
-        </Button>
+        </Button>}
       </DialogActions>
     </Box>
   );

@@ -19,7 +19,13 @@ def main():
     deploy.SERVICE = "recastfx-api"
     deploy.IMAGE_REPOSITORY = f"{deploy.REGION}-docker.pkg.dev/{deploy.PROJECT}/proof/recastfx-gateway"
     base_env = deploy.deployment_env
-    deploy.deployment_env = lambda workers, origins, url: {**base_env(workers, origins, url), "REQUIRE_ACCOUNT": "true"}
+    deploy.deployment_env = lambda workers, origins, url: {
+        **base_env(workers, origins, url), "REQUIRE_ACCOUNT": "true",
+        "COMMERCE_OWNER_EMAILS": "frank@whipsnapfilms.com",
+        "RECASTFX_CHECKOUT_RETURN_ORIGIN": "https://recastfx.com",
+        "RECASTFX_CREDIT_GENERATION_ENABLED": "false",
+        "RECASTFX_CHECKOUT_ENABLED": "false",
+    }
     project = deploy.gcloud("projects", "describe", deploy.PROJECT)
     if str(project.get("projectNumber")) != deploy.PROJECT_NUMBER:
         raise deploy.SetupError("Wrong project number")

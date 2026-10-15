@@ -15,6 +15,8 @@ import AccountBalanceWalletOutlined from "@mui/icons-material/AccountBalanceWall
 import { PANEL } from "./stepStyles";
 
 interface AccessStepProps {
+  apiKeyAllowed?: boolean;
+  live?: boolean;
   provider?: "reAPI" | "ToAPIs";
   accessMode: "api-key" | "credits";
   onAccessModeChange: (mode: "api-key" | "credits") => void;
@@ -26,6 +28,8 @@ interface AccessStepProps {
 }
 
 export function AccessStep({
+  apiKeyAllowed = true,
+  live = false,
   provider = "reAPI",
   accessMode,
   onAccessModeChange,
@@ -37,7 +41,7 @@ export function AccessStep({
 }: AccessStepProps) {
   return (
     <Stack spacing={2.5}>
-      <RadioGroup
+      {apiKeyAllowed && <RadioGroup
         aria-label="Generation access"
         value={accessMode}
         onChange={(_event, value) => {
@@ -89,9 +93,9 @@ export function AccessStep({
             "& .MuiFormControlLabel-label": { pt: 1 },
           }}
         />
-      </RadioGroup>
+      </RadioGroup>}
 
-      {accessMode === "api-key" ? (
+      {accessMode === "api-key" && apiKeyAllowed ? (
         <Box sx={PANEL}>
           <Stack
             direction={{ xs: "column", sm: "row" }}
@@ -145,27 +149,25 @@ export function AccessStep({
               <AccountBalanceWalletOutlined sx={{ color: "primary.main" }} />
               <Box>
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography fontWeight={600}>Sample balance</Typography>
-                  <Chip label="Preview" size="small" />
+                  <Typography fontWeight={600}>{live ? "Your credits" : "Sample balance"}</Typography>
+                  {!live && <Chip label="Preview" size="small" />}
                 </Stack>
                 <Typography variant="body2" color="text.secondary">
-                  {sampleCreditBalance.toLocaleString()} sample credits
+                  {live ? "Open Credits and account access from your profile to see your balance." : `${sampleCreditBalance.toLocaleString()} sample credits`}
                 </Typography>
               </Box>
             </Stack>
-            <Button
+            {!live && <Button
               variant="outlined"
               startIcon={<AddRounded />}
               onClick={onAddSampleCredits}
               sx={{ minHeight: 44, flexShrink: 0 }}
             >
               Add sample credits
-            </Button>
+            </Button>}
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            App credit purchases are coming soon. This balance and top-up are a
-            preview; no payment is taken and these credits cannot generate
-            videos yet.
+            {live ? "Credit pack pricing is being configured. Checkout is unavailable until the owner sets prices." : "App credit purchases are coming soon. This balance and top-up are a preview; no payment is taken and these credits cannot generate videos yet."}
           </Typography>
         </Box>
       )}

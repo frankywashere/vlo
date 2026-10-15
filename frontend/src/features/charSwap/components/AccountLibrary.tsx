@@ -25,6 +25,7 @@ import {
   resolveLiveTracking,
 } from "../services/livePipeline";
 import { SceneTrackingReview } from "./SceneTrackingReview";
+import { loadAccountAccess } from "../services/commerce";
 
 const ACTIVE = new Set(["queued", "preparing", "generating", "finalizing"]);
 interface AccountLibraryProps {
@@ -37,6 +38,13 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountJob | null>(null);
   const [key, setKey] = useState("");
+  const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void loadAccountAccess().then((value) => { if (active) setApiKeyAllowed(value.api_key_enabled); })
+      .catch(() => { if (active) setApiKeyAllowed(false); });
+    return () => { active = false; };
+  }, []);
   const [busy, setBusy] = useState(false);
   const [autoCheck, setAutoCheck] = useState(false);
   const [removed, setRemoved] = useState<AccountJob | null>(null);
@@ -134,6 +142,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           session.token,
           key,
           controller.current.signal,
+          selected.access_mode === "credits" ? "credits" : "api-key",
         );
         if (mounted.current) {
           setSelected({ ...selected, ...result });
@@ -156,7 +165,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
   );
 
   useEffect(() => {
-    if (!autoCheck || busy || !key.trim() || selected?.status !== "generating")
+    if (!autoCheck || busy || (selected?.access_mode !== "credits" && !key.trim()) || selected?.status !== "generating")
       return;
     const timer = globalThis.setTimeout(() => {
       void act(false);
@@ -210,11 +219,11 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         Your latest 50 swaps, saved to your Google account. Finished videos are
         kept for 30 days. Download the ones you want to keep.
       </Typography>
-      <Alert severity="info" sx={{ mb: 3 }}>
+      {apiKeyAllowed && <Alert severity="info" sx={{ mb: 3 }}>
         Preparation and export continue if you leave. To check a provider render
         after reopening, enter the same provider key using “Open job.” Keys are
         never saved to your account.
-      </Alert>
+      </Alert>}
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -298,7 +307,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {new Date(job.created_at * 1000).toLocaleDateString()} ·{" "}
-                {job.provider ?? "reAPI"}
+                {job.access_mode === "credits" ? "recastfx credits" : apiKeyAllowed ? job.provider ?? "Provider" : "Swap"}
               </Typography>
               <Box sx={{ my: 1.5 }}>
                 <Chip
@@ -370,14 +379,14 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
             {selected?.status === "ready" && (
               <Alert severity="info">
                 Review the guide and reference. Approving below starts a paid
-                generation using your {selected.provider} balance
+                generation using your {selected.access_mode === "credits" ? "recastfx credits" : apiKeyAllowed ? `${selected.provider} balance` : "account balance"}
                 {selected.estimated_cost_usd !== undefined
                   ? ` (estimated US$${selected.estimated_cost_usd.toFixed(2)})`
                   : ""}
                 .
               </Alert>
             )}
-            {selected &&
+            {apiKeyAllowed && selected?.access_mode !== "credits" && selected &&
               ["ready", "generating", "tracking_review"].includes(
                 selected.status,
               ) && (
@@ -413,7 +422,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                   duration={selected.duration ?? 0}
                   width={selected.width ?? 854}
                   height={selected.height ?? 480}
-                  busy={busy || !key.trim()}
+                  busy={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
                   initialChoices={selected.tracking_choices}
                   onRefresh={() => void refresh()}
                   onApply={async (choices) => {
@@ -458,7 +467,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           </Button>
           {selected?.status === "generating" && (
             <Button
-              disabled={busy || !key.trim()}
+              disabled={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
               onClick={() => void act(false)}
             >
               Check provider status
@@ -467,7 +476,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           {selected?.status === "ready" && (
             <Button
               variant="contained"
-              disabled={busy || !key.trim()}
+              disabled={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
               onClick={() => void act(true)}
             >
               Approve and generate

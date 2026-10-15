@@ -460,11 +460,11 @@ describe("live BYOK pipeline", () => {
     const { result, rerender } = renderHook(({provider}: {provider: "reAPI" | "ToAPIs"}) => useLivePipeline(USER_KEY, provider), {initialProps: {provider: "reAPI" as "reAPI" | "ToAPIs"}});
     await waitFor(() => expect(result.current.enabled).toBe(true));
     await act(async () => {await result.current.prepare(setup());});
-    expect(JSON.parse(String(calls("/api/session")[0][1]?.body))).toEqual({provider: "reAPI"});
+    expect(JSON.parse(String(calls("/api/session")[0][1]?.body))).toEqual({provider: "reAPI", access_mode: "api-key"});
     rerender({provider: "ToAPIs"});
     expect(result.current.job).toBeNull();
     await act(async () => {await result.current.prepare(setup());});
-    expect(JSON.parse(String(calls("/api/session")[1][1]?.body))).toEqual({provider: "ToAPIs"});
+    expect(JSON.parse(String(calls("/api/session")[1][1]?.body))).toEqual({provider: "ToAPIs", access_mode: "api-key"});
   });
 
 });

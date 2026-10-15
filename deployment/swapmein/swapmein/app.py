@@ -1,6 +1,7 @@
-"""Public BYOK gateway. Provider keys are request-only and never stored."""
+"""Recastfx gateway with private account credits and owner-gated BYOK access."""
 from functools import lru_cache
 from pathlib import Path
+import os
 import secrets
 import re
 import tempfile
@@ -31,9 +32,12 @@ from .storage import (Records, check_preparation_capacity, claim_job, reserve_pr
 from .tracking import resolve_tracking
 from .diagnostics import emit
 from .accounts import verify_account, bind_job, archive_completed, index_path
+from .commerce import (CATALOG_PATH, api_key_permission, apply_wallet_change, public_catalog, require_staff,
+                       save_catalog, staff_role, wallet_view)
+from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 
 settings = Settings.from_env()
-app = FastAPI(title="swapMEin single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="recastfx single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins),
     allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key", "X-Firebase-Token"], max_age=600)
 
@@ -48,6 +52,7 @@ class BodyLimitMiddleware:
         total = 0
         path = scope.get("path", "")
         maximum = (31 * 1024 * 1024 if path == "/api/jobs" else
+                   100 * 1024 if path == "/api/commerce/stripe-webhook" else
                    32768 if path.endswith("/tracking-review") else 8192)
         async def bounded_receive():
             nonlocal total
@@ -121,6 +126,20 @@ def selected_provider(provider_name: str):
     return toapis_service() if provider_name == "ToAPIs" else services()[2]
 
 
+def key_for_session(active_session: dict, supplied_key: str | None) -> str:
+    if active_session.get("access_mode") == "credits":
+        key = os.getenv("REAPI_SERVER_KEY", "")
+        if not os.getenv("RECASTFX_CREDIT_GENERATION_ENABLED") == "true" or not key:
+            raise PublicError("Credit-funded generation is not available yet.", 503)
+        return provider_key(key)
+    records, _, _ = services()
+    if settings.require_account and not api_key_permission(records, active_session):
+        raise PublicError("API-key access is not enabled for this account.", 403)
+    key = provider_key(supplied_key)
+    check_key_binding(active_session, key)
+    return key
+
+
 def job_estimate(job):
     # ToAPIs estimate scales the verified US$0.80 five-second reference test.
     return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
@@ -133,6 +152,8 @@ def authenticate(authorization: str | None):
     session = check_session(session)
     if settings.require_account and not session.get("account_id"):
         raise PublicError("Sign in with Google to continue.", 401)
+    if settings.require_account and session.get("access_mode", "api-key") == "api-key" and not api_key_permission(records, session):
+        raise PublicError("API-key access is not enabled for this account.", 403)
     return session.get("owner", session_id), session
 
 
@@ -154,14 +175,22 @@ def view(job: dict):
         status = "generating"
     if status == "matching":
         status = "queued"
-    result = {"provider": job.get("provider", "reAPI"), "id": job["id"], "status": status, "message": job.get("message", "")}
+    credits_mode = job.get("access_mode") == "credits"
+    result = {"id": job["id"], "status": status,
+              "message": ("Your video is processing." if credits_mode and status in {"generating", "finalizing"}
+                          else "Generation needs review." if credits_mode and status == "failed"
+                          else job.get("message", "")),
+              "access_mode": "credits" if credits_mode else "api-key"}
+    if not credits_mode:
+        result["provider"] = job.get("provider", "reAPI")
     if "duration" in job:
         result["duration"] = job["duration"]
-        result["estimated_cost_usd"] = job_estimate(job)
-        result["estimate_note"] = "Provider estimate only, using rounded published 768P rate; Google preparation costs are separate."
-        result["estimate_source"] = "https://reapi.ai/models/minimax-h3"
-        result["estimate_verified_at"] = "2026-10-14"
-    if job.get("provider") == "ToAPIs":
+        if not credits_mode:
+            result["estimated_cost_usd"] = job_estimate(job)
+            result["estimate_note"] = "Provider estimate only, using rounded published 768P rate; Google preparation costs are separate."
+            result["estimate_source"] = "https://reapi.ai/models/minimax-h3"
+            result["estimate_verified_at"] = "2026-10-14"
+    if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
     for field in ["width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode"]:
@@ -176,16 +205,21 @@ def view(job: dict):
             result["tracking_choices"] = job["tracking_choices"]
         if job.get("normalized_uri"):
             result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
-    if job.get("actual_credits") is not None:
+    if credits_mode and job.get("app_credits_charged") is not None:
+        result["app_credits_charged"] = job["app_credits_charged"]
+    if not credits_mode and job.get("actual_credits") is not None:
         result["actual_provider_credits"] = job["actual_credits"]
     return result
 
 
 @app.get("/api/config")
 def config():
-    return {"live": True, "providers": ["reAPI", "ToAPIs"], "provider": "reAPI", "model": "minimax-h3", "delivery": "native",
+    credit_ready = (os.getenv("RECASTFX_CREDIT_GENERATION_ENABLED") == "true"
+                    and bool(os.getenv("REAPI_SERVER_KEY")))
+    return {"live": True, "providers": [] if settings.require_account else ["reAPI", "ToAPIs"],
+            "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "single-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
-            "accounts_required": settings.require_account}
+            "accounts_required": settings.require_account, "credits_available": credit_ready}
 
 
 @app.get("/health")
@@ -196,6 +230,135 @@ def health():
 class ProviderSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: Literal["reAPI", "ToAPIs"] = "reAPI"
+    access_mode: Literal["api-key", "credits"] = "api-key"
+
+
+class CreditPack(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: str
+    name: str
+    credits: int
+    price_cents: int
+    active: bool
+
+
+class CatalogUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: int = Field(ge=0)
+    packs: list[CreditPack]
+    credits_per_second: int
+
+
+class CheckoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    pack_id: str
+
+
+class StaffUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    email: str
+    role: Literal["pricing_admin", "viewer"]
+    active: bool
+
+
+class ApiKeyAccessUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    email: str
+    enabled: bool
+
+
+def valid_account_email(value: str) -> str:
+    email = value.strip().lower()
+    if len(email) > 254 or not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.-]+\.[a-z]{2,}", email):
+        raise PublicError("Enter a valid account email.")
+    return email
+
+
+@app.get("/api/account/access")
+def account_access(x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return {"api_key_enabled": api_key_permission(records, account),
+            "role": staff_role(records, account)}
+
+
+@app.get("/api/commerce/catalog")
+def commerce_catalog():
+    records, _, _ = services()
+    return public_catalog(records)
+
+
+@app.get("/api/account/wallet")
+def account_wallet(x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return wallet_view(records, account["account_id"])
+
+
+@app.get("/api/commerce/admin")
+def commerce_admin(x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
+    catalog, _ = records.read(CATALOG_PATH)
+    return {"role": role, "catalog": catalog or {"revision": 0, "packs": [], "credits_per_second": 0, "history": []}}
+
+
+@app.post("/api/commerce/admin/catalog")
+def update_commerce_catalog(body: CatalogUpdate, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_second)
+
+
+@app.post("/api/commerce/admin/staff")
+def update_commerce_staff(body: StaffUpdate, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, account, {"owner"})
+    email = valid_account_email(body.email)
+    path = f"commerce/staff/{digest(email)}.json"
+    record = records.update(path, lambda current: {"email": email, "role": body.role,
+        "active": body.active, "updated_at": time.time(), "updated_by": account["email"]})
+    return {"email": record["email"], "role": record["role"], "active": record["active"]}
+
+
+@app.post("/api/commerce/admin/api-key-access")
+def update_api_key_access(body: ApiKeyAccessUpdate, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, actor, {"owner"})
+    email = valid_account_email(body.email)
+    path = f"commerce/api-key-access/{digest(email)}.json"
+    record = records.update(path, lambda current: {"email": email, "enabled": body.enabled,
+        "updated_at": time.time(), "updated_by": actor["email"]})
+    return {"email": record["email"], "enabled": record["enabled"]}
+
+
+@app.post("/api/commerce/checkout")
+def commerce_checkout(body: CheckoutRequest, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    catalog = public_catalog(records)
+    if not catalog["configured"] or not catalog["checkout_enabled"]:
+        raise PublicError("Credit checkout is not available yet.", 503)
+    pack = next((pack for pack in catalog["packs"] if pack["id"] == body.pack_id), None)
+    if not pack:
+        raise PublicError("Choose an available credit pack.", 404)
+    origin = os.getenv("RECASTFX_CHECKOUT_RETURN_ORIGIN", "https://recastfx.com").rstrip("/")
+    if origin not in settings.allowed_origins:
+        raise PublicError("Checkout return URL is not configured.", 503)
+    return {"url": create_checkout(account, pack, origin)}
+
+
+@app.post("/api/commerce/stripe-webhook")
+async def stripe_webhook(request: Request, stripe_signature: str | None = Header(default=None)):
+    # Stripe's signature is over the exact raw body. A browser return URL never grants credits.
+    payload = await request.body()
+    event = verified_event(payload, stripe_signature)
+    records, _, _ = services()
+    fulfilled = fulfill_checkout(records, event)
+    return {"received": True, "fulfilled": fulfilled}
 
 
 @app.post("/api/session")
@@ -203,12 +366,25 @@ def session(options: ProviderSelection = Body(default=ProviderSelection()), x_re
             x_firebase_token: str | None = Header(default=None)):
     records, _, provider = services()
     account = verify_account(x_firebase_token, settings.project) if settings.require_account or x_firebase_token else {}
-    key = provider_key(x_reapi_key)
-    provider = selected_provider(options.provider)
-    balance = provider.balance(key)
+    if options.access_mode == "credits":
+        if options.provider != "reAPI" or not account.get("account_id"):
+            raise PublicError("Sign in to use recastfx credits with MiniMax H3.", 400)
+        if not os.getenv("RECASTFX_CREDIT_GENERATION_ENABLED") == "true" or not os.getenv("REAPI_SERVER_KEY"):
+            raise PublicError("Credit-funded generation is not available yet.", 503)
+        balance = wallet_view(records, account["account_id"])["balance"]
+        key_fingerprint = digest("recastfx-credits")
+    else:
+        if settings.require_account and (not account or not api_key_permission(records, account)):
+            raise PublicError("API-key access is not enabled for this account.", 403)
+        key = provider_key(x_reapi_key)
+        provider = selected_provider(options.provider)
+        balance = provider.balance(key)
+        key_fingerprint = digest(key)
     token = secrets.token_urlsafe(32)
     expires_at = time.time() + settings.session_seconds
-    records.create("sessions/" + digest(token) + ".json", {"expires_at": expires_at, "key_fingerprint": digest(key), "provider": options.provider, **account})
+    records.create("sessions/" + digest(token) + ".json", {"expires_at": expires_at,
+        "key_fingerprint": key_fingerprint, "provider": options.provider,
+        "access_mode": options.access_mode, **account})
     return {"token": token, "expires_at": expires_at, "balance": balance}
 
 
@@ -254,7 +430,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
-               "source_uri": source_uri, "reference_uri": reference_uri}
+               "source_uri": source_uri, "reference_uri": reference_uri,
+               "access_mode": active_session.get("access_mode", "api-key")}
         job = await run_in_threadpool(bind_job, records, job, active_session)
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
         record_created = True
@@ -323,6 +500,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "raw_reference_uri": reference_uri, "source_bytes": options.source_bytes,
         "reference_bytes": options.reference_bytes, "setup": options.setup.model_dump(),
         "provider": active_session.get("provider", "reAPI"),
+        "access_mode": active_session.get("access_mode", "api-key"),
         "title": options.title,
     })
     return {"id": job_id, "source": source, "reference": reference}
@@ -364,7 +542,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         reserved = True
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
-               "source_uri": manifest["source_uri"], "reference_uri": reference_uri}
+               "source_uri": manifest["source_uri"], "reference_uri": reference_uri,
+               "access_mode": manifest.get("access_mode", "api-key")}
         job = bind_job(records, job, active_session, manifest.get("title", "Your clip"))
         records.create(f"jobs/{job_id}.json", job)
         record_created = True
@@ -548,8 +727,10 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
             if job.get("reference_uri"):
                 public["reference_url"] = cloud.signed_url(job["reference_uri"])
         else:
-            public = {"id": job_id, "provider": item.get("provider", "reAPI"),
+            public = {"id": job_id, "access_mode": item.get("access_mode", "api-key"),
                       "status": item.get("status", "failed"), "message": "Preparation records have expired."}
+            if public["access_mode"] != "credits":
+                public["provider"] = item.get("provider", "reAPI")
             if item.get("output_uri") and item.get("expires_at", 0) > time.time():
                 public.update(status="completed", output_url=cloud.signed_url(item["output_uri"]),
                               message="Your saved video is ready.")
@@ -568,14 +749,22 @@ def resume_account_job(job_id: str, x_firebase_token: str | None = Header(defaul
     account, _, job = account_job(job_id, x_firebase_token)
     if not job:
         raise PublicError("This preparation has expired. Start a new swap.", 410)
-    key = provider_key(x_reapi_key)
-    check_key_binding(job, key)
+    if job.get("access_mode") == "credits":
+        key_fingerprint = digest("recastfx-credits")
+    else:
+        records, _, _ = services()
+        if settings.require_account and not api_key_permission(records, account):
+            raise PublicError("API-key access is not enabled for this account.", 403)
+        key = provider_key(x_reapi_key)
+        check_key_binding(job, key)
+        key_fingerprint = digest(key)
     records, _, _ = services()
     token = secrets.token_urlsafe(32)
     expires_at = time.time() + settings.session_seconds
     records.create("sessions/" + digest(token) + ".json", {
         **account, "owner": job["owner"], "expires_at": expires_at,
-        "key_fingerprint": digest(key), "provider": job.get("provider", "reAPI"),
+        "key_fingerprint": key_fingerprint, "provider": job.get("provider", "reAPI"),
+        "access_mode": job.get("access_mode", "api-key"),
     })
     emit("account_job_resumed", job_id=job_id)
     return {"token": token, "expires_at": expires_at}
@@ -600,8 +789,9 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
              x_reapi_key: str | None = Header(default=None)):
     job, active_session = owned_job(job_id, authorization)
     job = refresh_stale_job(job)
-    key = provider_key(x_reapi_key)
-    check_key_binding(active_session, key)
+    if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
+        raise PublicError("This clip needs its original access method.", 403)
+    key = key_for_session(active_session, x_reapi_key)
     if not approval.approved:
         raise PublicError("Review the guide and approve the selected person before generating.")
     if job["status"] != "ready":
@@ -617,9 +807,16 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     anchor["time"] -= options.trim[0]
     anchor = job.get("normalized_anchor", anchor)
     payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor, job.get("mask_style", "gray"))
-    balance = provider.balance(key)
-    if balance < round(job_estimate(job) * 1000):
-        raise PublicError("Your provider allowance is below the current estimate. Check credits and token limits before generating.", 402)
+    credits_mode = active_session.get("access_mode") == "credits"
+    if credits_mode:
+        catalog = public_catalog(records)
+        charge = catalog["credits_per_second"] * job["duration"]
+        if not 0 < charge <= 1000000:
+            raise PublicError("Credit pricing is not configured yet.", 503)
+    else:
+        balance = provider.balance(key)
+        if balance < round(job_estimate(job) * 1000):
+            raise PublicError("Your provider allowance is below the current estimate. Check credits and token limits before generating.", 402)
     try:
         records.update(f"jobs/{job_id}.json", lambda current: claim_job(current, {"ready"}, "submitting"))
     except PublicError as error:
@@ -627,10 +824,24 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
             current, _ = records.read(f"jobs/{job_id}.json")
             return view(current)
         raise
+    if credits_mode:
+        debited = False
+        try:
+            apply_wallet_change(records, job["account_id"], "generation:" + job_id, -charge, "generation")
+            debited = True
+            records.update(f"jobs/{job_id}.json", lambda current: {**current, "app_credits_charged": charge})
+        except Exception:
+            if debited:
+                apply_wallet_change(records, job["account_id"], "refund:" + job_id, charge, "refund")
+            records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed" if debited else "ready"}
+                           if current["status"] == "submitting" else current)
+            raise
     try:
         task_id = provider.submit(key, payload, job_id=job_id)
     except PublicError as error:
         status = "submission_unknown" if error.status_code >= 500 else "failed"
+        if credits_mode and status == "failed":
+            apply_wallet_change(records, job["account_id"], "refund:" + job_id, charge, "refund")
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": status, "message": error.message})
         return view(updated)
     try:
@@ -651,16 +862,22 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
                      x_reapi_key: str | None = Header(default=None)):
     job, active_session = owned_job(job_id, authorization)
     job = refresh_stale_job(job)
-    key = provider_key(x_reapi_key)
-    check_key_binding(active_session, key)
+    if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
+        raise PublicError("This clip needs its original access method.", 403)
+    key = key_for_session(active_session, x_reapi_key)
     if job["status"] != "generating" or not job.get("provider_task"):
         return view(job)
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
     body = provider.status(key, job["provider_task"])
     if body.get("status") == "failed":
+        if job.get("access_mode") == "credits":
+            apply_wallet_change(records, job["account_id"], "refund:" + job_id,
+                                job["app_credits_charged"], "refund")
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
-            "message": "The provider rejected or failed the generation. Check its task details and refund in your dashboard."
+            "message": ("The generation failed. Your recastfx credits were returned."
+                        if job.get("access_mode") == "credits" else
+                        "The provider rejected or failed the generation. Check its task details and refund in your dashboard.")
         } if current["status"] == "generating" and current.get("provider_task") == job["provider_task"] else current)
         return view(updated)
     if body.get("status") != "completed":

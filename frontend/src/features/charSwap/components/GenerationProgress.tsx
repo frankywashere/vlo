@@ -23,8 +23,8 @@ export function GenerationProgress({ job, provider }: {
   const processing = ["processing", "running", "generating"].includes(job.provider_state ?? "");
   const title = job.status === "finalizing"
     ? "Restoring your original soundtrack"
-    : queued ? `Queued with ${provider}`
-    : processing ? "MiniMax is generating your replacement"
+    : queued ? job.access_mode === "credits" ? "Your video is queued" : `Queued with ${provider}`
+    : processing ? job.access_mode === "credits" ? "Generating your replacement" : "MiniMax is generating your replacement"
     : "Waiting for a generation status update";
   return (
     <Box sx={PANEL}>
@@ -38,7 +38,7 @@ export function GenerationProgress({ job, provider }: {
           {job.status === "finalizing"
             ? "Generation finished. Preparing your download at its generated resolution."
             : checkedAgo === null
-              ? "Checking the provider automatically. No reliable percentage or finish time is available."
+              ? job.access_mode === "credits" ? "Checking progress automatically. No reliable percentage or finish time is available." : "Checking the provider automatically. No reliable percentage or finish time is available."
               : `Last successful provider check: ${checkedAgo}s ago. ${checkedAgo >= 30
                 ? "Waiting for a fresh status update."
                 : "Checking automatically; no reliable percentage or finish time is available."}`}

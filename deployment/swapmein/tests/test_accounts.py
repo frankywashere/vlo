@@ -14,12 +14,12 @@ from test_api import api, authenticated, ready_job
 
 def test_google_identity_signature_audience_and_claims(monkeypatch):
     calls = []
-    claims = {"sub": "user-a", "iss": "https://securetoken.google.com/project", "firebase": {"sign_in_provider": "google.com"}, "email_verified": True}
+    claims = {"sub": "user-a", "iss": "https://securetoken.google.com/project", "firebase": {"sign_in_provider": "google.com"}, "email_verified": True, "email": "user@example.com"}
     def verify(token, request, *, audience):
         calls.append((token, audience))
         return claims
     monkeypatch.setattr(accounts.id_token, "verify_firebase_token", verify)
-    assert accounts.verify_account("x" * 30, "project") == {"account_id": digest("user-a")}
+    assert accounts.verify_account("x" * 30, "project") == {"account_id": digest("user-a"), "email": "user@example.com"}
     assert calls == [("x" * 30, "project")]
     for invalid in [{"iss": "wrong"}, {"sub": ""}, {"email_verified": False}, {"firebase": {"sign_in_provider": "password"}}]:
         original = dict(claims)
@@ -132,7 +132,9 @@ def test_account_upload_enters_private_queue_without_reserving_running_worker(ap
     from test_api import upload_options
     client, records, cloud, provider = api
     monkeypatch.setattr(gateway, "settings", replace(gateway.settings, require_account=True))
-    monkeypatch.setattr(gateway, "verify_account", lambda token, project: {"account_id": digest("google-user")})
+    monkeypatch.setattr(gateway, "verify_account", lambda token, project: {"account_id": digest("google-user"), "email": "user@example.com"})
+    records.create(f"commerce/api-key-access/{digest('user@example.com')}.json",
+                   {"email": "user@example.com", "enabled": True})
     dispatched = []
     monkeypatch.setattr(cloud, "enqueue", lambda kind, jid, **options: dispatched.append((kind, jid, options)))
     headers, owner = authenticated(api)

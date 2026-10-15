@@ -137,7 +137,7 @@ export function ReviewStep({
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {accessMode === "credits" ? (
-                  `${sampleCreditBalance} sample credits · Coming soon`
+                  live ? "Account credits" : `${sampleCreditBalance} sample credits · Preview`
                 ) : (
                   <>
                     MiniMax H3 ·{" "}
@@ -171,7 +171,7 @@ export function ReviewStep({
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {accessMode === "credits"
-            ? "Sample credits demonstrate the flow. Buying credits and generating with app credits are coming later."
+            ? "Credit checkout is being configured. Your current balance will appear here when pricing is ready."
             : `When connected, video generation uses your ${provider} credit balance.`}
         </Typography>
       </Box>
@@ -272,7 +272,7 @@ export function ReviewStep({
       <Alert severity="info" role="note">
         {live
           ? accessMode === "credits"
-            ? "App credits are coming soon. Choose your own API key in Access to generate."
+            ? job?.message || "Credit checkout is being configured. Generation will be available when pricing is ready."
             : job?.message ||
               `Review the prepared guide before generating. This uses your own ${provider} credits.`
           : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
@@ -311,14 +311,14 @@ export function ReviewStep({
           Refresh status and video links
         </Button>
       )}
-      {live && job?.actual_provider_credits !== undefined && (
+      {live && accessMode === "api-key" && job?.actual_provider_credits !== undefined && (
         <Typography variant="body2" color="text.secondary">
           {provider} reported charge: US$
           {(job.actual_provider_credits / 1000).toFixed(3)}.
         </Typography>
       )}
       {live &&
-        job?.actual_provider_credits === undefined &&
+        accessMode === "api-key" && job?.actual_provider_credits === undefined &&
         job?.estimated_cost_usd !== undefined && (
           <Typography variant="body2" color="text.secondary">
             {provider} estimate: US${job.estimated_cost_usd.toFixed(2)}.
@@ -350,9 +350,7 @@ export function ReviewStep({
           onClick={onGenerate}
           disabled={
             !live ||
-            accessMode !== "api-key" ||
-            !hasPreviewKey ||
-            isSampleKey ||
+            (accessMode === "api-key" && (!hasPreviewKey || isSampleKey)) ||
             generating ||
             job?.status !== "ready" ||
             !guidePlayable

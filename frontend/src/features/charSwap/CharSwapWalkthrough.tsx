@@ -47,6 +47,7 @@ import { LiveTrackingStep } from "./components/LiveTrackingStep";
 import { SceneTrackingReview } from "./components/SceneTrackingReview";
 import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
 import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
+import { loadAccountAccess } from "./services/commerce";
 import {
   ClipStep,
   TrimStep,
@@ -92,7 +93,7 @@ const STEP_INFO = {
   access: {
     title: "How would you like to pay?",
     short: "Access",
-    description: "Use your own API key or explore recastfx credits.",
+    description: "Review your recastfx credits before generating.",
     icon: KeyOutlined,
   },
   review: {
@@ -319,8 +320,21 @@ export function CharSwapWalkthrough({
   const [resetDialog, setResetDialog] = useState(false);
   const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
   const [accessMode, setAccessMode] = useState<"api-key" | "credits">(
-    "api-key",
+    "credits",
   );
+  const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void loadAccountAccess().then((access) => {
+      if (active) {
+        setApiKeyAllowed(access.api_key_enabled);
+        if (access.api_key_enabled) setAccessMode("api-key");
+      }
+    }).catch(() => {
+      if (active) setApiKeyAllowed(false);
+    });
+    return () => { active = false; };
+  }, []);
   const [sampleCreditBalance, setSampleCreditBalance] = useState(100);
   const {
     key: previewKey,
@@ -329,8 +343,14 @@ export function CharSwapWalkthrough({
     saveKey,
     clearKey,
   } = useApiKeyPreview();
+  useEffect(() => {
+    if (!apiKeyAllowed && accessMode === "api-key") {
+      setAccessMode("credits");
+      clearKey();
+    }
+  }, [apiKeyAllowed, accessMode, clearKey]);
   const [provider, setProvider] = useState<"reAPI" | "ToAPIs">("reAPI");
-  const pipeline = useLivePipeline(previewKey, provider);
+  const pipeline = useLivePipeline(previewKey, provider, accessMode);
   const { reset: resetPipeline } = pipeline;
   const secureSite = isSecureLiveOrigin();
   const live = pipeline.enabled && clip?.mode !== "demo";
@@ -414,6 +434,7 @@ export function CharSwapWalkthrough({
     loadingDemo ||
     pendingReferences.length > 0 ||
     (step === "matches" && !trackingReady) ||
+    (live && accessMode === "credits" && !pipeline.creditsAvailable && step === "access") ||
     (step === "access" && accessMode === "api-key" && !hasKey);
   const unresolved = getUnresolvedIssues(state).length;
 
@@ -461,8 +482,12 @@ export function CharSwapWalkthrough({
     setResetDialog(false);
   }
   async function continueFlow() {
+    if (live && accessMode === "credits" && !pipeline.creditsAvailable) {
+      setError("recastfx credit generation is being configured. No charge or preparation has started.");
+      return;
+    }
     if (step === "references" && live && !skipMaskReview) {
-      if (!hasKey || isSampleKey) {
+      if (accessMode === "api-key" && (!hasKey || isSampleKey)) {
         setError(
           `Add your ${provider} key before cloud preparation. Generation starts only after Review.`,
         );
@@ -584,7 +609,7 @@ export function CharSwapWalkthrough({
                 clip?.mode === "demo"
                   ? "Sample walkthrough · no paid runs"
                   : pipeline.enabled
-                    ? "Live beta · your API key"
+                    ? accessMode === "credits" ? "Live beta · recastfx credits" : "Live beta · your API key"
                     : "Local preview · no paid runs"
               }
               sx={{
@@ -838,9 +863,20 @@ export function CharSwapWalkthrough({
                 ))}
               {step === "access" && (
                 <AccessStep
+                  apiKeyAllowed={apiKeyAllowed}
+                  live={live}
                   provider={provider}
                   accessMode={accessMode}
-                  onAccessModeChange={setAccessMode}
+                  onAccessModeChange={(mode) => {
+                    if (lockedAccess || (mode === "api-key" && !apiKeyAllowed)) return;
+                    if (mode !== accessMode) {
+                      const hadJob = Boolean(pipeline.job);
+                      pipeline.clear();
+                      invalidateTracking();
+                      setAccessMode(mode);
+                      if (hadJob) visit("references");
+                    }
+                  }}
                   hasKey={hasKey}
                   isSampleKey={isSampleKey}
                   onApiSettings={() => setApiSettingsOpen(true)}
@@ -974,6 +1010,7 @@ export function CharSwapWalkthrough({
           </Button>
         </Box>
         <ApiKeySettingsDialog
+          apiKeyAllowed={apiKeyAllowed}
           open={apiSettingsOpen || settingsOpen}
           live={secureSite}
           provider={provider}
