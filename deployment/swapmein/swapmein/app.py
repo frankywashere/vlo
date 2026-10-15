@@ -10,7 +10,7 @@ import uuid
 
 from typing import Literal
 
-from fastapi import Body, FastAPI, File, Form, Header, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -30,9 +30,9 @@ from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner,
 from .storage import (Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation,
                       check_queue_capacity, reserve_queued_preparation, claim_queued_slot)
 from .tracking import resolve_tracking
-from .diagnostics import emit
+from .diagnostics import emit, provider_billing
 from .accounts import lookup_credit_recipient, verify_account, bind_job, archive_completed, index_path
-from .commerce import (grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
+from .commerce import (credit_grant_history, grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
                        save_catalog, staff_role, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 from .job_key import protect_key, recover_key
@@ -303,6 +303,15 @@ def admin_grant_credits(body: CreditGrant, x_firebase_token: str | None = Header
     email = valid_account_email(body.email)
     recipient = lookup_credit_recipient(settings.project, email)
     return grant_credits(records, actor, recipient, body.credits, body.reason, body.request_id)
+
+
+@app.get("/api/commerce/admin/grants")
+def admin_credit_grant_history(limit: int = Query(default=25, ge=1, le=50),
+                               cursor: str | None = Query(default=None, min_length=1, max_length=2048),
+                               x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return credit_grant_history(records, actor, limit=limit, cursor=cursor)
 
 
 class CreditPack(BaseModel):
@@ -1026,9 +1035,28 @@ def provider_status(job_id: str, job: dict, key: str):
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
     body = provider.status(key, job["provider_task"])
+    billing = provider_billing(body, job.get("provider", "reAPI"))
+    if body.get("status") in ("completed", "failed"):
+        recorded_now = False
+        def record_cost(current):
+            nonlocal recorded_now
+            recorded_now = False
+            if (not current or current.get("status") != "generating"
+                    or current.get("provider_task") != job["provider_task"]
+                    or current.get("provider_cost_recorded_at") is not None):
+                return current
+            recorded_now = True
+            return {**current, "provider_billing": billing,
+                    "actual_credits": billing["provider_credits"], "provider_cost_recorded_at": time.time()}
+        records.update(f"jobs/{job_id}.json", record_cost)
+        if recorded_now:
+            emit("provider_cost_recorded", job_id=job_id, provider=job.get("provider", "reAPI"),
+                 provider_task=job["provider_task"], terminal_status=body["status"],
+                 duration=job.get("duration"), app_credits_charged=job.get("app_credits_charged"), **billing)
     if body.get("status") != job.get("provider_state"):
         emit("provider_state_changed", job_id=job_id, provider=job.get("provider"), state=body.get("status") if isinstance(body.get("status"), str) and body.get("status") in {"failed", "completed", "queued", "pending", "processing", "running", "generating"} else "unknown")
     if body.get("status") == "failed":
+        emit("provider_generation_failed", job_id=job_id, provider=job.get("provider", "reAPI"), **billing)
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
             "auto_key_ciphertext": None,
             "message": ("The generation failed. Your recastfx credits were returned."
@@ -1046,18 +1074,17 @@ def provider_status(job_id: str, job: dict, key: str):
             "provider_state": state, "provider_checked_at": time.time()}
             if current["status"] == "generating" else current)
         return view(checked)
-    emit("provider_generation_completed", job_id=job_id, provider=job.get("provider"))
+    emit("provider_generation_completed", job_id=job_id, provider=job.get("provider", "reAPI"), **billing)
     try:
         output_url = body["output"]["video_urls"][0]
         validate_media_url(output_url)
     except (KeyError, IndexError, TypeError):
         raise PublicError("The provider did not return a usable result link.", 502) from None
-    usage = body.get("usage", {}).get("credits")
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
             **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url,
             "auto_key_ciphertext": None,
-            "actual_credits": usage if isinstance(usage, (int, float)) else None,
+            "actual_credits": billing["provider_credits"],
             "message": "Restoring the original soundtrack and preserving the generated resolution."})
     except PublicError as error:
         if error.status_code == 409:

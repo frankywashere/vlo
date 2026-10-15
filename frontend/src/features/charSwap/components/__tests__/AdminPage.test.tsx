@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin", read
 vi.mock("../../services/commerce", () => ({
   loadCreditAdmin: async () => ({ role: api.role, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
+  loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
   saveCreditCatalog: vi.fn(), saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), setCreditStaff: vi.fn(),
 }));
 beforeEach(() => { api.role = "owner"; api.grant.mockReset(); });

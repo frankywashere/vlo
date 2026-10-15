@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Card, CardContent, Container, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
-import { CommerceRequestError, grantAccountCredits, loadCreditAdmin, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, setApiKeyAccess, setCreditStaff } from "../services/commerce";
+import { loadCreditAdmin, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, setApiKeyAccess, setCreditStaff } from "../services/commerce";
+import { CreditGrantPanel } from "./CreditGrantPanel";
 import type { CreditAdmin, CreditPack } from "../services/commerce";
 
 export function AdminPage() {
@@ -8,10 +9,6 @@ export function AdminPage() {
   const [packs, setPacks] = useState<CreditPack[]>([]);
   const [rate, setRate] = useState("");
   const [email, setEmail] = useState("");
-  const [grantEmail, setGrantEmail] = useState("");
-  const [grantAmount, setGrantAmount] = useState("");
-  const [grantReason, setGrantReason] = useState("");
-  const [pendingGrant, setPendingGrant] = useState<{email: string; credits: number; reason: string; requestId: string} | null>(null);
   const [staffEmail, setStaffEmail] = useState("");
   const [privateKey, setPrivateKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,26 +96,7 @@ export function AdminPage() {
             setAdmin(await loadCreditAdmin()); setMessage("Private generation key saved securely. You can now enable credit-funded generation.");
           })}>Save private key</Button>
         </Stack></CardContent></Card>}
-        {admin.role === "owner" && <Card variant="outlined"><CardContent><Stack spacing={2}>
-          <Typography variant="h5">Grant user credits</Typography>
-          <Typography color="text.secondary">Add credits to an existing Google account. This does not charge a card or purchase provider credits. Each grant records your identity and reason.</Typography>
-          <TextField label="Credit recipient email" type="email" value={grantEmail} disabled={busy || !!pendingGrant} onChange={(event) => setGrantEmail(event.target.value)} />
-          <TextField label="Credits to grant" type="number" value={grantAmount} disabled={busy || !!pendingGrant} onChange={(event) => setGrantAmount(event.target.value)} inputProps={{min: 1, max: 1000000, step: 1}} />
-          <TextField label="Reason for credit grant" value={grantReason} disabled={busy || !!pendingGrant} onChange={(event) => setGrantReason(event.target.value)} inputProps={{maxLength: 300}} multiline minRows={2} />
-          {pendingGrant && !busy && <Alert severity="info">Retry this same grant to confirm its outcome. Retrying cannot add credits twice.</Alert>}
-          <Button variant="contained" disabled={busy || (!pendingGrant && (!grantEmail.trim() || !Number.isInteger(Number(grantAmount)) || Number(grantAmount) < 1 || Number(grantAmount) > 1000000 || grantReason.trim().length < 3))} onClick={() => void run(async () => {
-            const operation = pendingGrant ?? {email: grantEmail.trim(), credits: Number(grantAmount), reason: grantReason.trim(), requestId: crypto.randomUUID().replaceAll("-", "")};
-            setPendingGrant(operation);
-            let result;
-            try { result = await grantAccountCredits(operation.email, operation.credits, operation.reason, operation.requestId); }
-            catch (cause) {
-              if (cause instanceof CommerceRequestError && [400, 401, 403, 404, 422].includes(cause.status)) setPendingGrant(null);
-              throw cause;
-            }
-            setPendingGrant(null); setGrantAmount(""); setGrantReason("");
-            setMessage(`Granted ${result.credits} credits to ${result.email}. Current balance: ${result.balance} credits.`);
-          })}>{pendingGrant ? "Retry credit grant" : "Grant credits"}</Button>
-        </Stack></CardContent></Card>}
+        {admin.role === "owner" && <CreditGrantPanel />}
         {admin.role === "owner" && <Card variant="outlined"><CardContent><Stack spacing={2}>
           <Typography variant="h5">Account permissions</Typography>
           <Typography color="text.secondary">Allow a specific Google account to bring its own provider key.</Typography>

@@ -233,7 +233,8 @@ class Pipeline:
                 completed = self.update_job(job_id, status="completed", message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"])
-                emit("video_export_completed", job_id=job_id, width=output_dimensions["width"], height=output_dimensions["height"])
+                emit("video_export_completed", job_id=job_id, width=output_dimensions["width"], height=output_dimensions["height"],
+                     **job.get("provider_billing", {}))
                 try:
                     archive_completed(self.records, completed)
                     emit("account_library_saved", job_id=job_id)

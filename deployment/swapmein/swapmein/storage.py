@@ -5,7 +5,7 @@ import json
 import math
 import time
 
-from google.api_core.exceptions import NotFound, PreconditionFailed
+from google.api_core.exceptions import BadRequest, NotFound, PreconditionFailed
 from google.cloud import storage
 
 from .config import Settings
@@ -57,6 +57,16 @@ class Records:
 
     def list_paths(self, prefix: str, maximum: int = 100):
         return [blob.name for blob in self.client.list_blobs(self.bucket, prefix=prefix, max_results=maximum)]
+
+    def list_paths_page(self, prefix: str, maximum: int = 25, cursor: str | None = None):
+        """Read one bounded, lexically ordered GCS page without scanning the prefix."""
+        try:
+            iterator = self.client.list_blobs(self.bucket, prefix=prefix, page_size=maximum,
+                                              max_results=maximum, page_token=cursor)
+            page = next(iterator.pages, None)
+            return ([blob.name for blob in page] if page is not None else [], iterator.next_page_token)
+        except BadRequest as error:
+            raise PublicError("This history page is no longer valid. Refresh the list.", 400) from error
 
 
 def check_preparation_capacity(current: dict | None, now: float,

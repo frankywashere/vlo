@@ -41,3 +41,19 @@ def submission_event(payload, *, provider, endpoint, job_id=None):
     emit("provider_submission_request", job_id=job_id, provider=provider,
          endpoint=endpoint, request_sha256=fingerprint, payload=redact(payload))
     return fingerprint
+
+
+def provider_billing(body: dict, provider: str) -> dict:
+    """Explicit units for settled provider usage; missing charges are never zero."""
+    import math
+    usage = body.get("usage")
+    credits = usage.get("credits") if isinstance(usage, dict) else None
+    valid = (isinstance(credits, (int, float)) and not isinstance(credits, bool)
+             and math.isfinite(credits) and credits >= 0)
+    return {
+        "provider_credits": credits if valid else None,
+        "provider_credit_unit": "reapi_credit" if provider == "reAPI" else "usd_millidollar",
+        "provider_cost_usd": credits / 1000 if valid else None,
+        "provider_cost_status": "reported" if valid else "not_reported",
+        "provider_cost_source": "usage.credits" if provider == "reAPI" else "billing.cost_usd",
+    }

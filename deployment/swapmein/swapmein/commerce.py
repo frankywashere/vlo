@@ -14,6 +14,7 @@ CATALOG_PATH = "commerce/catalog.json"
 FEATURES_PATH = "commerce/features.json"
 MIN_PACK_CENTS = 2000
 USD_CENTS_PER_CREDIT = 1
+GRANT_HISTORY_PREFIX = "commerce/grant-history/"
 
 
 def stripe_livemode() -> bool:
@@ -221,9 +222,59 @@ def grant_credits(records, actor: dict, recipient: dict, amount: int, reason: st
         return current or {**operation, "created_at": time.time(), "status": "pending"}
     path = f"commerce/grants/{request_id}.json"
     saved = records.update(path, reserve)
+    index_credit_grant(records, request_id, saved)
     wallet = apply_wallet_change(records, recipient["account_id"], "grant:" + request_id, amount,
         "admin_grant", details={"actor_id": operation["actor_id"], "reason": reason})
     records.update(path, lambda current: {**current, "status": "completed", "completed_at": current.get("completed_at", time.time())})
     emit("admin_credits_granted", actor_id=operation["actor_id"], account_id=recipient["account_id"],
          request_id=request_id, credits=amount, replayed=saved.get("status") == "completed")
     return {"email": recipient["email"], "credits": amount, "balance": wallet["balance"], "request_id": request_id}
+
+
+def index_credit_grant(records, request_id: str, operation: dict):
+    """Immutable time ordering makes the owner history pageable without a full scan."""
+    # Reverse fixed-width timestamps sort newest first in GCS. The request ID
+    # provides a deterministic tie-breaker and makes retries overwrite no rows.
+    created = int(operation["created_at"] * 1000000)
+    path = f"{GRANT_HISTORY_PREFIX}{99999999999999999999 - created:020d}-{request_id}.json"
+    records.update(path, lambda current: current or {"request_id": request_id})
+
+
+def backfill_credit_grant_history(records, *, cursor: str | None = None, limit: int = 100) -> dict:
+    """One operator migration page for grants created before the history index.
+
+    This never changes a wallet or grant. Keeping migration outside the GET
+    endpoint prevents an admin refresh from scanning every historical operation.
+    """
+    paths, next_cursor = records.list_paths_page("commerce/grants/", limit, cursor)
+    indexed = 0
+    for path in paths:
+        request_id = path.rsplit("/", 1)[-1].removesuffix(".json")
+        if not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            continue
+        operation, _ = records.read(path)
+        if operation:
+            index_credit_grant(records, request_id, operation)
+            indexed += 1
+    return {"indexed": indexed, "next_cursor": next_cursor}
+
+
+def credit_grant_history(records, actor: dict, *, limit: int = 25, cursor: str | None = None) -> dict:
+    require_staff(records, actor, {"owner"})
+    if type(limit) is not int or not 1 <= limit <= 50 or (cursor is not None and not 1 <= len(cursor) <= 2048):
+        raise PublicError("Choose a valid grant history page.")
+    paths, next_cursor = records.list_paths_page(GRANT_HISTORY_PREFIX, limit, cursor)
+    grants = []
+    for path in paths:
+        entry, _ = records.read(path)
+        request_id = entry.get("request_id", "") if entry else ""
+        if not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            continue
+        operation, _ = records.read(f"commerce/grants/{request_id}.json")
+        if operation:
+            grants.append({"request_id": request_id, "email": operation["email"],
+                           "credits": operation["amount"], "reason": operation["reason"],
+                           "actor_email": operation.get("actor_email", ""),
+                           "created_at": operation["created_at"], "status": operation["status"],
+                           **({"completed_at": operation["completed_at"]} if "completed_at" in operation else {})})
+    return {"grants": grants, "next_cursor": next_cursor}

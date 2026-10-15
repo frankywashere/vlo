@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import socket
 from types import SimpleNamespace
 
-from google.api_core.exceptions import NotFound, PreconditionFailed
+from google.api_core.exceptions import BadRequest, NotFound, PreconditionFailed
 import pytest
 
 from swapmein.cloud import valid_spend_cap
@@ -11,6 +11,33 @@ from swapmein.errors import PublicError
 from swapmein.security import (check_key_binding, check_owner, check_session, digest,
                                validate_media_url, verify_task_identity)
 from swapmein.storage import Records, check_preparation_capacity, claim_job, release_preparation, reserve_preparation
+
+
+def test_record_listing_reads_only_one_bounded_gcs_page():
+    requests = []
+    pages_read = []
+    def list_blobs(bucket, **options):
+        requests.append(options)
+        iterator = SimpleNamespace(next_page_token="next-page-token")
+        def pages():
+            pages_read.append(1)
+            yield [SimpleNamespace(name="history/a.json"), SimpleNamespace(name="history/b.json")]
+            pytest.fail("A request must not scan the next storage page")
+        iterator.pages = pages()
+        return iterator
+    records = Records("app", client=SimpleNamespace(bucket=lambda _: object(), list_blobs=list_blobs))
+    assert records.list_paths_page("history/", 2, "previous-token") == (["history/a.json", "history/b.json"], "next-page-token")
+    assert requests == [{"prefix": "history/", "page_size": 2, "max_results": 2, "page_token": "previous-token"}]
+    assert pages_read == [1]
+
+
+def test_record_listing_translates_an_invalid_storage_cursor():
+    def list_blobs(*_, **__):
+        raise BadRequest("Invalid page token")
+    records = Records("app", client=SimpleNamespace(bucket=lambda _: object(), list_blobs=list_blobs))
+    with pytest.raises(PublicError) as error:
+        records.list_paths_page("history/", 25, "invalid")
+    assert error.value.status_code == 400
 
 
 @pytest.mark.parametrize("race", [NotFound, PreconditionFailed])

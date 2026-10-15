@@ -129,3 +129,20 @@ export function grantAccountCredits(email: string, credits: number, reason: stri
   return commerceRequest<{email: string; credits: number; balance: number; request_id: string}>(
     "/api/commerce/admin/grant-credits", {email, credits, reason, request_id: requestId});
 }
+
+
+export interface CreditGrantRecord {
+  request_id: string;
+  email: string;
+  credits: number;
+  reason: string;
+  actor_email: string;
+  created_at: number;
+  completed_at?: number;
+  status: "completed" | "pending";
+}
+
+export function loadCreditGrants(cursor?: string) {
+  return commerceRequest<{grants: CreditGrantRecord[]; next_cursor: string | null}>(
+    "/api/commerce/admin/grants?limit=25" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""));
+}
