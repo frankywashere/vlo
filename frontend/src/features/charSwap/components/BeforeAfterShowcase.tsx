@@ -15,7 +15,7 @@ export function BeforeAfterShowcase() {
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(14.625);
+  const [duration, setDuration] = useState(5);
   const [error, setError] = useState(false);
   useEffect(() => {
     const videos = [beforeRef.current, afterRef.current];
