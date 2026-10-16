@@ -225,10 +225,6 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         Your latest 50 swaps, saved to your Google account. Finished videos are
         kept for 30 days. Download the ones you want to keep.
       </Typography>
-      <Alert severity="info" sx={{ mb: 3 }}>
-        Once the upload is confirmed, you can close this tab and return to your jobs here.
-        {apiKeyAllowed && " Easy-mode provider keys are encrypted only for that job and removed after provider completion. You may need to re-enter a key if a job needs manual attention."}
-      </Alert>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}

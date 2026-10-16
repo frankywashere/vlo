@@ -45,6 +45,7 @@ describe("private account library", () => {
     ]);
     render(<AccountLibrary onCreate={() => {}} />);
     const current = await screen.findByRole("region", {name: "Current processing jobs"});
+    expect(screen.queryByText(/Once the upload is confirmed/)).not.toBeInTheDocument();
     expect(within(current).getByText("Preparing clip")).toBeInTheDocument();
     expect(within(current).getByRole("button", {name: "Check scene matches"})).toBeInTheDocument();
     expect(within(current).getByRole("button", {name: "View render status"})).toBeInTheDocument();

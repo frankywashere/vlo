@@ -365,6 +365,10 @@ export function CharSwapWalkthrough({
   const generationCredits = pipeline.job?.generation_credits ?? trimCredits;
   const unknownSubmission = pipeline.job?.status === "submission_unknown";
   const lockedAccess = pipeline.busy || unknownSubmission;
+  const renderCanContinueInLibrary = Boolean(
+    onLibrary && pipeline.job?.generation_started_at
+    && ["generating", "finalizing"].includes(pipeline.job.status),
+  );
   const liveJobId = pipeline.job?.id;
   useEffect(() => {
     if (pipeline.job) onJobChange?.(pipeline.job, clip?.name ?? "Your swap");
@@ -610,7 +614,7 @@ export function CharSwapWalkthrough({
             <Button
               size="small"
               sx={{ color: "text.secondary", px: 0 }}
-              disabled={pipeline.busy}
+              disabled={pipeline.busy && !renderCanContinueInLibrary}
               onClick={() => (clip ? setResetDialog(true) : startNewSwap())}
             >
               New swap
@@ -1067,7 +1071,9 @@ export function CharSwapWalkthrough({
             <Typography color="text.secondary">
               {unknownSubmission
                 ? "The provider submission outcome is unknown. Check your provider task history first; starting another generation could duplicate a charge. Only continue after you have confirmed the outcome."
-                : "This clears your current clip, selected people, and reference assignments from this tab."}
+                : renderCanContinueInLibrary
+                  ? "Your current render will keep running in your Library. This clears only the setup in this tab so you can start another swap."
+                  : "This clears your current clip, selected people, and reference assignments from this tab."}
             </Typography>
           </DialogContent>
           <DialogActions sx={{ p: 2 }}>

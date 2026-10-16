@@ -44,6 +44,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   live.job.status = "ready";
   live.busy = false;
+  delete live.job.generation_started_at;
   live.preparationProgress = null;
   live.prepare.mockReset();
   delete live.job.tracking_continuous;
@@ -250,4 +251,37 @@ it.each([{masking: false, easy: false}, {masking: true, easy: true}])("routes re
     await user.click(screen.getByRole("button", {name: "Generate replacements"}));
     expect(live.generate).toHaveBeenCalledOnce();
   }
+});
+
+describe("starting another swap during a saved render", () => {
+  it.each(["generating", "finalizing"] as const)("allows a new setup during %s without resubmitting or cancelling the saved job", async (status) => {
+    live.job.status = status;
+    live.job.generation_started_at = 1000;
+    live.busy = true;
+    const user = userEvent.setup();
+    render(<CharSwapWalkthrough onLibrary={() => {}} />);
+    await user.click(screen.getByRole("button", { name: "New swap" }));
+    expect(screen.getByText(/Your current render will keep running in your Library/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Start new swap" }));
+    expect(useCharSwapStore.getState().clip).toBeNull();
+    expect(useCharSwapStore.getState().step).toBe("clip");
+    expect(live.reset).toHaveBeenCalled();
+    expect(live.generate).not.toHaveBeenCalled();
+    expect(live.job.status).toBe(status);
+  });
+
+  it.each(["queued", "preparing", "generating"] as const)("keeps the setup locked during %s before provider acceptance", (status) => {
+    live.job.status = status;
+    live.busy = true;
+    render(<CharSwapWalkthrough onLibrary={() => {}} />);
+    expect(screen.getByRole("button", { name: "New swap" })).toBeDisabled();
+  });
+
+  it("does not abandon a rendering session without a saved Library route", () => {
+    live.job.status = "generating";
+    live.job.generation_started_at = 1000;
+    live.busy = true;
+    render(<CharSwapWalkthrough />);
+    expect(screen.getByRole("button", { name: "New swap" })).toBeDisabled();
+  });
 });
