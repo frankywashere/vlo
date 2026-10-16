@@ -109,20 +109,38 @@ class Pipeline:
                             f"outputs/{job_id}/tracking.mp4", selection_preview, "video/mp4")
                     else:
                         preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
-                self.update_job(job_id, message="Preparing vocals and the generation guide.")
+                # Existing jobs without a snapshot retain their original audio behavior.
+                audio_processing = job.get("audio_processing", True)
+                self.update_job(job_id, message="Preparing vocals and the generation guide." if audio_processing
+                                else "Preparing the generation guide with your source audio.")
+                emit("preparation_audio_mode", job_id=job_id, audio_processing=audio_processing)
                 audio_run, guide_run = "sm-audio-" + job_id, "sm-guide-" + job_id
                 depth_input = masks_input = vocals_input = None
-                with self.cloud.worker("audio") as invoke:
-                    audio = invoke("/benchmark", {"input_uri": source_uri, "run_id": audio_run}, remaining())
-                    vocals_uri = self.cloud.worker_output(audio, audio_run, "vocals_plus3.wav")
-                    if options.enhanced_character_masking:
-                        # Insert depth only inside the selected label; absent frames stay unchanged.
-                        depth_input = self.cloud.copy(depth_uri, self.settings.worker_bucket, prefix + "depth.mp4")
-                        masks_input = self.cloud.copy(masks_uri, self.settings.worker_bucket, prefix + "masks.zip")
-                        vocals_input = self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
-                        if not plan or not plan["review_required"]:
-                            composed = invoke("/compose", {"input_uri": source_uri, "masks_uri": masks_input,
-                                "guide_audio_uri": vocals_input, "selected_label": label, "depth_uri": depth_input, "fill_mode": "depth", "run_id": guide_run}, remaining())
+                # The unchanged compose worker can read audio directly from a normalized MP4.
+                # No extra extraction or audio-model call is needed in bypass mode.
+                vocals_uri = source_uri
+                if options.enhanced_character_masking:
+                    depth_input = self.cloud.copy(depth_uri, self.settings.worker_bucket, prefix + "depth.mp4")
+                    masks_input = self.cloud.copy(masks_uri, self.settings.worker_bucket, prefix + "masks.zip")
+                if audio_processing or (options.enhanced_character_masking and (not plan or not plan["review_required"])):
+                    with self.cloud.worker("audio") as invoke:
+                        if audio_processing:
+                            audio_started = time.monotonic()
+                            audio = invoke("/benchmark", {"input_uri": source_uri, "run_id": audio_run}, remaining())
+                            vocals_uri = self.cloud.worker_output(audio, audio_run, "vocals_plus3.wav")
+                            emit("preparation_audio_completed", job_id=job_id,
+                                 elapsed_seconds=round(time.monotonic() - audio_started, 3))
+                        if options.enhanced_character_masking:
+                            vocals_input = (self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
+                                            if audio_processing else source_uri)
+                            if not plan or not plan["review_required"]:
+                                composed = invoke("/compose", {"input_uri": source_uri, "masks_uri": masks_input,
+                                    "guide_audio_uri": vocals_input, "selected_label": label, "depth_uri": depth_input,
+                                    "fill_mode": "depth", "run_id": guide_run}, remaining())
+                if options.enhanced_character_masking and not audio_processing:
+                    vocals_input = source_uri
+                if not audio_processing:
+                    emit("preparation_audio_skipped", job_id=job_id)
                 tracking_fields = {}
                 if plan:
                     tracking_fields = {"tracking_plan": plan, "tracking_metadata": metadata,
@@ -146,8 +164,11 @@ class Pipeline:
                     guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, f"outputs/{job_id}/guide.mp4")
                 else:
                     vocals, guide = root / "vocals_plus3.wav", root / "guide.mp4"
-                    self.cloud.download(vocals_uri, vocals, 10 * 1024 * 1024)
-                    original_guide(normalized, vocals, guide, metadata)
+                    if audio_processing:
+                        self.cloud.download(vocals_uri, vocals, 10 * 1024 * 1024)
+                        original_guide(normalized, vocals, guide, metadata)
+                    else:
+                        guide.write_bytes(normalized.read_bytes())
                     guide_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/guide.mp4", guide, "video/mp4")
                 if options.enhanced_character_masking:
                     message = "Review every scene. Only your selected person should be covered by colored depth imagery. Identity across cuts or gaps is not verified."
@@ -226,14 +247,20 @@ class Pipeline:
                 raw, original, uploaded, output = root / "generated.mp4", root / "source.mp4", root / "upload.bin", root / "swapMEin.mp4"
                 self.cloud.download_provider(job["provider_output"], raw)
                 self.cloud.download(job["normalized_uri"], original)
-                self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
-                output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded, audio_start=job["setup"]["trim"][0])
+                audio_processing = job.get("audio_processing", True)
+                if audio_processing:
+                    self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
+                    output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded,
+                                               audio_start=job["setup"]["trim"][0])
+                else:
+                    output_dimensions = finish(raw, original, output, job["duration"], restore_audio=False)
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
-                completed = self.update_job(job_id, status="completed", completed_at=time.time(), message="Your video is ready at its generated resolution, with the original soundtrack.", output_uri=output_uri,
+                completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if audio_processing
+                             else "Your video is ready at its generated resolution, with the returned audio."), output_uri=output_uri,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"])
-                emit("video_export_completed", job_id=job_id, width=output_dimensions["width"], height=output_dimensions["height"],
+                emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=audio_processing, width=output_dimensions["width"], height=output_dimensions["height"],
                      **job.get("provider_billing", {}))
                 try:
                     archive_completed(self.records, completed)

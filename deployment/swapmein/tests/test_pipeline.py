@@ -7,8 +7,9 @@ from swapmein.config import Settings
 from swapmein.pipeline import Pipeline
 
 
+@pytest.mark.parametrize("audio_processing", [None, True, False])
 @pytest.mark.parametrize("account_id", [None, "b" * 64])
-def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id):
+def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing):
     job_id = "a" * 32
     path = f"jobs/{job_id}.json"
     class Records:
@@ -38,15 +39,21 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
             assert source.read_bytes() == b"exported" and content_type == "video/mp4"
             self.uploads.append(key)
             return f"gs://{bucket}/{key}"
-    def finish(raw, original, output, duration, audio_source=None, audio_start=0):
+    def finish(raw, original, output, duration, audio_source=None, audio_start=0, restore_audio=True):
         assert raw.read_bytes() == b"provider-video"
         assert original.read_bytes() == b"normalized-shape"
-        assert audio_source.read_bytes() == b"original-upload"
-        assert audio_start == 1.25 and duration == 5
+        if audio_processing is False:
+            assert audio_source is None and not restore_audio
+        else:
+            assert audio_source.read_bytes() == b"original-upload"
+            assert audio_start == 1.25 and restore_audio
+        assert duration == 5
         output.write_bytes(b"exported")
         return {"width": 1344, "height": 768}
     monkeypatch.setattr("swapmein.pipeline.finish", finish)
     records, cloud = Records(), Cloud()
+    if audio_processing is not None:
+        records.data[path]["audio_processing"] = audio_processing
     pipeline = Pipeline(replace(Settings(), app_bucket="private-app"), records, cloud)
     pipeline.finalize(job_id)
     first_uri = records.data[path]["output_uri"]
@@ -70,14 +77,18 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
 @pytest.mark.parametrize("enabled,scene_cuts,coverage", [(True, [], [100] * 120), (True, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 120), (False, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 48 + [0] * 72)])
-def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage, easy):
+@pytest.mark.parametrize("audio_processing", [None, True, False])
+def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage, easy, audio_processing):
     from contextlib import contextmanager
     import time
     job_id = "b" * 32
     path = f"jobs/{job_id}.json"
     metadata = {"duration": 5, "width": 854, "height": 480, "frames": 120,
                 "anchor": {"x": .6, "y": .4, "frame": 24}, "scene_cuts": scene_cuts}
-    monkeypatch.setattr("swapmein.pipeline.normalize", lambda *_: metadata)
+    def normalized(_source, destination, _options):
+        destination.write_bytes(b"normalized-video-with-original-audio")
+        return metadata
+    monkeypatch.setattr("swapmein.pipeline.normalize", normalized)
     def selected(*_, require_continuous):
         assert enabled and require_continuous is False
         return 2, coverage
@@ -130,6 +141,8 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
                 return {}
             yield invoke
     records, cloud = Records(enabled), Cloud()
+    if audio_processing is not None:
+        records.data[path]["audio_processing"] = audio_processing
     if easy is not None:
         records.data[path]["setup"]["easy_mode"] = easy
     auto_generate = easy is True and enabled and not scene_cuts and all(coverage)
@@ -145,7 +158,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
     assert records.data[path]["scene_cut_count"] == len(scene_cuts)
     assert records.data[path]["tracking_continuous"] is (enabled and not scene_cuts and all(coverage))
     if enabled:
-        assert [kind for kind, _, _ in cloud.calls] == (["gpu", "audio"] if needs_review else ["gpu", "audio", "audio"])
+        assert [kind for kind, _, _ in cloud.calls] == (["gpu"] + (["audio"] if audio_processing is not False else []) + ([] if needs_review else ["audio"]))
         assert cloud.calls[0][2]["operation"] == "both"
         assert records.data[path]["mask_style"] == "depth"
         if easy is True:
@@ -161,13 +174,16 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
             assert cloud.calls[-1][2]["fill_mode"] == "depth"
             assert cloud.calls[-1][2]["depth_uri"].endswith("depth.mp4")
             assert cloud.calls[-1][2]["selected_label"] == 2
-            assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
+            if audio_processing is False:
+                assert cloud.calls[-1][2]["guide_audio_uri"] == records.data[path]["normalized_uri"]
+            else:
+                assert "vocals_plus3.wav" in cloud.calls[-1][2]["guide_audio_uri"]
         assert not composed_original
     else:
-        assert [kind for kind, _, _ in cloud.calls] == ["audio"]
+        assert [kind for kind, _, _ in cloud.calls] == ([] if audio_processing is False else ["audio"])
         assert records.data[path]["tracking_uri"] is None
         assert records.data[path]["mask_frames"] == 0
-        assert composed_original == [True]
+        assert composed_original == ([] if audio_processing is False else [True])
         assert ("Continue generation" if easy is True else "SAM tracking was skipped") in records.data[path]["message"]
 
 

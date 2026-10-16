@@ -690,7 +690,7 @@ export function CharSwapWalkthrough({
                     label={`${targets.length} ${targets.length === 1 ? "person" : "people"} selected`}
                   />
                   <Chip size="small" label="Native resolution" />
-                  <Chip size="small" label="Original audio kept" />
+                  <Chip size="small" label="Audio included" />
                 </Stack>
               )}
             </Box>

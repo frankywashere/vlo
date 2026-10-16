@@ -120,7 +120,8 @@ def test_fractional_frame_rate_trim_at_source_end_keeps_last_frame(tmp_path):
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for independent input streams")
 @pytest.mark.parametrize("returned_duration", [5.167, 5.458333, 8])
-def test_five_second_dual_input_export_restores_audio_through_the_last_frame(tmp_path, returned_duration):
+@pytest.mark.parametrize("restore_audio", [True, False])
+def test_five_second_export_keeps_the_selected_soundtrack_through_the_last_frame(tmp_path, returned_duration, restore_audio):
     source, normalized, generated, result = [tmp_path / name for name in ["source.mp4", "normalized.mp4", "generated.mp4", "result.mp4"]]
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=854x480:r=24:d=6",
                     "-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-map", "0:v", "-map", "1:a", "-t", "6",
@@ -129,7 +130,7 @@ def test_five_second_dual_input_export_restores_audio_through_the_last_frame(tmp
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=blue:s=1280x720:r=24:d={returned_duration}",
                     "-f", "lavfi", "-i", f"sine=frequency=880:duration={returned_duration}", "-map", "0:v", "-map", "1:a",
                     "-t", str(returned_duration), "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", str(generated)], check=True)
-    finish(generated, normalized, result, 5)
+    finish(generated, normalized, result, 5, restore_audio=restore_audio)
     checked = probe(result)
     video = next(stream for stream in checked["streams"] if stream["codec_type"] == "video")
     audio = next(stream for stream in checked["streams"] if stream["codec_type"] == "audio")
@@ -141,7 +142,7 @@ def test_five_second_dual_input_export_restores_audio_through_the_last_frame(tmp
     def pcm(path):
         return np.frombuffer(subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:0",
             "-vn", "-ac", "1", "-ar", "44100", "-f", "f32le", "-"]), dtype=np.float32)[:220500]
-    original, restored = pcm(normalized), pcm(result)
+    original, restored = pcm(normalized if restore_audio else generated), pcm(result)
     assert len(original) == len(restored) == 220500
     assert np.corrcoef(original, restored)[0, 1] > .99
     assert np.corrcoef(original[-44100:], restored[-44100:])[0, 1] > .99

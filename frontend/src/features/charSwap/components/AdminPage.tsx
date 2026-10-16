@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Card, CardContent, Container, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
-import { loadCreditAdmin, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, setApiKeyAccess, setCreditStaff } from "../services/commerce";
+import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, setApiKeyAccess, setCreditStaff } from "../services/commerce";
 import { CreditGrantPanel } from "./CreditGrantPanel";
 import { DEFAULT_MARGIN_MODEL, marginPricing } from "../utils/marginPricing";
 import type { MarginModel } from "../services/commerce";
@@ -79,6 +79,21 @@ export function AdminPage() {
             <FormControlLabel control={<Switch checked={admin.features.credit_generation} disabled={busy || admin.role !== "owner" || (!admin.features.readiness.credit_generation && !admin.features.credit_generation)} onChange={(event) => void updateFeature("credit_generation", event.target.checked)} />} label="Enable generation using recastfx credits" />
             {!admin.features.readiness.credit_generation && <Typography variant="body2" color="text.secondary">Requires the private provider key on the gateway.</Typography>}
           </Box>
+        </Stack></CardContent></Card>
+        <Card variant="outlined"><CardContent><Stack spacing={2}>
+          <Typography variant="h5">Audio processing</Typography>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.audio_processing ?? false}
+            disabled={busy || admin.role !== "owner"}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({ revision: admin.pipeline?.revision ?? 0, audio_processing: enabled });
+                setAdmin({ ...admin, pipeline });
+                setMessage(`Audio processing ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved audio mode.`);
+              });
+            }} />} label="Enable audio processing" />
+          <Typography color="text.secondary">Off by default. When off, the source soundtrack is sent with the clip and the provider’s returned audio is kept. When on, vocals are separated and pitch-shifted before generation, then the original soundtrack is restored on export.</Typography>
+          <Typography variant="body2" color="text.secondary">Owner only. Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></CardContent></Card>
         {(admin.role === "owner" || admin.role === "pricing_admin") && <Card variant="outlined"><CardContent><Stack spacing={2}>
           <Typography variant="h5">Credit pricing</Typography>

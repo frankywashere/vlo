@@ -61,7 +61,8 @@ def test_color_compositor_changes_only_selected_label_and_allows_missing_scene(t
     assert float(next(s for s in probe(output)['streams'] if s['codec_type']=='audio')['duration']) >= .99
 
 
-def test_depth_compositor_replaces_only_selected_pixels_and_preserves_missing_frames(tmp_path, monkeypatch):
+@pytest.mark.parametrize("use_source_audio", [False, True])
+def test_depth_compositor_replaces_only_selected_pixels_and_preserves_missing_frames(tmp_path, monkeypatch, use_source_audio):
     patch = Path(__file__).parents[1] / 'worker_patch/composite.py'
     monkeypatch.setitem(sys.modules, 'common', SimpleNamespace(probe=probe))
     spec = importlib.util.spec_from_file_location('tested_depth_composite', patch)
@@ -78,6 +79,11 @@ def test_depth_compositor_replaces_only_selected_pixels_and_preserves_missing_fr
             if index < 12: labels[10:50, 60:85] = 2
             raw = BytesIO(); Image.fromarray(labels).save(raw, format='PNG')
             z.writestr(f'labels/labels_{index:05d}.png', raw.getvalue())
+    if use_source_audio:
+        with_audio = tmp_path/'original-audio.mp4'
+        subprocess.run(['ffmpeg','-v','error','-y','-i',str(source),'-f','lavfi','-i','sine=duration=1',
+                        '-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac','-t','1',str(with_audio)],check=True)
+        audio = with_audio  # MP4 input, exactly like bypass-mode cloud requests.
     metrics = module.compose(source, archive, audio, output, 2, 'depth', depth)
     assert metrics['depth'] is True and metrics['face_mesh'] is False
     assert metrics['mask_pixels_per_frame'][12:] == [0] * 12

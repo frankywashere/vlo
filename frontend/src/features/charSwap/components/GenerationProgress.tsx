@@ -22,7 +22,7 @@ export function GenerationProgress({ job, provider }: {
   const queued = job.provider_state === "queued" || job.provider_state === "pending";
   const processing = ["processing", "running", "generating"].includes(job.provider_state ?? "");
   const title = job.status === "finalizing"
-    ? "Restoring your original soundtrack"
+    ? job.audio_processing === false ? "Finishing your video with its returned audio" : "Restoring your original soundtrack"
     : queued ? job.access_mode === "credits" ? "Your video is queued" : `Queued with ${provider}`
     : processing ? job.access_mode === "credits" ? "Generating your replacement" : "MiniMax is generating your replacement"
     : "Waiting for a generation status update";

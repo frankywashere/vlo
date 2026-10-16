@@ -266,7 +266,7 @@ export function ReviewStep({
             {clip.mode === "demo" ? " (sample)" : ""}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            ✓ Original soundtrack restored on export
+            ✓ {job?.audio_processing ? "Original soundtrack restored on export" : "Audio included in your video"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             ✓ Final video keeps its generated resolution
@@ -307,8 +307,8 @@ export function ReviewStep({
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {enhancedCharacterMasking
-              ? "Watch every scene. The colored depth guide should cover only your selected person. The original soundtrack is restored on export."
-              : "Check your section before generating. MiniMax uses your selected position and timestamp; the original soundtrack is restored on export."}
+              ? "Watch every scene. The colored depth guide should cover only your selected person. Audio is included in your video."
+              : "Check your section before generating. MiniMax uses your selected position and timestamp; audio is included in your video."}
           </Typography>
         </Box>
       )}

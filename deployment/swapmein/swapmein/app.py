@@ -24,6 +24,7 @@ from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
 from .media import Anchor, Setup, normalize_reference
 from .pipeline import Pipeline
+from .pipeline_settings import pipeline_settings, save_pipeline_settings
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
@@ -220,7 +221,7 @@ def view(job: dict):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["created_at", "completed_at", "updated_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits"]:
+    for field in ["created_at", "completed_at", "updated_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing"]:
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
@@ -404,7 +405,20 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "catalog": catalog or default_catalog(), "features": feature_view(records)}
+    return {"role": role, "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records)}
+
+
+class PipelineSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: int = Field(ge=0)
+    audio_processing: bool
+
+
+@app.post("/api/commerce/admin/pipeline")
+def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return save_pipeline_settings(records, actor, body.revision, body.audio_processing)
 
 
 @app.post("/api/commerce/admin/features")
@@ -559,7 +573,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
                "source_uri": source_uri, "reference_uri": reference_uri,
-               "access_mode": active_session.get("access_mode", "api-key")}
+               "access_mode": active_session.get("access_mode", "api-key"),
+               "audio_processing": pipeline_settings(records)["audio_processing"]}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
@@ -690,7 +705,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uri,
-               "access_mode": manifest.get("access_mode", "api-key")}
+               "access_mode": manifest.get("access_mode", "api-key"),
+               "audio_processing": pipeline_settings(records)["audio_processing"]}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         if manifest.get("generation_credits") is not None:
@@ -966,7 +982,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     anchor = options.anchor.model_dump()
     anchor["time"] -= options.trim[0]
     anchor = job.get("normalized_anchor", anchor)
-    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor, job.get("mask_style", "gray"))
+    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor, job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True))
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)

@@ -3,14 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
 
-const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin", ready: false, grant: vi.fn(), save: vi.fn() }));
+const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin", ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn() }));
 vi.mock("../../services/commerce", () => ({
   loadCreditAdmin: async () => ({ role: api.role, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
-  saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), setCreditStaff: vi.fn(),
+  savePipelineSettings: api.pipeline, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), setCreditStaff: vi.fn(),
 }));
-beforeEach(() => { api.role = "owner"; api.grant.mockReset(); api.save.mockReset().mockImplementation(async (catalog) => ({ ...catalog, revision: catalog.revision + 1 })); });
+beforeEach(() => { api.pipeline.mockReset().mockImplementation(async (settings) => ({ ...settings, revision: settings.revision + 1 })); api.role = "owner"; api.grant.mockReset(); api.save.mockReset().mockImplementation(async (catalog) => ({ ...catalog, revision: catalog.revision + 1 })); });
 afterEach(() => cleanup());
 
 it("shows owner service switches but blocks activation until credentials are ready", async () => {
@@ -73,4 +73,25 @@ it("saves the margin assumptions with the calculated quote", async () => {
     credits_per_generation: 195,
     margin_model: expect.objectContaining({ target_margin_percent: 30, payment_fee_percent: 4.75 }),
   }));
+});
+
+it("defaults audio processing off and confirms saved changes without touching payment controls", async () => {
+  const user = userEvent.setup();
+  render(<AdminPage />);
+  const toggle = await screen.findByRole("switch", { name: "Enable audio processing" });
+  expect(toggle).not.toBeChecked();
+  await user.click(toggle);
+  expect(api.pipeline).toHaveBeenLastCalledWith({ revision: 0, audio_processing: true });
+  await screen.findByText(/Audio processing enabled for new jobs/);
+  expect(toggle).toBeChecked();
+  await user.click(toggle);
+  expect(api.pipeline).toHaveBeenLastCalledWith({ revision: 1, audio_processing: false });
+  await screen.findByText(/Audio processing disabled for new jobs/);
+  expect(toggle).not.toBeChecked();
+});
+
+it("does not let pricing staff change audio behavior", async () => {
+  api.role = "pricing_admin";
+  render(<AdminPage />);
+  expect(await screen.findByRole("switch", { name: "Enable audio processing" })).toBeDisabled();
 });

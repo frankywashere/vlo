@@ -64,8 +64,16 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
     )
 
 
-def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay"):
-    return {"model": "minimax-h3", "prompt": replacement_prompt(duration, enhanced_masking, anchor, mask_style), "duration": duration,
+def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True):
+    prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style)
+    if not audio_processing:
+        prompt = prompt.replace(
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
+            "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")
+        prompt = prompt.replace(
+            "The video contains isolated vocals pitched up three semitones. Use these embedded vocals for performance and mouth synchronization, without extra dialogue.",
+            "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")
+    return {"model": "minimax-h3", "prompt": prompt, "duration": duration,
             "resolution": "768P", "aspect_ratio": "adaptive", "content_filter": False,
             "reference_image_urls": [image_url], "reference_video_urls": [video_url]}
 

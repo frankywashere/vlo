@@ -42,6 +42,7 @@ export interface MarginModel {
 export interface CreditAdmin {
   role: "owner" | "pricing_admin" | "viewer";
   features: CreditFeatures;
+  pipeline?: PipelineSettings;
   catalog: {
     revision: number;
     packs: CreditPack[];
@@ -49,6 +50,15 @@ export interface CreditAdmin {
     credits_per_second?: number;
     margin_model?: MarginModel | null;
   };
+}
+
+export interface PipelineSettings {
+  revision: number;
+  audio_processing: boolean;
+}
+
+export function savePipelineSettings(settings: PipelineSettings) {
+  return commerceRequest<PipelineSettings>("/api/commerce/admin/pipeline", settings);
 }
 
 export interface CreditFeatures {

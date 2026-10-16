@@ -22,8 +22,16 @@ records its checks and the remaining generation-quality limits.
   places the depth pixels only inside the selected person's mask over the original
   background, without numbers or face mesh. With masking off, the guide keeps the
   original person visible; SAM and the GPU worker are skipped.
-- Both modes use Demucs-separated vocals shifted up three semitones, without a
-  timing change. The final export restores the source soundtrack.
+- The owner-only **Enable audio processing** admin toggle defaults **off**. New jobs
+  snapshot the setting at creation; queued/running and legacy jobs retain their saved
+  behavior (legacy records without a flag use processing on). Off sends the source
+  audio with the guide, skips Demucs and pitch shifting, and keeps provider audio
+  through final export. On uses Demucs-separated vocals shifted up three semitones
+  and restores the original uploaded soundtrack at the selected trim offset.
+  Both paths retain the existing export duration and native generated dimensions.
+  The setting is stored independently at `control/pipeline-settings.json`; owners
+  save it through `/api/commerce/admin/pipeline` with a revision check. Audio-mode,
+  processing/skipping, and export-restoration decisions are logged per job.
 - Preparation uses a normalized guide of at most 854×480 at 24 fps. Standard H3
   generation requests use 768p. Final export preserves the provider-returned
   dimensions at 24 fps; it neither downsizes to the guide nor upscales to the

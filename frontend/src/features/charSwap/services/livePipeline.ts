@@ -30,6 +30,7 @@ export type LiveJobStatus =
   | "submission_unknown";
 
 export interface LivePipelineJob {
+  audio_processing?: boolean;
   provider?: GenerationProvider;
   access_mode?: GenerationAccessMode;
   app_credits_charged?: number;

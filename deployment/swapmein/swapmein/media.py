@@ -206,7 +206,7 @@ def original_guide(source: Path, vocals: Path, output: Path, metadata: dict):
 
 
 def finish(raw: Path, original: Path, output: Path, duration: int,
-           audio_source: Path | None = None, audio_start: float = 0):
+           audio_source: Path | None = None, audio_start: float = 0, *, restore_audio: bool = True):
     metadata = probe(raw)
     length = float(metadata.get("format", {}).get("duration", 0))
     if not math.isfinite(length) or length < duration - .05:
@@ -216,8 +216,10 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
         raise PublicError("The provider returned an unsupported video.")
     width, height = video["width"], video["height"]
     source = probe(original)
-    soundtrack = audio_source or original
-    soundtrack_metadata = probe(soundtrack) if audio_source is not None else source
+    soundtrack = (audio_source or original) if restore_audio else raw
+    soundtrack_metadata = (probe(soundtrack) if audio_source is not None else source) if restore_audio else metadata
+    if not restore_audio:
+        audio_start = 0
     if not math.isfinite(audio_start) or audio_start < 0:
         raise PublicError("Invalid soundtrack trim start.")
     # Stream duration excludes a delayed audio stream's start timestamp, and
@@ -225,18 +227,21 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
     soundtrack_stream = next((stream for stream in soundtrack_metadata.get("streams", [])
                               if stream.get("codec_type") == "audio"), None)
     if not soundtrack_stream:
-        raise PublicError("The original upload has no soundtrack.")
+        raise PublicError("The original upload has no soundtrack." if restore_audio else "The provider returned no soundtrack. The result needs review.")
     if decoded_audio_samples(soundtrack, audio_start, duration) < math.floor((duration - .05) * 44100):
-        raise PublicError("The original soundtrack does not cover the selected section.")
+        raise PublicError("The original soundtrack does not cover the selected section." if restore_audio
+                          else "The provider soundtrack does not cover the selected section. The result needs review.")
     source_video = next(stream for stream in source["streams"] if stream["codec_type"] == "video")
     out_w, out_h = source_video["width"], source_video["height"]
     if abs((width / height) / (out_w / out_h) - 1) > .03:
         raise PublicError("The provider changed the frame shape. The result needs manual review.")
+    soundtrack_input = (["-protocol_whitelist", "file,pipe", "-ss", str(audio_start), "-i", str(soundtrack)]
+                        if restore_audio else [])
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(raw),
-         "-protocol_whitelist", "file,pipe", "-ss", str(audio_start), "-i", str(soundtrack),
+         *soundtrack_input,
          # A global video frame cap can end muxing before an independent audio
          # input is drained. Trim inside the video filter to retain the soundtrack.
-         "-map", "0:v:0", "-map", "1:a:0", "-vf", f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,setsar=1",
+         "-map", "0:v:0", "-map", "1:a:0" if restore_audio else "0:a:0", "-vf", f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,setsar=1",
          "-t", str(duration), "-c:v", "libx264", "-threads", "2",
          "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags",
          "+faststart", str(output)])
