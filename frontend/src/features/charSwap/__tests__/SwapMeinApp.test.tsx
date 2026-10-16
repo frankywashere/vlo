@@ -96,12 +96,11 @@ describe("recastfx app shell", () => {
     expect(
       screen.getByRole("heading", { name: /Same scene\.\s*New you\./ }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Before character replacement video"),
-    ).toHaveAttribute("poster", expect.stringContaining("showcase-before"));
-    expect(
-      screen.getByLabelText("After character replacement video"),
-    ).toHaveAttribute("src", expect.stringContaining("showcase-after"));
+    const comparison = screen.getByLabelText("Before and after character replacement video");
+    expect(comparison).toHaveAttribute("poster", expect.stringContaining("showcase-comparison"));
+    expect(comparison).toHaveAttribute("src", expect.stringContaining("showcase-comparison"));
+    expect(screen.getByText("BEFORE")).toBeInTheDocument();
+    expect(screen.getByText("AFTER")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Start creating" }));
     const steps = screen.getByRole("navigation", { name: "Replacement steps" });
     expect(within(steps).getAllByRole("button")).toHaveLength(6);

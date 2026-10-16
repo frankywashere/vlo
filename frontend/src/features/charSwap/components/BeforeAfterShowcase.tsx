@@ -4,43 +4,33 @@ import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import PauseRounded from "@mui/icons-material/PauseRounded";
 import VolumeOffRounded from "@mui/icons-material/VolumeOffRounded";
 import VolumeUpRounded from "@mui/icons-material/VolumeUpRounded";
-import beforeVideo from "../assets/showcase-before.mp4";
-import afterVideo from "../assets/showcase-after.mp4";
-import beforePoster from "../assets/showcase-before.jpg";
-import afterPoster from "../assets/showcase-after.jpg";
+import comparisonVideo from "../assets/showcase-comparison.mp4";
+import comparisonPoster from "../assets/showcase-comparison.jpg";
 
 export function BeforeAfterShowcase() {
-  const beforeRef = useRef<HTMLVideoElement>(null);
-  const afterRef = useRef<HTMLVideoElement>(null);
+  // Both panels are encoded into one video, so buffering, seeking, and playback
+  // cannot put the before and after on separate clocks.
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(5);
   const [error, setError] = useState(false);
   useEffect(() => {
-    const videos = [beforeRef.current, afterRef.current];
-    return () => {
-      videos.forEach((video) => video?.pause());
-    };
+    const video = videoRef.current;
+    return () => video?.pause();
   }, []);
   function pause() {
-    beforeRef.current?.pause();
-    afterRef.current?.pause();
+    videoRef.current?.pause();
     setPlaying(false);
   }
   async function togglePlayback() {
-    const before = beforeRef.current;
-    const after = afterRef.current;
-    if (!before || !after) return;
-    if (playing) {
-      pause();
-      return;
-    }
-    if (before.ended || before.currentTime >= duration - 0.1)
-      before.currentTime = 0;
-    after.currentTime = before.currentTime;
+    const video = videoRef.current;
+    if (!video) return;
+    if (playing) { pause(); return; }
+    if (video.ended || video.currentTime >= duration - 0.1) video.currentTime = 0;
     try {
-      await Promise.all([before.play(), after.play()]);
+      await video.play();
       setPlaying(true);
       setError(false);
     } catch {
@@ -48,136 +38,40 @@ export function BeforeAfterShowcase() {
       setError(true);
     }
   }
-  function updateTime() {
-    const before = beforeRef.current;
-    const after = afterRef.current;
-    if (!before || !after) return;
-    setTime(before.currentTime);
-    if (Math.abs(after.currentTime - before.currentTime) > 0.12)
-      after.currentTime = before.currentTime;
-  }
-  return (
-    <Box
-      sx={{
-        p: { xs: 1, sm: 1.5 },
-        bgcolor: "background.paper",
-        borderRadius: 2,
-      }}
-    >
-      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.25 }}>
-        {[
-          {
-            label: "BEFORE",
-            source: beforeVideo,
-            poster: beforePoster,
-            ref: beforeRef,
-          },
-          {
-            label: "AFTER",
-            source: afterVideo,
-            poster: afterPoster,
-            ref: afterRef,
-          },
-        ].map(({ label, source, poster, ref }, index) => (
-          <Box
-            key={label}
-            sx={{
-              position: "relative",
-              aspectRatio: "3 / 4",
-              overflow: "hidden",
-              borderRadius: 1,
-              bgcolor: "#231b19",
-            }}
-          >
-            <video
-              ref={ref}
-              src={source}
-              poster={poster}
-              muted={index === 1 || muted}
-              playsInline
-              preload="metadata"
-              aria-label={`${index ? "After" : "Before"} character replacement video`}
-              onTimeUpdate={index ? undefined : updateTime}
-              onLoadedMetadata={() => {
-                const lengths = [
-                  beforeRef.current?.duration,
-                  afterRef.current?.duration,
-                ].filter((length): length is number =>
-                  Boolean(length && Number.isFinite(length)),
-                );
-                if (lengths.length) setDuration(Math.min(...lengths));
-              }}
-              onEnded={pause}
-              onError={() => {
-                pause();
-                setError(true);
-              }}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                display: "block",
-              }}
-            />
-            <Box
-              component="span"
-              sx={{
-                position: "absolute",
-                top: 12,
-                left: 10,
-                px: 1.2,
-                py: 0.5,
-                borderRadius: 1,
-                bgcolor: index ? "primary.main" : "#fff",
-                color: index ? "primary.contrastText" : "#252326",
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: ".1em",
-              }}
-            >
-              {label}
-            </Box>
-          </Box>
-        ))}
-      </Box>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ pt: 1 }}>
-        <Button
-          aria-label={playing ? "Pause comparison" : "Play comparison"}
-          onClick={() => void togglePlayback()}
-          sx={{ minWidth: 44, px: 1 }}
-        >
-          {playing ? <PauseRounded /> : <PlayArrowRounded />}
-        </Button>
-        <Slider
-          aria-label="Comparison position"
-          value={Math.min(time, duration)}
-          min={0}
-          max={duration}
-          step={0.1}
-          onChange={(_, value) => {
-            pause();
-            const next = Number(value);
-            if (beforeRef.current) beforeRef.current.currentTime = next;
-            if (afterRef.current) afterRef.current.currentTime = next;
-            setTime(next);
-          }}
-        />
-        <IconButton
-          aria-label={muted ? "Unmute comparison" : "Mute comparison"}
-          onClick={() => setMuted(!muted)}
-        >
-          {muted ? (
-            <VolumeOffRounded fontSize="small" />
-          ) : (
-            <VolumeUpRounded fontSize="small" />
-          )}
-        </IconButton>
-      </Stack>
-      {error && (
-        <Alert severity="warning">
-          The comparison couldn’t play. You can try Play again.
-        </Alert>
-      )}
+  return <Box sx={{ p: { xs: 1, sm: 1.5 }, bgcolor: "background.paper", borderRadius: 2 }}>
+    <Box sx={{ position: "relative", aspectRatio: "3 / 2", overflow: "hidden", borderRadius: 1, bgcolor: "#231b19" }}>
+      <video ref={videoRef} src={comparisonVideo} poster={comparisonPoster} muted={muted} playsInline preload="metadata"
+        aria-label="Before and after character replacement video"
+        onTimeUpdate={() => setTime(videoRef.current?.currentTime ?? 0)}
+        onLoadedMetadata={() => {
+          const length = videoRef.current?.duration;
+          if (length && Number.isFinite(length)) setDuration(length);
+        }}
+        onEnded={pause}
+        onError={() => { pause(); setError(true); }}
+        style={{ width: "100%", height: "100%", display: "block" }} />
+      <Box aria-hidden sx={{ position: "absolute", top: 0, bottom: 0, left: "calc(50% - 5px)", width: 10, bgcolor: "background.paper", pointerEvents: "none" }} />
+      {["BEFORE", "AFTER"].map((label, index) => <Box key={label} component="span" sx={{
+        position: "absolute", top: 12, left: index ? "calc(50% + 10px)" : 10, px: 1.2, py: 0.5, borderRadius: 1,
+        bgcolor: index ? "primary.main" : "#fff", color: index ? "primary.contrastText" : "#252326",
+        fontSize: 10, fontWeight: 800, letterSpacing: ".1em",
+      }}>{label}</Box>)}
     </Box>
-  );
+    <Stack direction="row" alignItems="center" spacing={1} sx={{ pt: 1 }}>
+      <Button aria-label={playing ? "Pause comparison" : "Play comparison"} onClick={() => void togglePlayback()} sx={{ minWidth: 44, px: 1 }}>
+        {playing ? <PauseRounded /> : <PlayArrowRounded />}
+      </Button>
+      <Slider aria-label="Comparison position" value={Math.min(time, duration)} min={0} max={duration} step={0.1}
+        onChange={(_, value) => {
+          pause();
+          const next = Number(value);
+          if (videoRef.current) videoRef.current.currentTime = next;
+          setTime(next);
+        }} />
+      <IconButton aria-label={muted ? "Unmute comparison" : "Mute comparison"} onClick={() => setMuted(!muted)}>
+        {muted ? <VolumeOffRounded fontSize="small" /> : <VolumeUpRounded fontSize="small" />}
+      </IconButton>
+    </Stack>
+    {error && <Alert severity="warning">The comparison couldn’t play. You can try Play again.</Alert>}
+  </Box>;
 }
