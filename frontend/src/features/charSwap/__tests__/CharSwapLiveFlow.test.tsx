@@ -270,6 +270,25 @@ describe("starting another swap during a saved render", () => {
     expect(live.job.status).toBe(status);
   });
 
+  it.each(["header", "library"])("starts a fresh setup from the %s Create entry after acceptance", async (entry) => {
+    live.job.status = "generating";
+    live.job.generation_started_at = 1000;
+    live.busy = true;
+    const onLibrary = () => {};
+    const user = userEvent.setup();
+    const view = render(<CharSwapWalkthrough onLibrary={onLibrary} createRequest={0} />);
+    if (entry === "header") {
+      await user.click(screen.getByRole("button", { name: "Create" }));
+    } else {
+      view.rerender(<CharSwapWalkthrough onLibrary={onLibrary} createRequest={1} />);
+    }
+    expect(useCharSwapStore.getState().clip).toBeNull();
+    expect(useCharSwapStore.getState().step).toBe("clip");
+    expect(live.reset).toHaveBeenCalled();
+    expect(live.generate).not.toHaveBeenCalled();
+    expect(live.job.status).toBe("generating");
+  });
+
   it.each(["queued", "preparing", "generating"] as const)("keeps the setup locked during %s before provider acceptance", (status) => {
     live.job.status = status;
     live.busy = true;

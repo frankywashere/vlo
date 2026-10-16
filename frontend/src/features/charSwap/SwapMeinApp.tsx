@@ -109,6 +109,7 @@ function AccountWorkspace({
   const [commerceOpen, setCommerceOpen] = useState(false);
   const [pending, setPending] = useState<"create" | "library" | "admin" | null>(null);
   const [busy, setBusy] = useState(false);
+  const [createRequest, setCreateRequest] = useState(0);
   const [authBusy, setAuthBusy] = useState(false);
   const [staffRole, setStaffRole] = useState<string | null>(null);
   useEffect(() => {
@@ -126,14 +127,17 @@ function AccountWorkspace({
     url.searchParams.delete("checkout");
     globalThis.history.replaceState(null, "", url.toString());
   }, [account.user]);
-  function navigate(next: typeof view) {
+  function navigate(next: typeof view, newSwap = true) {
     onDestination(next);
     if (next !== "home" && !account.user) {
       setPending(next);
       setAccountOpen(true);
       return;
     }
-    if (next === "create") setStarted(true);
+    if (next === "create") {
+      setStarted(true);
+      if (newSwap) setCreateRequest((request) => request + 1);
+    }
     setView(next);
     window.scrollTo({ top: 0, behavior: "instant" });
   }
@@ -163,7 +167,7 @@ function AccountWorkspace({
           onLibrary={() => navigate("library")}
           onAdmin={staffRole ? () => navigate("admin") : undefined}
           onSettings={() => {
-            navigate("create");
+            navigate("create", false);
             if (account.user) setSettingsOpen(true);
           }}
           locked={busy || account.loading}
@@ -181,6 +185,7 @@ function AccountWorkspace({
             onLibrary={() => navigate("library")}
             onAdmin={staffRole ? () => navigate("admin") : undefined}
             onBusyChange={setBusy}
+            createRequest={createRequest}
             settingsOpen={settingsOpen}
             onSettingsClose={() => setSettingsOpen(false)}
             accountLabel={label}

@@ -253,6 +253,7 @@ interface CharSwapWalkthroughProps {
   onCredits?: () => void;
   onJobChange?: (job: LivePipelineJob, title: string) => void;
   onBusyChange?: (busy: boolean) => void;
+  createRequest?: number;
   settingsOpen?: boolean;
   onSettingsClose?: () => void;
 }
@@ -268,6 +269,7 @@ export function CharSwapWalkthrough({
   onCredits,
   onJobChange,
   onBusyChange,
+  createRequest = 0,
   settingsOpen = false,
   onSettingsClose,
 }: CharSwapWalkthroughProps = {}) {
@@ -374,8 +376,14 @@ export function CharSwapWalkthrough({
     if (pipeline.job) onJobChange?.(pipeline.job, clip?.name ?? "Your swap");
   }, [pipeline.job, clip?.name, onJobChange]);
   useEffect(() => {
-    onBusyChange?.(lockedAccess);
-  }, [lockedAccess, onBusyChange]);
+    onBusyChange?.(lockedAccess && !renderCanContinueInLibrary);
+  }, [lockedAccess, renderCanContinueInLibrary, onBusyChange]);
+  const handledCreateRequest = useRef(createRequest);
+  useEffect(() => {
+    if (handledCreateRequest.current === createRequest) return;
+    handledCreateRequest.current = createRequest;
+    if (renderCanContinueInLibrary) startNewSwap();
+  }, [createRequest]);
   useEffect(() => {
     if (live) invalidateTracking();
   }, [liveJobId, live, invalidateTracking]);
@@ -587,13 +595,13 @@ export function CharSwapWalkthrough({
           onToggleAppearance={onToggleAppearance}
           active="create"
           onHome={onHome ?? (() => {})}
-          onCreate={() => {}}
+          onCreate={() => { if (renderCanContinueInLibrary) startNewSwap(); }}
           onLibrary={onLibrary}
           onAdmin={onAdmin}
           accountLabel={accountLabel}
           onAccount={onAccount}
           onSettings={() => setApiSettingsOpen(true)}
-          locked={lockedAccess}
+          locked={lockedAccess && !renderCanContinueInLibrary}
         />
         <Box
           sx={{
@@ -645,7 +653,7 @@ export function CharSwapWalkthrough({
           >
             <Box>
               <ProgressNavigation
-                locked={lockedAccess}
+                locked={lockedAccess && !renderCanContinueInLibrary}
                 accessReady={accessMode === "credits" || hasKey}
                 skipMaskReview={skipMaskReview}
                 reviewReady={
