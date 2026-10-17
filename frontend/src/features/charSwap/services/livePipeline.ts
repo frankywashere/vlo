@@ -1,4 +1,4 @@
-import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES } from "../limits";
+import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES, MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
@@ -14,7 +14,7 @@ export interface LivePipelineConfig {
   provider: "reAPI";
   model: "minimax-h3";
   delivery: "native" | "480p";
-  beta: "single-person";
+  beta: "single-person" | "multi-person";
   credits_available?: boolean;
 }
 
@@ -44,6 +44,9 @@ export interface LivePipelineJob {
   tracking_url?: string;
   source_preview_url?: string;
   tracking_segments?: TrackingReviewSegment[];
+  selection_targets?: SelectionTarget[];
+  reference_urls?: string[];
+  reference_url?: string;
   tracking_revision?: number;
   tracking_reviewed?: boolean;
   tracking_choices?: TrackingReviewChoice[];
@@ -58,12 +61,21 @@ export interface LivePipelineJob {
   easy_mode?: boolean;
   auto_generate?: boolean;
   scene_cut_count?: number;
-  mask_style?: "depth" | "cyan_overlay" | "gray" | "none";
+  mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
   provider_checked_at?: number;
   provider_state?: "queued" | "pending" | "processing" | "running" | "generating" | "unknown";
   estimated_cost_usd?: number;
   actual_provider_credits?: number;
+}
+
+export interface SelectionTarget {
+  id: string;
+  name: string;
+  anchor: { x: number; y: number; time: number };
+  reference_index: number;
+  color?: string;
+  color_name?: string;
 }
 
 export interface TrackingReviewSegment {
@@ -76,6 +88,8 @@ export interface TrackingReviewSegment {
   reason: string;
   needs_review: boolean;
   selected_label?: number | null;
+  target_id?: string;
+  target_name?: string;
 }
 
 export interface TrackingReviewChoice {
@@ -176,6 +190,7 @@ function capacityMessage(value: unknown): string | null {
     upload_monthly_limit: "This month's upload limit has been reached.",
     preparation_recovery: "Cloud preparation is paused while a previous job is checked. The site operator needs to restore availability.",
     tracking_background: "That tap did not land on a detected person. Choose a clearer frame and tap inside the person's body, then apply your matches again.",
+    tracking_target_conflict: "Two replacements are assigned to the same person in this scene. Choose the correct person for each replacement, or mark one not in this scene.",
     tracking_review_invalid: "This scene review has changed. Refresh the review before applying your matches again.",
   };
   const message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
@@ -184,7 +199,10 @@ function capacityMessage(value: unknown): string | null {
   const reset = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && seconds <= 32 * 86400
     ? new Date(Date.now() + seconds * 1000).toLocaleString(undefined, {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short"})
     : null;
-  return message + (reset ? value.code === "preparation_busy" ? " Current processing deadline: " + reset + "." : " Resets " + reset + "." : "") + " No generation was submitted.";
+  const referenceLabel = value.code.startsWith("reference_") && typeof value.reference_index === "number"
+    && Number.isInteger(value.reference_index) && value.reference_index >= 0 && value.reference_index < MAX_TARGET_PEOPLE
+    ? `Reference image ${value.reference_index + 1}: ` : "";
+  return referenceLabel + message + (reset ? value.code === "preparation_busy" ? " Current processing deadline: " + reset + "." : " Resets " + reset + "." : "") + " No generation was submitted.";
 }
 
 async function requestJson(
@@ -211,7 +229,7 @@ async function requestJson(
     if (!response.ok) {
       let detail: unknown;
       try { detail = await response.json(); } catch { /* Never echo raw error bodies. */ }
-      const segmentId = isRecord(detail) && detail.code === "tracking_background" && typeof detail.segment_id === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(detail.segment_id) ? detail.segment_id : null;
+      const segmentId = isRecord(detail) && ["tracking_background", "tracking_target_conflict"].includes(String(detail.code)) && typeof detail.segment_id === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(detail.segment_id) ? detail.segment_id : null;
       throw new LivePipelineError(capacityMessage(detail) ?? requestMessage(response.status), response.status, segmentId);
     }
     return await response.json();
@@ -258,7 +276,7 @@ function readJob(value: unknown): LivePipelineJob {
     status: value.status as LiveJobStatus,
   };
   if (value.access_mode === "credits" || value.access_mode === "api-key") job.access_mode = value.access_mode;
-  if (["depth", "cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
+  if (["depth", "depth_multi", "cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
@@ -278,7 +296,7 @@ function readJob(value: unknown): LivePipelineJob {
     job.scene_cut_count = value.scene_cut_count;
   if (["queued", "pending", "processing", "running", "generating", "unknown"].includes(String(value.provider_state)))
     job.provider_state = value.provider_state as LivePipelineJob["provider_state"];
-  for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url"] as const) {
+  for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url", "reference_url"] as const) {
     const url = value[field];
     if (typeof url !== "string") continue;
     try {
@@ -292,6 +310,31 @@ function readJob(value: unknown): LivePipelineJob {
     } catch {
       // An invalid optional preview must not hide an otherwise readable job.
     }
+  }
+  if (value.reference_urls !== undefined) {
+    if (!Array.isArray(value.reference_urls) || value.reference_urls.length > MAX_TARGET_PEOPLE || value.reference_urls.some((url) => {
+      if (typeof url !== "string") return true;
+      try { const parsed = new URL(url); return parsed.protocol !== "https:" || Boolean(parsed.username || parsed.password); }
+      catch { return true; }
+    })) throw new LivePipelineError("The service returned unreadable reference assignments. Refresh the job before continuing.");
+    job.reference_urls = [...value.reference_urls];
+  }
+  if (value.selection_targets !== undefined) {
+    const targets = value.selection_targets;
+    const ids = new Set<string>();
+    if (!Array.isArray(targets) || targets.length > MAX_TARGET_PEOPLE || targets.some((target: unknown) => {
+      if (!isRecord(target) || typeof target.id !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(target.id) || ids.has(target.id)) return true;
+      ids.add(target.id);
+      return typeof target.name !== "string" || !target.name.trim() || target.name.length > 40 || !isRecord(target.anchor)
+        || ![target.anchor.x, target.anchor.y, target.anchor.time].every((number) => typeof number === "number" && Number.isFinite(number))
+        || Number(target.anchor.x) < 0 || Number(target.anchor.x) > 1 || Number(target.anchor.y) < 0 || Number(target.anchor.y) > 1 || Number(target.anchor.time) < 0
+        || !Number.isInteger(target.reference_index) || Number(target.reference_index) < 0 || Number(target.reference_index) >= MAX_TARGET_PEOPLE;
+    })) throw new LivePipelineError("The service returned unreadable person assignments. Refresh the job before continuing.");
+    job.selection_targets = (targets as SelectionTarget[]).map((target, index) => ({
+      id: target.id, name: target.name, anchor: {...target.anchor}, reference_index: target.reference_index,
+      color: typeof target.color === "string" && /^#[0-9a-f]{6}$/i.test(target.color) ? target.color : TARGET_COLORS[index],
+      ...(typeof target.color_name === "string" ? {color_name: target.color_name.slice(0, 40)} : {}),
+    }));
   }
   for (const field of [
     "duration",
@@ -318,7 +361,7 @@ function readJob(value: unknown): LivePipelineJob {
   if (value.tracking_segments !== undefined) {
     const segments = value.tracking_segments;
     const ids = new Set<string>();
-    if (!Array.isArray(segments) || segments.length > 60 || segments.some((segment: unknown) => {
+    if (!Array.isArray(segments) || segments.length > 300 || segments.some((segment: unknown) => {
       if (!isRecord(segment) || typeof segment.id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(segment.id) || ids.has(segment.id)) return true;
       ids.add(segment.id);
       return typeof segment.needs_review !== "boolean" || typeof segment.reason !== "string" || segment.reason.length > 500 ||
@@ -329,16 +372,25 @@ function readJob(value: unknown): LivePipelineJob {
         typeof segment.seek_time !== "number" || !Number.isFinite(segment.seek_time) || segment.seek_time < segment.start || segment.seek_time >= segment.end ||
         (job.duration !== undefined && (segment.end > job.duration + 1e-6 || segment.end_frame > Math.round(job.duration * 24))) ||
         Math.abs(segment.start - segment.start_frame / 24) > 1e-6 || Math.abs(segment.end - segment.end_frame / 24) > 1e-6 ||
-        (segment.selected_label !== undefined && segment.selected_label !== null && (typeof segment.selected_label !== "number" || !Number.isSafeInteger(segment.selected_label) || segment.selected_label < 1));
+        (segment.selected_label !== undefined && segment.selected_label !== null && (typeof segment.selected_label !== "number" || !Number.isSafeInteger(segment.selected_label) || segment.selected_label < 1))
+        || (segment.target_id !== undefined && (typeof segment.target_id !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(segment.target_id)))
+        || (segment.target_name !== undefined && (typeof segment.target_name !== "string" || segment.target_name.length > 40));
     })) throw new LivePipelineError("The service returned an unreadable scene review. Refresh the job before continuing.");
     job.tracking_segments = (segments as TrackingReviewSegment[]).map((segment) => ({
       id: segment.id, start_frame: segment.start_frame, end_frame: segment.end_frame,
       start: segment.start, end: segment.end, seek_time: segment.seek_time,
       reason: segment.reason, needs_review: segment.needs_review,
       ...(segment.selected_label !== undefined ? {selected_label: segment.selected_label} : {}),
+      ...(segment.target_id !== undefined ? {target_id: segment.target_id} : {}),
+      ...(segment.target_name !== undefined ? {target_name: segment.target_name} : {}),
     }));
-    if (job.tracking_segments.some((segment, index, all) => index > 0 && segment.start_frame < all[index - 1].end_frame))
-      throw new LivePipelineError("The service returned overlapping scene review sections. Refresh the job before continuing.");
+    const previousEnds = new Map<string, number>();
+    for (const segment of job.tracking_segments) {
+      const targetId = segment.target_id ?? "legacy";
+      if (segment.start_frame < (previousEnds.get(targetId) ?? 0))
+        throw new LivePipelineError("The service returned overlapping scene review sections for one person. Refresh the job before continuing.");
+      previousEnds.set(targetId, segment.end_frame);
+    }
   }
   if (job.status === "tracking_review" && (!job.source_preview_url || job.tracking_revision === undefined || !job.duration || !job.width || !job.height || !job.tracking_segments?.some((segment) => segment.needs_review))) {
     throw new LivePipelineError("The service returned an incomplete scene review. Refresh the job before continuing.");
@@ -347,7 +399,7 @@ function readJob(value: unknown): LivePipelineJob {
     const choices = value.tracking_choices;
     const required = job.tracking_segments?.filter((segment) => segment.needs_review) ?? [];
     const chosenIds = new Set<string>();
-    if (!Array.isArray(choices) || choices.length > 60 || choices.length !== required.length || choices.some((choice: unknown) => {
+    if (!Array.isArray(choices) || choices.length > 300 || choices.length !== required.length || choices.some((choice: unknown) => {
       if (!isRecord(choice) || typeof choice.segment_id !== "string" || chosenIds.has(choice.segment_id) || typeof choice.absent !== "boolean") return true;
       chosenIds.add(choice.segment_id);
       const section = required.find((segment) => segment.id === choice.segment_id);
@@ -375,10 +427,10 @@ export async function getLiveConfig(
     (value.provider !== "reAPI" && value.provider !== "recastfx") ||
     value.model !== "minimax-h3" ||
     (value.delivery !== "480p" && value.delivery !== "native") ||
-    value.beta !== "single-person"
+    (value.beta !== "single-person" && value.beta !== "multi-person")
   ) {
     throw new LivePipelineError(
-      "This live backend is not configured for the single-person beta.",
+      "This live backend is not configured for character replacement.",
     );
   }
   return {
@@ -387,7 +439,7 @@ export async function getLiveConfig(
     provider: "reAPI",
     model: "minimax-h3",
     delivery: value.delivery,
-    beta: "single-person",
+    beta: value.beta,
     credits_available: value.credits_available === true,
   };
 }
@@ -430,8 +482,10 @@ export async function createLiveSession(
 
 export function validateLiveSetup(state: WalkthroughState) {
   if (!state.clip) throw new LivePipelineError("Upload a source clip first.");
-  if (state.targets.length !== 1)
-    throw new LivePipelineError("Choose one person or Replace all people.");
+  if (!state.targets.length || state.targets.length > MAX_TARGET_PEOPLE
+      || new Set(state.targets.map((target) => target.id)).size !== state.targets.length
+      || (state.replaceAllPeople && state.targets.length !== 1))
+    throw new LivePipelineError("Choose up to five people, or Replace all people with one reference.");
   const [start, end] = state.trim;
   const duration = end - start;
   if (
@@ -448,29 +502,23 @@ export function validateLiveSetup(state: WalkthroughState) {
       "Choose a whole-number duration between 4 and 15 seconds for the live beta.",
     );
   }
-  const target = state.targets[0];
-  const { x, y, time } = target.anchor;
-  if (
-    ![x, y, time].every(Number.isFinite) ||
-    x < 0 ||
-    x > 1 ||
-    y < 0 ||
-    y > 1 ||
-    time < start ||
-    time >= end
-  ) {
-    throw new LivePipelineError(
-      "Select the person again inside the chosen section.",
-    );
-  }
-  const reference = state.references.find(
-    (item) => item.id === state.assignments[target.id],
-  );
-  if (!reference?.url)
-    throw new LivePipelineError(
-      "Assign a reference image to the selected person.",
-    );
-  return { clip: state.clip, reference, target };
+  const references: WalkthroughState["references"] = [];
+  const targets = state.targets.map((target) => {
+    const { x, y, time } = target.anchor;
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(target.id) || !target.name.trim() || target.name.length > 40
+        || ![x, y, time].every(Number.isFinite) || x < 0 || x > 1 || y < 0 || y > 1 || time < start || time >= end)
+      throw new LivePipelineError("Select the person again inside the chosen section.");
+    const reference = state.references.find((item) => item.id === state.assignments[target.id]);
+    if (!reference?.url) throw new LivePipelineError(`Assign a reference image to ${target.name}.`);
+    let referenceIndex = references.findIndex((item) => item.id === reference.id || item.url === reference.url);
+    if (referenceIndex < 0) {
+      referenceIndex = references.length;
+      references.push(reference);
+    }
+    return {id: target.id, name: target.name, anchor: {...target.anchor}, reference_index: referenceIndex};
+  });
+  if (references.length > MAX_TARGET_PEOPLE) throw new LivePipelineError("Use up to five different reference images.");
+  return { clip: state.clip, reference: references[0], target: state.targets[0], references, targets };
 }
 
 async function assetFile(
@@ -569,18 +617,12 @@ export async function createLiveJob(
   autoKey = "",
 ): Promise<LivePipelineJob> {
   assertSecureOrigin();
-  const { clip, reference, target } = validateLiveSetup(state);
+  const { clip, references, target, targets } = validateLiveSetup(state);
   onProgress?.({phase: "checking_capacity", message: "Checking cloud availability before uploading your clip…"});
   await requestJson("/api/preparation-capacity", {headers: sessionHeaders(token)}, signal);
-  const [sourceFile, referenceFile] = await Promise.all([
+  const [sourceFile, referenceFiles] = await Promise.all([
     assetFile(clip.url, clip.name, MAX_SOURCE_BYTES, "source", signal),
-    assetFile(
-      reference.url,
-      reference.name,
-      MAX_REFERENCE_BYTES,
-      "reference",
-      signal,
-    ),
+    Promise.all(references.map((reference) => assetFile(reference.url, reference.name, MAX_REFERENCE_BYTES, "reference", signal))),
   ]);
   const ticket = await requestJson(
     "/api/uploads",
@@ -590,10 +632,12 @@ export async function createLiveJob(
       body: JSON.stringify({
         title: clip.name.slice(0, 120),
         source_bytes: sourceFile.size,
-        reference_bytes: referenceFile.size,
+        reference_bytes: referenceFiles[0].size,
+        reference_sizes: referenceFiles.map((file) => file.size),
         setup: {
+          preparation_version: 2,
           trim: state.trim,
-          ...(state.replaceAllPeople ? {replace_all_people: true} : {anchor: target.anchor}),
+          ...(state.replaceAllPeople ? {replace_all_people: true} : {anchor: target.anchor, targets}),
           target_name: target.name,
           enhanced_character_masking: state.enhancedCharacterMasking ?? true,
           easy_mode: state.easyMode ?? true,
@@ -612,10 +656,13 @@ export async function createLiveJob(
   signal.addEventListener("abort", abortUploads, {once: true});
   try {
     signal.throwIfAborted();
-    onProgress?.({phase: "uploading", message: "Uploading your video and reference to private storage…"});
+    const referenceTickets = Array.isArray(ticket.references) ? ticket.references : [ticket.reference];
+    if (referenceTickets.length !== referenceFiles.length)
+      throw new LivePipelineError("The service did not prepare every reference upload. No generation was submitted.");
+    onProgress?.({phase: "uploading", message: `Uploading your video and ${referenceFiles.length === 1 ? "reference" : `${referenceFiles.length} references`} to private storage…`});
     await Promise.all([
       uploadAsset(ticket.source, sourceFile, uploads.signal),
-      uploadAsset(ticket.reference, referenceFile, uploads.signal),
+      ...referenceFiles.map((file, index) => uploadAsset(referenceTickets[index], file, uploads.signal)),
     ]);
   } catch (error) {
     uploads.abort();

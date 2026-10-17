@@ -75,6 +75,9 @@ export function ReviewStep({
   const guidePlayable = playableGuide === guideIdentity;
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const prepared = Boolean(job && ["ready", "generating", "finalizing", "completed"].includes(job.status));
+  const automaticPreparationPending = live && !replaceAllPeople && Boolean(enhancedCharacterMasking)
+    && (easyMode ?? true) && !prepared;
   if (!clip) return null;
   async function downloadVideo() {
     if (!job?.output_url || downloading) return;
@@ -253,7 +256,7 @@ export function ReviewStep({
             ✓ Every selected person has a reference
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            ✓{" "}
+            {automaticPreparationPending ? "→ " : "✓ "}
             {replaceAllPeople
               ? "Everyone will use the same reference character"
               : issues.length
@@ -261,11 +264,14 @@ export function ReviewStep({
               : live
                 ? job?.tracking_reviewed
                   ? "Scene matches checked and applied"
-                  : job?.easy_mode && enhancedCharacterMasking
-                    ? "Easy mode: automatic tracking, no scene matching"
+                  : (easyMode ?? true) && enhancedCharacterMasking
+                    ? !job || job.status === "failed"
+                      ? "Automatic preparation after submission"
+                      : prepared ? "Easy mode: automatic tracking, no scene matching"
+                        : "Automatic preparation in progress; no scene matching"
                     : enhancedCharacterMasking
-                      ? "Tracking checks completed"
-                      : "Person selected by position and timestamp"
+                      ? prepared ? "Tracking guide prepared" : "Tracking will be checked during preparation"
+                      : "Masking off: positions and timestamps identify your people; no SAM tracking"
                 : "No uncertain sections"}
             {clip.mode === "demo" ? " (sample)" : ""}
           </Typography>

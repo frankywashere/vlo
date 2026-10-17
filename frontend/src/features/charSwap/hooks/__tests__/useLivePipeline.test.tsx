@@ -12,6 +12,7 @@ const CONFIG = {
   live: true, available: true, provider: "reAPI", model: "minimax-h3",
   delivery: "native", beta: "single-person",
 };
+const UPLOAD_HEADERS = {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"};
 
 function setup(): WalkthroughState {
   return {
@@ -103,8 +104,8 @@ describe("live BYOK pipeline", () => {
     window.dispatchEvent(afterConfirmation);
     expect(afterConfirmation.defaultPrevented).toBe(false);
   });
-  it.each([false, true])("uploads all-person mode without a tap (enhanced: %s)", async (enhanced) => {
-    const group = setReplaceAllPeople({...setup(), enhancedCharacterMasking: enhanced}, true);
+  it.each([false, true].flatMap((enhanced) => [false, true].map((easy) => ({enhanced, easy}))))("uploads all-person mode without a tap (enhanced: $enhanced, Easy: $easy)", async ({enhanced, easy}) => {
+    const group = setReplaceAllPeople({...setup(), enhancedCharacterMasking: enhanced, easyMode: easy}, true);
     const state = setReference(group, "all-people", {id: "reference", name: "character.png", url: "blob:reference"});
     const {result} = await renderLive();
     await act(async () => {await result.current.prepare(state);});
@@ -112,7 +113,63 @@ describe("live BYOK pipeline", () => {
     expect(body.setup.replace_all_people).toBe(true);
     expect(body.setup.enhanced_character_masking).toBe(enhanced);
     expect(body.setup).not.toHaveProperty("anchor");
+    expect(body.setup).not.toHaveProperty("targets");
+    expect(body.reference_sizes).toEqual([9]);
     expect(body.setup.target_name).toBe("All people");
+  });
+  it.each([false, true].flatMap((enhanced) => [false, true].map((easy) => ({enhanced, easy}))))("uploads every selected person's assigned image once (enhanced: $enhanced, Easy: $easy)", async ({enhanced, easy}) => {
+    const state = setup();
+    state.enhancedCharacterMasking = enhanced;
+    state.easyMode = easy;
+    state.targets.push({...state.targets[0], id: "second", name: "Person 2", anchor: {x: .8, y: .3, time: 3}},
+      {...state.targets[0], id: "third", name: "Person 3", anchor: {x: .2, y: .3, time: 4}});
+    state.references.push({id: "other", name: "cat.png", url: "blob:other"});
+    state.assignments = {person: "reference", second: "other", third: "reference"};
+    requests.mockImplementation((input) => {
+      if (input === "blob:other") return Promise.resolve(new Response("other-image", {headers: {"Content-Type": "image/png"}}));
+      if (input === "/api/uploads") return Promise.resolve(json({id: "job-1",
+        source: {url: "https://storage.googleapis.com/private-app/source?signature=test", headers: UPLOAD_HEADERS},
+        references: ["reference", "other"].map((name) => ({url: `https://storage.googleapis.com/private-app/${name}?signature=test`, headers: UPLOAD_HEADERS}))}));
+      return defaultRequest(input);
+    });
+    const {result} = await renderLive();
+    await act(async () => {expect(await result.current.prepare(state, easy)).toBe(true);});
+    const body = JSON.parse(String(calls("/api/uploads")[0][1]?.body));
+    expect(body.reference_sizes).toEqual([9, 11]);
+    expect(body.setup).toMatchObject({preparation_version: 2, easy_mode: easy, enhanced_character_masking: enhanced, auto_generate: easy});
+    expect(body.setup.targets.map((target: {id: string; reference_index: number}) => [target.id, target.reference_index]))
+      .toEqual([["person", 0], ["second", 1], ["third", 0]]);
+    expect(requests.mock.calls.filter(([input, options]) => String(input).startsWith("https://storage.googleapis.com/") && options?.method === "PUT")).toHaveLength(3);
+    expect(calls("/api/uploads/job-1/complete")).toHaveLength(1);
+    expect(calls("/api/jobs/job-1/generate")).toHaveLength(0);
+  });
+
+  it("keeps the upload warning until the last reference and server confirmation finish", async () => {
+    const state = setup();
+    state.targets.push({...state.targets[0], id: "second", name: "Person 2"});
+    state.references.push({id: "other", name: "cat.png", url: "blob:other"});
+    state.assignments.second = "other";
+    const pending = deferred<Response>();
+    requests.mockImplementation((input) => {
+      if (input === "blob:other") return Promise.resolve(new Response("other-image", {headers: {"Content-Type": "image/png"}}));
+      if (input === "/api/uploads") return Promise.resolve(json({id: "job-1", source: {url: "https://storage.googleapis.com/private-app/source", headers: UPLOAD_HEADERS},
+        references: ["reference", "other"].map((name) => ({url: `https://storage.googleapis.com/private-app/${name}`, headers: UPLOAD_HEADERS}))}));
+      if (input === "https://storage.googleapis.com/private-app/other") return pending.promise;
+      return defaultRequest(input);
+    });
+    const {result} = await renderLive();
+    let preparing!: Promise<boolean>;
+    act(() => {preparing = result.current.prepare(state);});
+    await waitFor(() => expect(result.current.preparationProgress?.phase).toBe("uploading"));
+    expect(calls("/api/uploads/job-1/complete")).toHaveLength(0);
+    const leaving = new Event("beforeunload", {cancelable: true});
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(true);
+    await act(async () => {pending.resolve(new Response(null, {status: 200})); await preparing;});
+    expect(calls("/api/uploads/job-1/complete")).toHaveLength(1);
+    const saved = new Event("beforeunload", {cancelable: true});
+    window.dispatchEvent(saved);
+    expect(saved.defaultPrevented).toBe(false);
   });
   it("pauses polling for scene review, validates complete choices, and resumes the same job without a paid submission", async () => {
     const review = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 2, tracking_segments: [
@@ -184,15 +241,30 @@ describe("live BYOK pipeline", () => {
     expect(JSON.stringify(requests.mock.calls)).not.toContain(DEMO_API_KEY);
   });
 
-  it("validates the single-person integer-duration beta before contacting access or workers", () => {
+  it("validates bounded people and integer-duration clips before contacting access or workers", () => {
     const state = setup();
-    expect(() => validateLiveSetup({ ...state, targets: [...state.targets, { ...state.targets[0], id: "second" }] })).toThrow("Choose one person or Replace all people");
+    expect(() => validateLiveSetup({ ...state, targets: Array.from({length: 6}, (_, index) => ({...state.targets[0], id: `person-${index}`})) })).toThrow("up to five");
     expect(() => validateLiveSetup({ ...state, trim: [1, 5.5] })).toThrow("whole-number");
     expect(() => validateLiveSetup({ ...state, trim: [0, 3] })).toThrow("4 and 15");
     expect(() => validateLiveSetup({ ...state, trim: [1, 11] })).toThrow("4 and 15");
     expect(() => validateLiveSetup({ ...state, assignments: {} })).toThrow("reference");
     expect(() => validateLiveSetup({ ...state, targets: [{ ...state.targets[0], anchor: { x: 0.5, y: 0.4, time: 6 } }] })).toThrow("Select the person again");
     expect(validateLiveSetup(state).target.id).toBe("person");
+  });
+  it("validates every selected person and permits five people sharing a single image", () => {
+    const state = setup();
+    state.targets = Array.from({length: 5}, (_, index) => ({...state.targets[0], id: `person-${index}`, name: `Person ${index + 1}`}));
+    state.assignments = Object.fromEntries(state.targets.map((target) => [target.id, "reference"]));
+    const checked = validateLiveSetup(state);
+    expect(checked.targets).toHaveLength(5);
+    expect(checked.references).toHaveLength(1);
+    expect(checked.targets.map((target) => target.reference_index)).toEqual([0, 0, 0, 0, 0]);
+    expect(() => validateLiveSetup({...state, assignments: {...state.assignments, "person-4": "missing"}})).toThrow(/Person 5/);
+    expect(() => validateLiveSetup({...state, targets: state.targets.map((target, index) => index === 4
+      ? {...target, anchor: {...target.anchor, time: 6}} : target)})).toThrow(/inside the chosen section/);
+    expect(() => validateLiveSetup({...state, targets: [state.targets[0], state.targets[0]]})).toThrow(/up to five/);
+    expect(() => validateLiveSetup({...state, replaceAllPeople: true})).toThrow(/one reference/);
+    expect(requests).not.toHaveBeenCalled();
   });
 
   it("sends credentials only in headers and keeps them out of state, setup and browser storage", async () => {
@@ -206,8 +278,11 @@ describe("live BYOK pipeline", () => {
     const ticket = JSON.parse(String(upload?.body));
     expect(ticket.source_bytes).toBe(6);
     expect(ticket.reference_bytes).toBe(9);
+    expect(ticket.reference_sizes).toEqual([9]);
     expect(ticket.setup).toEqual({
+      preparation_version: 2,
       trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true, easy_mode: true, auto_generate: false,
+      targets: [{id: "person", name: "Person 1", anchor: {x: .5, y: .4, time: 2}, reference_index: 0}],
     });
     expect(String(upload?.body)).not.toContain(USER_KEY);
     expect(String(upload?.body)).not.toContain(SESSION_TOKEN);

@@ -7,7 +7,7 @@ from typing import Literal
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic import Field
 from common import BOOT_TIME, download_input, probe, upload_tree
 
@@ -25,14 +25,31 @@ def health():
     return {"status": "ready", "device": "cpu", "version": "audio-depth-guide-v5", "operations": ["audio", "compose"]}
 
 
+class TargetStyle(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    label: int = Field(ge=1, le=65535, strict=True)
+    color: str = Field(pattern=r'^#[0-9A-Fa-f]{6}$')
+
+
 class ComposeRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     input_uri: str
     masks_uri: str
     guide_audio_uri: str
     selected_label: int = Field(ge=1, le=65535)
     fill_mode: Literal['gray','original','color','depth'] = 'gray'
     depth_uri: str | None = None
+    target_styles: list[TargetStyle] | None = Field(default=None, min_length=1, max_length=5)
     run_id: str
+
+    @model_validator(mode='after')
+    def validate_styles(self):
+        if self.target_styles and self.fill_mode!='depth':
+            raise ValueError('Target styles require a depth guide')
+        if self.target_styles and (len({style.label for style in self.target_styles})!=len(self.target_styles)
+                                  or any(style.color.lower()=='#000000' for style in self.target_styles)):
+            raise ValueError('Target labels must be unique and their colors visible')
+        return self
 
 
 @app.post('/compose')
@@ -53,7 +70,8 @@ def composite(request: ComposeRequest):
                 if not request.depth_uri:raise HTTPException(400,'Depth source required')
                 depth_source=root/'depth.mp4'
                 download_input(request.depth_uri,str(depth_source))
-            metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode,depth_source)
+            metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode,depth_source,
+                [style.model_dump() for style in request.target_styles] if request.target_styles is not None else None)
             metrics['request_processing_seconds']=time.monotonic()-started
             (output/'metrics.json').write_text(json.dumps(metrics,indent=2))
             return {'metrics':metrics,'files':upload_tree(output,request.run_id)}

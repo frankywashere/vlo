@@ -14,7 +14,7 @@ from fastapi import Body, FastAPI, File, Form, Header, Query, Request, UploadFil
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
@@ -40,7 +40,7 @@ from .job_key import protect_key, recover_key
 from .provider_credentials import server_provider_key, save_server_provider_key
 
 settings = Settings.from_env()
-app = FastAPI(title="recastfx single-person beta", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="recastfx character replacement", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins),
     allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key", "X-Firebase-Token"], max_age=600)
 
@@ -56,7 +56,7 @@ class BodyLimitMiddleware:
         path = scope.get("path", "")
         maximum = (31 * 1024 * 1024 if path == "/api/jobs" else
                    100 * 1024 if path == "/api/commerce/stripe-webhook" else
-                   32768 if path.endswith("/tracking-review") else 8192)
+                   128 * 1024 if path.endswith("/tracking-review") else 8192)
         async def bounded_receive():
             nonlocal total
             message = await receive()
@@ -91,14 +91,17 @@ async def protect_requests(request: Request, call_next):
 
 @app.exception_handler(PublicError)
 async def public_error(_request, error):
-    emit("api_request_rejected", error=error, route=_request.scope.get("route").path if _request.scope.get("route") else "unmatched", http_status=error.status_code, public_code=error.code)
+    reference_index = getattr(error, "reference_index", None)
+    reference_fields = {"reference_index": reference_index} if type(reference_index) is int and 0 <= reference_index < 5 else {}
+    emit("api_request_rejected", error=error, route=_request.scope.get("route").path if _request.scope.get("route") else "unmatched", http_status=error.status_code, public_code=error.code, **reference_fields)
     content = {"message": error.message}
+    content.update(reference_fields)
     if error.code is not None:
         content["code"] = error.code
     if error.retry_after is not None:
         content["retry_after"] = error.retry_after
     segment_id = getattr(error, "segment_id", None)
-    if error.code == "tracking_background" and isinstance(segment_id, str) and re.fullmatch(r"segment-[0-9]{3}", segment_id):
+    if error.code in {"tracking_background", "tracking_collision", "tracking_target_conflict"} and isinstance(segment_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", segment_id):
         content["segment_id"] = segment_id
     headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
     return JSONResponse(content, status_code=error.status_code, headers=headers)
@@ -212,6 +215,15 @@ def view(job: dict):
               "replace_all_people": bool(job.get("setup", {}).get("replace_all_people", False))}
     if not credits_mode:
         result["provider"] = job.get("provider", "reAPI")
+    targets = job.get("normalized_targets") or job.get("setup", {}).get("targets")
+    if targets:
+        result["selection_targets"] = [{key: target[key] for key in
+            ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
+            for target in targets]
+    reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
+    if reference_uris:
+        result["reference_urls"] = [cloud.signed_url(uri) for uri in reference_uris]
+        result["reference_url"] = result["reference_urls"][0]
     if "duration" in job:
         result["duration"] = job["duration"]
         if not credits_mode:
@@ -246,7 +258,7 @@ def config():
     credit_ready = feature_view(services()[0])["credit_generation"] if settings.available else False
     return {"live": True, "providers": [] if settings.require_account else ["reAPI", "ToAPIs"],
             "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
-            "beta": "single-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
+            "beta": "multi-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
             "accounts_required": settings.require_account, "credits_available": credit_ready}
 
 
@@ -554,6 +566,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         options = Setup.model_validate_json(setup)
     except ValidationError:
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
+    validate_reference_mapping(options, 1)
     check_automatic_generation(records, options, active_session)
     job_id = uuid.uuid4().hex
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
@@ -569,12 +582,12 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             await save_upload(clip, source, LEGACY_SOURCE_BYTES)
             await save_upload(reference, raw_reference, MAX_REFERENCE_BYTES)
             reference_details = await run_in_threadpool(normalize_reference, raw_reference, image)
-            emit("reference_normalized", job_id=job_id, **(reference_details or {}))
+            emit("reference_normalized", job_id=job_id, reference_index=0, **(reference_details or {}))
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
-               "source_uri": source_uri, "reference_uri": reference_uri,
+               "source_uri": source_uri, "reference_uri": reference_uri, "reference_uris": [reference_uri],
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": pipeline_settings(records)["audio_processing"]}
         if auto_key:
@@ -603,12 +616,44 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         raise
 
 
+def validate_reference_mapping(setup: Setup, count: int):
+    if not 1 <= count <= 5:
+        raise PublicError("Choose between one and five reference images.")
+    if setup.replace_all_people and count != 1:
+        raise PublicError("Replace all people uses one shared reference image.")
+    targets = getattr(setup, "targets", None)
+    if targets and any(target.reference_index >= count for target in targets):
+        raise PublicError("Assign an uploaded reference image to every selected person.")
+    if not targets and count != 1:
+        raise PublicError("Assign each reference to a selected person before uploading.")
+
+
 class UploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_bytes: int = Field(strict=True, gt=0, le=MAX_SOURCE_BYTES)
-    reference_bytes: int = Field(strict=True, gt=0, le=MAX_REFERENCE_BYTES)
+    reference_bytes: int | None = Field(default=None, strict=True, gt=0, le=MAX_REFERENCE_BYTES)
+    reference_sizes: list[StrictInt] | None = Field(default=None, min_length=1, max_length=5)
     setup: Setup
     title: str = Field(default="Your clip", max_length=120)
+
+    @model_validator(mode="after")
+    def validate_references(self):
+        sizes = self.reference_sizes
+        if sizes is None:
+            if self.reference_bytes is None:
+                raise ValueError("Upload at least one reference image")
+            sizes = [self.reference_bytes]
+        if any(not 0 < size <= MAX_REFERENCE_BYTES for size in sizes):
+            raise ValueError("Reference images must be at most 5 MiB each")
+        if self.reference_bytes is not None and sizes[0] != self.reference_bytes:
+            raise ValueError("Reference upload sizes do not match")
+        self.reference_sizes = sizes
+        self.reference_bytes = sizes[0]
+        try:
+            validate_reference_mapping(self.setup, len(sizes))
+        except PublicError as error:
+            raise ValueError(error.message) from None
+        return self
 
 
 def check_available_preparation(records, now):
@@ -645,14 +690,16 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         limit_prefix="upload"), job_id))
     prefix = f"uploads/{job_id}/"
     source_uri = f"gs://{settings.app_bucket}/{prefix}source.bin"
-    reference_uri = f"gs://{settings.app_bucket}/{prefix}reference.bin"
+    reference_uris = [f"gs://{settings.app_bucket}/{prefix}reference{'' if index == 0 else '-' + str(index)}.bin"
+                      for index in range(len(options.reference_sizes))]
     source = cloud.signed_upload(source_uri, options.source_bytes)
-    reference = cloud.signed_upload(reference_uri, options.reference_bytes)
+    references = [cloud.signed_upload(uri, size) for uri, size in zip(reference_uris, options.reference_sizes)]
     manifest = {
         "id": job_id, "owner": owner, "status": "uploading", "created_at": time.time(),
         "expires_at": time.time() + UPLOAD_SECONDS, "source_uri": source_uri,
-        "raw_reference_uri": reference_uri, "source_bytes": options.source_bytes,
-        "reference_bytes": options.reference_bytes, "setup": options.setup.model_dump(),
+        "raw_reference_uri": reference_uris[0], "raw_reference_uris": reference_uris,
+        "source_bytes": options.source_bytes, "reference_bytes": options.reference_bytes,
+        "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
         "title": options.title,
@@ -663,7 +710,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         manifest["generation_credits"] = generation_credit_cost(options.setup.trim[1] - options.setup.trim[0], public_catalog(records)["credits_per_generation"])
         emit("generation_quote_created", job_id=job_id, duration=options.setup.trim[1] - options.setup.trim[0], credits=manifest["generation_credits"])
     records.create(prefix + "manifest.json", manifest)
-    return {"id": job_id, "source": source, "reference": reference}
+    return {"id": job_id, "source": source, "reference": references[0], "references": references}
 
 
 @app.post("/api/uploads/{job_id}/complete", status_code=202)
@@ -681,7 +728,13 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         return {"id": job_id, "status": job["status"]}
     if manifest["expires_at"] <= time.time():
         raise PublicError("This upload expired. Prepare the clip again.", 409)
-    check_automatic_generation(records, Setup.model_validate(manifest["setup"]), active_session)
+    options = Setup.model_validate({"preparation_version": 1, **manifest["setup"]})
+    raw_reference_uris = manifest.get("raw_reference_uris") or [manifest["raw_reference_uri"]]
+    reference_sizes = manifest.get("reference_sizes") or [manifest["reference_bytes"]]
+    if len(raw_reference_uris) != len(reference_sizes):
+        raise PublicError("Reference uploads are incomplete. Prepare the clip again.", 409)
+    validate_reference_mapping(options, len(raw_reference_uris))
+    check_automatic_generation(records, options, active_session)
     if (manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
             and not manifest.get("auto_key_ciphertext")):
         raise PublicError("Re-enter your API key before submitting this job.", 409)
@@ -692,14 +745,29 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
     enqueue_attempted = False
     try:
         cloud.verify_upload(manifest["source_uri"], manifest["source_bytes"])
-        cloud.verify_upload(manifest["raw_reference_uri"], manifest["reference_bytes"])
+        for index, (uri, size) in enumerate(zip(raw_reference_uris, reference_sizes)):
+            try:
+                cloud.verify_upload(uri, size)
+            except PublicError as error:
+                error.reference_index = index
+                raise
         with tempfile.TemporaryDirectory() as temporary:
-            raw_reference = Path(temporary) / "reference.bin"
-            image = Path(temporary) / "reference.jpg"
-            cloud.download(manifest["raw_reference_uri"], raw_reference, MAX_REFERENCE_BYTES)
-            reference_details = normalize_reference(raw_reference, image)
-            emit("reference_normalized", job_id=job_id, **(reference_details or {}))
-            reference_uri = cloud.upload(settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
+            images = []
+            # Validate every photo before publishing normalized references or queuing compute.
+            for index, uri in enumerate(raw_reference_uris):
+                raw_reference = Path(temporary) / f"reference-{index}.bin"
+                image = Path(temporary) / f"reference-{index}.jpg"
+                cloud.download(uri, raw_reference, MAX_REFERENCE_BYTES)
+                try:
+                    reference_details = normalize_reference(raw_reference, image)
+                except PublicError as error:
+                    error.reference_index = index
+                    raise
+                emit("reference_normalized", job_id=job_id, reference_index=index, **(reference_details or {}))
+                images.append(image)
+            reference_uris = [cloud.upload(settings.app_bucket,
+                f"uploads/{job_id}/reference{'' if index == 0 else '-' + str(index)}.jpg", image, "image/jpeg")
+                for index, image in enumerate(images)]
         records.update("control/preparation.json", lambda current: reserve_queued_preparation(
             current, time.time(), settings.monthly_preparations, settings.daily_preparations)
             if settings.require_account else reserve_preparation(
@@ -707,7 +775,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         reserved = True
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
-               "source_uri": manifest["source_uri"], "reference_uri": reference_uri,
+               "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": pipeline_settings(records)["audio_processing"]}
         if manifest.get("auto_key_ciphertext"):
@@ -789,7 +857,7 @@ class TrackingChoice(BaseModel):
 class TrackingReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1, le=100, strict=True)
-    choices: list[TrackingChoice] = Field(min_length=1, max_length=60)
+    choices: list[TrackingChoice] = Field(min_length=1, max_length=300)
 
 
 @app.post("/api/jobs/{job_id}/tracking-review", status_code=202)
@@ -819,7 +887,11 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             choices = [choice.model_dump() for choice in review.choices]
             # Validate taps against the real masks before claiming compute or
             # changing the job. A background tap stays editable in the browser.
-            resolved = resolve_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
+            if plan.get("version") == 2:
+                from .tracking import resolve_multi_tracking
+                resolved = resolve_multi_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
+            else:
+                resolved = resolve_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
             records.update("control/preparation.json", lambda current: reserve_preparation(
                 current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
             reserved = True
@@ -898,11 +970,11 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
             if job.get("status") == "completed" and not item.get("output_uri"):
                 archive_completed(records, job)
             public = view(job)
-            if job.get("reference_uri"):
-                public["reference_url"] = cloud.signed_url(job["reference_uri"])
         else:
             public = {"id": job_id, "access_mode": item.get("access_mode", "api-key"),
                       "status": item.get("status", "failed"), "message": "Preparation records have expired."}
+            if item.get("selection_targets"):
+                public["selection_targets"] = item["selection_targets"]
             if public["access_mode"] != "credits":
                 public["provider"] = item.get("provider", "reAPI")
             if item.get("output_uri") and item.get("expires_at", 0) > time.time():
@@ -980,13 +1052,24 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         raise PublicError("Confirm your scene matches before generating.", 409, code="tracking_review_invalid")
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
-    image_url, video_url = cloud.signed_url(job["reference_uri"]), cloud.signed_url(job["guide_uri"])
-    options = Setup.model_validate({"enhanced_character_masking": True, **job["setup"]})
+    options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True, **job["setup"]})
+    reference_uris = job.get("reference_uris") or [job["reference_uri"]]
+    validate_reference_mapping(options, len(reference_uris))
+    image_urls, video_url = [cloud.signed_url(uri) for uri in reference_uris], cloud.signed_url(job["guide_uri"])
     anchor = options.anchor.model_dump() if options.anchor else None
     if anchor:
         anchor["time"] -= options.trim[0]
     anchor = None if options.replace_all_people else job.get("normalized_anchor", anchor)
-    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor, job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True), replace_all_people=options.replace_all_people)
+    targets = job.get("normalized_targets") or None
+    if getattr(options, "targets", None) and not targets:
+        raise PublicError("This clip's person assignments are incomplete. Prepare it again before generating.", 409)
+    if options.targets and (len(targets) != len(options.targets) or any(
+            target.get("id") != expected.id or target.get("reference_index") != expected.reference_index
+            for target, expected in zip(targets, options.targets))):
+        raise PublicError("This clip's person assignments have changed. Prepare it again before generating.", 409)
+    payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
+        job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
+        replace_all_people=options.replace_all_people, targets=targets)
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)

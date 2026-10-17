@@ -21,7 +21,7 @@ from .errors import PublicError
 FPS = 24
 MAX_FRAMES = 360
 MAX_SEGMENTS = 60
-MAX_FRAME_BYTES = 2_000_000
+MAX_FRAME_BYTES = 8_000_000
 
 
 def merge_all_people_masks(archive: Path, output: Path, metadata: dict):
@@ -67,7 +67,8 @@ def _metadata(metadata):
     if not isinstance(metadata, dict):
         raise _invalid()
     width, height, frames = (metadata.get(key) for key in ("width", "height", "frames"))
-    if (not _integer(width, 1, 854) or not _integer(height, 1, 480)
+    if (not _integer(width, 1, 1920) or not _integer(height, 1, 1920)
+            or min(width, height) > 768 or width * height > 1920 * 768
             or not _integer(frames, 1, MAX_FRAMES)):
         raise _invalid("The tracking dimensions or frame count are invalid.")
     if "duration" in metadata and (not _number(metadata["duration"])
@@ -342,3 +343,13 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def analyze_multi_tracking(archive: Path, metadata: dict, targets: list[dict] | None = None):
+    from .multi_tracking import analyze
+    return analyze(archive, metadata, targets)
+
+
+def resolve_multi_tracking(archive: Path, metadata: dict, plan: dict, choices: list[dict], output: Path):
+    from .multi_tracking import resolve
+    return resolve(archive, metadata, plan, choices, output)

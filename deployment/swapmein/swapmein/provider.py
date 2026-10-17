@@ -6,6 +6,7 @@ import httpx
 
 from .errors import PublicError
 from .diagnostics import emit, submission_event
+from .multi_tracking import TARGET_COLORS
 
 BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -79,8 +80,56 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
     )
 
 
-def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, replace_all_people: bool = False):
-    prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
+def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_masking: bool, mask_style: str):
+    instructions = []
+    for index, target in enumerate(targets):
+        anchor = target.get("anchor", target)
+        reference = target["reference_index"] + 1
+        location = (f"selected at approximately {anchor['x'] * 100:.0f}% of the frame width and "
+                    f"{anchor['y'] * 100:.0f}% of its height, measured from the top left, "
+                    f"at {anchor['time']:.2f} seconds")
+        marker = (f" covered by {TARGET_COLORS[index][1]}-tinted depth imagery" if mask_style == "depth_multi"
+                  else " covered by colored depth imagery") if enhanced_masking else ""
+        instructions.append(f"Person {index + 1}{marker}, {location}, must be replaced with the character "
+                            f"from reference image {reference}.")
+    return (
+        "Use reference video 1 as the source scene and precise motion guide. "
+        + " ".join(instructions) + " "
+        "Replace each selected person's entire head, hands, body and feet. Keep these assignments separate, "
+        "even when people overlap or change positions. Follow each selected person's individual motion, "
+        "pose, interactions and speaking timing through scene changes. "
+        + ("The colored depth imagery identifies each selected person and describes shape and motion, not appearance. "
+           "Remove every depth-map color from the completed characters. " if enhanced_masking else "")
+        + "When a selected person is absent, preserve the scene and do not replace another person in their place. "
+        "Keep all other people unchanged. Do not merge people, add extra characters or leave human body parts. "
+        f"Preserve the background, camera, lighting and exact {duration}-second timing. "
+        "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
+        "Reference images supply replacement appearance only; retain the source scene background. "
+        "Replace the selected people rather than adding characters beside them."
+    )
+
+
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, replace_all_people: bool = False, targets: list[dict] | None = None):
+    images = [image_url] if isinstance(image_url, str) else image_url
+    if (not isinstance(images, list) or not 1 <= len(images) <= 5
+            or any(not isinstance(url, str) or not url for url in images)):
+        raise PublicError("Choose between one and five valid reference images.")
+    if replace_all_people and (targets or len(images) != 1):
+        raise PublicError("Replace all people uses one shared reference image.")
+    if targets is not None:
+        if not isinstance(targets, list) or not 1 <= len(targets) <= 5:
+            raise PublicError("Choose between one and five people.")
+        for target in targets:
+            reference = target.get("reference_index") if isinstance(target, dict) else None
+            point = target.get("anchor", target) if isinstance(target, dict) else {}
+            if (type(reference) is not int or not 0 <= reference < len(images) or not isinstance(point, dict)
+                    or any(type(point.get(axis)) not in (int, float) or not math.isfinite(point[axis])
+                           for axis in ("x", "y", "time"))
+                    or not 0 <= point["x"] <= 1 or not 0 <= point["y"] <= 1 or not 0 <= point["time"] < duration):
+                raise PublicError("Each selected person needs a valid reference and clip timestamp.")
+        prompt = multi_replacement_prompt(duration, targets, enhanced_masking, mask_style)
+    else:
+        prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
     if not audio_processing:
         prompt = prompt.replace(
             "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
@@ -90,7 +139,7 @@ def generation_payload(duration: int, image_url: str, video_url: str, enhanced_m
             "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")
     return {"model": "minimax-h3", "prompt": prompt, "duration": duration,
             "resolution": "768P", "aspect_ratio": "adaptive", "content_filter": False,
-            "reference_image_urls": [image_url], "reference_video_urls": [video_url]}
+            "reference_image_urls": images, "reference_video_urls": [video_url]}
 
 
 class Provider:

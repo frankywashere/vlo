@@ -12,7 +12,7 @@ import {
 } from "@mui/material";
 import CheckRounded from "@mui/icons-material/CheckRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import type { TargetPerson } from "../model/model";
+import type { ReferenceAsset, TargetPerson } from "../model/model";
 import type {
   TrackingReviewChoice,
   TrackingReviewSegment,
@@ -28,11 +28,14 @@ interface SceneTrackingReviewProps {
   trackingUrl?: string;
   segments: TrackingReviewSegment[];
   target: TargetPerson;
+  targets?: TargetPerson[];
+  references?: {targetId: string; asset?: ReferenceAsset}[];
   duration: number;
   width: number;
   height: number;
   busy: boolean;
   errorSegmentId?: string | null;
+  errorMessage?: string | null;
   message?: string;
   initialChoices?: TrackingReviewChoice[];
   onApply: (choices: TrackingReviewChoice[]) => Promise<boolean>;
@@ -53,11 +56,14 @@ export function SceneTrackingReview({
   sourceUrl,
   trackingUrl,
   segments,
-  target,
+  target: fallbackTarget,
+  targets = [],
+  references = [],
   width,
   height,
   busy,
   errorSegmentId,
+  errorMessage,
   message,
   initialChoices = [],
   onApply,
@@ -109,6 +115,10 @@ export function SceneTrackingReview({
     previousSection.current = active?.id;
   }, [errorSegmentId, active]);
   if (!active) return null;
+  const target = targets.find((person) => person.id === active.target_id)
+    ?? (active.target_id ? {...fallbackTarget, id: active.target_id, name: active.target_name ?? fallbackTarget.name} : fallbackTarget);
+  const reference = references.find((assignment) => assignment.targetId === target.id)?.asset;
+  const multiplePeople = targets.length > 1;
 
   const choice = choices[active.id];
   const frameNumbers = reviewFrameNumbers(active, choice?.anchor?.time);
@@ -174,6 +184,11 @@ export function SceneTrackingReview({
             person={target}
             subtitle="Find this person in each image"
           />
+          {reference && <Stack direction="row" spacing={1} alignItems="center">
+            <Box component="img" src={reference.url} alt={`${target.name} replacement: ${reference.name}`}
+              sx={{width: 56, height: 56, borderRadius: 1, objectFit: "contain", border: `2px solid ${target.color}`}} />
+            <Typography variant="body2">Replaced with {reference.name}</Typography>
+          </Stack>}
           <Box sx={{ minWidth: { sm: 160 } }}>
             <Typography variant="body2" sx={{ mb: 1 }} aria-live="polite">
               {completed} of {sections.length} sections checked
@@ -198,7 +213,7 @@ export function SceneTrackingReview({
             clickable
             disabled={busy}
             aria-current={index === activeIndex ? "step" : undefined}
-            aria-label={`Section ${index + 1}${choices[section.id] ? ", checked" : ", needs checking"}`}
+            aria-label={`${multiplePeople ? `${section.target_name ?? targets.find((person) => person.id === section.target_id)?.name ?? "Person"}, ` : ""}Section ${index + 1}${choices[section.id] ? ", checked" : ", needs checking"}`}
             onClick={() =>
               setNavigation({
                 index,
@@ -206,7 +221,7 @@ export function SceneTrackingReview({
               })
             }
             icon={choices[section.id] ? <CheckRounded /> : undefined}
-            label={`${index + 1} · ${formatTime(section.start)}–${formatTime(section.end)}`}
+            label={`${multiplePeople ? `${section.target_name ?? targets.find((person) => person.id === section.target_id)?.name ?? "Person"} · ` : ""}${index + 1} · ${formatTime(section.start)}–${formatTime(section.end)}`}
             sx={{
               flexShrink: 0,
               minHeight: 44,
@@ -238,6 +253,7 @@ export function SceneTrackingReview({
           sx={{ outline: "none", scrollMarginTop: 20 }}
         >
           Section {activeIndex + 1} of {sections.length}
+          {multiplePeople && ` · ${target.name}`}
         </Typography>
         <Typography
           color="text.secondary"
@@ -249,8 +265,7 @@ export function SceneTrackingReview({
         </Typography>
         {errorSegmentId === active.id && (
           <Alert severity="error" sx={{ mb: 2 }}>
-            That selection missed a detected person. Tap inside their mask, or
-            use Show another frame.
+            {errorMessage || "That selection missed a detected person. Tap inside their mask, or use Show another frame."}
           </Alert>
         )}
         <Stack
@@ -307,7 +322,7 @@ export function SceneTrackingReview({
         {choice && (
           <Typography variant="body2" sx={{ color: "success.main", mt: 1.5 }}>
             {choice.absent
-              ? "Marked not in this scene. Nobody will be replaced in this section."
+              ? multiplePeople ? `${target.name} is not in this scene. This changes only their replacement.` : "Marked not in this scene. Nobody will be replaced in this section."
               : "Person selected. Tap again to change your choice."}
           </Typography>
         )}

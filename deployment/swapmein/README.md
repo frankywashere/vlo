@@ -1,639 +1,400 @@
-# swapMEin cloud gateway
+# RecastFX cloud gateway
 
-This FastAPI gateway connects the Firebase-hosted swapMEin walkthrough to the
-private SAM GPU worker, private audio/compositor CPU worker, and the user's
-chosen MiniMax H3 provider. The supported providers are **reAPI and ToAPIs**,
-using a key entered by the user. No owner key is bundled or supplied as a fallback.
+This FastAPI gateway connects the Firebase walkthrough and private account Library
+to the existing SAM/depth GPU worker, audio/compositor CPU worker and MiniMax H3
+providers. Ordinary customers use RecastFX credits and a server-managed provider
+credential. Only accounts explicitly authorized by an owner see personal API-key
+controls. reAPI and ToAPIs adapters remain supported.
 
-The [pipeline and deployment overview](../../docs/charswap-walkthrough.md) is the
-canonical architecture document. This README is the gateway's API and operator
-runbook, checked against the deployed implementation on 2026-10-14. Masking-off
-multi-shot preparation passed a bounded cloud proof; the canonical overview
-records its checks and the remaining generation-quality limits.
+This runbook describes the source implementation, including the version 2
+preparation and multi-person changes. **It is not evidence that a particular
+revision has been deployed.** Verify the release report, immutable service images,
+traffic and Firebase bundle before reporting a rollout complete. The older
+[pipeline overview](../../docs/charswap-walkthrough.md) contains historical proofs;
+use the contracts below for these changes.
 
-## Supported beta
+## Preparation and selection
 
-- One selected person and one reference image. Cuts are allowed in both masking modes.
-- A 4–15-second selection with a whole-second duration; the trim start and target
-  timestamp may be fractional. The application does not yet round a fractional
-  selection up for generation and trim it back afterward.
-- **Enhanced character masking is on by default.** The GPU worker runs Depth Anything
-  on the normalized clip, then SAM 3 on that colored depth video. The CPU worker
-  places the depth pixels only inside the selected person's mask over the original
-  background, without numbers or face mesh. With masking off, the guide keeps the
-  original person visible; SAM and the GPU worker are skipped.
-- The owner-only **Enable audio processing** admin toggle defaults **off**. New jobs
-  snapshot the setting at creation; queued/running and legacy jobs retain their saved
-  behavior (legacy records without a flag use processing on). Off sends the source
-  audio with the guide, skips Demucs and pitch shifting, and keeps provider audio
-  through final export. On uses Demucs-separated vocals shifted up three semitones
-  and restores the original uploaded soundtrack at the selected trim offset.
-  Both paths retain the existing export duration and native generated dimensions.
-  The setting is stored independently at `control/pipeline-settings.json`; owners
-  save it through `/api/commerce/admin/pipeline` with a revision check. Audio-mode,
-  processing/skipping, and export-restoration decisions are logged per job.
-- Preparation uses a normalized guide of at most 854×480 at 24 fps. Standard H3
-  generation requests use 768p. Final export preserves the provider-returned
-  dimensions at 24 fps; it neither downsizes to the guide nor upscales to the
-  uploaded source dimensions.
+- Clips are 4–15 seconds with a whole-second **duration**. Start/end positions and
+  person timestamps may be fractional, for example 1.3–6.3 seconds.
+- New requests default to `preparation_version: 2`. Working video keeps its aspect
+  ratio, caps its short side at 768 pixels, and does not upscale smaller picture
+  content. Even dimensions and a minimum 256-pixel canvas can require small
+  rounding or letterboxes. At the allowed aspect ratios, the long side is at most
+  1920 pixels. This is a working-guide policy, not a selectable 1080p output tier.
+- The shared preparation timeline remains **24 fps**. This release does not
+  implement source-FPS passthrough. Audio and picture use the same selected source
+  interval; frame conversion is not a playback-speed change.
+- Enhanced masking and Easy mode default on. Face mesh is not connected to this
+  preparation path. Enhanced off skips depth, SAM and mask previews entirely.
+- Selected mode supports 1–5 people and up to five image references. People may
+  share a reference. The browser deduplicates a shared reference asset/URL and
+  sends explicit per-person reference indexes. Group mode (`replace_all_people`)
+  uses exactly one reference for every detected person and is mutually exclusive
+  with individual `targets`.
 
-Multiple-person generation, automatic identity continuity across cuts, and automated face
-re-identification are not implemented. The Admin page exposes owner-only switches
-for credit checkout and credit-funded generation. Both default off and require
-private gateway credentials. `STRIPE_MODE` explicitly selects test or live keys,
-sessions and webhook events; the live account ID must be pinned.
-Prices are in USD: one credit is US$0.01, packs start at US$20.00, and the initial
-bootstrap generation rate is 10 credits per second; the live catalog overrides it. Quotes round up to whole credits. The October 15 margin configuration targets 30%, producing 13 credits per second: 65 credits for 5 seconds and 195 credits for 15 seconds.
-Trim and Review show the selected clip’s credit cost; Review does not show a dollar generation price.
-The owner/pricing admin can edit pack prices and the per-second generation price. Admin also offers a target-margin calculator with editable provider USD/second, cloud USD/clip, allocated payment fee percentage, and typical clip length. It computes `ceil(100 * (provider_per_second + cloud_per_clip / typical_seconds) / (1 - margin_fraction - payment_fee_fraction))` whole credits per second. The server recomputes the rate, validates assumptions, and saves the private `margin_model` in catalog history; public responses never include cost assumptions. These are estimates, not measured profit or automatic provider-rate updates. The initial assumptions are $0.0732/second provider, $0.08/clip cloud, 4.75% allocated payment fees, and a 10-second typical clip. A 30% target rounds up to a 32.8% estimated margin at 10 seconds, before shared overhead. Shorter clips and different card fees can have lower margins. Changes require Save pricing; changing cost assumptions does not automatically reprice existing quotes. The persisted `credits_per_generation` field remains the 15-second price for compatibility; the public catalog exposes `credits_per_second`. New jobs snapshot their duration-based quote before preparation, and existing job quotes remain unchanged.
-The walkthrough may illustrate later capabilities, but those services are not
-implemented. “Check all scenes” prepares the selected section. With masking off,
-SAM is skipped and the user reviews the original-picture guide. With masking on,
-the user assigns the detected person in flagged sections, including every scene
-outside the original tap's healthy section. SAM coverage is not proof of identity.
-Explicitly absent sections stay unchanged in the guide.
-The cut detector is a heuristic and
-may flag strong lighting changes or abrupt motion.
+Enhanced version 2 preparation follows this sequence:
 
-## Normal application flow
+1. Normalize the trimmed source at its working dimensions and 24 fps.
+2. Call the existing GPU `/benchmark` with `operation: "depth"` on that working
+   video, retaining full working-dimension Depth Anything output.
+3. Make a separate SAM copy of the colored depth video, bounded by 854×480 with
+   the same frame count/timeline. Call `/benchmark` with `operation: "sam"`.
+4. Validate the categorical label archive and scale labels back to working
+   dimensions with **nearest-neighbor** interpolation. Integer tracking labels
+   must never be blended as RGB pixels.
+5. Use the taps to choose actual SAM IDs. For multiple selected people, remap the
+   chosen tracks to stable slots 1–5; reject conflicting assignments. Group mode
+   unions every non-background label in each frame, including new IDs after cuts.
+6. The CPU `/compose` copies depth imagery inside the selected masks while
+   retaining the original background. A single selected person or group uses the
+   ordinary colored depth image. Multiple selected people use distinct stable
+   depth hues: cyan `#00dcff`, magenta `#ff4fd8`, gold `#ffd166`, lime green
+   `#9be564`, orange `#ff8c42`. Their depth brightness still varies. This is
+   **depth replacement**, not a translucent overlay or solid gray fill.
+7. Before publication, version 2 guides are checked against the working width,
+   height, 24 fps frame count, selected duration and audio coverage, and are
+   bounded to **50 MiB**. This applies to initial and reviewed guide builds.
 
-1. The browser calls `/api/config` and opens a six-hour session with
-   `/api/session`. Ordinary accounts use recastfx credits and the gateway's
-   private provider key when credit generation is enabled. Only accounts granted
-   API-key access can choose a personal provider key. For an Easy-mode job,
-   that key is encrypted for the job so submission and status checks can finish
-   after the browser closes; non-Easy jobs keep the key in the tab.
-2. On non-Easy “Check all scenes,” or final Easy “Submit swap,” the browser checks `/api/preparation-capacity` before
-   opening/uploading media. `/api/uploads` rechecks availability and issues two
-   signed PUT URLs. Files go directly to the private app bucket.
-3. The browser uploads both files and confirms with `/api/uploads/{id}/complete`.
-   The gateway verifies their actual sizes, normalizes the image, atomically
-   reserves a preparation slot, saves the job, and enqueues its preparation task.
-4. The task trims and normalizes the source, records detected cuts, and allows
-   them in either masking mode. Only enhanced masking activates Depth Anything then SAM 3 on `proof-gpu`,
-   validates the mask archive and actual label under the clicked point, then shuts
-   the GPU worker down. Masking off uses the normalized tap and timestamp directly. Absent-label frames remain unchanged; identity matching across cuts requires review.
-5. The task activates `proof-audio` and obtains `vocals_plus3.wav`. Enhanced mode
-   publishes `tracking_review` when sections need matching, retaining depth,
-   masks and vocals for reuse. Otherwise it calls `/compose` with `fill_mode: depth`.
-   Masking-off mode uses gateway CPU FFmpeg to
-   remux normalized RGB with those vocals, bypassing mask-based composition. The
-   audio worker is shut down, private review links are published, and the job
-   becomes `ready`, or pauses at `tracking_review` with both workers off.
-   Masking-off remux honors the existing 100 ms vocal-duration tolerance by
-   padding a short tail to the selected length; it does not retime vocals.
-6. Flagged sections show translucent masks on the original footage. The user
-   taps the correct person or marks them absent, then applies the matches. A
-   separately claimed CPU task rebuilds the depth guide using those assignments.
-   Sections without flags skip this interaction. Non-Easy mode reviews the
-   complete guide before approving one provider submission. Easy mode skips
-   guide review. Both credit-funded and authorized API-key Easy jobs enqueue
-   submission after preparation. The gateway never automatically retries a claimed paid POST.
-7. Easy-mode renders use a separate bounded `recastfx-renders` Cloud Tasks
-   queue to check provider status while the browser is closed. Non-Easy personal-key
-   renders can be checked after reopening the job and re-entering that key.
-   On completion, the gateway enqueues
-   export. It downloads and checks the result, removes only permitted extra tail
-   frames, restores audio directly from the original upload at the selected trim
-   start, and publishes the final MP4.
+The numbered/all-person SAM preview and translucent selection-review video are
+review aids; neither is the submitted generation guide. Provider submission uses
+the actual depth-composited guide, or the original-looking normalized video when
+enhanced masking is off. SAM can miss body pixels or change IDs after cuts;
+resizing labels does not recover missing anatomy or establish identity.
 
-The UI immediately reports access, capacity, upload, confirmation, queued and
-preparation stages with elapsed time. The live path uses an indeterminate bar;
-its upload implementation does not currently supply measured byte percentages.
-Worker feedback is based on actual job messages, not an invented percentage or
-ETA. The tab must remain open until both uploads are confirmed. After that,
-jobs appear under “Current processing jobs” in the signed-in Library. Reloading
-clears the in-tab provider key and session, but does not delete the saved job.
+### Existing jobs
 
-## API contract
+Saved jobs without `preparation_version` retain version 1: the legacy 854×480
+bounding box at 24 fps and combined GPU `operation: "both"` (depth followed by SAM
+on the depth video). Existing saved dimensions, guide URLs, quotes, tracking plans
+and render requests are not upgraded in place. The worker patches continue to
+accept legacy inputs. Single-reference fields and version 1 scene plans remain
+supported. Historical jobs without `easy_mode` retain explicit scene review.
 
-The browser uses Firebase Hosting's `/api/**` rewrite to the public gateway.
-API responses set `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
-and `Referrer-Policy: no-referrer`. Configured website origins are enforced;
-CLI clients may omit `Origin`. CORS is not authentication. Session ownership uses
-an unpredictable bearer token, stored only as a SHA256 digest on the server.
+### Audio and export
 
-The compatibility header **`X-Reapi-Key` carries either provider's personal key**.
-For an authorized API-key Easy job, the browser sends it again only when opening
-the upload ticket. The gateway encrypts it with a Cloud Secret Manager-backed
-key, binds it to that job ID and original key fingerprint, and retains the
-ciphertext in private records for at most two days. It removes the ciphertext
-when provider processing finishes. Raw keys never enter setup JSON, upload URLs,
-Cloud Tasks, or saved job records. Credit-funded jobs instead load the private
-key from the scoped `recastfx-provider-key` Google Secret Manager secret, cached
-for at most one minute. The legacy `REAPI_SERVER_KEY` environment binding remains
-supported when `REAPI_SECRET_NAME` is unset. Neither key is exposed to customers.
+The owner-only Admin **Enable audio processing** switch defaults off and is
+snapshotted into each new job. Changing it does not rewrite queued/running jobs.
+Legacy records without `audio_processing` retain processing on.
 
-| Endpoint | Authentication and input | Response |
-| --- | --- | --- |
-| `GET /health` | None; direct gateway health probe | `{status:"ready",available:boolean}` |
-| `GET /api/config` | None | `{live:true,providers:["reAPI","ToAPIs"],provider:"reAPI",model:"minimax-h3",delivery:"native",beta:"single-person",available:boolean,max_source_bytes:104857600}` |
-| `POST /api/session` | `X-Reapi-Key`; optional JSON `{provider:"reAPI"}` or `{provider:"ToAPIs"}`; omitted provider defaults to reAPI | `{token,expires_at,balance}` |
-| `GET /api/preparation-capacity` | Session bearer | `{available:true}` or structured capacity error |
-| `POST /api/uploads` | Session bearer; JSON `{source_bytes,reference_bytes,setup}` | HTTP 201 `{id,source:{url,headers},reference:{url,headers}}` |
-| `POST /api/uploads/{id}/complete` | Same session bearer after both PUTs | HTTP 202 `{id,status:"queued"}`; repeat completion returns the existing job status |
-| `POST /api/jobs` | Legacy endpoint; session bearer; multipart `clip`, `reference`, `setup` JSON string | HTTP 202 `{id,status:"queued"}` |
-| `GET /api/jobs/{id}` | Session bearer that owns the job | Public status, messages and available review/result URLs |
-| `POST /api/jobs/{id}/tracking-review` | Same session bearer; JSON `{revision,choices}` | HTTP 202; validates all matches and queues one CPU guide rebuild |
-| `POST /api/jobs/{id}/generate` | Session bearer; personal-key mode also sends `X-Reapi-Key`; JSON `{approved:true}` | Current public job status; submits at most once |
-| `GET /api/jobs/{id}/provider` | Session bearer; personal-key mode also sends `X-Reapi-Key` | Refreshes provider state and queues one export on completion |
-| `POST /internal/generate`, `/internal/poll-provider` | Cloud Tasks service identity; credit-funded jobs only | Unattended, bounded submission and status checks |
-| `POST /internal/prepare` | Exact Google OIDC task identity and audience; JSON `{job_id,task_token?}` | `{ok:true}` |
-| `POST /internal/finish` | Same task identity; JSON `{job_id}` | `{ok:true}` |
+- Off: retain source audio in the guide, skip Demucs and pitch shifting, and use
+  the provider-returned soundtrack during export. Enhanced mode still uses the
+  CPU compositor; with enhanced off, the normalized MP4 is the guide.
+- On: separate vocals with Demucs, shift them up three semitones, embed them in
+  the guide, then restore the original uploaded soundtrack at the selected trim
+  offset after generation. Short vocal tails can be padded within the existing
+  100 ms tolerance; vocals are not stretched.
 
-`expires_at` is Unix seconds. `balance` and `actual_provider_credits` use the
-gateway's shared millidollar convention: 1,000 units represent US$1. reAPI already
-uses this scale. ToAPIs balance is translated from `remain_balance`, and task
-usage from `billing.cost_usd`; these values are not ToAPIs dashboard credit units.
-The session stores the selected provider and key fingerprint, and jobs inherit
-that provider. Switching providers in the UI clears the key, session, guide and
-approval; the selector is locked during active or uncertain submissions.
+Export retains the provider's returned pixel dimensions and uses 24 fps
+H.264/yuv420p, CRF 18, AAC 192 kb/s and MP4 fast-start. Extra ending frames are
+trimmed to the selected duration; motion inside a longer result is not retimed.
+A result shorter than the selection, missing audio or materially changed aspect
+ratio requires review. Unique output names preserve previous exports.
 
-### Setup and uploads
+## Walkthrough, matching and background jobs
+
+Easy mode prepares after final submission, skips manual mask/guide review and
+queues rendering when preparation is safely ready. It follows the originally
+chosen SAM IDs across the clip; it does not verify cross-cut identity. Multiple
+selected tracks may require turning Easy off if the IDs conflict.
+
+Non-Easy enhanced mode partitions the clip at cuts, label gaps and abrupt mask
+changes. These are review heuristics, not identity-confidence scores. For each
+selected person, the healthy anchor section can be retained; flagged sections
+show still frames with a translucent detected-person preview and the assigned
+reference. The user chooses that person or **Not visible here**. Two targets
+cannot be assigned the same person in one scene. Group mode requires no
+individual scene matching. Enhanced off identifies each selected person using
+its normalized coordinates and clip-relative timestamp in the provider prompt.
+
+Reviewed labels are rebuilt by the CPU compositor using saved depth and audio;
+there is no additional SAM inference or paid generation at that step. After
+review, one approved provider submission is allowed. Both credit-funded and
+authorized personal-key Easy jobs can continue with the browser closed.
+
+Uploads must finish and be confirmed before the tab can be closed safely. Jobs
+then remain in Library **Current processing jobs**. Private job responses include
+`selection_targets`, signed `reference_urls` and the compatible first
+`reference_url`, so reopening a job retains people, reference assignments and
+per-person scene choices. A signed-in account can recover a session; a personal
+key may need to be entered again. Starting another swap after acceptance leaves
+the existing job in the Library.
+
+Preparation uses the existing project-wide single-worker lease and queue.
+Rendering/status checks use the separate bounded render queue; several provider
+renders can overlap after their preparations finish. Elapsed/completion times
+come from persisted timestamps. Progress uses actual stages and provider states,
+not invented percentages or ETAs.
+
+## HTTP contracts
+
+Firebase Hosting rewrites `/api/**` to the configured gateway. API responses are
+`no-store`, `nosniff`, and `no-referrer`. Configured origins are enforced; CORS is
+not authentication. Sessions use an unpredictable bearer token stored server-side
+only as a digest. Raw provider credentials never enter setup JSON or upload URLs.
+
+| Endpoint | Input / purpose |
+| --- | --- |
+| `GET /health`, `GET /api/config` | Read health and source-supported capabilities; current config reports `beta: "multi-person"` |
+| `POST /api/session` | Account access mode, or authorized personal key through compatibility header `X-Reapi-Key`; optional provider selection |
+| `GET /api/preparation-capacity` | Read-only capacity preflight using the session bearer |
+| `POST /api/uploads` | `{source_bytes,reference_sizes,reference_bytes?,setup,title?}`; returns HTTP 201 `{id,source,references,reference}` signed PUT descriptors |
+| `POST /api/uploads/{id}/complete` | Confirm every uploaded object; repeat confirmation returns the existing job |
+| `POST /api/jobs` | Legacy multipart `clip`, one `reference`, `setup`; rejects a mapping requiring another reference |
+| `GET /api/jobs/{id}` | Owned job state, actual guide/result links, target/reference mapping and available scene plan |
+| `POST /api/jobs/{id}/tracking-review` | `{revision,choices:[{segment_id,absent,anchor|null}]}`; validates choices before reserving a CPU rebuild |
+| `POST /api/jobs/{id}/generate` | `{approved:true}`; one durable provider submission claim |
+| `GET /api/jobs/{id}/provider` | Refresh provider state without submitting again |
+| `GET /api/account/jobs` | Signed-in account's private processing/history Library |
+| `POST /api/account/jobs/{id}/session` | Recover an owned job session after leaving/reopening |
+| `POST /internal/prepare`, `/internal/finish` | Exact Google OIDC task identity; bounded preparation/export |
+| `POST /internal/generate`, `/internal/poll-provider` | Background credit-funded or authorized encrypted-key Easy jobs |
+
+A selected-mode upload request can be:
 
 ```json
 {
-  "trim": [2.3, 7.3],
-  "anchor": {"x": 0.48, "y": 0.52, "time": 3.2},
-  "target_name": "Person 1",
-  "enhanced_character_masking": false
+  "source_bytes": 12000000,
+  "reference_sizes": [120000, 160000],
+  "setup": {
+    "preparation_version": 2,
+    "trim": [2.3, 7.3],
+    "targets": [
+      {"id":"left","name":"Left person","anchor":{"x":0.25,"y":0.5,"time":3.2},"reference_index":0},
+      {"id":"right","name":"Right person","anchor":{"x":0.75,"y":0.5,"time":4.1},"reference_index":1}
+    ],
+    "enhanced_character_masking": true,
+    "easy_mode": false,
+    "auto_generate": false
+  }
 }
 ```
 
-The anchor coordinates are normalized against the displayed original video.
-Its time is an absolute source timestamp within `[trim start, trim end)`.
-`target_name` has 1–40 characters. `enhanced_character_masking` is a strict
-boolean, defaulting to `false` on new requests. Historical stored jobs lacking
-that field keep their earlier gray-mode interpretation. Unknown setup fields
-are rejected.
+Targets have unique safe IDs (1–40 letters/digits/`_`/`-`), names of 1–40
+characters, and a strict integer `reference_index` from 0 through 4. Every index
+must exist in the uploaded references. Taps use normalized displayed-source
+coordinates and absolute source times within `[trim start, trim end)`. Working
+anchors are adjusted for padding and the trim start. Legacy `anchor` and
+`target_name` remain accepted; the first target supplies the anchor if omitted.
+Group mode instead sets `replace_all_people:true`, omits `targets`, and uploads
+one shared reference. Flags are strict booleans and unknown setup fields fail.
 
-| Input | Bounds |
+`reference_sizes` contains 1–5 positive whole-byte lengths, each at most 5 MiB.
+Legacy `reference_bytes` alone becomes a one-reference request; if both are
+present it must match the first size. `references` contains the corresponding
+signed upload descriptors in the same order, and `reference` aliases the first.
+The private manifest retains raw reference URI/size arrays plus the legacy first
+fields. Completion verifies every immutable upload and normalizes **all** photos
+before publishing normalized references or queueing work. A failed reference
+returns/logs its zero-based `reference_index` without exposing its file or URL.
+A storage error cannot create a partially prepared job; orphaned private files
+remain subject to storage lifecycle cleanup.
+
+| Bounds | Policy |
 | --- | --- |
-| Direct-upload source | MP4, MOV, WebM or AVI; nonempty; at most **100 MiB** (104,857,600 bytes); audio required; at most 4096px per side and 16,777,216 pixels; aspect ratio 0.4–2.5 |
-| Reference image | One nonanimated JPG, PNG or WebP; nonempty; at most **5 MiB**; sides 256–5760px; aspect ratio 0.4–2.5 |
-| Legacy multipart source | At most **25 MiB**, with total request body at most **31 MiB**, to stay below Cloud Run HTTP/1 ingress bounds |
-| Other request bodies | At most 8 KiB; legacy setup string at most 4 KiB |
+| Source | Nonempty MP4/MOV/WebM/AVI, audio required, at most **100 MiB**; source dimensions/aspect validated before worker activation |
+| References | 1–5 still JPG/JPEG, camera MPO (main photo flattened), PNG or WebP; **5 MiB each**, sides 256–5760px, aspect ratio 0.4–2.5 |
+| Normalized photo | EXIF-corrected JPEG, metadata stripped, at most 2048 pixels per side |
+| Legacy multipart | Source 25 MiB; request body 31 MiB; setup string 4 KiB |
+| Tracking review | At most **300** choices / **128 KiB** body; ordinary JSON requests 8 KiB |
+| Guide | At most **50 MiB**, selected working dimensions, 24 fps, `duration × 24` frames and audio coverage |
 
-The reference is EXIF-corrected, converted to JPEG and stripped of metadata.
-Each signed V4 PUT URL expires in 15 minutes and binds the declared exact
-`Content-Length`, `Content-Type: application/octet-stream`, and
-`x-goog-if-generation-match: 0`. The browser supplies Content-Length from the
-file body and sends the returned headers. A ticket cannot replace an existing
-object; the completion endpoint rechecks exact stored sizes. No provider key or
-session bearer is sent to storage. App-bucket CORS permits only configured site
-origins for GET, HEAD and PUT.
+Signed PUT URLs expire after 15 minutes and bind exact Content-Length, content
+type and `x-goog-if-generation-match:0`. PUTs cannot replace existing objects;
+completion checks stored sizes/generations. Browser storage requests contain
+neither session tokens nor provider keys. Signed GET links last at most one hour.
 
-### Capacity errors and job state
+Scene-plan version 1 retains ordinary segment IDs; version 2 flattens each
+person's sections as `tN-segment-XXX`, with `target_id`, `target_name`, reference
+index and color metadata. Choice times are relative to the trimmed 24 fps clip;
+ends are exclusive. Stale revisions, missing/duplicate/foreign sections,
+background taps and conflicting target assignments fail before a rebuild lease
+is taken. Recoverable errors identify the affected section. An absent choice has
+`anchor:null`. The gateway never treats a numeric SAM ID as proof of identity.
 
-Capacity is project-wide, across all users and provider keys. Both preparation
-attempts and upload tickets allow **100 per UTC day and 3,100 per UTC calendar
-month**, using separate permanent records. Failed preparation consumes an
-attempt; abandoned uploads consume an upload ticket but hold no processing slot.
-Preflight is read-only and can race with another caller, so reservation rechecks
-inside an atomic GCS generation-precondition update.
+Public statuses are `queued`, `preparing`, `tracking_review`, `ready`,
+`generating`, `finalizing`, `completed`, `failed`, `submission_unknown` (and Library
+expiry). Internal `matching`, `submitting`, `finishing` map to queued, generating,
+finalizing. Saved image/target mappings contain no bucket URIs in public views.
 
-Controlled capacity errors return `{message,code,retry_after?}`. When present,
-`retry_after` is an integer number of seconds and is also sent in `Retry-After`.
-
-| Code | HTTP | Meaning / reset |
-| --- | --- | --- |
-| `preparation_busy` | 429 | One preparation already holds the slot; retry hint is its current lease deadline, not a guaranteed completion time |
-| `preparation_recovery` | 503 | Expired or blocked lease; operator recovery required; no automatic reset |
-| `preparation_daily_limit` | 429 | Preparation attempts exhausted; next UTC midnight |
-| `preparation_monthly_limit` | 429 | Preparation attempts exhausted; first of next UTC month |
-| `upload_daily_limit` | 429 | Upload tickets exhausted; next UTC midnight |
-| `upload_monthly_limit` | 429 | Upload tickets exhausted; first of next UTC month |
-
-The UI translates these codes into a specific reason and local reset time where
-known. Other errors retain a sanitized `message`; raw provider responses and
-credentials are not reflected.
-
-Public statuses are `queued`, `preparing`, `tracking_review`, `ready`, `generating`, `finalizing`,
-`completed`, `failed`, and `submission_unknown`. Internal `submitting` and
-`finishing` map to `generating` and `finalizing`; internal `matching` maps to `queued`. Status includes `provider`, `id`,
-`status` and `message`, then `duration`, `width`, `height`, `selected_label`,
-`scene_cut_count`, `tracking_continuous`,
-`tracking_url`, `guide_url`, and `output_url` as available. Tracking-review jobs also
-expose `tracking_revision`, `tracking_segments`, `tracking_reviewed`,
-`source_preview_url` and previously applied `tracking_choices` when available. Optional cost fields
-are `estimated_cost_usd`, `estimate_note`, `estimate_source`,
-`estimate_verified_at`, and `actual_provider_credits`. Signed GET URLs last at
-most one hour. Private bucket URIs and session ownership are not returned.
-
-`scene_cut_count` reports heuristic cut detections; `tracking_continuous` is true
-only when there are no detected cuts and the selected label has nonzero coverage
-throughout. It is not identity confidence. Masking-off jobs with cuts or gaps require whole-guide approval and
-must not be described as verified cross-scene tracking.
-
-Record reads retry up to four times if a progress update replaces an object
-between fetching its metadata and downloading that generation. Exhaustion is a
-temporary 503, rather than a false missing-job 404. Actual missing records and
-other-session ownership still return their usual errors; paid submissions are
-never retried by this read handling.
-
-Poll ordinary job state during preparation and finalization, show the actual
-review media at `ready`, and require approval before one `/generate` call. During
-generation, use `/provider` with the same request-only key. A new session cannot
-access an older session's jobs; account recovery and saved keys are not available.
-
-## Provider protocols and export
-
-Both integrations are implemented in [provider.py](swapmein/provider.py), with
-one reference image, one guide video, integer duration, adaptive aspect ratio
-and a replacement prompt that preserves the source scene and other people.
-Without gray fill, the prompt identifies the selected person using normalized
-anchor coordinates and clip-relative time; with enhanced masking, it identifies the selected person covered by colored depth imagery. There is no paid fallback to another provider.
+## Providers, credits and payments
 
 | Operation | reAPI | ToAPIs |
 | --- | --- | --- |
-| Key/allowance validation | `GET https://reapi.ai/api/v1/balance` | `GET https://toapis.com/v1/balance` |
+| Balance | `GET https://reapi.ai/api/v1/balance` | `GET https://toapis.com/v1/balance` |
 | Submit | `POST https://reapi.ai/api/v1/videos/generations` | `POST https://toapis.com/v1/videos/generations` |
 | Poll | `GET https://reapi.ai/api/v1/tasks/{id}` | `GET https://toapis.com/v1/videos/generations/{id}` |
-| Model / resolution | `minimax-h3` / `768P` | `MiniMax-H3` / `768p` |
-| References | `reference_image_urls`, `reference_video_urls` | `image_with_roles` and `video_with_roles`, with `reference_image` / `reference_video` roles |
-| Provider-specific fields | `content_filter:false` | Unique `client_business_id`; no content-filter field forwarded |
+| Output model/tier | `minimax-h3` / `768P` | `MiniMax-H3` / `768p` |
+| Media | `reference_image_urls`, one `reference_video_urls` guide | `image_with_roles`, `video_with_roles` |
+| Other fields | `content_filter:false` | Unique `client_business_id`; no filter field forwarded |
 
-No seed or anatomy/motion-strength option is supplied. The two providers' model
-names do not prove identical internal routing or generation behavior.
+Prompts map every selected person to its 1-based reference image number and
+coordinates/timestamp. Multiple enhanced targets additionally map their distinct
+depth hues. One-person depth uses a general depth description, not a false cyan
+claim. Group mode requests a separate replacement instance for every person and
+preserves empty scenes. Reference images supply appearance; the guide supplies
+the source scene/motion. No seed, anatomy-strength setting, LoRA or automatic
+provider fallback is added.
 
-The reAPI estimate currently uses a rounded rate dated 2026-10-14:
-`ceil((input seconds + output seconds) × 0.074 × 1000) / 1000` USD. A five-second
-input and output therefore displays approximately US$0.74. The ToAPIs estimate
-scales the measured US$0.80 five-second proof (`duration × 0.16` USD). Estimates
-are not quotes; provider usage/billing is authoritative. Google preparation,
-storage, builds, tax and currency conversion are separate. Reverify the
-[reAPI model page](https://reapi.ai/models/minimax-h3) and
-[ToAPIs protocol](https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation)
-before changing dated pricing or provider support.
+The service accepts up to five references within the first-five reference
+allowance used for this provider integration. Shared-image assignments need only
+one uploaded reference. **Customer pricing remains duration-based**, with no
+additional per-person/reference charge here and no output-tier change. Provider
+billing remains authoritative; a larger number of selected people does not prove
+lower/higher generation fidelity or identical provider routing.
 
-Export downloads at most 100 MiB from exact approved HTTPS hosts:
-`cdn.reapi.ai`, `reapiflexible.b-cdn.net`, `reapi.ai`, and `files.toapis.xyz`.
-Every redirect and resolved address is checked to reject unsupported hosts or
-nonpublic addresses. Result duration must be within −0.05/+0.3 seconds of the
-requested length; its aspect ratio must stay within 3% of the normalized source,
-and its longest side must not exceed 5760px. Larger timing/framing changes require
-manual review rather than silent stretching or cropping.
+RecastFX prices are USD: 100 customer credits represent US$1, packs start at
+US$20. The live catalog controls credits/second; quotes round up to whole credits
+and are saved before preparation. Existing quotes do not change with later
+pricing edits. The compatibility `credits_per_generation` field holds a
+15-second price. Admin's target-margin calculator uses estimated provider,
+cloud and allocated payment-fee costs; it is not measured profit or an automatic
+provider-price feed. Review shows the credit charge, not its dollar equivalent.
 
-[media.py](swapmein/media.py) exports H.264/yuv420p at CRF 18 and AAC 192 kb/s,
-24 fps, exactly `duration × 24` frames, with MP4 fast-start. It preserves generated
-width/height, restores audio from the original uploaded file and exact trim start,
-and validates frame count, audio-stream duration and decoded sample coverage.
-Export names are unique so an operator-reviewed re-export preserves older files.
+Provider balance/usage values use separate units: 1,000 reAPI credits represent
+US$1. ToAPIs `remain_balance` and `billing.cost_usd` are normalized to
+`usd_millidollar`, not ToAPIs dashboard credits. `provider_billing` and completion
+logs preserve the reported amount/source; missing usage is unknown, never zero.
+Dated estimates in code are not quotes. The 768P output request remains unchanged.
 
-## Cost controls, shutdown and recovery
+Credit checkout/generation need private credentials and owner-controlled feature
+switches. They default off when no saved configuration exists. The owner-only
+audio switch is independent. Provider secrets use scoped Secret Manager access;
+ordinary customers never see their origin. Authorized personal-key Easy jobs
+store only encrypted job-bound credentials, expiring with job records and removed
+when provider processing ends. Non-Easy personal-key jobs require that key again
+after reopening. No keys belong in Git, frontend assets, setup JSON or CLI args.
 
-The gateway uses a single active preparation lease in
-`control/preparation.json`; upload counts live in `control/uploads.json`.
-Daily/monthly allowances are attempt limits, not a guarantee that all 100 daily
-attempts fit the spending cap. Before every private-worker activation, the gateway
-queries project-scoped Google billing budgets and requires a configured native
-Cloud Run spend cap in CAD with a positive amount no greater than **CAD 7/month**.
-The separate CAD 10 project budget alert is not an instantaneous universal cap.
-Storage, builds and other non-Run charges remain separate.
+Stripe mode/account/secret bindings survive subsequent deploys. Live webhooks at
+`https://recastfx.com/api/commerce/stripe-webhook` handle signed, paid
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`, and
+`charge.refunded` events exactly once. Browser success redirects do not grant
+credits. Refunds reverse credits, possibly leaving a negative wallet; disputes
+need operator review. Adaptive Pricing is disabled so checkout charges remain
+USD. Stripe settlement settings/fees are separate; Tax is not enabled by this
+change. Stripe sales do not themselves purchase provider balance.
 
-Each worker is normally in MANUAL mode at zero. Before setting it to one, the
-gateway registers a backup shutdown task for 15 minutes later, recording its
-predetermined name and deadline before the bounded registration RPC. After the
-worker call, a `finally` block returns it to manual zero, verifies settled Run
-state, and deletes the backup task with retries disabled and a 20-second timeout. Worker calls are bounded at 600 seconds each,
-with a 1,200-second aggregate preparation deadline plus cleanup; scaling checks
-are bounded at 120 seconds. Cloud Tasks create calls disable SDK retries and use
-20-second RPC timeouts. Task dispatch deadline is 1,800 seconds.
+Owners can grant credits to existing Google accounts with a reason. These grants
+do not charge Stripe or replenish provider credits. Idempotent private grant
+records, wallet transactions and paginated Admin history retain confirmation.
+For older grants, run the bounded `backfill_credit_grant_history` migration until
+its returned cursor is null before publishing the history UI; it indexes grants
+without granting them again.
 
-If shutdown cannot be verified, backup registration acknowledgment is lost, or
-backup cancellation fails, the lease is retained and marked blocked. No worker
-is activated if registration was unconfirmed. Expired/blocked leases are not
-automatically reused: a stale backup must not shut down a later user's worker.
-Operator recovery must verify both workers at manual zero, wait for or cancel
-every relevant backup task, then clear only the matching active lease. Preserve
-the quota counts. Do not delete `control/` or reset usage as a routine retry.
+## Queues, caps and safe recovery
 
-Job claims use atomic GCS generation preconditions. A repeated task cannot
-reactivate a claimed preparation or duplicate an export. A paid POST has a durable
-`submitting` claim and a 35-second timeout, with **no retry**. An ambiguous response
-or crash becomes `submission_unknown`; inspect the selected provider's task
-history before initiating any new paid request. Repeated approval returns current
-state. The application does not reconstruct unknown provider tasks or failed
-exports automatically. Queue-creation ambiguity retains the known job/lease and
-reports pending confirmation rather than admitting a duplicate preparation.
+These changes do not increase concurrency, reset quotas or remove shutdown
+safeguards. Preparation and upload-ticket attempts remain separate permanent
+counts, normally **100 per UTC day / 3,100 per UTC calendar month**. Failed
+attempts/abandoned tickets count. Preflight is read-only; atomic GCS generation
+preconditions enforce admission under races.
 
-Status reads mark queued/preparing/finalizing work older than 2,100 seconds failed,
-and a submitting claim older than 90 seconds unknown. That UI transition does
-not release a blocked worker lease or prove a provider task was canceled.
-
-## Diagnostic logs
-
-The gateway writes structured JSON events to Google Cloud Logging for preparation,
-backup-shutdown registration, worker start/stop, cleanup and pipeline failures.
-Filter on `jsonPayload.job_id` or `jsonPayload.event`. Error records include the
-exception type, Google error code or HTTP status, and stack file/function/line
-locations. Exception messages, request headers/bodies, media URLs and source
-lines are excluded to avoid leaking BYOK credentials and private media. These
-logs do not automatically clear recovery locks or retry generation.
-
-Immediately before each generation POST, the provider adapter logs its actual
-vendor-specific payload (including duration, prompt and resolution), job ID,
-endpoint and SHA-256 request fingerprint. Signed media URLs are redacted; API
-keys are never included. The acceptance event links the provider task ID to that
-fingerprint. This is diagnostic evidence, not a replayable credential-bearing
-request archive.
-
-The Review step shows provider queue/processing state, elapsed time since
-acceptance, age of the last successful provider check and final audio-restoration
-progress. Unknown states are displayed as waiting for an update; no estimated
-percentage or completion time is invented. Checks remain browser-driven and
-pause after 20 minutes; users can manually refresh without resubmitting.
-
-## Deployment and IAM
-
-| Resource | Verified deployment configuration, 2026-10-14 |
+| Resource | Preserved configuration / purpose |
 | --- | --- |
-| Google project | `charswap-franky-20261013` / project number `634011479314` |
-| Firebase site | `https://charswap-franky-20261013.web.app`; [firebase.json](../../firebase.json) rewrites `/api/**` to `swapmein-api` in `us-east4` |
-| Gateway | `swapmein-api`, `us-east4`; AUTO min 0/max 1 at service and revision; concurrency 4; 2 vCPU; 2 GiB; timeout 1,800s; request CPU throttling; gen2 |
-| Workers | Private `proof-gpu` and `proof-audio`; normally MANUAL count 0; one instance enabled only for the relevant preparation stage |
-| App bucket | `charswap-franky-20261013-app`, uniform IAM/public-access prevention; short-lived app media and records |
-| Worker bucket | `charswap-franky-20261013-proof`, existing private model/proof assets |
-| App task queue | `swapmein-jobs`; one concurrent dispatch, one dispatch/minute, one attempt; queue pause is preserved |
-| RecastFX render queue | `recastfx-renders`; at most five concurrent dispatches and one dispatch/second for provider submission and status checks; no GPU work |
-| Backup queue | Existing `proof-shutdown`; must be RUNNING; deployment does not rewrite its rate/retry policy |
-| Gateway identity | `swapmein-gateway@charswap-franky-20261013.iam.gserviceaccount.com` |
-| Worker runtime identity | `proof-worker@charswap-franky-20261013.iam.gserviceaccount.com`; deployment derives/verifies the attached identities |
-| Shutdown identity | `proof-shutdown@charswap-franky-20261013.iam.gserviceaccount.com` |
+| Project / region | `charswap-franky-20261013`, `634011479314`, `us-east4` |
+| RecastFX hosting / gateway | `recastfx-franky`, `recastfx.com`, `recastfx-api`; legacy `swapmein-api` is separate |
+| Preparation queue | `swapmein-jobs`, one concurrent dispatch / one per minute; preserve its pause and retry configuration |
+| Render queue | `recastfx-renders`, at most five concurrent dispatches / one per second; provider work/status checks, not GPU inference |
+| Backup queue | `proof-shutdown`; must be running; preserve rate/retry policy |
+| Worker services | Private `proof-gpu`, `proof-audio`, normally MANUAL instance count 0 |
+| Gateway | AUTO min 0/max 1, concurrency 4, 2 vCPU/2 GiB, timeout 1,800 seconds |
+| Private storage | `charswap-franky-20261013-app` and existing `charswap-franky-20261013-proof` |
+| Identities | `swapmein-gateway@...`, `proof-worker@...`, `proof-shutdown@...` in that project; derive/verify actual attached identities |
 
-The gateway is publicly invokable for browser traffic. Its `/internal/*` handlers
-independently require Google OIDC issuer, exact configured audience, exact task
-service-account email and `email_verified:true`. Model workers remain private.
-The runtime identity has object read/write/delete access on the app and worker
-buckets, private Run invoker plus service-scoped `run.services.get/update` on the
-two workers, queue-scoped enqueue permissions, shutdown-task delete permission,
-self `signBlob`, and project-scoped budget read. `actAs` is granted on itself,
-the shutdown identity and exact verified worker runtime identities. It does not
-require project-wide Run update or project-wide service-account impersonation.
-The optional billing-viewer fallback is an operator action after a verified
-project-scoped budget-read failure; it is not the normal path.
+Before every worker activation the gateway requires the existing configured
+positive Cloud Run native spend cap of at most **CAD 7/month**. The separate
+CAD 10 budget alert is not a universal instantaneous cap; storage, builds and
+other non-Run charges remain separate. A daily job allowance does not guarantee
+all attempts fit that cap.
 
-| Environment variable | Meaning / deployed default |
-| --- | --- |
-| `GOOGLE_CLOUD_PROJECT`, `PROJECT_NUMBER`, `REGION` | Project, numeric project ID and `us-east4` |
-| `BILLING_ACCOUNT` | Account used to verify the project-specific Run cap |
-| `APP_BUCKET`, `WORKER_BUCKET` | Private application bucket and existing worker bucket |
-| `SERVICE_URL` | Exact gateway Run URL; also the task OIDC audience |
-| `GATEWAY_SERVICE_ACCOUNT`, `TASK_SERVICE_ACCOUNT` | Runtime signer and exact accepted task caller; normally the gateway identity |
-| `TASK_QUEUE` | `swapmein-jobs` |
-| `SHUTDOWN_SERVICE_ACCOUNT` | Existing backup shutdown identity |
-| `GPU_URL`, `AUDIO_URL` | Exact private worker URLs |
-| `ALLOWED_ORIGINS` | Comma-separated Firebase `web.app` and `firebaseapp.com` HTTPS origins |
-| `DAILY_PREPARATIONS` | Positive integer; default/deployed `100`, used by preparation and upload-ticket quotas separately |
-| `MONTHLY_PREPARATIONS` | Positive integer; default/deployed `3100`, measured by UTC calendar month |
+The gateway registers the existing backup shutdown before setting a worker to
+one. Its `finally` block restores/verifies MANUAL zero and cancels the backup.
+Worker calls are bounded to 600 seconds, aggregate preparation to 1,200 seconds,
+scaling checks to 120 seconds, task registration/deletion RPCs to 20 seconds with
+SDK retries disabled, and task dispatch to 1,800 seconds. Backup shutdown is
+scheduled for 15 minutes after registration.
 
-App-bucket lifecycle deletes only `uploads/`, `outputs/`, `sessions/`, and `jobs/`
-after two days; `control/` is permanent. Soft-delete retention is disabled on this
-ephemeral app bucket. The separate worker bucket currently has no lifecycle
-cleanup and retains deleted objects for seven days: copied worker inputs and
-outputs persist beyond app cleanup. Any future worker-bucket lifecycle changes
-must be scoped to this gateway's `inputs/swapmein-` and `outputs/sm-` prefixes and
-preserve historical proofs. The gateway deployment does not globally delete worker
-assets. Artifact Registry stores software container images, not user pictures;
-retained images and model storage are separate from active compute charges.
+Unconfirmed registration, unverifiable shutdown or failed backup cleanup retains
+and blocks the preparation lease. No worker starts on unconfirmed registration.
+Operator recovery must verify **both** workers at zero, wait for/cancel all
+relevant backup tasks, then clear only the matching lease while preserving quota
+counts. Never delete `control/` or reset usage as a routine retry.
 
-### Operator deployment
+Paid POSTs have a durable submitting claim, a 35-second timeout and no automatic
+retry. Ambiguous outcomes become `submission_unknown`. Inspect provider history
+before another paid request. Lost task acknowledgments retain the known job and
+lease. Status/watchdog transitions do not prove that a worker/provider was
+canceled. Account admission waits have a separate two-hour bound; normal active
+preparation/export watchdogs and shutdown guards remain in place.
 
-[deploy.py](deploy.py) is separate from the user's normal workflow. It pins the
-authorized project/account, verifies active billing and the native cap, verifies
-worker state and identity scope, configures the app bucket/IAM/queue, stages an
-allowlist of runtime source, builds a container and deploys the gateway by image
-digest. It never activates model workers and checks their configuration stayed
-unchanged. A release explicitly promotes the final Ready revision and verifies
-its immutable image and sole 100% requested/effective traffic before checking
-HTTP configuration; an inherited rollback route cannot count as a new release.
-The public frontend is built/deployed separately through Firebase.
+## Deployment, storage and verification
 
-From the repository root, with the appropriate authenticated Google Cloud CLI:
+[deploy_launch.py](deploy_launch.py) is the RecastFX release route; it preserves
+Stripe mode/account/secret bindings, private worker state and the separate
+legacy gateway. [deploy.py](deploy.py) retains its older gateway/setup role.
+Neither is part of normal user operation. Worker source overlays are documented
+in [worker_patch/README.md](worker_patch/README.md). Version 2 needs **both** GPU
+and CPU common validation patches plus the CPU multi-person compositor patch.
+Reusing old workers that still reject high-resolution guides is not a release.
 
-```sh
-python3 deployment/swapmein/deploy.py --setup-only
-python3 deployment/swapmein/deploy.py
-```
+Before operator rollout, inspect active preparations/renders and prevent changes
+to a worker used by an active preparation. Preserve bounded leases and queued
+saved-job versions. Build from allowlisted runtime files only; never stage local
+media, credentials, `.secrets`, ADC files, browser profiles or test fixtures.
+Existing model layers/checkpoints are reused, not downloaded or duplicated by
+the source patch. Promote/verify the intended Ready immutable gateway revision
+and sole 100% effective traffic, then deploy the matching frontend separately.
+Check actual worker image digests and bundle contents, not a stale health label.
 
-`--setup-only` configures scoped resources without building or deploying.
-`--service-only` checks the cap and bounds the existing gateway without a build or
-worker change. `--allowed-origin` may be repeated for authorized HTTPS origins.
-Do not add a provider key to CLI arguments or a plaintext environment file.
-`deploy_launch.py` provisions the `recastfx-job-key` Secret Manager binding for
-temporary Easy-mode API-key encryption. It also provisions the scoped
-`recastfx-provider-key` secret; only the gateway can read/add versions, and only
-the owner can save a validated provider key through Admin.
+Gateway IAM stays scoped to its buckets, exact private workers/queues, verified
+worker identities, self signing and budget read. Internal handlers require the
+exact Google OIDC issuer, audience, caller email and verified-email claim even
+though the public browser gateway is invokable. Do not grant project-wide Run
+update/impersonation as a substitute for those bindings.
 
-For live payments, first create the dedicated Stripe key and live webhook
-endpoint, then store their secrets as `recastfx-stripe-live-key` and
-`recastfx-stripe-live-webhook` in Secret Manager. Never pass secret values on
-command lines or commit them. Deploy with:
+App uploads/outputs/sessions/jobs have short retention; permanent control,
+commerce and account ledgers must remain. Completed Library outputs retain their
+separate 30-day policy. Worker inputs/outputs and Artifact Registry images can
+continue incurring storage cost while compute is off. Any worker lifecycle cleanup
+must be restricted to the gateway's prefixes and preserve earlier proofs/models.
+A deploy must not globally delete worker assets or unpause/reconfigure queues.
 
-```sh
-python3 deployment/swapmein/deploy_launch.py --stripe-live-account acct_REVIEWED_LIVE_ACCOUNT
-```
+## Logs, cost evidence and tests
 
-Later deployments preserve payment mode, account ID and secret bindings.
-Hosted Checkout disables Adaptive Pricing so charges remain in USD. A private
-order snapshot is saved before creating the session; only signed, paid events
-from the configured mode can fund its account wallet, exactly once. Subscribe
-the live webhook at `https://recastfx.com/api/commerce/stripe-webhook` to
-`checkout.session.completed`, `checkout.session.async_payment_succeeded` and
-`charge.refunded`. Dashboard refunds reverse the corresponding credits,
-including partial/reordered refunds; a spent balance can become negative and
-cannot fund another generation. Disputes require operator review. A browser
-success return never grants credits. Stripe Tax is not enabled automatically.
+Structured Cloud Logging events identify preparation version, geometry, SAM
+working dimensions, target count, audio mode, guide verification, worker
+start/stop/shutdown, scene reviews, provider acceptance/state/cost, export and
+Library saves. Photo errors include only a safe reference index. Correlate by
+`job_id`; financial changes additionally use account/order/grant identifiers.
+Exceptions log type, status and stack file/function/line, never exception text,
+raw credentials, media URLs, source lines or HTTP bodies.
 
-Build staging includes only `Dockerfile`, `requirements.txt` and runtime Python
-files, rejecting source symlinks. It excludes local media, `.secrets`, ADC files,
-browser profiles, credentials and tests. Uvicorn access logging is disabled;
-application errors are sanitized and must not log request headers.
+Immediately before a paid POST the adapter logs the actual settings/prompt and
+request fingerprint with **all media URLs redacted**. Acceptance links its task
+ID. This is diagnostic evidence, not a replayable credential-bearing archive.
+New per-person prompt mappings are therefore visible without exposing references.
+Financial ledger mutations and logs cannot be committed atomically; private
+records remain authoritative.
 
-## Dependencies, code map and validation
+Per-render provider costs come from reported usage, not estimates. Stripe fees
+belong to purchases and require allocation over consumed credits for a per-render
+margin estimate; inspect BalanceTransaction currency/fees/exchange rate. Worker
+start/stop times are not invoice-exact billable time. Total-cost reporting also
+needs CPU/RAM/GPU configuration, startup/minimum charges, gateway work, Tasks,
+storage/egress, logs, registry and builds. Reconcile with Cloud Billing/Monitoring;
+this change does not enable a billing export or automatic total-cost dashboard.
 
-[Dockerfile](Dockerfile) uses `python:3.12-slim-bookworm`, system `ffmpeg` and
-`ca-certificates`, and runs as UID 10001. The pinned runtime packages are in
-[requirements.txt](requirements.txt): FastAPI 0.143.1, Starlette 1.8.0, Pydantic
-2.14.1, Uvicorn 0.54.0, python-multipart 0.0.32, google-cloud-storage 3.17.0,
-google-cloud-tasks 2.26.0, google-auth 2.62.0, requests 2.34.2, httpx 0.28.1,
-NumPy 2.5.4 and Pillow 12.3.0. [requirements-test.txt](requirements-test.txt) adds
-pytest 9.1.1. The gateway bundles no Torch, SAM, Demucs, depth/face model or model
-weights; those dependencies belong to the existing private worker containers.
+The gateway image uses the pinned Python dependencies in
+[requirements.txt](requirements.txt), system FFmpeg and a non-root user. It does
+not bundle Torch, model weights or face-mesh models. Worker dependencies remain
+in their existing base images.
 
-| Source | Responsibility |
-| --- | --- |
-| [app.py](swapmein/app.py) | HTTP contract, sessions, uploads, approval and provider polling |
-| [pipeline.py](swapmein/pipeline.py) | Task claims, SAM/audio orchestration, review and final export |
-| [media.py](swapmein/media.py) | Setup/media validation, cut detection, anchor/label selection, original-guide remux and audio restoration |
-| [provider.py](swapmein/provider.py) | Provider adapters, prompts, estimates and one paid submission |
-| [cloud.py](swapmein/cloud.py) | Private storage, signed URLs, tasks, native-cap check and bounded worker activation/shutdown |
-| [storage.py](swapmein/storage.py) | Atomic records, separate quotas and shared lease |
-| [security.py](swapmein/security.py) | Ownership/key binding, OIDC and constrained result fetching |
-| [config.py](swapmein/config.py), [limits.py](swapmein/limits.py) | Deployment configuration and shared media bounds |
-| [frontend charSwap feature](../../frontend/src/features/charSwap) | Walkthrough state, upload feedback, API integration and explicit approval |
-
-For development verification, from this directory in a dedicated virtualenv:
-
-```sh
-python3 -m venv /tmp/swapmein-gateway-tests
-/tmp/swapmein-gateway-tests/bin/python -m pip install -r requirements-test.txt
-/tmp/swapmein-gateway-tests/bin/python -m pytest tests -q
-```
-
-Tests cover session/key/job isolation, OIDC identity, media/body bounds,
-SSRF/redirect restrictions, quotas and leases, atomic submission/export claims,
-actual clicked SAM labels, disappearing targets, EXIF normalization, both fill
-modes, provider protocol translation, native output dimensions and restored
-audio coverage. Mocks do not prove live IAM, signed-URL access, spend-cap access,
-worker compatibility or creative generation quality. Operator readiness requires
-a bounded deployed preparation proof and reviewed output. The existing paid
-ToAPIs proof used vendor-uploaded URLs; signed-Google-reference submission from
-the public UI still needs its own paid integration proof. Motion and lip sync
-remain user-review decisions.
-
-This standalone gateway consumes the private workers outside the VLO extension
-host; it adds no SDK or extension-owned service. After repository changes, run
-`npm run check:extension-surface` at the repository root as required by AGENTS.md.
-
-Export accepts provider results longer than the requested selection and trims
-excess end frames to the selected duration. It restores only the matching
-original soundtrack segment, preserves generated dimensions, and still rejects
-short results or incomplete frame/audio coverage. No playback-speed adjustment
-is applied.
-
-Cloud Tasks RPC timeouts stay below its 30-second server limit. A controlled
-cloud diagnostic reproduced `INVALID_ARGUMENT` at the 30-second boundary; task
-creation and deletion now use 20 seconds to leave transport/clock headroom.
-
-## Enhanced masking guide
-
-Enhanced masking submits the colored depth image inside only the selected SAM
-label, with the original scene outside it and no numbers. Scene cuts and
-zero-coverage frames are accepted; zero coverage does not select a different
-label. The user must confirm identity in every scene. New guides store
-`mask_style: depth`. Previously prepared cyan or gray guides retain their
-respective prompt when submitted.
-
-The versioned CPU worker patch is in `worker_patch/`; it overlays the existing
-immutable audio image without reinstalling models. Original gray/original
-composition modes remain available for historical diagnostics.
-
-### Masking-off preparation
-
-New preparations with masking off skip SAM inference, GPU activation, mask
-validation, and the detected-people preview. Only CPU normalization, scene-cut
-inspection, vocal preparation and original-picture guide assembly run. The
-public job records `tracking_performed: false`, with no tracking URL or selected
-SAM label. The review step always shows the actual guide and explains that the
-provider uses the selected coordinates and clip-relative timestamp. Changing
-selection still requires a new preparation/review. The timestamp retains the
-original fractional offset within the trimmed clip.
-
-### Access before preparation with masking off
-
-Uploaded clips with masking off use six steps: Clip, Trim, People, References,
-Access, Review. References proceeds to Access without requiring a key or starting
-preparation. Continuing with a personal key validates access and queues CPU
-preparation; progress and the resulting guide appear in Review. Generate remains
-disabled until the job is ready and the guide can play. It remains an explicit
-paid submission. Enhanced masking and the sample demo retain their overlay/match
-review step and confirmation requirements. App credits require the owner switch
-and a private provider key; the customer credits dialog cannot change either.
-
-### Scene tracking review
-
-The implementation adds an owned `tracking_review` state for enhanced
-masking. After depth and SAM finish, `tracking.py` partitions the normalized
-24 fps clip at scene cuts, label disappearance/reappearance, and abrupt changes
-in mask area or position. These are review heuristics, not identity-confidence
-scores. The healthy section containing the original tap can be retained;
-every other scene and suspicious section needs an explicit match.
-
-The walkthrough shows translucent masks over the normalized original video in
-short, scrub-friendly sections with the selected person's thumbnail. The masks
-are rendered on CPU from SAM's exact label maps, without numbers. A display toggle
-lets the user inspect the original alone. The user taps a colored person or
-chooses **Not visible here** for each section. Their reference stays assigned.
-No flagged sections means the walkthrough proceeds directly to Access; the
-prepared guide still requires visual approval at final Review.
-
-`POST /api/jobs/{id}/tracking-review` accepts the owning session token and JSON
-`{revision, choices:[{segment_id, absent, anchor:{x,y,time}|null}]}`. Times are
-relative to the trimmed, normalized clip; section ends are exclusive. Taps are
-checked against actual SAM label maps. Background taps preserve the editable
-review, and foreign, duplicate, missing or stale choices are rejected. The
-request body is bounded to 32 KiB and at most 60 section choices.
-
-Reviewed maps retain label `1` only for the selected person in each section;
-explicitly absent sections contain no target pixels. The original maps stay
-unchanged. A new preparation task activates only the CPU audio worker's existing
-`/compose` operation to rebuild the depth guide. It reuses saved depth and vocals:
-there is no extra SAM run, audio separation or paid generation. This extra guide
-rebuild reserves the normal preparation lease and counts toward its daily/monthly
-limits. Each attempt has a unique, persisted task token so Cloud Tasks' retained
-names cannot block a rebuild; retries cannot repeat a claimed attempt.
-
-The job becomes `ready` only after composition succeeds. The user then reviews
-the whole corrected guide. Generation is blocked while matches are unresolved.
-Masking-off preparations and previously created jobs retain their existing flow.
-Reassigning existing labels cannot recover a person SAM never detected, repair
-missing body pixels, or guarantee the provider's identity/motion fidelity.
-
-Released on 2026-10-14 with gateway revision `swapmein-api-00023-x4p`, serving
-100% traffic. Local validation includes 224 gateway tests, 145 walkthrough tests,
-and desktop/mobile browser checks with saved SAM masks. Release checks verify the
-new owned review route and the exact frontend bundle; no paid generation was run
-as part of deployment.
-
-
-### Easy mode
-
-New preparations accept strict boolean `setup.easy_mode`, defaulting to `true`.
-The Settings switch applies immediately without a provider key and defaults on.
-Easy mode removes Matches from the walkthrough: Clip → Trim → People → References
-→ Access → Review. Preparation begins after Access; the prepared guide remains
-visible at final Review before any paid generation. Turning Easy mode off retains
-the scene picker and its per-section label assignments. Mode changes invalidate
-the prepared guide and return to References, preserving the original selection and
-reference image. The switch is locked during processing.
-
-With enhanced masking on, Easy mode still runs Depth Anything, SAM 3, and vocal
-preparation. It selects the original tap's SAM ID and composites that same ID
-throughout the clip, including cuts and gaps, without manual scene assignments.
-It does not provide cross-cut identity verification. With masking off, the
-existing original-video guide and coordinate/timestamp prompt are unchanged.
-No GPU model or worker image changes are required; the gateway and frontend must
-be released together. Existing saved jobs lacking `easy_mode` keep the prior
-review behavior. Logs record `preparation_mode` and `tracking_selection`, including
-the selected label and count of frames where its mask is missing.
-
-Released on 2026-10-14 with gateway revision `swapmein-api-00024-vzf` and the
-Firebase Hosting site above. The release passed 163 frontend walkthrough tests,
-235 gateway tests, and the production frontend build. Both model workers remained
-off; no generation was submitted.
-
-
-### Audit events and owner credit grants
-
-Owners can use Admin → Grant user credits with an existing Google sign-in email, a positive whole-credit amount, and a reason. Pricing staff cannot grant credits. This changes only the RecastFX wallet; it does not charge Stripe or buy provider credits. The gateway resolves Firebase's user ID with read-only `firebaseauth.users.get` access (`roles/firebaseauth.viewer` during deployment), then applies the grant atomically. A client operation ID is bound to the recipient, amount, owner and reason; retrying after an uncertain response does not duplicate credits. Private `commerce/grants/<request_id>.json` records retain the owner, reason, recipient and completion state. Wallet entries retain the adjustment and reason.
-
-Structured Cloud Logging events include wallet changes, Stripe Checkout creation/fulfillment/refunds, price quotes, pricing and permission changes, background task queueing, provider state changes, successful export and Library saves, as well as existing preparation and shutdown diagnostics. Correlate by `job_id`, `account_id`, `order_ref`, or grant `request_id`. Replayed webhook/grant events are not additional wallet transactions; `wallet_change_applied` is emitted only after a newly applied mutation. Financial ledger and grant records remain the durable source of truth, since logs cannot be committed atomically with GCS records.
-
-The signed-in frontend reports uncaught errors, promise rejections, React failures and handled pipeline/commerce request failures to `/api/diagnostics`. Reports contain only allowlisted category/error type, optional HTTP status and owned job ID. No error messages, stacks, media URLs, form values or keys are sent. Browser and server each limit reports to ten per minute; server ingestion requires Firebase authentication. Errors before sign-in and offline reports are intentionally not collected. Reporting failures never interrupt jobs.
-
-
-### Grant confirmation and history rollout
-
-The owner grant form displays its pending state and a persistent confirmation directly below the submit button, including recipient, credited amount and returned balance. The separate history refresh cannot turn a confirmed grant into a retry. Owner-only `GET /api/commerce/admin/grants` returns newest-first pages of up to 50 records (default 25), with reason, granting owner, date and pending/completed status. The UI refreshes after success and loads older pages on request.
-
-Before releasing this history view, run `swapmein.commerce.backfill_credit_grant_history(records, cursor=None, limit=100)` against the app bucket, then repeat with the returned `next_cursor` until it is null. This idempotent migration only creates timestamp-sorted `commerce/grant-history/` references for preexisting grant records. It never grants credits or changes wallets. New grants create their index entry automatically; list requests are read-only and bounded. Run the migration after the gateway rollout and before releasing the history UI, so grants made during rollout are included.
-
-
-### Provider cost evidence and total-run estimates
-
-`provider_cost_recorded` is emitted once per locally observed terminal provider task and includes `job_id`, provider task ID, duration, customer credits charged, `provider_credits`, `provider_credit_unit`, `provider_cost_usd`, `provider_cost_status`, and source field. Completion/failure/export events also include available provider billing fields. The private job stores `provider_billing` and the compatible `actual_credits` field, even if output validation later fails. A failed task can have a positive provider charge. Missing or invalid usage is `not_reported` with a null amount, never zero. For reAPI, 1,000 provider credits equal US$1; these are independent of RecastFX customer credits (100 equal US$1). ToAPIs adapters normalize their reported dollar amount into millidollars; these are explicitly labelled `usd_millidollar`, not native ToAPIs credits.
-
-A complete margin report is not implemented yet. Stripe processing fees belong to credit purchases, not individual renders. Their authoritative source is the charge's expanded BalanceTransaction (`fee`, `currency`, `exchange_rate`, and `fee_details`); allocate a purchase's fee over credits consumed for a per-render estimate. Preserve settlement currency (earlier payments settled in CAD; USD settlement was subsequently enabled) before presenting any USD equivalent. Free/admin-granted credits have no customer payment or Stripe fee to allocate.
-
-Google worker start/stop events provide operational windows, not invoice-exact billable time. Compute estimates require deployed CPU/RAM/GPU allocations, region and billing mode, startup/shutdown and minimum charges; shared gateway work, storage/egress, Cloud Tasks, logs, Artifact Registry and deployment builds are additional costs. Reconcile estimates against Google Monitoring billable-instance metrics and Cloud Billing reports/exports rather than presenting operational stopwatch time as the final bill. No billing export or automatic full-cost aggregation was enabled by this change.
+Relevant validation includes direct/multipart upload compatibility, all-reference
+failure handling, normalized target/reference ordering, prompt mappings,
+background-job ownership, legacy version preservation, exact categorical mask
+resizing, per-person/collision scene choices, working-guide dimensions/frame/audio
+checks, export audio modes, frontend upload/Library recovery and the production
+build. Run the relevant gateway tests from this directory with
+`.venv/bin/python -m pytest tests -q`, frontend walkthrough tests/build from
+`frontend`, and the repository extension-surface check before release. Passing
+local tests is not a new paid-generation quality proof or evidence of deployment.

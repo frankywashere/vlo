@@ -1,0 +1,21 @@
+{
+  "steps": [
+    {
+      "name": "gcr.io/go-containerregistry/gcrane@sha256:ed0c30d0d5cf0869ab6cb69a55b5352e14bb3878993736d67e54d8b03b091094",
+      "args": [
+        "append",
+        "--base",
+        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gpu@sha256:6b1bb4e7f1ac184f8a49831d26c89d06375e1b8d4fa8af8dce96482d49a259fd",
+        "--new_layer",
+        "overlay_patch.tar",
+        "--new_tag",
+        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gpu:working-768-v1"
+      ]
+    }
+  ],
+  "timeout": "300s",
+  "options": {
+    "logging": "GCS_ONLY"
+  },
+  "logsBucket": "gs://charswap-franky-20261013-proof/build-logs"
+}

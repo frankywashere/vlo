@@ -27,6 +27,7 @@ import {
 import { JobElapsedTime } from "./JobElapsedTime";
 import { SceneTrackingReview } from "./SceneTrackingReview";
 import { loadAccountAccess } from "../services/commerce";
+import { TARGET_COLORS } from "../limits";
 
 const ACTIVE = new Set(["queued", "preparing", "generating", "finalizing"]);
 interface AccountLibraryProps {
@@ -37,6 +38,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
   const [jobs, setJobs] = useState<AccountJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountJob | null>(null);
   const [key, setKey] = useState("");
   const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
@@ -85,6 +87,10 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
               )
                 next[field] = oldUrl;
             }
+            if (next.reference_urls) next.reference_urls = next.reference_urls.map((url, index) => {
+              const previousUrl = previous.job.reference_urls?.[index];
+              return previousUrl && previousUrl.split("?")[0] === url.split("?")[0] ? previousUrl : url;
+            });
           }
           mediaCache.current.set(job.id, {
             job: next,
@@ -129,6 +135,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
     setSelected(null);
     setKey("");
     setError(null);
+    setTrackingErrorSegmentId(null);
   }
   const act = useCallback(
     async (generate: boolean) => {
@@ -172,7 +179,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
       void act(false);
     }, 10000);
     return () => globalThis.clearTimeout(timer);
-  }, [autoCheck, busy, key, selected?.status, act]);
+  }, [autoCheck, busy, key, selected?.status, selected?.access_mode, act]);
 
   async function hide(job: AccountJob, hidden: boolean) {
     try {
@@ -189,6 +196,9 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         );
     }
   }
+  const selectedTargets = selected?.selection_targets?.map((target, index) => ({...target,
+    color: target.color ?? TARGET_COLORS[index % TARGET_COLORS.length]})) ?? [];
+  const selectedReferences = selected?.reference_urls ?? (selected?.reference_url ? [selected.reference_url] : []);
   const sections = [
     { title: "Current processing jobs", jobs: jobs.filter((item) => !["completed", "failed", "expired"].includes(item.status)) },
     { title: "Finished videos", jobs: jobs.filter((item) => item.status === "completed") },
@@ -337,6 +347,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                         setKey("");
                         setSelected(job);
                         setError(null);
+                        setTrackingErrorSegmentId(null);
                       }}
                     >
                       {job.status === "tracking_review" ? "Check scene matches"
@@ -373,7 +384,13 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                 sx={{ width: "100%", maxHeight: 420, bgcolor: "#211e1d" }}
               />
             )}
-            {selected?.reference_url && (
+            {selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
+              {selectedTargets.map((target) => <Stack key={target.id} spacing={0.5} sx={{borderLeft: `3px solid ${target.color}`, pl: 1}}>
+                <Typography fontWeight={600}>{target.name}</Typography>
+                {selectedReferences[target.reference_index] && <Box component="img" src={selectedReferences[target.reference_index]}
+                  alt={`${target.name} replacement reference`} sx={{width: 112, height: 112, objectFit: "contain"}} />}
+              </Stack>)}
+            </Stack> : selected?.reference_url && (
               <Box
                 component="img"
                 src={selected.reference_url}
@@ -426,15 +443,22 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                     color: "#06b6d4",
                     anchor: { x: 0.5, y: 0.5, time: 0 },
                   }}
+                  targets={selectedTargets}
+                  references={selectedTargets.map((target) => ({targetId: target.id,
+                    asset: selectedReferences[target.reference_index] ? {id: `reference-${target.reference_index}`,
+                      name: `Reference ${target.reference_index + 1}`, url: selectedReferences[target.reference_index]} : undefined}))}
                   duration={selected.duration ?? 0}
                   width={selected.width ?? 854}
                   height={selected.height ?? 480}
                   busy={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
                   initialChoices={selected.tracking_choices}
+                  errorSegmentId={trackingErrorSegmentId}
+                  errorMessage={error}
                   onRefresh={() => void refresh()}
                   onApply={async (choices) => {
                     setBusy(true);
                     setError(null);
+                    setTrackingErrorSegmentId(null);
                     controller.current = new AbortController();
                     try {
                       const session = await resumeAccountJob(selected.id, key);
@@ -451,6 +475,9 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                       }
                       return true;
                     } catch (cause) {
+                      if (cause instanceof Error && "segmentId" in cause && typeof cause.segmentId === "string"
+                          && selected.tracking_segments?.some((segment) => segment.id === cause.segmentId))
+                        setTrackingErrorSegmentId(cause.segmentId);
                       if (mounted.current)
                         setError(
                           cause instanceof Error

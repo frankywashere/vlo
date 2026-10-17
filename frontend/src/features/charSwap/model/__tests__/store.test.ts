@@ -80,7 +80,7 @@ describe("walkthrough store readiness", () => {
     store.selectTarget(PERSON_A);
     state = useCharSwapStore.getState();
     expect(state.replaceAllPeople).toBe(false);
-    expect(state.targets).toEqual([PERSON_A]);
+    expect(state.targets).toEqual([{...PERSON_A, color: "#00dcff"}]);
     expect(state.assignments).toEqual({});
     store.setReplaceAllPeople(true);
     store.changeTrim([1, 5]);

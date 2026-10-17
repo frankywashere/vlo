@@ -133,9 +133,9 @@ function ReferenceCard({
               Use sample teddy bear
             </Button>
           )}
-          {!reference && references.length > 0 && (
+          {references.some((item) => item.id !== reference?.id) && (
             <Stack direction="row" flexWrap="wrap" gap={1}>
-              {references.map((item) => (
+              {references.filter((item) => item.id !== reference?.id).map((item) => (
                 <Button
                   key={item.id}
                   size="small"

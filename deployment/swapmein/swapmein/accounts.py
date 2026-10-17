@@ -61,6 +61,7 @@ def archive_completed(records, job: dict):
         "created_at": job["created_at"], "completed_at": (current or {}).get("completed_at") or completed_at,
         "expires_at": time.time() + LIBRARY_SECONDS, "output_uri": job["output_uri"],
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),
+        "selection_targets": job.get("normalized_targets") or job.get("setup", {}).get("targets"),
     })
 
 

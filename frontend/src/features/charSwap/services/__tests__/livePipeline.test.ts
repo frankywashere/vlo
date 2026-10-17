@@ -34,6 +34,10 @@ describe("live job charge parsing", () => {
     requests.mockResolvedValue(new Response(JSON.stringify({code: "reference_dimensions", message: "private upstream detail"}), {status: 400}));
     await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/Crop it or choose a different image/);
   });
+  it("identifies which reference image needs conversion or replacement", async () => {
+    requests.mockResolvedValue(new Response(JSON.stringify({code: "reference_unreadable", reference_index: 1}), {status: 400}));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/^Reference image 2:/);
+  });
   it.each([740.5, 0])("preserves an actual charge of %s credits separately from the estimate", async (credits) => {
     requests.mockResolvedValue(jobResponse(credits));
 
@@ -96,6 +100,39 @@ describe("scene tracking review contract", () => {
     requests.mockResolvedValue(new Response(JSON.stringify(reviewJob)));
     expect(await getLiveJob("job-1", "session", new AbortController().signal)).toEqual(reviewJob);
   });
+  it("preserves person-to-reference slots and allows the same scene to be checked for different people", async () => {
+    const selection_targets = [
+      {id: "left", name: "Left boxer", anchor: {x: .2, y: .5, time: 0}, reference_index: 0, color: "#00dcff"},
+      {id: "right", name: "Right boxer", anchor: {x: .8, y: .5, time: 0}, reference_index: 1, color: "#ff4fd8"},
+    ];
+    const tracking_segments = selection_targets.map((target) => ({...reviewSegment, id: `${target.id}-scene`, target_id: target.id, target_name: target.name}));
+    const reference_urls = ["https://storage.googleapis.com/bear.jpg", "https://storage.googleapis.com/cat.jpg"];
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, selection_targets, tracking_segments, reference_urls})));
+    const received = await getLiveJob("job-1", "session", new AbortController().signal);
+    expect(received.selection_targets).toEqual(selection_targets);
+    expect(received.tracking_segments).toEqual(tracking_segments);
+    expect(received.reference_urls).toEqual(reference_urls);
+  });
+
+  it("accepts up to 300 uniquely named person-scene checks and saved absence choices", async () => {
+    const tracking_segments = Array.from({length: 5}, (_, person) => Array.from({length: 60}, (_, scene) => ({
+      id: `p${person}-s${scene}`, target_id: `p${person}`, target_name: `Person ${person + 1}`,
+      start_frame: scene, end_frame: scene + 1, start: scene / 24, end: (scene + 1) / 24,
+      seek_time: (scene + .5) / 24, reason: "scene_cut", needs_review: true,
+    }))).flat();
+    const tracking_choices = tracking_segments.map((section) => ({segment_id: section.id, absent: true, anchor: null}));
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_segments, tracking_choices})));
+    const received = await getLiveJob("job-1", "session", new AbortController().signal);
+    expect(received.tracking_choices).toHaveLength(300);
+    expect(received.tracking_segments).toHaveLength(300);
+  });
+
+  it("rejects overlapping sections belonging to the same person", async () => {
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_segments: [
+      {...reviewSegment, target_id: "left"}, {...reviewSegment, id: "again", target_id: "left"},
+    ]})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/overlapping/);
+  });
 
   it.each([
     {source_preview_url: "javascript:alert(1)"},
@@ -135,6 +172,16 @@ describe("scene tracking review contract", () => {
   it("preserves only a safe section identifier on a rejected background tap", async () => {
     requests.mockResolvedValue(new Response(JSON.stringify({code: "tracking_background", segment_id: "segment-001"}), {status: 400}));
     await expect(resolveLiveTracking("job-1", "session", 1, [], new AbortController().signal)).rejects.toMatchObject({segmentId: "segment-001"});
+  });
+  it("returns the specific person's section and useful guidance for conflicting replacements", async () => {
+    requests.mockResolvedValue(new Response(JSON.stringify({code: "tracking_target_conflict", segment_id: "p2-segment-001"}), {status: 400}));
+    await expect(resolveLiveTracking("job-1", "session", 1, [], new AbortController().signal)).rejects.toMatchObject({
+      segmentId: "p2-segment-001", message: expect.stringContaining("Two replacements are assigned to the same person"),
+    });
+  });
+  it("retains the multi-person depth-guide style", async () => {
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "ready", mask_style: "depth_multi"})));
+    expect((await getLiveJob("job-1", "session", new AbortController().signal)).mask_style).toBe("depth_multi");
   });
 
   it("restores validated saved choices for an interrupted guide rebuild", async () => {

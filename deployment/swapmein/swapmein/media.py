@@ -1,10 +1,12 @@
 """Bounded CPU preparation, actual SAM label selection and audio restoration."""
 from io import BytesIO
+from fractions import Fraction
 import json
 import math
 from pathlib import Path
 import re
 import subprocess
+from typing import Literal
 import warnings
 import zipfile
 
@@ -22,14 +24,24 @@ class Anchor(BaseModel):
     time: float = Field(ge=0)
 
 
+class Target(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    id: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=40)
+    anchor: Anchor
+    reference_index: int = Field(ge=0, le=4, strict=True)
+
+
 class Setup(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     enhanced_character_masking: bool = Field(default=True, strict=True)
     easy_mode: bool = Field(default=True, strict=True)
     auto_generate: bool = Field(default=False, strict=True)
     replace_all_people: bool = Field(default=False, strict=True)
+    preparation_version: Literal[1, 2] = 2
     trim: tuple[float, float]
     anchor: Anchor | None = None
+    targets: list[Target] | None = Field(default=None, min_length=1, max_length=5)
     target_name: str = Field(default="Selected person", min_length=1, max_length=40)
 
     @model_validator(mode="after")
@@ -39,7 +51,13 @@ class Setup(BaseModel):
         if (start < 0 or not 4 <= duration <= 15
                 or not math.isclose(duration, round(duration), abs_tol=0.01)):
             raise ValueError("Select 4–15 seconds, with a whole-second length.")
-        if not self.replace_all_people and (self.anchor is None or not start <= self.anchor.time < end):
+        if self.targets and self.replace_all_people:
+            raise ValueError("Choose individual people or replace everyone, not both.")
+        if self.targets and (len({target.id for target in self.targets}) != len(self.targets)
+                            or any(not start <= target.anchor.time < end for target in self.targets)):
+            raise ValueError("Give each person a unique ID and select them inside the trimmed section.")
+        selection = self.anchor or (self.targets[0].anchor if self.targets else None)
+        if not self.replace_all_people and (selection is None or not start <= selection.time < end):
             raise ValueError("Select the person inside the trimmed section.")
         return self
 
@@ -53,7 +71,7 @@ def run(command: list[str], timeout: int = 90):
 
 def probe(path: Path):
     result = json.loads(run(["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-show_entries",
-                          "format=duration,format_name:stream=codec_type,width,height,r_frame_rate,duration,nb_frames:stream_tags=rotate:stream_side_data=rotation",
+                          "format=duration,format_name:stream=codec_type,width,height,sample_aspect_ratio,r_frame_rate,duration,nb_frames:stream_tags=rotate:stream_side_data=rotation",
                           "-of", "json", str(path)], timeout=20).stdout)
     if result.get("format", {}).get("format_name") not in {
         "mov,mp4,m4a,3gp,3g2,mj2", "matroska,webm", "avi"}:
@@ -61,15 +79,42 @@ def probe(path: Path):
     return result
 
 
-def dimensions(width: int, height: int):
-    if not width or not height or max(width, height) > 4096 or width * height > 16_777_216 or not .4 <= width / height <= 2.5:
+def _source_bounds(width: int, height: int):
+    if not width or not height or min(width, height) < 1 or max(width, height) > 4096 or width * height > 16_777_216:
+        raise PublicError("Use a video with supported source dimensions up to 4096px per side.")
+
+
+def _fit_dimensions(width, height, preparation_version):
+    if not .4 <= width / height <= 2.5:
         raise PublicError("Use a video with an aspect ratio between 0.4 and 2.5.")
-    factor = min(854 / width, 480 / height)
+    if preparation_version not in (1, 2):
+        raise PublicError("Unsupported clip preparation version.")
+    factor = min(854 / width, 480 / height) if preparation_version == 1 else min(1, Fraction(768) / min(width, height))
     scaled_w = max(2, math.floor(width * factor / 2) * 2)
     scaled_h = max(2, math.floor(height * factor / 2) * 2)
     # Narrow portrait clips need small letterboxes to satisfy H3's 256px minimum.
     canvas_w, canvas_h = max(256, scaled_w), max(256, scaled_h)
     return scaled_w, scaled_h, canvas_w, canvas_h
+
+
+def dimensions(width: int, height: int, preparation_version: int = 2):
+    _source_bounds(width, height)
+    return _fit_dimensions(width, height, preparation_version)
+
+
+def _display_dimensions(width: int, height: int, sample_aspect_ratio, rotation: float):
+    """Square-pixel display geometry, before orientation is applied to the frame."""
+    _source_bounds(width, height)
+    try:
+        ratio = Fraction(str(sample_aspect_ratio).replace(":", "/")) if sample_aspect_ratio not in (None, "N/A", "0:1") else Fraction(1)
+        if ratio <= 0:
+            raise ValueError("Invalid sample aspect ratio")
+    except (ValueError, ZeroDivisionError):
+        raise PublicError("The video has an unsupported sample aspect ratio.") from None
+    display_width, display_height = width * ratio, height
+    if abs(round(rotation)) % 180 == 90:
+        display_width, display_height = display_height, display_width
+    return display_width, display_height
 
 
 def require_audio_duration(metadata: dict, duration: float):
@@ -101,9 +146,14 @@ def normalize(source: Path, output: Path, setup: Setup):
     for data in video.get("side_data_list", []):
         rotation = float(data.get("rotation", rotation))
     source_w, source_h = video["width"], video["height"]
-    if abs(round(rotation)) % 180 == 90:
-        source_w, source_h = source_h, source_w
-    sw, sh, width, height = dimensions(source_w, source_h)
+    if setup.preparation_version >= 2:
+        source_w, source_h = _display_dimensions(source_w, source_h, video.get("sample_aspect_ratio"), rotation)
+        sw, sh, width, height = _fit_dimensions(source_w, source_h, setup.preparation_version)
+    else:
+        # Preserve the pixel geometry saved by pre-V2 jobs, including their taps.
+        if abs(round(rotation)) % 180 == 90:
+            source_w, source_h = source_h, source_w
+        sw, sh, width, height = dimensions(source_w, source_h, setup.preparation_version)
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe", "-ss", str(start),
          "-i", str(source), "-t", str(duration), "-map", "0:v:0", "-map", "0:a:0",
          # A fractional-frame-rate source can end one output frame short when
@@ -123,13 +173,59 @@ def normalize(source: Path, output: Path, setup: Setup):
     scene_cuts = [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
     # Group mode needs no user tap. The normalized metadata still carries a
     # valid frame origin for media validation; it is never used to select an ID.
-    selection = Anchor(x=.5, y=.5, time=start) if setup.replace_all_people else setup.anchor
-    anchor = {"x": (selection.x * sw + (width - sw) / 2) / width,
-              "y": (selection.y * sh + (height - sh) / 2) / height,
-              "time": selection.time - start,
-              "frame": min(duration * 24 - 1, round((selection.time - start) * 24))}
+    def mapped_anchor(selection):
+        return {"x": (selection.x * sw + (width - sw) / 2) / width,
+                "y": (selection.y * sh + (height - sh) / 2) / height,
+                "time": selection.time - start,
+                "frame": min(duration * 24 - 1, round((selection.time - start) * 24))}
+    selection = (Anchor(x=.5, y=.5, time=start) if setup.replace_all_people
+                 else setup.anchor or setup.targets[0].anchor)
+    anchor = mapped_anchor(selection)
+    targets = [{"id": target.id, "name": target.name, "anchor": mapped_anchor(target.anchor),
+                "reference_index": target.reference_index} for target in setup.targets or []]
     return {"duration": duration, "width": width, "height": height,
-            "frames": duration * 24, "anchor": anchor, "scene_cuts": scene_cuts}
+            "frames": duration * 24, "anchor": anchor, "scene_cuts": scene_cuts,
+            "preparation_version": setup.preparation_version,
+            "resolution_policy": "legacy_480p" if setup.preparation_version == 1 else "short_side_768_no_upscale",
+            "targets": targets}
+
+
+def sam_input_video(source: Path, output: Path):
+    """Use a bounded SAM working copy while retaining the guide's frame timeline."""
+    metadata = probe(source)
+    video = next((s for s in metadata.get("streams", []) if s.get("codec_type") == "video"), None)
+    if not video or video["r_frame_rate"] != "24/1":
+        raise PublicError("SAM input must use the prepared 24 fps timeline.")
+    frames = int(video.get("nb_frames", 0))
+    if not 1 <= frames <= 360:
+        raise PublicError("SAM input exceeds the supported clip length.")
+    factor = min(1, 854 / video["width"], 480 / video["height"])
+    width = max(2, math.floor(video["width"] * factor / 2) * 2)
+    height = max(2, math.floor(video["height"] * factor / 2) * 2)
+    run(["ffmpeg", "-v", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(source),
+         "-map", "0:v:0", "-an", "-vf", f"scale={width}:{height},setsar=1", "-c:v", "libx264",
+         "-threads", "2", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output)])
+    checked = next(s for s in probe(output)["streams"] if s["codec_type"] == "video")
+    if int(checked.get("nb_frames", 0)) != frames or checked["r_frame_rate"] != "24/1":
+        raise PublicError("The SAM working copy changed the prepared frame timeline.")
+    return {"width": width, "height": height, "frames": frames, "duration": frames / 24, "fps": 24}
+
+
+def validate_guide_media(path: Path, metadata: dict):
+    """Check the actual provider-bound artifact, including the reference-file limit."""
+    size = path.stat().st_size
+    if not 0 < size <= 50 * 1024 * 1024:
+        raise PublicError("The prepared reference video exceeds the provider's 50 MB limit.", code="guide_media_invalid")
+    checked = probe(path)
+    video = next((stream for stream in checked.get("streams", []) if stream.get("codec_type") == "video"), None)
+    duration = float(checked.get("format", {}).get("duration", 0))
+    if (not video or (video["width"], video["height"]) != (metadata["width"], metadata["height"])
+            or int(video.get("nb_frames", 0)) != metadata["frames"] or video.get("r_frame_rate") != "24/1"
+            or not math.isfinite(duration) or abs(duration - metadata["duration"]) > .1):
+        raise PublicError("The generation guide changed the prepared dimensions or frame timeline.", code="guide_media_invalid")
+    require_audio_duration(checked, metadata["duration"])
+    return {"bytes": size, "width": video["width"], "height": video["height"],
+            "frames": int(video["nb_frames"]), "fps": 24, "duration": duration}
 
 
 def normalize_reference(raw: Path, output: Path):
@@ -167,7 +263,7 @@ def select_label(archive: Path, metadata: dict, *, require_continuous: bool = Tr
         with zipfile.ZipFile(archive) as masks:
             entries = sorted(name for name in masks.namelist() if name.startswith("labels/") and name.endswith(".png"))
             expected = [f"labels/labels_{i:05d}.png" for i in range(frames)]
-            if entries != expected or any(masks.getinfo(name).file_size > 2_000_000 for name in entries):
+            if entries != expected or any(masks.getinfo(name).file_size > 8_000_000 for name in entries):
                 raise PublicError("Tracking did not return one mask for every frame. Try a clearer shot.")
             def read(index):
                 with Image.open(BytesIO(masks.read(entries[index]))) as image:

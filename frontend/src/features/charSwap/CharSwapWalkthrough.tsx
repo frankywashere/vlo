@@ -716,7 +716,7 @@ export function CharSwapWalkthrough({
                     size="small"
                     label={replaceAllPeople ? "All people" : `${targets.length} ${targets.length === 1 ? "person" : "people"} selected`}
                   />
-                  <Chip size="small" label="Native resolution" />
+                  <Chip size="small" label="Up to 768p guide · 24 fps" />
                   <Chip size="small" label="Audio included" />
                 </Stack>
               )}
@@ -844,7 +844,7 @@ export function CharSwapWalkthrough({
                 </>
               )}
               {step === "people" && (
-                <PeopleStep demo={demo} maxPeople={live ? 1 : 3} />
+                <PeopleStep demo={demo} />
               )}
               {step === "references" && (
                 <ReferencesStep
@@ -874,11 +874,15 @@ export function CharSwapWalkthrough({
                       trackingUrl={pipeline.job.tracking_url}
                       segments={pipeline.job.tracking_segments}
                       target={targets[0]}
+                      targets={targets}
+                      references={targets.map((target) => ({targetId: target.id,
+                        asset: references.find((reference) => reference.id === assignments[target.id])}))}
                       duration={pipeline.job.duration ?? trim[1] - trim[0]}
                       width={pipeline.job.width ?? clip?.width ?? 854}
                       height={pipeline.job.height ?? clip?.height ?? 480}
                       busy={pipeline.busy}
                       errorSegmentId={pipeline.trackingErrorSegmentId}
+                      errorMessage={pipeline.error}
                       message={pipeline.job.message}
                       initialChoices={pipeline.job.tracking_choices}
                       onApply={pipeline.resolveTracking}
@@ -895,6 +899,7 @@ export function CharSwapWalkthrough({
                       }
                       enhancedCharacterMasking={enhancedCharacterMasking}
                       replaceAllPeople={replaceAllPeople}
+                      targetCount={replaceAllPeople ? 1 : targets.length}
                       selectedLabel={pipeline.job?.selected_label}
                       maskStyle={pipeline.job?.mask_style}
                       trackingContinuous={pipeline.job?.tracking_continuous}

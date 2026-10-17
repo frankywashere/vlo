@@ -1,3 +1,5 @@
+import { MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
+
 export type Step =
   "clip" | "trim" | "people" | "references" | "matches" | "access" | "review";
 
@@ -150,7 +152,8 @@ export function toggleTarget(
 ): WalkthroughState {
   if (state.replaceAllPeople) state = setReplaceAllPeople(state, false);
   if (state.targets.some((person) => person.id === target.id)) {
-    const targets = state.targets.filter((person) => person.id !== target.id);
+    const targets = state.targets.filter((person) => person.id !== target.id)
+      .map((person, index) => ({...person, color: TARGET_COLORS[index]}));
     const assignments = { ...state.assignments };
     delete assignments[target.id];
     const issues = state.issues.filter((issue) => issue.targetId !== target.id);
@@ -163,8 +166,8 @@ export function toggleTarget(
     return { ...state, targets, assignments, issues, decisions };
   }
 
-  if (!state.clip || !isValidAnchor(target, state.trim)) return state;
-  return { ...state, targets: [...state.targets, target] };
+  if (!state.clip || state.targets.length >= MAX_TARGET_PEOPLE || !isValidAnchor(target, state.trim)) return state;
+  return { ...state, targets: [...state.targets, {...target, color: TARGET_COLORS[state.targets.length]}] };
 }
 
 export function setReference(
@@ -291,6 +294,10 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
     case "people":
       if (state.targets.length === 0)
         return "Select at least one person to replace.";
+      if (state.targets.length > MAX_TARGET_PEOPLE || new Set(state.targets.map((target) => target.id)).size !== state.targets.length)
+        return "Choose up to five different people to replace.";
+      if (state.replaceAllPeople && (state.targets.length !== 1 || state.targets[0].id !== ALL_PEOPLE_TARGET_ID))
+        return "Choose Replace all people or select individual people.";
       if (state.targets.some((target) => !isValidAnchor(target, state.trim))) {
         return "Select your people again in the chosen section.";
       }
@@ -329,7 +336,7 @@ function isValidAnchor(target: TargetPerson, trim: [number, number]): boolean {
     y >= 0 &&
     y <= 1 &&
     time >= trim[0] &&
-    time <= trim[1]
+    time < trim[1]
   );
 }
 

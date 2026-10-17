@@ -29,8 +29,8 @@ def test_anchor_must_be_inside_trimmed_section_and_multiple_targets_are_rejected
         options(anchor={"x": .5, "y": .5, "time": 4})
     with pytest.raises(ValidationError):
         options(targets=[{"x": .5, "y": .5}])
-    assert dimensions(1080, 1920) == (270, 480, 270, 480)
-    assert dimensions(768, 1920) == (192, 480, 256, 480)
+    assert dimensions(1080, 1920, preparation_version=1) == (270, 480, 270, 480)
+    assert dimensions(768, 1920, preparation_version=1) == (192, 480, 256, 480)
 
 
 def archive(path: Path, arrays):

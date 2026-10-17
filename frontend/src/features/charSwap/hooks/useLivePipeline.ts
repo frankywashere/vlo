@@ -165,11 +165,13 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       ...published,
       ...(published.message ? { message: safeMessage(published.message, apiKey, session.current?.token) } : {}),
     };
-    for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url"] as const) {
+    for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url", "reference_url"] as const) {
       if ([apiKey.trim(), session.current?.token].some((secret) => secret && clean[field]?.includes(secret))) {
         delete clean[field];
       }
     }
+    if (clean.reference_urls?.some((url) => [apiKey.trim(), session.current?.token].some((secret) => secret && url.includes(secret))))
+      delete clean.reference_urls;
     currentJob.current = clean;
     setJob(clean);
     setPreparationProgress(clean.upload_confirmation_pending

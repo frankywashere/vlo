@@ -11,10 +11,11 @@ import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
 
 interface LiveTrackingStepProps {
+  targetCount?: number;
   replaceAllPeople?: boolean;
   enhancedCharacterMasking?: boolean;
   selectedLabel?: number;
-  maskStyle?: "depth" | "cyan_overlay" | "gray" | "none";
+  maskStyle?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
   trackingContinuous?: boolean;
   trackingPerformed?: boolean;
   sceneCutCount?: number;
@@ -34,6 +35,7 @@ interface LiveTrackingStepProps {
 }
 
 export function LiveTrackingStep({
+  targetCount = 1,
   replaceAllPeople = false,
   enhancedCharacterMasking = false,
   selectedLabel,
@@ -57,7 +59,7 @@ export function LiveTrackingStep({
 }: LiveTrackingStepProps) {
   const ready = status === "ready";
   const wholeClipReview =
-    (replaceAllPeople || !trackingPerformed || trackingContinuous === false || (sceneCutCount ?? 0) > 0);
+    (replaceAllPeople || targetCount > 1 || !trackingPerformed || trackingContinuous === false || (sceneCutCount ?? 0) > 0);
   const [playable, setPlayable] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const failed = status === "failed";
@@ -79,14 +81,14 @@ export function LiveTrackingStep({
       {ready && wholeClipReview && !replaceAllPeople && (
         <Alert severity="warning">
           {trackingReviewed
-            ? "Your scene matches have been applied. Review the guide to check that only your selected person is covered in each section."
+            ? targetCount > 1 ? "Your scene matches have been applied. Review the guide to check each selected person's color and replacement in every scene." : "Your scene matches have been applied. Review the guide to check that only your selected person is covered in each section."
             : trackingPerformed
             ? "Automatic identity matching across scene cuts has not been verified. The model may change other people. Review every scene before approving."
             : "Masking is off, so SAM tracking is skipped. MiniMax uses your selected position and timestamp to identify the person. Review your selection before approving."}
         </Alert>
       )}
       {ready && enhancedCharacterMasking && guideUrl && <Typography variant="body2">
-        {replaceAllPeople ? "All detected people are covered by colored depth imagery. The background stays visible. This guide is sent to MiniMax without face mesh or numbers." : maskStyle === "depth" ? "Only the selected person is covered by colored depth imagery. The original background stays visible. This guide is sent to MiniMax without face mesh or numbers." : maskStyle === "gray" || !maskStyle ? "This older guide uses solid gray masking." : "Only the selected person is tinted cyan. This guide is sent to MiniMax without numbers."}
+        {replaceAllPeople ? "All detected people are covered by colored depth imagery. The background stays visible. This guide is sent to MiniMax without face mesh or numbers." : targetCount > 1 ? "Each selected person has a different colored depth guide, matched to their replacement image. Everyone else and the background stay visible. Review every person in every scene." : maskStyle === "depth" ? "Only the selected person is covered by colored depth imagery. The original background stays visible. This guide is sent to MiniMax without face mesh or numbers." : maskStyle === "gray" || !maskStyle ? "This older guide uses solid gray masking." : "Only the selected person is tinted cyan. This guide is sent to MiniMax without numbers."}
       </Typography>}
       {ready && guideUrl && (
         <Box sx={PANEL}>
@@ -119,6 +121,7 @@ export function LiveTrackingStep({
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
             {replaceAllPeople ? "Review every scene. Everyone detected by SAM should be covered. People missed by SAM may not be fully marked."
+              : targetCount > 1 ? "Review every selected person in every scene. Check that each guide color follows the right person and replacement."
               : enhancedCharacterMasking
               ? "Review the whole clip. The colored depth guide should cover your selected person without covering anyone else."
               : wholeClipReview

@@ -36,6 +36,20 @@ const job = {
 };
 
 describe("private account library", () => {
+  it("reopens every persisted person-to-reference assignment, including a shared reference", async () => {
+    vi.mocked(loadAccountJobs).mockResolvedValue([{...job, selection_targets: [
+      {id: "left", name: "Left boxer", anchor: {x: .2, y: .5, time: 0}, reference_index: 0},
+      {id: "right", name: "Right boxer", anchor: {x: .8, y: .5, time: 0}, reference_index: 1},
+      {id: "third", name: "Third person", anchor: {x: .5, y: .5, time: 2}, reference_index: 0},
+    ], reference_urls: ["https://storage.googleapis.com/bear.jpg", "https://storage.googleapis.com/cat.jpg"]}]);
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={() => {}} />);
+    await user.click(await screen.findByRole("button", {name: "Review prepared clip"}));
+    expect(screen.getByAltText("Left boxer replacement reference")).toHaveAttribute("src", "https://storage.googleapis.com/bear.jpg");
+    expect(screen.getByAltText("Right boxer replacement reference")).toHaveAttribute("src", "https://storage.googleapis.com/cat.jpg");
+    expect(screen.getByAltText("Third person replacement reference")).toHaveAttribute("src", "https://storage.googleapis.com/bear.jpg");
+    expect(generateLiveJob).not.toHaveBeenCalled();
+  });
   it("separates resumable preparation and renders from finished videos", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([
       {...job, id: "b".repeat(32), status: "preparing", title: "Preparing clip"},

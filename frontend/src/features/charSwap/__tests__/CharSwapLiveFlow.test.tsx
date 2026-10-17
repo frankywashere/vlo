@@ -89,6 +89,36 @@ afterEach(() => {
 });
 
 describe("live generation approval", () => {
+  it.each([false, true].flatMap((easy) => [false, true].map((enhanced) => ({easy, enhanced}))))("keeps both person-reference assignments in the live walkthrough (Easy: $easy, enhanced: $enhanced)", async ({easy, enhanced}) => {
+    const store = useCharSwapStore.getState();
+    store.setEasyMode(easy);
+    store.setEnhancedCharacterMasking(enhanced);
+    store.selectTarget({id: "other-person", name: "Person 2", color: "#ff4fd8", anchor: {x: .8, y: .5, time: 1}});
+    store.assignReference("other-person", {id: "cat", name: "Cat", url: "blob:cat"});
+    store.visit("references");
+    live.job.status = "failed";
+    live.prepare.mockResolvedValue(true);
+    const user = userEvent.setup();
+    render(<CharSwapWalkthrough />);
+    expect(screen.getByAltText("Person 1 replacement: Reference")).toBeInTheDocument();
+    expect(screen.getByAltText("Person 2 replacement: Cat")).toBeInTheDocument();
+    if (!easy && enhanced) {
+      await user.click(screen.getByRole("button", {name: "Settings"}));
+      await user.type(screen.getByLabelText("reAPI API key"), "fake-multi-reference-key");
+      await user.click(screen.getByRole("button", {name: "Save key"}));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await user.click(screen.getByRole("button", {name: "Check all scenes"}));
+      expect(live.prepare).toHaveBeenCalledWith(expect.objectContaining({targets: expect.arrayContaining([
+        expect.objectContaining({id: "person"}), expect.objectContaining({id: "other-person"}),
+      ]), assignments: {person: "ref", "other-person": "cat"}}));
+      expect(useCharSwapStore.getState().step).toBe("matches");
+    } else {
+      await user.click(screen.getByRole("button", {name: "Choose access"}));
+      expect(live.prepare).not.toHaveBeenCalled();
+      expect(useCharSwapStore.getState().step).toBe("access");
+    }
+    expect(live.generate).not.toHaveBeenCalled();
+  });
   it("shows real flagged scene review, applies choices, then requires review of the rebuilt guide", async () => {
     const user = userEvent.setup();
     live.job.status = "tracking_review";

@@ -28,6 +28,29 @@ function loadedFrame() {
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
 
 describe("still-frame scene tracking review", () => {
+  it("shows the correct person and replacement for overlapping multi-person scene checks", () => {
+    const props = properties();
+    const targets = [props.target, {...props.target, id: "second", name: "Person 2", color: "#ff4fd8"}];
+    const segments = targets.map((target, index) => ({...props.segments[1], id: `person-${index}-cut`, target_id: target.id, target_name: target.name}));
+    render(<SceneTrackingReview {...props} targets={targets} segments={segments} references={[
+      {targetId: targets[0].id, asset: {id: "bear", name: "Bear", url: "blob:bear"}},
+      {targetId: targets[1].id, asset: {id: "cat", name: "Cat", url: "blob:cat"}},
+    ]} />);
+    expect(screen.getByAltText("Person 1 replacement: Bear")).toBeInTheDocument();
+    loadedFrame();
+    fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
+    expect(screen.getByRole("heading", {name: "Section 2 of 2 · Person 2"})).toBeInTheDocument();
+    expect(screen.getByAltText("Person 2 replacement: Cat")).toBeInTheDocument();
+    loadedFrame();
+    fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
+    fireEvent.click(screen.getByRole("button", {name: "Apply matches"}));
+    expect(props.onApply).toHaveBeenCalledWith([
+      {segment_id: "person-0-cut", absent: true, anchor: null},
+      expect.objectContaining({segment_id: "person-1-cut", absent: false}),
+    ]);
+    fireEvent.click(screen.getByRole("button", {name: "Person 1, Section 1, checked"}));
+    expect(screen.getByText("Person 1 is not in this scene. This changes only their replacement.")).toBeInTheDocument();
+  });
   it("shows one masked still without playback or scrubbing controls, and toggles to the same original frame", () => {
     const props = properties();
     const trackingUrl = "https://storage.googleapis.com/test/selection-preview.mp4?signature=test";

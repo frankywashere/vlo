@@ -278,17 +278,62 @@ def test_review_view_exposes_signed_source_and_segments_without_storage_internal
         assert private not in public
 
 
-def test_only_tracking_review_accepts_a_body_between_eight_and_thirty_two_kib(tracking_review):
+def test_only_tracking_review_accepts_the_larger_multi_person_review_body(tracking_review):
     client, _, cloud, provider, headers, job_id, _ = tracking_review
     content_headers = {**headers, "Content-Type": "application/json"}
     content = json.dumps(review_body()) + " " * 9000
     response = client.post(review_endpoint(job_id), headers=content_headers, content=content)
     assert response.status_code in {200, 202}
     too_large = client.post(review_endpoint(job_id), headers=content_headers,
-        content=json.dumps(review_body()) + " " * (32 * 1024))
+        content=json.dumps(review_body()) + " " * (128 * 1024))
     assert too_large.status_code == 413
     ordinary = client.post(f"/api/jobs/{job_id}/generate", headers=content_headers,
         content=json.dumps({"approved": True}) + " " * 9000)
     assert ordinary.status_code == 413
     assert cloud.enqueued == [("prepare", job_id)]
     assert not provider.submissions
+
+
+def test_multi_person_review_dispatches_its_saved_plan_and_retains_target_sections(tracking_review, monkeypatch):
+    import swapmein.tracking as tracking
+    client, records, cloud, provider, headers, job_id, calls = tracking_review
+    job = records.data[f"jobs/{job_id}.json"]
+    section = job["tracking_plan"]["segments"][0]
+    job["tracking_plan"].update(version=2, segments=[
+        {**section, "id": "t0-segment-000", "target_id": "left", "target_name": "Left person"},
+        {**section, "id": "t1-segment-000", "target_id": "right", "target_name": "Right person"},
+    ])
+    dispatched = []
+    def resolve(archive, metadata, plan, choices, output):
+        dispatched.append((plan["version"], copy.deepcopy(choices)))
+        output.write_bytes(b"reviewed labels")
+        return {"coverage": [2] * 120, "assignments": [{"target_id": "left"}, {"target_id": "right"}]}
+    monkeypatch.setattr(tracking, "resolve_multi_tracking", resolve)
+    choices = [{**selected_choice(), "segment_id": "t0-segment-000"},
+               {"segment_id": "t1-segment-000", "absent": True}]
+    response = client.post(review_endpoint(job_id), headers=headers, json=review_body(choices))
+    assert response.status_code == 202
+    assert dispatched == [(2, [{**choices[0]}, {**choices[1], "anchor": None}])]
+    assert [section["target_id"] for section in response.json()["tracking_segments"]] == ["left", "right"]
+    assert not calls["resolved"] and not provider.submissions
+    assert cloud.enqueued == [("prepare", job_id)]
+
+
+@pytest.mark.parametrize("code", ["tracking_background", "tracking_target_conflict"])
+def test_multi_person_review_error_returns_the_specific_target_scene(tracking_review, monkeypatch, code):
+    import swapmein.tracking as tracking
+    client, records, cloud, provider, headers, job_id, _ = tracking_review
+    job = records.data[f"jobs/{job_id}.json"]
+    job["tracking_plan"]["version"] = 2
+    job["tracking_plan"]["segments"][0]["id"] = "t1-segment-000"
+    def reject(*args):
+        error = PublicError("Choose the matching person again.", code=code)
+        error.segment_id = "t1-segment-000"
+        raise error
+    monkeypatch.setattr(tracking, "resolve_multi_tracking", reject)
+    response = client.post(review_endpoint(job_id), headers=headers,
+        json=review_body([{**selected_choice(), "segment_id": "t1-segment-000"}]))
+    assert response.status_code == 400
+    assert response.json()["segment_id"] == "t1-segment-000"
+    assert response.json()["code"] == code
+    assert job["status"] == "tracking_review" and not cloud.enqueued and not provider.submissions

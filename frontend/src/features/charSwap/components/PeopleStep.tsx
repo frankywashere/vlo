@@ -21,12 +21,13 @@ import type { NormalizedPoint } from "../utils/videoGeometry";
 import { createLocalId } from "../utils/createLocalId";
 import { VideoPreview } from "./VideoPreview";
 import { PANEL } from "./stepStyles";
+import { MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 
 interface PeopleStepProps {
   demo: DemoManifest | null;
   maxPeople?: number;
 }
-export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
+export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepProps) {
   const { clip, trim, targets, replaceAllPeople, setReplaceAllPeople, selectTarget, renameTarget, setError } =
     useCharSwapStore(
       useShallow((s) => ({
@@ -48,9 +49,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
       !targets.some((p) => p.id === person.id)
     ) {
       setError(
-        maxPeople === 1
-          ? "The live beta supports one person per swap. Remove the current selection to choose someone else."
-          : "Choose up to three people in this UI preview.",
+        `Choose up to ${maxPeople} people. Remove a selection to choose someone else.`,
       );
       return;
     }
@@ -97,14 +96,14 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
       return;
     }
     const index =
-      [1, 2, 3].find(
+      [1, 2, 3, 4, 5].find(
         (number) =>
           !targets.some((target) => target.name === `Person ${number}`),
       ) ?? targets.length + 1;
     choose({
       id: createLocalId(),
       name: `Person ${index}`,
-      color: ["#75baff", "#d3a3ff", "#80d5ba"][index - 1] ?? "#80d5ba",
+      color: TARGET_COLORS[targets.length % TARGET_COLORS.length],
       anchor: { ...point, time: video.currentTime },
       thumbnail: captureAnchor(video, point),
     });
@@ -120,7 +119,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
         </Button>
         <Typography variant="body2" color="text.secondary" sx={{mt: 1}}>
           Use one reference image for everyone in every scene. Each person becomes a separate version of that character.
-          {replaceAllPeople ? " Tap a person below to switch back to a specific person." : " Or tap a specific person below."}
+          {replaceAllPeople ? " Tap a person below to switch back to individual selections." : " Or tap up to five people below and give each their own replacement."}
         </Typography>
       </Box>
       <VideoPreview
@@ -133,9 +132,9 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
           <>
             {sample.map((person) => {
               const box = boxAtTime(person, time);
-              const selected = targets.some(
-                (target) => target.id === person.id,
-              );
+              const selectedTarget = targets.find((target) => target.id === person.id);
+              const selected = Boolean(selectedTarget);
+              const color = selectedTarget?.color ?? person.color;
               return (
                 box && (
                   <Box
@@ -150,9 +149,9 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
                       top: `${box.y * 100}%`,
                       width: `${box.width * 100}%`,
                       height: `${box.height * 100}%`,
-                      border: `${selected ? 3 : 1}px solid ${selected ? person.color : "#ffffff70"}`,
+                      border: `${selected ? 3 : 1}px solid ${selected ? color : "#ffffff70"}`,
                       borderRadius: 1.5,
-                      bgcolor: selected ? `${person.color}12` : "transparent",
+                      bgcolor: selected ? `${color}12` : "transparent",
                       cursor: "pointer",
                       minWidth: 44,
                       minHeight: 44,
@@ -165,7 +164,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
                         position: "absolute",
                         top: 6,
                         left: 6,
-                        bgcolor: selected ? person.color : "#121212dd",
+                        bgcolor: selected ? color : "#121212dd",
                         color: selected ? "#102133" : "white",
                         borderRadius: 0.75,
                         px: 1,
@@ -249,7 +248,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
           sx={{ mb: targets.length ? 2 : 0 }}
         >
           <Typography fontWeight={600}>People to replace</Typography>
-          <Chip size="small" label={replaceAllPeople ? "Everyone" : `${targets.length} selected`} />
+          <Chip size="small" label={replaceAllPeople ? "Everyone" : `${targets.length} of ${maxPeople} selected`} />
         </Stack>
         {!targets.length && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -302,8 +301,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
       </Box>
       {clip.mode === "upload" && maxPeople > 1 && !replaceAllPeople && (
         <Alert severity="info" role="note">
-          These taps save your starting points. Automatic masks and tracking
-          will be connected in the next build.
+          Tap each person once, on a clear frame. Each selection gets its own replacement image; everyone else stays in the shot.
         </Alert>
       )}
       <Typography variant="body2" color="text.secondary">

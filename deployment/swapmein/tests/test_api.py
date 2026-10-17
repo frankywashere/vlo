@@ -411,7 +411,8 @@ def test_direct_upload_accepts_100mib_without_body_or_worker_and_confirms_once(a
     response = client.post("/api/uploads", headers=headers, json=upload_options())
     assert response.status_code == 201
     ticket = response.json()
-    assert set(ticket) == {"id", "source", "reference"}
+    assert set(ticket) == {"id", "source", "reference", "references"}
+    assert ticket["references"] == [ticket["reference"]]
     assert not cloud.enqueued and not provider.submissions
     assert "control/preparation.json" not in records.data
     assert not records.data["control/uploads.json"].get("active")
