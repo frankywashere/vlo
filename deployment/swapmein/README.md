@@ -302,8 +302,8 @@ preconditions enforce admission under races.
 | Identities | `swapmein-gateway@...`, `proof-worker@...`, `proof-shutdown@...` in that project; derive/verify actual attached identities |
 
 Before every worker activation the gateway requires the existing configured
-positive Cloud Run native spend cap of at most **CAD 7/month**. The separate
-CAD 10 budget alert is not a universal instantaneous cap; storage, builds and
+positive Cloud Run native spend cap of at most **CAD 20/month**. Budget alerts
+are separate from that cap; storage, builds and
 other non-Run charges remain separate. A daily job allowance does not guarantee
 all attempts fit that cap.
 
