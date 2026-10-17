@@ -22,7 +22,14 @@ class Request(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ready", "device": "cpu", "version": "audio-depth-guide-v5", "operations": ["audio", "compose"]}
+    # Import the complete runtime used by /compose before reporting readiness.
+    # The retained audio base did not include Pillow; a source-only overlay can
+    # otherwise look healthy and fail only after expensive GPU preparation.
+    from composite import compose
+    from PIL import __version__ as pillow_version
+    return {"status": "ready", "device": "cpu", "version": "audio-depth-guide-v6",
+            "operations": ["audio", "compose"], "compositor_ready": callable(compose),
+            "pillow_version": pillow_version}
 
 
 class TargetStyle(BaseModel):

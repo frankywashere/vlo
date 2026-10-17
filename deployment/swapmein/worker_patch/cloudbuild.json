@@ -7,9 +7,9 @@
         "--base",
         "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:809458c2d9bd5d718df704763dfd6b402556c606c54df9e6ef5844c8d7ccf5ff",
         "--new_layer",
-        "overlay_patch.tar",
+        "overlay_cpu_pillow_patch.tar",
         "--new_tag",
-        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio:multi-768-v1"
+        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio:multi-768-v2-pillow11-3"
       ]
     }
   ],

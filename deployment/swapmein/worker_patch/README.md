@@ -2,21 +2,49 @@
 
 These recipes append small source layers to the existing immutable private
 worker images. Model weights and dependencies remain in their base layers;
-no model download, reinstall or checkpoint duplication is required for this
-patch. A built tag alone is not proof of deployment or successful inference.
+no model download, model reinstall or checkpoint duplication is required for
+this patch. The CPU overlay also supplies its pinned Pillow runtime dependency.
+A built tag alone is not proof of deployment or successful inference.
 
 ## Layer contents and pinned bases
 
 | Recipe | Layer members | Pinned base | New tag |
 | --- | --- | --- | --- |
-| [cloudbuild.json](cloudbuild.json) | `app/app.py`, `app/composite.py`, **`app/common.py`** | audio `sha256:809458c2d9bd5d718df704763dfd6b402556c606c54df9e6ef5844c8d7ccf5ff` | `audio:multi-768-v1` |
+| [cloudbuild.json](cloudbuild.json) | `app/app.py`, `app/composite.py`, **`app/common.py`**, complete pinned Pillow wheel under CPython 3.12 site-packages | audio `sha256:809458c2d9bd5d718df704763dfd6b402556c606c54df9e6ef5844c8d7ccf5ff` | `audio:multi-768-v2-pillow11-3` |
 | [cloudbuild.gpu.json](cloudbuild.gpu.json) | **`app/common.py`** | GPU `sha256:6b1bb4e7f1ac184f8a49831d26c89d06375e1b8d4fa8af8dce96482d49a259fd` | `gpu:working-768-v1` |
 
-Both recipes expect `overlay_patch.tar` with exactly those paths, built from
-these checked-in source files. Stage each tar and its recipe separately; do not
-include source media, checkpoints, credentials or unrelated files. Both append
+The GPU recipe expects `overlay_patch.tar`. The CPU recipe deliberately expects
+the different name `overlay_cpu_pillow_patch.tar`, preventing an old source-only
+archive from being reused without the dependency. Stage each tar and its recipe
+separately; do not include source media, checkpoints, credentials or unrelated files. Both append
 recipes use the pinned `gcrane` builder and existing project registry/log bucket.
 The GPU layer deliberately retains its existing model code and dependencies.
+
+### CPU dependency staging
+
+The retained CPU base has NumPy but **does not have Pillow**. Copying only Python
+source would fail when the compositor imports `PIL`. Use
+[`stage_cpu_overlay.py`](stage_cpu_overlay.py) to build the complete small layer:
+
+```sh
+.venv/bin/python worker_patch/stage_cpu_overlay.py --output /absolute/path/to/empty-cpu-build
+gcloud --account=frankywashere@gmail.com --project=charswap-franky-20261013 \
+  builds submit /absolute/path/to/empty-cpu-build --region=us-east4 \
+  --config=/absolute/path/to/empty-cpu-build/cloudbuild.json
+```
+
+The staging script downloads the official [Pillow 11.3.0 PyPI wheel](https://pypi.org/project/pillow/11.3.0/)
+for CPython 3.12, Linux x86_64, manylinux 2.27/2.28. Its pinned SHA256 is
+`676b2815362456b5b3216b4fd5bd89d362100dc6f4945154ff172e206a22c024`.
+It verifies that exact hash and ABI metadata, then includes **all** `PIL/`,
+`pillow.libs/` and `pillow-11.3.0.dist-info/` members under
+`usr/local/lib/python3.12/site-packages/`; the bundled shared libraries must not
+be omitted. This wheel is compatible with the retained Debian Bookworm base.
+No Torch or model layers are pulled/rebuilt by staging. An optional `--wheel`
+argument accepts a cached wheel with the same required hash. The deterministic
+layer and `dependency-manifest.json` record the wheel, layer and source hashes.
+The CPU health endpoint imports the full compositor and reports the Pillow
+version, so a missing runtime dependency cannot report healthy readiness.
 
 **`common.py` must be patched in both images.** Its shared `probe` accepts the
 new prepared working geometry: short side at most 768, long side at most 1920,
