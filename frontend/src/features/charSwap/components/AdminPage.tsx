@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Card, CardContent, Container, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
-import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, setApiKeyAccess, setCreditStaff } from "../services/commerce";
+import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, setApiKeyAccess } from "../services/commerce";
+import { StaffAccessPanel } from "./StaffAccessPanel";
 import { CreditGrantPanel } from "./CreditGrantPanel";
 import { DEFAULT_MARGIN_MODEL, marginPricing } from "../utils/marginPricing";
-import type { MarginModel } from "../services/commerce";
+import type { StaffPermission, MarginModel } from "../services/commerce";
 import type { CreditAdmin, CreditPack } from "../services/commerce";
 
 export function AdminPage() {
@@ -14,7 +15,8 @@ export function AdminPage() {
   const [useMargin, setUseMargin] = useState(false);
   const estimate = marginPricing(margin);
   const [email, setEmail] = useState("");
-  const [staffEmail, setStaffEmail] = useState("");
+  const permissions: StaffPermission[] = admin?.permissions ?? (admin?.role === "owner" ? ["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"] : admin?.role === "pricing_admin" ? ["pricing"] : []);
+  const can = (permission: StaffPermission) => permissions.includes(permission);
   const [privateKey, setPrivateKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -67,23 +69,24 @@ export function AdminPage() {
       {message && <Alert severity="success">{message}</Alert>}
       {!admin && !error && <Typography>Loading admin settings…</Typography>}
       {admin && <>
+        {permissions.length === 0 && <Alert severity="info">Read-only admin access. You can view all sections, but cannot change settings or grant credits.</Alert>}
         <Card variant="outlined"><CardContent><Stack spacing={2}>
           <Typography variant="h5">Service controls</Typography>
           <Typography>Stripe mode: {admin.features.stripe_mode === "live" ? "Live payments (USD)" : "Sandbox"}</Typography>
-          <Typography color="text.secondary">Only an owner can change these. Turning a service off stops new requests; it does not cancel work already submitted.</Typography>
+          <Typography color="text.secondary">Requires service-control permission. Turning a service off stops new requests; it does not cancel work already submitted.</Typography>
           <Box>
-            <FormControlLabel control={<Switch checked={admin.features.checkout} disabled={busy || admin.role !== "owner" || (!admin.features.readiness.checkout && !admin.features.checkout)} onChange={(event) => void updateFeature("checkout", event.target.checked)} />} label="Enable credit checkout" />
+            <FormControlLabel control={<Switch checked={admin.features.checkout} disabled={busy || !can("service_controls") || (!admin.features.readiness.checkout && !admin.features.checkout)} onChange={(event) => void updateFeature("checkout", event.target.checked)} />} label="Enable credit checkout" />
             {!admin.features.readiness.checkout && <Typography variant="body2" color="text.secondary">Requires the matching private Stripe key and webhook signing secret on the gateway.</Typography>}
           </Box>
           <Box>
-            <FormControlLabel control={<Switch checked={admin.features.credit_generation} disabled={busy || admin.role !== "owner" || (!admin.features.readiness.credit_generation && !admin.features.credit_generation)} onChange={(event) => void updateFeature("credit_generation", event.target.checked)} />} label="Enable generation using recastfx credits" />
+            <FormControlLabel control={<Switch checked={admin.features.credit_generation} disabled={busy || !can("service_controls") || (!admin.features.readiness.credit_generation && !admin.features.credit_generation)} onChange={(event) => void updateFeature("credit_generation", event.target.checked)} />} label="Enable generation using recastfx credits" />
             {!admin.features.readiness.credit_generation && <Typography variant="body2" color="text.secondary">Requires the private provider key on the gateway.</Typography>}
           </Box>
         </Stack></CardContent></Card>
         <Card variant="outlined"><CardContent><Stack spacing={2}>
           <Typography variant="h5">Audio processing</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.audio_processing ?? false}
-            disabled={busy || admin.role !== "owner"}
+            disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
               const enabled = event.target.checked;
               void run(async () => {
@@ -93,9 +96,9 @@ export function AdminPage() {
               });
             }} />} label="Enable audio processing" />
           <Typography color="text.secondary">Off by default. When off, the source soundtrack is sent with the clip and the provider’s returned audio is kept. When on, vocals are separated and pitch-shifted before generation, then the original soundtrack is restored on export.</Typography>
-          <Typography variant="body2" color="text.secondary">Owner only. Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
+          <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></CardContent></Card>
-        {(admin.role === "owner" || admin.role === "pricing_admin") && <Card variant="outlined"><CardContent><Stack spacing={2}>
+        <Card variant="outlined"><CardContent><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography variant="h5">Credit pricing</Typography>
           <Typography color="text.secondary">All prices are in USD. One credit equals US$0.01. Generation pricing scales with clip length. Credit packs start at US$20.00.</Typography>
           <FormControlLabel control={<Switch checked={useMargin} onChange={(event) => setUseMargin(event.target.checked)} />} label="Calculate pricing from target margin" />
@@ -120,26 +123,24 @@ export function AdminPage() {
           </Stack>)}
           <Stack direction="row" spacing={1}><Button disabled={busy || packs.length >= 8} onClick={() => setPacks((current) => [...current, { id: "", name: "", credits: 2000, price_cents: 2000, active: false }])}>Add pack</Button>
             <Button variant="contained" disabled={busy || (useMargin ? !estimate : !rate) || packs.length === 0} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, credits_per_generation: (useMargin ? estimate!.credits : Math.round(Number(rate) * 100)) * 15, margin_model: useMargin ? margin : null }); setAdmin({ ...admin, catalog }); setRate((catalog.credits_per_generation / 1500).toFixed(2)); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
-        </Stack></CardContent></Card>}
-        {admin.role === "owner" && <Card variant="outlined"><CardContent><Stack spacing={2}>
+        </Stack></Box></CardContent></Card>
+        <Card variant="outlined"><CardContent><Box component="fieldset" disabled={busy || !can("provider_key")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography variant="h5">Private generation account</Typography>
-          <Typography color="text.secondary">This key funds customer generations. It is validated and stored in Google Secret Manager. Customers and pricing staff cannot view it.</Typography>
+          <Typography color="text.secondary">This key funds customer generations. It is validated and stored in Google Secret Manager. The saved key is never displayed.</Typography>
           <TextField label="Private reAPI key" type="password" value={privateKey} onChange={(event) => setPrivateKey(event.target.value)} autoComplete="off" />
           <Button variant="outlined" disabled={busy || !privateKey.trim()} onClick={() => void run(async () => {
             await savePrivateProviderKey(privateKey.trim()); setPrivateKey("");
             setAdmin(await loadCreditAdmin()); setMessage("Private generation key saved securely. You can now enable credit-funded generation.");
           })}>Save private key</Button>
-        </Stack></CardContent></Card>}
-        {admin.role === "owner" && <CreditGrantPanel />}
-        {admin.role === "owner" && <Card variant="outlined"><CardContent><Stack spacing={2}>
+        </Stack></Box></CardContent></Card>
+        <CreditGrantPanel readOnly={!can("grant_credits")} />
+        <Card variant="outlined"><CardContent><Box component="fieldset" disabled={busy || !can("api_key_access")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography variant="h5">Account permissions</Typography>
           <Typography color="text.secondary">Allow a specific Google account to bring its own provider key.</Typography>
           <TextField label="User Google email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="off" />
           <Stack direction="row" spacing={1}><Button disabled={busy || !email.trim()} onClick={() => void run(async () => { await setApiKeyAccess(email, true); setMessage("API-key access enabled."); setEmail(""); })}>Enable key access</Button><Button disabled={busy || !email.trim()} onClick={() => void run(async () => { await setApiKeyAccess(email, false); setMessage("API-key access disabled."); setEmail(""); })}>Disable key access</Button></Stack>
-          <Typography variant="h6">Pricing team</Typography>
-          <TextField label="Team member Google email" type="email" value={staffEmail} onChange={(event) => setStaffEmail(event.target.value)} />
-          <Stack direction="row" spacing={1}><Button disabled={busy || !staffEmail.trim()} onClick={() => void run(async () => { await setCreditStaff(staffEmail, "pricing_admin", true); setMessage("Pricing access enabled."); setStaffEmail(""); })}>Allow price editing</Button><Button disabled={busy || !staffEmail.trim()} onClick={() => void run(async () => { await setCreditStaff(staffEmail, "pricing_admin", false); setMessage("Pricing access removed."); setStaffEmail(""); })}>Remove pricing access</Button></Stack>
-        </Stack></CardContent></Card>}
+        </Stack></Box></CardContent></Card>
+        <StaffAccessPanel canManage={can("manage_staff")} grantable={permissions} />
       </>}
     </Stack>
   </Container>;

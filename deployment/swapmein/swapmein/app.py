@@ -35,7 +35,7 @@ from .diagnostics import emit, provider_billing
 from .accounts import lookup_credit_recipient, verify_account, bind_job, archive_completed, index_path
 from .job_settings import settings_used
 from .commerce import (credit_grant_history, grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
-                       save_catalog, staff_role, wallet_view, feature_view, save_features)
+                       save_catalog, staff_role, staff_permissions, require_permission, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 from .job_key import protect_key, recover_key
 from .provider_credentials import server_provider_key, save_server_provider_key
@@ -316,7 +316,7 @@ def client_diagnostic(body: ClientDiagnostic, x_firebase_token: str | None = Hea
 def admin_grant_credits(body: CreditGrant, x_firebase_token: str | None = Header(default=None)):
     actor = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    require_staff(records, actor, {"owner"})
+    require_permission(records, actor, "grant_credits")
     email = valid_account_email(body.email)
     recipient = lookup_credit_recipient(settings.project, email)
     return grant_credits(records, actor, recipient, body.credits, body.reason, body.request_id)
@@ -379,6 +379,7 @@ class StaffUpdate(BaseModel):
     email: str
     role: Literal["pricing_admin", "viewer"]
     active: bool
+    permissions: list[Literal["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"]] | None = Field(default=None, max_length=7)
 
 
 class ApiKeyAccessUpdate(BaseModel):
@@ -421,7 +422,7 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records)}
+    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records)}
 
 
 class PipelineSettingsUpdate(BaseModel):
@@ -455,7 +456,7 @@ def update_commerce_catalog(body: CatalogUpdate, x_firebase_token: str | None = 
 def update_private_provider_key(body: PrivateProviderKey, x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    require_staff(records, account, {"owner"})
+    require_permission(records, account, "provider_key")
     key = provider_key(body.key)
     balance = selected_provider("reAPI").balance(key)
     save_server_provider_key(key)
@@ -463,24 +464,40 @@ def update_private_provider_key(body: PrivateProviderKey, x_firebase_token: str 
     return {"configured": True, "balance_usd": round(balance / 1000, 3)}
 
 
+@app.get("/api/commerce/admin/staff")
+def get_commerce_staff(email: str, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, actor, {"owner", "pricing_admin", "viewer"})
+    email = valid_account_email(email)
+    target = {"email": email}
+    role = staff_role(records, target)
+    return {"email": email, "role": role or "viewer", "active": bool(role), "permissions": staff_permissions(records, target)}
+
+
 @app.post("/api/commerce/admin/staff")
 def update_commerce_staff(body: StaffUpdate, x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    require_staff(records, account, {"owner"})
+    require_permission(records, account, "manage_staff")
     email = valid_account_email(body.email)
+    permissions = sorted(set(body.permissions if body.permissions is not None else (["pricing"] if body.role == "pricing_admin" else [])))
+    if not set(permissions).issubset(staff_permissions(records, account)):
+        raise PublicError("You can grant only permissions you have.", 403)
+    if staff_role(records, {"email": email}) == "owner":
+        raise PublicError("Owner access is managed separately from staff permissions.", 409)
     path = f"commerce/staff/{digest(email)}.json"
     record = records.update(path, lambda current: {"email": email, "role": body.role,
-        "active": body.active, "updated_at": time.time(), "updated_by": account["email"]})
-    emit("admin_staff_changed", actor_id=digest(account["email"]), target_id=digest(email), role=body.role, active=body.active)
-    return {"email": record["email"], "role": record["role"], "active": record["active"]}
+        "permissions": permissions, "active": body.active, "updated_at": time.time(), "updated_by": account["email"]})
+    emit("admin_staff_changed", actor_id=digest(account["email"]), target_id=digest(email), role=body.role, active=body.active, permissions=permissions)
+    return {"email": record["email"], "role": record["role"], "active": record["active"], "permissions": permissions}
 
 
 @app.post("/api/commerce/admin/api-key-access")
 def update_api_key_access(body: ApiKeyAccessUpdate, x_firebase_token: str | None = Header(default=None)):
     actor = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    require_staff(records, actor, {"owner"})
+    require_permission(records, actor, "api_key_access")
     email = valid_account_email(body.email)
     path = f"commerce/api-key-access/{digest(email)}.json"
     record = records.update(path, lambda current: {"email": email, "enabled": body.enabled,

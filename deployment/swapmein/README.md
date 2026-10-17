@@ -434,3 +434,20 @@ under an expandable Settings used section, even after temporary job records
 expire. Missing historical fields remain unknown rather than taking current
 site defaults. Preparation media dimensions and provider model/quality are saved
 at their respective processing/submission stages for future jobs.
+
+### Staff access
+
+The Admin Staff permissions panel loads a Google email's current access before
+saving. Active staff with no editing permissions have a read-only dashboard.
+Optional permissions are `pricing`, `grant_credits`, `manage_staff`,
+`service_controls`, `pipeline_settings`, `provider_key` and `api_key_access`.
+Every mutation checks its permission server-side, including direct API calls.
+Staff can inspect current settings and credit-grant history; saved credentials
+are never returned. Personal provider-key eligibility remains a separate per-user
+flag, independent of staff access.
+
+Bootstrap owners retain every permission and cannot be changed through the staff
+panel. Legacy pricing admins retain pricing-only editing unless explicitly
+updated. Delegated staff managers may grant only permissions they themselves
+hold; they cannot elevate themselves or modify bootstrap owners. Staff changes
+record the actor, target, active state and permission set in Cloud Logging.

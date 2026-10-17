@@ -1,7 +1,7 @@
 """Owner-managed pipeline defaults, snapshotted when a new job is created."""
 import time
 
-from .commerce import require_staff
+from .commerce import require_permission
 from .diagnostics import emit
 from .errors import PublicError
 from .security import digest
@@ -17,7 +17,7 @@ def pipeline_settings(records):
 
 
 def save_pipeline_settings(records, actor, revision, audio_processing):
-    require_staff(records, actor, {"owner"})
+    require_permission(records, actor, "pipeline_settings")
 
     def update(current):
         current = current or {}

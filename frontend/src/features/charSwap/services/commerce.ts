@@ -39,7 +39,16 @@ export interface MarginModel {
   reference_seconds: number;
 }
 
+export type StaffPermission = "pricing" | "grant_credits" | "manage_staff" | "service_controls" | "pipeline_settings" | "provider_key" | "api_key_access";
+export interface StaffAccess {
+  email: string;
+  role: "owner" | "pricing_admin" | "viewer";
+  active: boolean;
+  permissions: StaffPermission[];
+}
+
 export interface CreditAdmin {
+  permissions?: StaffPermission[];
   role: "owner" | "pricing_admin" | "viewer";
   features: CreditFeatures;
   pipeline?: PipelineSettings;
@@ -139,8 +148,12 @@ export function savePrivateProviderKey(key: string) {
   return commerceRequest<{configured: boolean; balance_usd: number}>("/api/commerce/admin/provider-key", {key});
 }
 
-export function setCreditStaff(email: string, role: "pricing_admin" | "viewer", active: boolean) {
-  return commerceRequest("/api/commerce/admin/staff", {email, role, active});
+export function setCreditStaff(email: string, role: "pricing_admin" | "viewer", active: boolean, permissions?: StaffPermission[]) {
+  return commerceRequest<StaffAccess>("/api/commerce/admin/staff", {email, role, active, ...(permissions ? {permissions} : {})});
+}
+
+export function loadCreditStaff(email: string) {
+  return commerceRequest<StaffAccess>("/api/commerce/admin/staff?email=" + encodeURIComponent(email));
 }
 
 

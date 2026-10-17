@@ -172,7 +172,7 @@ def test_new_grants_between_history_pages_do_not_repeat_or_skip_older_rows(api, 
     assert refreshed["grants"][0]["request_id"] == "d" * 32
 
 
-def test_grant_history_is_owner_only_and_validates_page_bounds(api, monkeypatch):
+def test_grant_history_is_staff_only_and_validates_page_bounds(api, monkeypatch):
     client, records, _, _ = api
     setup_owner(monkeypatch)
     requests = install_history_listing(records, monkeypatch)
@@ -183,7 +183,8 @@ def test_grant_history_is_owner_only_and_validates_page_bounds(api, monkeypatch)
     monkeypatch.setattr(gateway, "verify_account", lambda *_: USER)
     assert client.get("/api/commerce/admin/grants").status_code == 403
     records.data[f"commerce/staff/{digest(USER['email'])}.json"] = {"email": USER["email"], "role": "pricing_admin", "active": True}
-    assert client.get("/api/commerce/admin/grants").status_code == 403
+    assert client.get("/api/commerce/admin/grants").status_code == 200
+    calls += 1
     def unsigned(*_):
         raise PublicError("Sign in.", 401)
     monkeypatch.setattr(gateway, "verify_account", unsigned)

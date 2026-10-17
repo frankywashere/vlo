@@ -6,7 +6,7 @@ import type { CreditGrantRecord } from "../services/commerce";
 type GrantOperation = {email: string; credits: number; reason: string; requestId: string};
 type GrantReceipt = {email: string; credits: number; balance: number};
 
-export function CreditGrantPanel() {
+export function CreditGrantPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [email, setEmail] = useState("");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
@@ -39,7 +39,7 @@ export function CreditGrantPanel() {
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
 
   async function submitGrant() {
-    if (busy) return;
+    if (readOnly || busy) return;
     const operation = pending ?? {email: email.trim(), credits: Number(amount), reason: reason.trim(), requestId: crypto.randomUUID().replaceAll("-", "")};
     setPending(operation); setBusy(true); setError(""); setReceipt(null);
     try {
@@ -57,6 +57,7 @@ export function CreditGrantPanel() {
   return <Card variant="outlined"><CardContent><Stack spacing={2}>
     <Typography variant="h5">Grant user credits</Typography>
     <Typography color="text.secondary">Add credits to an existing Google account. This does not charge a card or purchase provider credits. Each grant records your identity and reason.</Typography>
+    <Box component="fieldset" disabled={readOnly} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
     <TextField label="Credit recipient email" type="email" value={email} disabled={busy || !!pending} onChange={(event) => setEmail(event.target.value)} />
     <TextField label="Credits to grant" type="number" value={amount} disabled={busy || !!pending} onChange={(event) => setAmount(event.target.value)} inputProps={{min: 1, max: 1000000, step: 1}} />
     <TextField label="Reason for credit grant" value={reason} disabled={busy || !!pending} onChange={(event) => setReason(event.target.value)} inputProps={{maxLength: 300}} multiline minRows={2} />
@@ -65,6 +66,7 @@ export function CreditGrantPanel() {
     <Button variant="contained" disabled={busy || (!pending && !valid)} onClick={() => void submitGrant()} startIcon={busy ? <CircularProgress color="inherit" size={18} /> : undefined}>
       {busy ? "Granting credits…" : pending ? "Retry credit grant" : "Grant credits"}
     </Button>
+    </Stack></Box>
     {receipt && <Alert severity="success" role="status" aria-live="polite">
       <AlertTitle>Credits granted</AlertTitle>
       Granted {receipt.credits} credits to {receipt.email}. Current balance: {receipt.balance} credits.

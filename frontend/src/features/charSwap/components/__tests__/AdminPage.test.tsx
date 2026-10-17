@@ -3,12 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
 
-const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin", ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn() }));
+const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin" | "viewer", ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn() }));
 vi.mock("../../services/commerce", () => ({
   loadCreditAdmin: async () => ({ role: api.role, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
-  savePipelineSettings: api.pipeline, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), setCreditStaff: vi.fn(),
+  savePipelineSettings: api.pipeline, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadCreditStaff: vi.fn(), setCreditStaff: vi.fn(),
 }));
 beforeEach(() => { api.pipeline.mockReset().mockImplementation(async (settings) => ({ ...settings, revision: settings.revision + 1 })); api.role = "owner"; api.grant.mockReset(); api.save.mockReset().mockImplementation(async (catalog) => ({ ...catalog, revision: catalog.revision + 1 })); });
 afterEach(() => cleanup());
@@ -29,9 +29,9 @@ it("lets pricing staff edit prices but not service or account access", async () 
   render(<AdminPage />);
   await waitFor(() => expect(screen.getByRole("heading", { name: "Credit pricing" })).toBeInTheDocument());
   expect(screen.getByRole("switch", { name: "Enable credit checkout" })).toBeDisabled();
-  expect(screen.queryByRole("heading", { name: "Account permissions" })).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Private reAPI key")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", {name: "Grant credits"})).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Account permissions" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Private reAPI key")).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Grant credits"})).toBeDisabled();
 });
 
 
@@ -94,4 +94,15 @@ it("does not let pricing staff change audio behavior", async () => {
   api.role = "pricing_admin";
   render(<AdminPage />);
   expect(await screen.findByRole("switch", { name: "Enable audio processing" })).toBeDisabled();
+});
+
+it("lets read-only staff see every section with all mutations disabled", async () => {
+  api.role = "viewer";
+  render(<AdminPage />);
+  await screen.findByText(/Read-only admin access/);
+  for (const name of ["Service controls", "Audio processing", "Credit pricing", "Private generation account", "Grant user credits", "Account permissions", "Staff permissions"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
+  for (const name of ["Save pricing", "Save private key", "Grant credits", "Enable key access"]) expect(screen.getByRole("button", {name})).toBeDisabled();
+  expect(screen.getByLabelText("Private reAPI key")).toHaveValue("");
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
 });

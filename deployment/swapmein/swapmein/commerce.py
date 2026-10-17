@@ -51,7 +51,7 @@ def feature_view(records) -> dict:
 
 
 def save_features(records, actor: dict, revision: int, checkout: bool, credit_generation: bool) -> dict:
-    require_staff(records, actor, {"owner"})
+    require_permission(records, actor, "service_controls")
     ready = feature_readiness()
     catalog, _ = records.read(CATALOG_PATH)
     catalog = catalog or default_catalog()
@@ -119,6 +119,25 @@ def require_staff(records, account: dict, roles: set[str]) -> str:
     return role
 
 
+STAFF_PERMISSIONS = {"pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"}
+
+
+def staff_permissions(records, account):
+    role = staff_role(records, account)
+    if role == "owner":
+        return sorted(STAFF_PERMISSIONS)
+    if role not in {"pricing_admin", "viewer"}:
+        return []
+    record, _ = records.read(f"commerce/staff/{digest(account['email'].strip().lower())}.json")
+    saved = (record or {}).get("permissions")
+    return sorted(set(saved) & STAFF_PERMISSIONS) if isinstance(saved, list) else (["pricing"] if role == "pricing_admin" else [])
+
+
+def require_permission(records, account, permission):
+    if permission not in staff_permissions(records, account):
+        raise PublicError("Your staff access does not allow this change.", 403)
+
+
 def public_catalog(records) -> dict:
     current, _ = records.read(CATALOG_PATH)
     current = current or default_catalog()
@@ -160,7 +179,7 @@ def margin_credit_rate(model: dict) -> int:
 
 
 def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int, margin_model: dict | None = None) -> dict:
-    require_staff(records, actor, {"owner", "pricing_admin"})
+    require_permission(records, actor, "pricing")
     if margin_model is not None:
         credits_per_generation = margin_credit_rate(margin_model) * 15
     if not 1 <= credits_per_generation <= 100000 or not 1 <= len(packs) <= 8:
@@ -235,7 +254,7 @@ def apply_wallet_change(records, account_id: str, reference: str, amount: int, k
 
 def grant_credits(records, actor: dict, recipient: dict, amount: int, reason: str, request_id: str) -> dict:
     """Reserve an immutable operation before the atomic, idempotent wallet credit."""
-    require_staff(records, actor, {"owner"})
+    require_permission(records, actor, "grant_credits")
     reason = reason.strip()
     if (type(amount) is not int or not 1 <= amount <= 1000000 or not 3 <= len(reason) <= 300
             or not re.fullmatch(r"[a-f0-9]{32}", request_id)):
@@ -286,7 +305,7 @@ def backfill_credit_grant_history(records, *, cursor: str | None = None, limit: 
 
 
 def credit_grant_history(records, actor: dict, *, limit: int = 25, cursor: str | None = None) -> dict:
-    require_staff(records, actor, {"owner"})
+    require_staff(records, actor, {"owner", "pricing_admin", "viewer"})
     if type(limit) is not int or not 1 <= limit <= 50 or (cursor is not None and not 1 <= len(cursor) <= 2048):
         raise PublicError("Choose a valid grant history page.")
     paths, next_cursor = records.list_paths_page(GRANT_HISTORY_PREFIX, limit, cursor)
