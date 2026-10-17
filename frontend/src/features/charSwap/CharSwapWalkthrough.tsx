@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ThemeProvider } from "@mui/material/styles";
 import {
@@ -44,6 +44,7 @@ import { useLiveCredits } from "./hooks/useLiveCredits";
 import { MAX_SOURCE_BYTES } from "./limits";
 import { isSecureLiveOrigin } from "./services/livePipeline";
 import { PreparationProgress } from "./components/PreparationProgress";
+import { isUploadUnconfirmed } from "./model/preparation";
 import { LiveTrackingStep } from "./components/LiveTrackingStep";
 import { SceneTrackingReview } from "./components/SceneTrackingReview";
 import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
@@ -330,6 +331,7 @@ export function CharSwapWalkthrough({
   const [demo, setDemo] = useState<DemoManifest | null>(null);
   const [loadingDemo, setLoadingDemo] = useState(false);
   const [resetDialog, setResetDialog] = useState(false);
+  const [pendingCreate, setPendingCreate] = useState(false);
   const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
   const [accessMode, setAccessMode] = useState<"api-key" | "credits">(
     "credits",
@@ -372,23 +374,27 @@ export function CharSwapWalkthrough({
   const generationCredits = pipeline.job?.generation_credits ?? trimCredits;
   const unknownSubmission = pipeline.job?.status === "submission_unknown";
   const lockedAccess = pipeline.busy || unknownSubmission;
-  const renderCanContinueInLibrary = Boolean(
-    onLibrary && pipeline.job?.generation_started_at
-    && ["generating", "finalizing"].includes(pipeline.job.status),
+  const jobCanContinueInLibrary = Boolean(
+    onLibrary && pipeline.job?.id
+    && !pipeline.job.upload_confirmation_pending
+    && !isUploadUnconfirmed(pipeline.preparationProgress)
+    && !unknownSubmission
+    && !(pipeline.busy && pipeline.job.status === "ready")
+    // A manual generation POST still belongs to this tab until acceptance.
+    // Easy mode submissions already belong to the durable server workflow.
+    && (pipeline.job.status !== "generating"
+      || pipeline.job.generation_started_at !== undefined
+      || pipeline.job.auto_generate)
+    && ["queued", "preparing", "tracking_review", "ready", "generating", "finalizing", "completed", "failed"].includes(pipeline.job.status),
   );
   const liveJobId = pipeline.job?.id;
   useEffect(() => {
     if (pipeline.job) onJobChange?.(pipeline.job, clip?.name ?? "Your swap");
   }, [pipeline.job, clip?.name, onJobChange]);
   useEffect(() => {
-    onBusyChange?.(lockedAccess && !renderCanContinueInLibrary);
-  }, [lockedAccess, renderCanContinueInLibrary, onBusyChange]);
+    onBusyChange?.(lockedAccess);
+  }, [lockedAccess, onBusyChange]);
   const handledCreateRequest = useRef(createRequest);
-  useEffect(() => {
-    if (handledCreateRequest.current === createRequest) return;
-    handledCreateRequest.current = createRequest;
-    if (renderCanContinueInLibrary) startNewSwap();
-  }, [createRequest]);
   useEffect(() => {
     if (live) invalidateTracking();
   }, [liveJobId, live, invalidateTracking]);
@@ -501,14 +507,26 @@ export function CharSwapWalkthrough({
       if (request === sampleRequest.current) setLoadingDemo(false);
     }
   }
-  function startNewSwap() {
+  const startNewSwap = useCallback(() => {
     sampleRequest.current += 1;
     setLoadingDemo(false);
     cancelPending();
     reset();
-    pipeline.reset();
+    resetPipeline();
     setResetDialog(false);
-  }
+    setPendingCreate(false);
+  }, [cancelPending, reset, resetPipeline]);
+  useEffect(() => {
+    if (!pendingCreate && handledCreateRequest.current === createRequest) return;
+    // Do not lose a Create click while an upload or submission is confirming.
+    if ((pipeline.job || lockedAccess) && !jobCanContinueInLibrary) {
+      setPendingCreate(true);
+      return;
+    }
+    handledCreateRequest.current = createRequest;
+    setPendingCreate(false);
+    if (jobCanContinueInLibrary) startNewSwap();
+  }, [createRequest, pendingCreate, pipeline.job, lockedAccess, jobCanContinueInLibrary, startNewSwap]);
   async function continueFlow() {
     if (live && accessMode === "credits" && !pipeline.creditsAvailable) {
       setError("recastfx credit generation is being configured. No charge or preparation has started.");
@@ -601,13 +619,16 @@ export function CharSwapWalkthrough({
           onToggleAppearance={onToggleAppearance}
           active="create"
           onHome={onHome ?? (() => {})}
-          onCreate={() => { if (renderCanContinueInLibrary) startNewSwap(); }}
+          onCreate={() => {
+            if (jobCanContinueInLibrary) startNewSwap();
+            else if (pipeline.job || lockedAccess) setPendingCreate(true);
+          }}
           onLibrary={onLibrary}
           onAdmin={onAdmin}
           accountLabel={accountLabel}
           onAccount={onAccount}
           onSettings={() => setApiSettingsOpen(true)}
-          locked={lockedAccess && !renderCanContinueInLibrary}
+          locked={lockedAccess}
         />
         <Box
           sx={{
@@ -628,7 +649,7 @@ export function CharSwapWalkthrough({
             <Button
               size="small"
               sx={{ color: "text.secondary", px: 0 }}
-              disabled={pipeline.busy && !renderCanContinueInLibrary}
+              disabled={pipeline.busy && !jobCanContinueInLibrary}
               onClick={() => (clip ? setResetDialog(true) : startNewSwap())}
             >
               New swap
@@ -659,7 +680,7 @@ export function CharSwapWalkthrough({
           >
             <Box>
               <ProgressNavigation
-                locked={lockedAccess && !renderCanContinueInLibrary}
+                locked={lockedAccess}
                 accessReady={accessMode === "credits" || hasKey}
                 skipMaskReview={skipMaskReview}
                 reviewReady={
@@ -757,6 +778,11 @@ export function CharSwapWalkthrough({
                     : STEP_INFO[step].description}
                 </Typography>
               </Box>
+              {pendingCreate && !jobCanContinueInLibrary && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Your new setup will open once the current upload or render submission is confirmed. Your saved job will remain in your Library.
+                </Alert>
+              )}
               {pipeline.preparationProgress && (
                 <Box sx={{ mb: 2 }}>
                   <PreparationProgress
@@ -1090,8 +1116,8 @@ export function CharSwapWalkthrough({
             <Typography color="text.secondary">
               {unknownSubmission
                 ? "The provider submission outcome is unknown. Check your provider task history first; starting another generation could duplicate a charge. Only continue after you have confirmed the outcome."
-                : renderCanContinueInLibrary
-                  ? "Your current render will keep running in your Library. This clears only the setup in this tab so you can start another swap."
+                : jobCanContinueInLibrary
+                  ? "Your current job stays in your Library. Processing continues there, or you can return to finish its review. This clears only the setup in this tab so you can start another swap."
                   : "This clears your current clip, selected people, and reference assignments from this tab."}
             </Typography>
           </DialogContent>

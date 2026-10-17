@@ -261,7 +261,7 @@ describe("starting another swap during a saved render", () => {
     const user = userEvent.setup();
     render(<CharSwapWalkthrough onLibrary={() => {}} />);
     await user.click(screen.getByRole("button", { name: "New swap" }));
-    expect(screen.getByText(/Your current render will keep running in your Library/)).toBeInTheDocument();
+    expect(screen.getByText(/Your current job stays in your Library/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Start new swap" }));
     expect(useCharSwapStore.getState().clip).toBeNull();
     expect(useCharSwapStore.getState().step).toBe("clip");
@@ -289,7 +289,8 @@ describe("starting another swap during a saved render", () => {
     expect(live.job.status).toBe("generating");
   });
 
-  it.each(["queued", "preparing", "generating"] as const)("keeps the setup locked during %s before provider acceptance", (status) => {
+  it("keeps a manual submission locked before provider acceptance", () => {
+    const status = "generating";
     live.job.status = status;
     live.busy = true;
     render(<CharSwapWalkthrough onLibrary={() => {}} />);
