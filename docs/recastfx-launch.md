@@ -25,6 +25,48 @@ The browser bundle contains the public Firebase app configuration. It contains n
 
 ## Flow
 
+### Local change awaiting deployment: Replace all people
+
+The People step now offers **Replace all people** alongside tapping a specific
+person. It creates one group reference slot: every person becomes a separate
+instance of the same reference character. Changing between group and individual
+selection clears the previous assignments and prepared tracking state.
+
+- **Enhanced on:** Depth Anything and SAM run as before. The gateway unions all
+  nonzero SAM labels per frame into a separate mask archive for the existing depth
+  compositor. IDs can change between scenes; no individual scene matching is
+  needed. Empty shots stay empty. A clip with no detected people stops before
+  generation. People SAM misses can still be missing from the guide.
+- **Enhanced off:** SAM and depth remain skipped. The prompt requests every person
+  in every scene, with one separate replacement per person, without tap coordinates.
+- **Easy mode:** preparation and submission remain queued after the final review.
+- **Non-Easy mode:** enhanced mode retains a whole-guide approval step, labeled
+  Guide rather than individual scene matching. Non-enhanced mode retains its
+  existing Access/review flow.
+- The mode is saved in the job setup, returned when reopening the job, and included
+  in preparation logs. Existing duration pricing and audio settings are unchanged.
+
+Validation uses local synthetic masks/media, API fakes and walkthrough tests;
+there has been no paid all-person generation or production rollout of this mode.
+
+### Existing account flow
+
+Local upload improvements awaiting deployment: camera multi-picture JPEGs (MPO)
+are flattened to their main photo and converted to the same standard JPEG used
+for JPG/PNG/WebP references. Animation remains unsupported, and dimension/size
+checks remain active. Normalization logs record only the source/output formats
+and whether a camera photo was flattened.
+
+Before the final Easy-mode submission, review text explains that the page must
+stay open until the upload is saved. During upload and confirmation, a prominent
+mobile-friendly dialog shows real progress and asks users to keep the page
+visible. A browser leave/refresh guard is active only during that period (mobile
+browser force-close behavior cannot be prevented). Uploading 100% is not treated
+as server confirmation. A delayed acknowledgement keeps the warning active until
+the job can be read back successfully; it does not initiate a second upload.
+Confirmed queued/preparing jobs instead show a clear safe-to-close notice and
+continue in the Library.
+
 1. Browse the landing page and light/dark theme without an account.
 2. Sign in with Google to create or open the private library.
 3. Upload up to 100 MiB, trim, tap the person, assign the reference, and choose settings/access. Easy mode remains the default. Enhanced mode retains the depth/SAM preparation already used on `tasty`.

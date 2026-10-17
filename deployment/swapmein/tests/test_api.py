@@ -349,6 +349,23 @@ def test_lost_export_enqueue_response_preserves_an_already_completed_export(api)
     assert records.data[f"jobs/{job_id}.json"]["status"] == "completed"
 
 
+@pytest.mark.parametrize("enhanced", [False, True])
+def test_replace_everyone_generates_and_reopens_without_an_anchor(api, enhanced):
+    client, records, _, provider = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    job = records.data[f"jobs/{job_id}.json"]
+    job["setup"] = {"trim": [0, 4], "replace_all_people": True, "enhanced_character_masking": enhanced}
+    job["duration"] = 4
+    job["mask_style"] = "depth" if enhanced else "none"
+    response = client.post(f"/api/jobs/{job_id}/generate", headers=headers, json={"approved": True})
+    assert response.status_code == 200
+    assert response.json()["replace_all_people"] is True
+    assert "Replace every person in every scene" in provider.submissions[0]["prompt"]
+    assert ("colored depth imagery" in provider.submissions[0]["prompt"]) is enhanced
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).json()["replace_all_people"] is True
+
+
 def test_original_visible_mode_uses_stored_selection_without_gray_instructions(api):
     client, records, cloud, provider = api
     headers, owner = authenticated(api)

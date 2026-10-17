@@ -13,11 +13,12 @@ from PIL import Image
 import pytest
 
 from swapmein.media import decoded_audio_samples, probe
-from swapmein.tracking import analyze_tracking, resolve_tracking
+from swapmein.tracking import analyze_tracking, resolve_tracking, merge_all_people_masks
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg required for media integration")
-def test_reviewed_scene_labels_and_absence_reach_depth_guide(tmp_path, monkeypatch):
+@pytest.mark.parametrize("all_people", [False, True])
+def test_reviewed_scene_labels_and_absence_reach_depth_guide(tmp_path, monkeypatch, all_people):
     source, depth, vocals, masks, reviewed, output = [tmp_path / name for name in
         ("source.mp4", "depth.mp4", "vocals.wav", "masks.zip", "reviewed.zip", "guide.mp4")]
     for destination, color in ((source, "red"), (depth, "blue")):
@@ -42,8 +43,9 @@ def test_reviewed_scene_labels_and_absence_reach_depth_guide(tmp_path, monkeypat
         {"segment_id": "segment-001", "absent": False, "anchor": {"x": .2, "y": .5, "time": 1.5}},
         {"segment_id": "segment-002", "absent": True, "anchor": None},
     ]
-    resolution = resolve_tracking(masks, metadata, plan, selections, reviewed)
-    assert resolution["coverage"] == [1000] * 48 + [0] * 24
+    resolution = ({"coverage": merge_all_people_masks(masks, reviewed, metadata)} if all_people
+                  else resolve_tracking(masks, metadata, plan, selections, reviewed))
+    assert resolution["coverage"] == ([2000] * 72 if all_people else [1000] * 48 + [0] * 24)
     patch = Path(__file__).parents[1] / "worker_patch/composite.py"
     monkeypatch.setitem(sys.modules, "common", SimpleNamespace(probe=probe))
     spec = importlib.util.spec_from_file_location("reviewed_depth_composite", patch)
@@ -59,9 +61,14 @@ def test_reviewed_scene_labels_and_absence_reach_depth_guide(tmp_path, monkeypat
 
     original, colored, actual = frames(source), frames(depth), frames(output)
     assert len(actual) == 72
-    assert np.abs(actual[:24, 25, 70] - colored[:24, 25, 70]).max() < 8
-    assert np.abs(actual[:24, 25, 20] - original[:24, 25, 20]).max() < 8
-    assert np.abs(actual[24:48, 25, 20] - colored[24:48, 25, 20]).max() < 8
-    assert np.abs(actual[24:48, 25, 70] - original[24:48, 25, 70]).max() < 8
-    assert np.abs(actual[48:] - original[48:]).mean() < 5
+    if all_people:
+        assert np.abs(actual[:, 25, 20] - colored[:, 25, 20]).max() < 8
+        assert np.abs(actual[:, 25, 70] - colored[:, 25, 70]).max() < 8
+        assert np.abs(actual[:, 0, 0] - original[:, 0, 0]).max() < 8
+    else:
+        assert np.abs(actual[:24, 25, 70] - colored[:24, 25, 70]).max() < 8
+        assert np.abs(actual[:24, 25, 20] - original[:24, 25, 20]).max() < 8
+        assert np.abs(actual[24:48, 25, 20] - colored[24:48, 25, 20]).max() < 8
+        assert np.abs(actual[24:48, 25, 70] - original[24:48, 25, 70]).max() < 8
+        assert np.abs(actual[48:] - original[48:]).mean() < 5
     assert decoded_audio_samples(output) >= 3 * 44100

@@ -27,8 +27,9 @@ class Setup(BaseModel):
     enhanced_character_masking: bool = Field(default=True, strict=True)
     easy_mode: bool = Field(default=True, strict=True)
     auto_generate: bool = Field(default=False, strict=True)
+    replace_all_people: bool = Field(default=False, strict=True)
     trim: tuple[float, float]
-    anchor: Anchor
+    anchor: Anchor | None = None
     target_name: str = Field(default="Selected person", min_length=1, max_length=40)
 
     @model_validator(mode="after")
@@ -38,7 +39,7 @@ class Setup(BaseModel):
         if (start < 0 or not 4 <= duration <= 15
                 or not math.isclose(duration, round(duration), abs_tol=0.01)):
             raise ValueError("Select 4–15 seconds, with a whole-second length.")
-        if not start <= self.anchor.time < end:
+        if not self.replace_all_people and (self.anchor is None or not start <= self.anchor.time < end):
             raise ValueError("Select the person inside the trimmed section.")
         return self
 
@@ -120,10 +121,13 @@ def normalize(source: Path, output: Path, setup: Setup):
     cuts = run(["ffmpeg", "-hide_banner", "-loglevel", "info", "-protocol_whitelist", "file,pipe", "-i", str(output), "-an",
                 "-vf", "select='gt(scene,0.40)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
     scene_cuts = [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
-    anchor = {"x": (setup.anchor.x * sw + (width - sw) / 2) / width,
-              "y": (setup.anchor.y * sh + (height - sh) / 2) / height,
-              "time": setup.anchor.time - start,
-              "frame": min(duration * 24 - 1, round((setup.anchor.time - start) * 24))}
+    # Group mode needs no user tap. The normalized metadata still carries a
+    # valid frame origin for media validation; it is never used to select an ID.
+    selection = Anchor(x=.5, y=.5, time=start) if setup.replace_all_people else setup.anchor
+    anchor = {"x": (selection.x * sw + (width - sw) / 2) / width,
+              "y": (selection.y * sh + (height - sh) / 2) / height,
+              "time": selection.time - start,
+              "frame": min(duration * 24 - 1, round((selection.time - start) * 24))}
     return {"duration": duration, "width": width, "height": height,
             "frames": duration * 24, "anchor": anchor, "scene_cuts": scene_cuts}
 
@@ -133,19 +137,27 @@ def normalize_reference(raw: Path, output: Path):
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(raw) as image:
-                if image.format not in {"JPEG", "PNG", "WEBP"} or getattr(image, "is_animated", False):
-                    raise PublicError("Use a single JPG, PNG or WebP reference image.")
+                # Camera MPOs are still photos with auxiliary/burst images.
+                # Flatten the main image to a normal JPEG; never forward the container.
+                if image.format not in {"JPEG", "MPO", "PNG", "WEBP"} or (
+                        image.format != "MPO" and getattr(image, "is_animated", False)):
+                    raise PublicError("Use a single JPG, PNG or WebP reference image.", code="reference_format")
+                source_format = image.format
+                if source_format == "MPO":
+                    image.seek(0)
                 width, height = image.size
                 if min(width, height) < 256 or max(width, height) > 5760 or not .4 <= width / height <= 2.5:
-                    raise PublicError("Reference sides must be 256–5760px, with an aspect ratio between 0.4 and 2.5.")
+                    raise PublicError("Reference sides must be 256–5760px, with an aspect ratio between 0.4 and 2.5.", code="reference_dimensions")
                 image.load()
                 image = ImageOps.exif_transpose(image)
                 image.thumbnail((2048, 2048))
                 image.convert("RGB").save(output, "JPEG", quality=92)
+                return {"input_format": source_format, "output_format": "JPEG",
+                        "flattened_photo": source_format == "MPO"}
     except PublicError:
         raise
     except Exception:
-        raise PublicError("The reference image could not be read.") from None
+        raise PublicError("The reference image could not be read.", code="reference_unreadable") from None
 
 
 def select_label(archive: Path, metadata: dict, *, require_continuous: bool = True):

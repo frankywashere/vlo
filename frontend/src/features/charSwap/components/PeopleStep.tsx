@@ -27,12 +27,14 @@ interface PeopleStepProps {
   maxPeople?: number;
 }
 export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
-  const { clip, trim, targets, selectTarget, renameTarget, setError } =
+  const { clip, trim, targets, replaceAllPeople, setReplaceAllPeople, selectTarget, renameTarget, setError } =
     useCharSwapStore(
       useShallow((s) => ({
         clip: s.clip,
         trim: s.trim,
         targets: s.targets,
+        replaceAllPeople: s.replaceAllPeople,
+        setReplaceAllPeople: s.setReplaceAllPeople,
         selectTarget: s.selectTarget,
         renameTarget: s.renameTarget,
         setError: s.setError,
@@ -42,7 +44,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
   const sample = clip.mode === "demo" ? (demo?.people ?? []) : [];
   function choose(person: TargetPerson) {
     if (
-      targets.length >= maxPeople &&
+      !replaceAllPeople && targets.length >= maxPeople &&
       !targets.some((p) => p.id === person.id)
     ) {
       setError(
@@ -85,7 +87,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
         setError("Tap inside a person's outline, or choose their card below.");
       return;
     }
-    const existing = targets.find(
+    const existing = !replaceAllPeople && targets.find(
       (target) =>
         Math.hypot(target.anchor.x - point.x, target.anchor.y - point.y) <
           0.06 && Math.abs(target.anchor.time - video.currentTime) < 0.5,
@@ -109,6 +111,18 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
   }
   return (
     <Stack spacing={2.5}>
+      <Box sx={PANEL}>
+        <Button variant={replaceAllPeople ? "contained" : "outlined"}
+          aria-pressed={Boolean(replaceAllPeople)}
+          onClick={() => setReplaceAllPeople(!replaceAllPeople)}
+          sx={{minHeight: 48, width: {xs: "100%", sm: "auto"}}}>
+          Replace all people
+        </Button>
+        <Typography variant="body2" color="text.secondary" sx={{mt: 1}}>
+          Use one reference image for everyone in every scene. Each person becomes a separate version of that character.
+          {replaceAllPeople ? " Tap a person below to switch back to a specific person." : " Or tap a specific person below."}
+        </Typography>
+      </Box>
       <VideoPreview
         clip={clip}
         trim={trim}
@@ -168,7 +182,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
                 )
               );
             })}
-            {!sample.length &&
+            {!sample.length && !replaceAllPeople &&
               targets
                 .filter((target) => Math.abs(target.anchor.time - time) < 0.5)
                 .map((target) => (
@@ -235,7 +249,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
           sx={{ mb: targets.length ? 2 : 0 }}
         >
           <Typography fontWeight={600}>People to replace</Typography>
-          <Chip size="small" label={`${targets.length} selected`} />
+          <Chip size="small" label={replaceAllPeople ? "Everyone" : `${targets.length} selected`} />
         </Stack>
         {!targets.length && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -244,7 +258,7 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
           </Typography>
         )}
         <Stack spacing={2}>
-          {targets.map((person) => (
+          {replaceAllPeople ? <Typography>Everyone in the clip will use the same replacement image.</Typography> : targets.map((person) => (
             <Stack
               key={person.id}
               direction="row"
@@ -286,14 +300,14 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
           ))}
         </Stack>
       </Box>
-      {clip.mode === "upload" && (
+      {clip.mode === "upload" && maxPeople > 1 && !replaceAllPeople && (
         <Alert severity="info" role="note">
           These taps save your starting points. Automatic masks and tracking
           will be connected in the next build.
         </Alert>
       )}
       <Typography variant="body2" color="text.secondary">
-        You’ll choose a replacement image for each person next.
+        {replaceAllPeople ? "You’ll choose one replacement image for everyone next." : "You’ll choose a replacement image for each person next."}
       </Typography>
     </Stack>
   );

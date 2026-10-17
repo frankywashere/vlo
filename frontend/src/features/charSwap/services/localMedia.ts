@@ -62,7 +62,7 @@ export async function validateReference(
   file: File,
   url: string,
 ): Promise<void> {
-  if (!/^image\/(jpeg|png|webp)$/.test(file.type))
+  if (!/^image\/(jpeg|png|webp|mpo|x-mpo)$/.test(file.type) && !/\.mpo$/i.test(file.name))
     throw new Error("Choose a JPG, PNG, or WebP image.");
   if (file.size > 20 * 1024 * 1024)
     throw new Error("Choose a reference smaller than 20 MB.");
@@ -71,6 +71,12 @@ export async function validateReference(
   await image.decode().catch(() => {
     throw new Error("That image couldn't be opened. Choose another image.");
   });
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  if (Math.min(width, height) < 256 || Math.max(width, height) > 5760 ||
+      !Number.isFinite(width / height) || width / height < 0.4 || width / height > 2.5) {
+    throw new Error(`This reference is ${width} × ${height} pixels. Use an image with both sides between 256 and 5760 pixels, no more than 2.5 times as tall or wide. Crop it or choose a different image.`);
+  }
 }
 
 /** Capture an anchor thumbnail, not a segmentation result. */

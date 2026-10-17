@@ -73,12 +73,13 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
         assert archived["status"] == "completed"
 
 
+@pytest.mark.parametrize("replace_all", [False, True])
 @pytest.mark.parametrize("easy", [None, False, True])
 @pytest.mark.parametrize("enabled,scene_cuts,coverage", [(True, [], [100] * 120), (True, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 120), (False, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 48 + [0] * 72)])
 @pytest.mark.parametrize("audio_processing", [None, True, False])
-def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage, easy, audio_processing):
+def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage, easy, audio_processing, replace_all):
     from contextlib import contextmanager
     import time
     job_id = "b" * 32
@@ -90,16 +91,21 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         return metadata
     monkeypatch.setattr("swapmein.pipeline.normalize", normalized)
     def selected(*_, require_continuous):
-        assert enabled and require_continuous is False
+        assert enabled and not replace_all and require_continuous is False
         return 2, coverage
     monkeypatch.setattr("swapmein.pipeline.select_label", selected)
-    needs_review = bool(scene_cuts or not all(coverage)) and easy is not True
+    def merge(_archive, output, _metadata):
+        assert replace_all and enabled
+        output.write_bytes(b"all-people-union")
+        return coverage
+    monkeypatch.setattr("swapmein.pipeline.merge_all_people_masks", merge)
+    needs_review = bool(scene_cuts or not all(coverage)) and easy is not True and not replace_all
     plan = {"version": 1, "review_required": needs_review, "segments": [{
         "id": "segment-000", "start_frame": 0, "end_frame": 120,
         "start": 0, "end": 5, "seek_time": 1, "reason": "scene_cut" if scene_cuts else "selected_person",
         "needs_review": needs_review, "selected_label": None if needs_review else 2}]}
     def analyze(*_):
-        assert easy is not True, "Easy mode must not require scene matching"
+        assert easy is not True and not replace_all, "Only individual non-Easy swaps need scene matching"
         return plan
     monkeypatch.setattr("swapmein.pipeline.analyze_tracking", analyze)
     monkeypatch.setattr("swapmein.pipeline.create_selection_preview", lambda _source, _masks, output, _metadata: output.write_bytes(b"translucent-selection-preview"))
@@ -141,6 +147,8 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
                 return {}
             yield invoke
     records, cloud = Records(enabled), Cloud()
+    if replace_all:
+        records.data[path]["setup"].update(replace_all_people=True, anchor=None)
     if audio_processing is not None:
         records.data[path]["audio_processing"] = audio_processing
     if easy is not None:
@@ -152,7 +160,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
     assert cloud.enqueued == ([("generate", job_id)] if auto_generate else [])
     assert records.data[path]["status"] == ("tracking_review" if enabled and needs_review else "ready")
     assert records.data[path]["easy_mode"] is (easy is True)
-    assert records.data[path]["selected_label"] == (2 if enabled else None)
+    assert records.data[path]["selected_label"] == ((1 if replace_all else 2) if enabled else None)
     assert records.data[path]["tracking_performed"] is enabled
     assert records.data[path]["normalized_anchor"]["time"] == 1
     assert records.data[path]["scene_cut_count"] == len(scene_cuts)
@@ -161,9 +169,9 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert [kind for kind, _, _ in cloud.calls] == (["gpu"] + (["audio"] if audio_processing is not False else []) + ([] if needs_review else ["audio"]))
         assert cloud.calls[0][2]["operation"] == "both"
         assert records.data[path]["mask_style"] == "depth"
-        if easy is True:
+        if easy is True or replace_all:
             assert "tracking_plan" not in records.data[path]
-            if not auto_generate:
+            if not auto_generate and easy is True:
                 assert "Continue generation" in records.data[path]["message"]
         else:
             assert records.data[path]["tracking_plan"] == plan
@@ -173,7 +181,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         else:
             assert cloud.calls[-1][2]["fill_mode"] == "depth"
             assert cloud.calls[-1][2]["depth_uri"].endswith("depth.mp4")
-            assert cloud.calls[-1][2]["selected_label"] == 2
+            assert cloud.calls[-1][2]["selected_label"] == (1 if replace_all else 2)
             if audio_processing is False:
                 assert cloud.calls[-1][2]["guide_audio_uri"] == records.data[path]["normalized_uri"]
             else:
@@ -184,7 +192,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert records.data[path]["tracking_uri"] is None
         assert records.data[path]["mask_frames"] == 0
         assert composed_original == ([] if audio_processing is False else [True])
-        assert ("Continue generation" if easy is True else "SAM tracking was skipped") in records.data[path]["message"]
+        assert ("Continue generation" if easy is True else "replace every person" if replace_all else "SAM tracking was skipped") in records.data[path]["message"]
 
 
 def test_reviewed_matches_rebuild_only_cpu_guide_and_ignore_stale_tasks(monkeypatch):

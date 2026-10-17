@@ -75,7 +75,7 @@ const STEP_INFO = {
   people: {
     title: "Who do you want to replace?",
     short: "People",
-    description: "Pause on a clear frame. Tap each person you want to swap.",
+    description: "Tap a person to swap, or choose Replace all people.",
     icon: PeopleAltOutlined,
   },
   references: {
@@ -123,6 +123,7 @@ function ProgressNavigation({
     clip,
     trim,
     targets,
+    replaceAllPeople,
     references,
     assignments,
     issues,
@@ -135,6 +136,7 @@ function ProgressNavigation({
       clip: s.clip,
       trim: s.trim,
       targets: s.targets,
+      replaceAllPeople: s.replaceAllPeople,
       references: s.references,
       assignments: s.assignments,
       issues: s.issues,
@@ -147,6 +149,7 @@ function ProgressNavigation({
     clip,
     trim,
     targets,
+    replaceAllPeople,
     references,
     assignments,
     issues,
@@ -234,7 +237,7 @@ function ProgressNavigation({
                 index + 1
               )}
             </Box>
-            {STEP_INFO[item].short}
+            {replaceAllPeople && item === "matches" ? "Guide" : STEP_INFO[item].short}
           </Button>
         );
       })}
@@ -278,6 +281,7 @@ export function CharSwapWalkthrough({
     clip,
     trim,
     targets,
+    replaceAllPeople,
     references,
     assignments,
     issues,
@@ -302,6 +306,7 @@ export function CharSwapWalkthrough({
       clip: s.clip,
       trim: s.trim,
       targets: s.targets,
+      replaceAllPeople: s.replaceAllPeople,
       references: s.references,
       assignments: s.assignments,
       issues: s.issues,
@@ -433,6 +438,7 @@ export function CharSwapWalkthrough({
     clip,
     trim,
     targets,
+    replaceAllPeople,
     references,
     assignments,
     issues,
@@ -541,7 +547,7 @@ export function CharSwapWalkthrough({
       demo &&
       !(easyMode ?? true)
     )
-      reviewTracking(sampleReviewIssues(targets, demo, trim));
+      reviewTracking(replaceAllPeople ? [] : sampleReviewIssues(targets, demo, trim));
     next();
   }
   async function submitEasySwap() {
@@ -687,7 +693,7 @@ export function CharSwapWalkthrough({
                   />
                   <Chip
                     size="small"
-                    label={`${targets.length} ${targets.length === 1 ? "person" : "people"} selected`}
+                    label={replaceAllPeople ? "All people" : `${targets.length} ${targets.length === 1 ? "person" : "people"} selected`}
                   />
                   <Chip size="small" label="Native resolution" />
                   <Chip size="small" label="Audio included" />
@@ -741,10 +747,14 @@ export function CharSwapWalkthrough({
                     fontSize: { xs: "2rem", md: "2.5rem" },
                   }}
                 >
-                  {STEP_INFO[step].title}
+                  {replaceAllPeople && step === "matches" ? "Check your prepared clip"
+                    : replaceAllPeople && step === "references" ? "Choose a replacement for everyone"
+                    : STEP_INFO[step].title}
                 </Typography>
                 <Typography color="text.secondary" sx={{ lineHeight: 1.65 }}>
-                  {STEP_INFO[step].description}
+                  {replaceAllPeople && step === "matches" ? "Review the guide for everyone in every scene. Individual scene matching is not needed."
+                    : replaceAllPeople && step === "references" ? "One reference image will be used for every person in the clip."
+                    : STEP_INFO[step].description}
                 </Typography>
               </Box>
               {pipeline.preparationProgress && (
@@ -858,6 +868,7 @@ export function CharSwapWalkthrough({
                         "Preparation has not started. Go back to References to try again."
                       }
                       enhancedCharacterMasking={enhancedCharacterMasking}
+                      replaceAllPeople={replaceAllPeople}
                       selectedLabel={pipeline.job?.selected_label}
                       maskStyle={pipeline.job?.mask_style}
                       trackingContinuous={pipeline.job?.tracking_continuous}

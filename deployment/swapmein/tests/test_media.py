@@ -79,6 +79,41 @@ def test_reference_exif_rotation_is_applied_and_metadata_removed(tmp_path):
         assert not normalized.getexif()
 
 
+def test_tall_reference_returns_an_actionable_code_without_weakening_validation(tmp_path):
+    source, output = tmp_path / "tall.jpg", tmp_path / "normalized.jpg"
+    Image.new("RGB", (289, 1235), "red").save(source)
+    with pytest.raises(PublicError) as error:
+        normalize_reference(source, output)
+    assert error.value.code == "reference_dimensions"
+    assert not output.exists()
+
+
+def test_camera_mpo_is_flattened_to_its_main_photo(tmp_path):
+    source, output = tmp_path / "camera.mpo", tmp_path / "reference.jpg"
+    first = Image.new("RGB", (640, 480), "red")
+    auxiliary = Image.new("RGB", (640, 480), "blue")
+    first.save(source, "MPO", save_all=True, append_images=[auxiliary])
+    with Image.open(source) as camera:
+        assert camera.format == "MPO" and camera.n_frames == 2
+    details = normalize_reference(source, output)
+    assert details == {"input_format": "MPO", "output_format": "JPEG", "flattened_photo": True}
+    with Image.open(output) as photo:
+        assert photo.format == "JPEG" and getattr(photo, "n_frames", 1) == 1
+        assert photo.size == (640, 480)
+        r, g, b = photo.getpixel((320, 240))
+        assert r > 240 and g < 15 and b < 15  # Primary image, not the auxiliary view.
+
+
+def test_animated_webp_is_not_mistaken_for_a_camera_photo(tmp_path):
+    source, output = tmp_path / "animation.webp", tmp_path / "reference.jpg"
+    first = Image.new("RGB", (640, 480), "red")
+    first.save(source, "WEBP", save_all=True, append_images=[Image.new("RGB", first.size, "blue")], duration=100)
+    with pytest.raises(PublicError) as error:
+        normalize_reference(source, output)
+    assert error.value.code == "reference_format"
+    assert not output.exists()
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for media integration")
 def test_real_normalization_and_soundtrack_restoration(tmp_path):
     source, guide, result = tmp_path / "source.mp4", tmp_path / "normalized.mp4", tmp_path / "result.mp4"

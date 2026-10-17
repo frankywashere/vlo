@@ -30,6 +30,9 @@ export type LiveJobStatus =
   | "submission_unknown";
 
 export interface LivePipelineJob {
+  /** Browser-only: the upload finished but queue acknowledgement was lost. */
+  upload_confirmation_pending?: boolean;
+  replace_all_people?: boolean;
   audio_processing?: boolean;
   provider?: GenerationProvider;
   access_mode?: GenerationAccessMode;
@@ -163,6 +166,9 @@ function requestMessage(status: number): string {
 function capacityMessage(value: unknown): string | null {
   if (!isRecord(value) || typeof value.code !== "string") return null;
   const messages: Record<string, string> = {
+    reference_dimensions: "The reference image is too narrow, too wide, or outside the supported size. Use an image with both sides between 256 and 5760 pixels and a width-to-height ratio between 0.4 and 2.5. Crop it or choose a different image.",
+    reference_format: "Use one still JPG, PNG, or WebP reference image.",
+    reference_unreadable: "The reference image could not be opened. Choose another JPG, PNG, or WebP image.",
     preparation_busy: "Another clip is being checked. Wait for it to finish before starting yours.",
     preparation_daily_limit: "Today's cloud-preparation limit has been reached.",
     preparation_monthly_limit: "This month's cloud-preparation limit has been reached.",
@@ -256,6 +262,7 @@ function readJob(value: unknown): LivePipelineJob {
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
+  if (typeof value.replace_all_people === "boolean") job.replace_all_people = value.replace_all_people;
   if (typeof value.easy_mode === "boolean") job.easy_mode = value.easy_mode;
   if (typeof value.auto_generate === "boolean") job.auto_generate = value.auto_generate;
   if (typeof value.tracking_performed === "boolean")
@@ -424,7 +431,7 @@ export async function createLiveSession(
 export function validateLiveSetup(state: WalkthroughState) {
   if (!state.clip) throw new LivePipelineError("Upload a source clip first.");
   if (state.targets.length !== 1)
-    throw new LivePipelineError("Choose exactly one person for the live beta.");
+    throw new LivePipelineError("Choose one person or Replace all people.");
   const [start, end] = state.trim;
   const duration = end - start;
   if (
@@ -586,7 +593,7 @@ export async function createLiveJob(
         reference_bytes: referenceFile.size,
         setup: {
           trim: state.trim,
-          anchor: target.anchor,
+          ...(state.replaceAllPeople ? {replace_all_people: true} : {anchor: target.anchor}),
           target_name: target.name,
           enhanced_character_masking: state.enhancedCharacterMasking ?? true,
           easy_mode: state.easyMode ?? true,
@@ -628,7 +635,8 @@ export async function createLiveJob(
     if (error instanceof LivePipelineError && error.status !== null && error.status < 500) throw error;
     // Confirmation may already have queued work. Retain its known ID and poll;
     // never start another upload just because the acknowledgement was lost.
-    return {id: ticket.id, status: "queued", message: "Upload confirmation is pending. Check this job's status before preparing another clip."};
+    return {id: ticket.id, status: "queued", upload_confirmation_pending: true,
+      message: "Upload confirmation is pending. Check this job's status before preparing another clip."};
   }
 }
 

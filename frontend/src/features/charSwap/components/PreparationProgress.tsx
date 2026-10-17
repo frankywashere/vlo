@@ -1,7 +1,10 @@
-import { Box, LinearProgress, Stack, Typography } from "@mui/material";
+import { useEffect, useRef } from "react";
+import { Alert, Box, Dialog, DialogContent, DialogTitle, LinearProgress, Stack, Typography } from "@mui/material";
+import CloudUploadOutlined from "@mui/icons-material/CloudUploadOutlined";
 import { PANEL } from "./stepStyles";
 
 import type { PreparationProgressState } from "../model/preparation";
+import { isUploadUnconfirmed } from "../model/preparation";
 export type { PreparationProgressState } from "../model/preparation";
 
 interface PreparationProgressProps {
@@ -15,6 +18,11 @@ export function PreparationProgress({
   elapsedSeconds,
   title = "Checking all scenes",
 }: PreparationProgressProps) {
+  const uploadUnconfirmed = isUploadUnconfirmed(progress);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!uploadUnconfirmed) panelRef.current?.scrollIntoView?.({block: "start", behavior: "auto"});
+  }, [uploadUnconfirmed]);
   const elapsed = Number.isFinite(elapsedSeconds)
     ? Math.max(0, Math.floor(elapsedSeconds))
     : 0;
@@ -26,9 +34,13 @@ export function PreparationProgress({
       ? Math.min(100, Math.max(0, progress.uploadPercent))
       : undefined;
 
-  return (
-    <Box sx={{ ...PANEL, borderColor: "divider" }}>
+  const panel = (
+    <Box ref={panelRef} sx={{ ...PANEL, borderColor: "divider", scrollMarginTop: 90 }}>
       <Stack spacing={1.5}>
+        {!uploadUnconfirmed && <Alert severity="success">
+          <Typography fontWeight={700}>Upload saved. You can close this page.</Typography>
+          Your job continues on the server. Find it in Current processing jobs in your Library.
+        </Alert>}
         <Stack
           direction="row"
           justifyContent="space-between"
@@ -73,12 +85,27 @@ export function PreparationProgress({
             </Typography>
           )}
         </Stack>
-        <Typography variant="body2" color="text.secondary">
-          {progress.phase === "queued" || progress.phase === "preparing"
-            ? "You can leave now. Find this job under Current processing jobs in your Library."
-            : "Keep this tab open until the upload is confirmed. Your saved job will then appear in your Library."}
-        </Typography>
       </Stack>
     </Box>
   );
+  if (!uploadUnconfirmed) return panel;
+  return <Dialog open disableEscapeKeyDown disableRestoreFocus maxWidth="sm" fullWidth
+    aria-labelledby="upload-stay-open-title" aria-describedby="upload-stay-open-description"
+    slotProps={{paper: {sx: {m: {xs: 2, sm: 3}, width: {xs: "calc(100% - 32px)", sm: "100%"}, borderRadius: 2}}}}>
+    <DialogTitle id="upload-stay-open-title" sx={{display: "flex", alignItems: "center", gap: 1.5}}>
+      <CloudUploadOutlined color="warning" /> Keep this page open
+    </DialogTitle>
+    <DialogContent>
+      <Alert severity="warning" id="upload-stay-open-description" sx={{mb: 2}}>
+        <Typography fontWeight={700}>Your upload is not saved yet.</Typography>
+        Don’t close or refresh this page. On mobile, keep this page visible and your screen awake until we confirm it’s saved.
+      </Alert>
+      {panel}
+      <Typography variant="body2" color="text.secondary" sx={{mt: 2}}>
+        {progress.phase === "confirming"
+          ? "The files have uploaded. We’re confirming they’re saved and your job is queued. Please wait for confirmation."
+          : "We’ll tell you when it’s safe to leave. After that, processing continues even if you close your browser."}
+      </Typography>
+    </DialogContent>
+  </Dialog>;
 }

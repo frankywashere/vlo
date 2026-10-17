@@ -30,6 +30,10 @@ afterEach(() => {
 });
 
 describe("live job charge parsing", () => {
+  it("shows controlled reference-validation guidance rather than the generic request error", async () => {
+    requests.mockResolvedValue(new Response(JSON.stringify({code: "reference_dimensions", message: "private upstream detail"}), {status: 400}));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/Crop it or choose a different image/);
+  });
   it.each([740.5, 0])("preserves an actual charge of %s credits separately from the estimate", async (credits) => {
     requests.mockResolvedValue(jobResponse(credits));
 

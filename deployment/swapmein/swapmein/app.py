@@ -208,7 +208,8 @@ def view(job: dict):
               "message": ("Your video is processing." if credits_mode and status in {"generating", "finalizing"}
                           else "Generation needs review." if credits_mode and status == "failed"
                           else job.get("message", "")),
-              "access_mode": "credits" if credits_mode else "api-key"}
+              "access_mode": "credits" if credits_mode else "api-key",
+              "replace_all_people": bool(job.get("setup", {}).get("replace_all_people", False))}
     if not credits_mode:
         result["provider"] = job.get("provider", "reAPI")
     if "duration" in job:
@@ -567,7 +568,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             source, raw_reference, image = root / "source.bin", root / "reference.bin", root / "reference.jpg"
             await save_upload(clip, source, LEGACY_SOURCE_BYTES)
             await save_upload(reference, raw_reference, MAX_REFERENCE_BYTES)
-            await run_in_threadpool(normalize_reference, raw_reference, image)
+            reference_details = await run_in_threadpool(normalize_reference, raw_reference, image)
+            emit("reference_normalized", job_id=job_id, **(reference_details or {}))
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
@@ -695,7 +697,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
             raw_reference = Path(temporary) / "reference.bin"
             image = Path(temporary) / "reference.jpg"
             cloud.download(manifest["raw_reference_uri"], raw_reference, MAX_REFERENCE_BYTES)
-            normalize_reference(raw_reference, image)
+            reference_details = normalize_reference(raw_reference, image)
+            emit("reference_normalized", job_id=job_id, **(reference_details or {}))
             reference_uri = cloud.upload(settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
         records.update("control/preparation.json", lambda current: reserve_queued_preparation(
             current, time.time(), settings.monthly_preparations, settings.daily_preparations)
@@ -979,10 +982,11 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     provider = selected_provider(job.get("provider", "reAPI"))
     image_url, video_url = cloud.signed_url(job["reference_uri"]), cloud.signed_url(job["guide_uri"])
     options = Setup.model_validate({"enhanced_character_masking": True, **job["setup"]})
-    anchor = options.anchor.model_dump()
-    anchor["time"] -= options.trim[0]
-    anchor = job.get("normalized_anchor", anchor)
-    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor, job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True))
+    anchor = options.anchor.model_dump() if options.anchor else None
+    if anchor:
+        anchor["time"] -= options.trim[0]
+    anchor = None if options.replace_all_people else job.get("normalized_anchor", anchor)
+    payload = generation_payload(job["duration"], image_url, video_url, options.enhanced_character_masking, anchor, job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True), replace_all_people=options.replace_all_people)
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)

@@ -11,7 +11,7 @@ from .diagnostics import emit
 from .limits import MAX_SOURCE_BYTES
 from .media import Setup, finish, normalize, original_guide, select_label
 from .storage import Records, claim_job, release_preparation
-from .tracking import analyze_tracking
+from .tracking import analyze_tracking, merge_all_people_masks
 from .tracking_preview import create_selection_preview
 from .accounts import archive_completed, LIBRARY_SECONDS
 
@@ -76,7 +76,9 @@ class Pipeline:
                 options = Setup.model_validate({"enhanced_character_masking": True, "easy_mode": False, **job["setup"]})
                 self.update_job(job_id, easy_mode=options.easy_mode, auto_generate=options.auto_generate)
                 emit("preparation_mode", job_id=job_id, easy_mode=options.easy_mode,
-                     enhanced_character_masking=options.enhanced_character_masking)
+                     enhanced_character_masking=options.enhanced_character_masking,
+                     replace_all_people=options.replace_all_people)
+                self.update_job(job_id, replace_all_people=options.replace_all_people)
                 metadata = normalize(source, normalized, options)
                 prefix = f"inputs/swapmein-{job_id}/"
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
@@ -85,7 +87,8 @@ class Pipeline:
                 plan = None
                 tracking_continuous = False
                 if options.enhanced_character_masking:
-                    self.update_job(job_id, message="Preparing depth guidance and tracking the selected person.")
+                    self.update_job(job_id, message="Preparing depth guidance and detecting all people." if options.replace_all_people
+                                    else "Preparing depth guidance and tracking the selected person.")
                     sam_run = "sm-sam-" + job_id
                     with self.cloud.worker("gpu") as invoke:
                         result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both"}, remaining())
@@ -94,13 +97,23 @@ class Pipeline:
                     preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
                     masks = root / "masks.zip"
                     self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
-                    label, coverage = select_label(masks, metadata, require_continuous=False)
+                    if options.replace_all_people:
+                        combined = root / "all-people-masks.zip"
+                        coverage = merge_all_people_masks(masks, combined, metadata)
+                        masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "all-people-masks.zip",
+                                                      combined, "application/zip")
+                        label = 1  # The union's compose label, not a tracked identity.
+                        emit("all_people_masks_prepared", job_id=job_id, frames=len(coverage),
+                             empty_frames=sum(count == 0 for count in coverage))
+                    else:
+                        label, coverage = select_label(masks, metadata, require_continuous=False)
                     # Easy mode retains the original selected ID across all frames,
                     # including cuts and gaps, just as preparation did before scene review.
-                    if not options.easy_mode:
+                    if not options.easy_mode and not options.replace_all_people:
                         plan = analyze_tracking(masks, metadata, label)
                     emit("tracking_selection", job_id=job_id, easy_mode=options.easy_mode,
-                         selected_label=label, missing_frames=sum(count == 0 for count in coverage))
+                         selected_label=label, replace_all_people=options.replace_all_people,
+                         missing_frames=sum(count == 0 for count in coverage))
                     tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
                     if plan and plan["review_required"]:
                         selection_preview = root / "selection-preview.mp4"
@@ -174,6 +187,10 @@ class Pipeline:
                     message = "Review every scene. Only your selected person should be covered by colored depth imagery. Identity across cuts or gaps is not verified."
                 else:
                     message = "Review your prepared clip. SAM tracking was skipped; MiniMax will identify the selected person using your tap position and timestamp."
+                if options.replace_all_people:
+                    message = ("Review every scene. All detected people should be covered by colored depth imagery. No individual scene matching is needed."
+                               if options.enhanced_character_masking else
+                               "Review your prepared clip. Masking is off; MiniMax will replace every person in every scene with your reference character.")
                 if options.easy_mode:
                     message = "Preparation is complete. Continue generation here or reopen this job in your Library."
                 if options.auto_generate:

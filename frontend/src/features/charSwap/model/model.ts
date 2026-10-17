@@ -45,6 +45,7 @@ export interface MatchDecision {
 }
 
 export interface WalkthroughState {
+  replaceAllPeople?: boolean;
   easyMode?: boolean;
   enhancedCharacterMasking?: boolean;
   clip: ClipAsset | null;
@@ -70,6 +71,7 @@ const MAX_CLIP_SECONDS = 15;
 
 export function createInitialState(): WalkthroughState {
   return {
+    replaceAllPeople: false,
     easyMode: true,
     enhancedCharacterMasking: true,
     clip: null,
@@ -88,6 +90,7 @@ export function setClip(
 ): WalkthroughState {
   return {
     ...state,
+    replaceAllPeople: false,
     clip,
     trim: [0, Math.min(Math.max(Math.floor(clip.duration), 0), MAX_CLIP_SECONDS)],
     targets: [],
@@ -118,6 +121,7 @@ export function setTrim(
 
   return {
     ...state,
+    replaceAllPeople: false,
     trim: [start, end],
     targets: [],
     assignments: {},
@@ -126,10 +130,25 @@ export function setTrim(
   };
 }
 
+// A single reference slot for the group, not an actual tapped person.
+export const ALL_PEOPLE_TARGET_ID = "all-people";
+
+export function setReplaceAllPeople(state: WalkthroughState, enabled: boolean): WalkthroughState {
+  if (!state.clip || enabled === (state.replaceAllPeople ?? false)) return state;
+  return {
+    ...state,
+    replaceAllPeople: enabled,
+    targets: enabled ? [{id: ALL_PEOPLE_TARGET_ID, name: "All people", color: "#75baff",
+      anchor: {x: 0.5, y: 0.5, time: state.trim[0]}}] : [],
+    references: [], assignments: {}, issues: [], decisions: {},
+  };
+}
+
 export function toggleTarget(
   state: WalkthroughState,
   target: TargetPerson,
 ): WalkthroughState {
+  if (state.replaceAllPeople) state = setReplaceAllPeople(state, false);
   if (state.targets.some((person) => person.id === target.id)) {
     const targets = state.targets.filter((person) => person.id !== target.id);
     const assignments = { ...state.assignments };
@@ -286,7 +305,7 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
           );
         })
       ) {
-        return "Add a replacement image for each selected person.";
+        return state.replaceAllPeople ? "Add one replacement image for everyone." : "Add a replacement image for each selected person.";
       }
       return null;
     case "matches":

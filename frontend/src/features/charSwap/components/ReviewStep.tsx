@@ -47,6 +47,7 @@ export function ReviewStep({
 }: ReviewStepProps) {
   const {
     easyMode,
+    replaceAllPeople,
     enhancedCharacterMasking,
     clip,
     trim,
@@ -58,6 +59,7 @@ export function ReviewStep({
   } = useCharSwapStore(
     useShallow((s) => ({
       easyMode: s.easyMode,
+      replaceAllPeople: s.replaceAllPeople,
       enhancedCharacterMasking: s.enhancedCharacterMasking,
       clip: s.clip,
       trim: s.trim,
@@ -252,7 +254,9 @@ export function ReviewStep({
           </Typography>
           <Typography variant="body2" color="text.secondary">
             ✓{" "}
-            {issues.length
+            {replaceAllPeople
+              ? "Everyone will use the same reference character"
+              : issues.length
               ? `${issues.length} review ${issues.length === 1 ? "section" : "sections"} confirmed`
               : live
                 ? job?.tracking_reviewed
@@ -277,10 +281,10 @@ export function ReviewStep({
         {live
           ? accessMode === "credits"
             ? job?.message || ((easyMode ?? true)
-              ? "Submit once to prepare your clip and queue generation with recastfx credits. You can follow the job in your Library."
+              ? "After submitting, keep this page open until we confirm your upload is saved. Then you can close it and follow preparation and generation in your Library."
               : "Review the prepared guide, then submit once using your recastfx credits. You can follow the job in your Library.")
             : job?.message || ((easyMode ?? true)
-              ? `Submit once to prepare your clip and start generation with your ${provider} key. The key is encrypted for this job so it can finish after you close the tab.`
+              ? `After submitting, keep this page open until we confirm your upload is saved. Your ${provider} key is encrypted for this job so it can then finish after you close the tab.`
               : `Review the prepared guide before generating. This uses your own ${provider} credits.`)
           : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
       </Alert>

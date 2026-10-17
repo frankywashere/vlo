@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createInitialState } from "../../model/model";
+import { createInitialState, setReplaceAllPeople, setReference } from "../../model/model";
 import type { WalkthroughState } from "../../model/model";
 import { DEMO_API_KEY } from "../useApiKeyPreview";
 import { useLivePipeline } from "../useLivePipeline";
@@ -88,6 +88,32 @@ afterEach(() => {
 });
 
 describe("live BYOK pipeline", () => {
+  it("warns on browser exit only until upload confirmation and removes the guard afterward", async () => {
+    const pending = deferred<Response>();
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? pending.promise : defaultRequest(input));
+    const {result} = await renderLive();
+    let preparing!: Promise<boolean>;
+    act(() => {preparing = result.current.prepare(setup());});
+    await waitFor(() => expect(result.current.preparationProgress?.phase).toBe("confirming"));
+    const whileUploading = new Event("beforeunload", {cancelable: true});
+    window.dispatchEvent(whileUploading);
+    expect(whileUploading.defaultPrevented).toBe(true);
+    await act(async () => {pending.resolve(json({id: "job-1", status: "queued"})); await preparing;});
+    const afterConfirmation = new Event("beforeunload", {cancelable: true});
+    window.dispatchEvent(afterConfirmation);
+    expect(afterConfirmation.defaultPrevented).toBe(false);
+  });
+  it.each([false, true])("uploads all-person mode without a tap (enhanced: %s)", async (enhanced) => {
+    const group = setReplaceAllPeople({...setup(), enhancedCharacterMasking: enhanced}, true);
+    const state = setReference(group, "all-people", {id: "reference", name: "character.png", url: "blob:reference"});
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(state);});
+    const body = JSON.parse(String(calls("/api/uploads")[0][1]?.body));
+    expect(body.setup.replace_all_people).toBe(true);
+    expect(body.setup.enhanced_character_masking).toBe(enhanced);
+    expect(body.setup).not.toHaveProperty("anchor");
+    expect(body.setup.target_name).toBe("All people");
+  });
   it("pauses polling for scene review, validates complete choices, and resumes the same job without a paid submission", async () => {
     const review = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 2, tracking_segments: [
       {id: "segment-001", start_frame: 48, end_frame: 120, start: 2, end: 5, seek_time: 3, reason: "scene_cut", needs_review: true},
@@ -160,7 +186,7 @@ describe("live BYOK pipeline", () => {
 
   it("validates the single-person integer-duration beta before contacting access or workers", () => {
     const state = setup();
-    expect(() => validateLiveSetup({ ...state, targets: [...state.targets, { ...state.targets[0], id: "second" }] })).toThrow("exactly one person");
+    expect(() => validateLiveSetup({ ...state, targets: [...state.targets, { ...state.targets[0], id: "second" }] })).toThrow("Choose one person or Replace all people");
     expect(() => validateLiveSetup({ ...state, trim: [1, 5.5] })).toThrow("whole-number");
     expect(() => validateLiveSetup({ ...state, trim: [0, 3] })).toThrow("4 and 15");
     expect(() => validateLiveSetup({ ...state, trim: [1, 11] })).toThrow("4 and 15");
@@ -256,9 +282,18 @@ describe("live BYOK pipeline", () => {
     const {result} = await renderLive();
     await act(async () => {await result.current.prepare(setup());});
     expect(result.current.job).toMatchObject({id: "job-1", status: "queued"});
+    expect(result.current.preparationProgress?.phase).toBe("confirming");
+    const leavingEarly = new Event("beforeunload", {cancelable: true});
+    window.dispatchEvent(leavingEarly);
+    expect(leavingEarly.defaultPrevented).toBe(true);
     await act(async () => {await result.current.prepare(setup());});
     expect(calls("/api/uploads")).toHaveLength(1);
     expect(result.current.error).toContain("retained");
+    await act(async () => {await result.current.refresh();});
+    expect(result.current.preparationProgress?.phase).toBe("queued");
+    const leavingAfterConfirmation = new Event("beforeunload", {cancelable: true});
+    window.dispatchEvent(leavingAfterConfirmation);
+    expect(leavingAfterConfirmation.defaultPrevented).toBe(false);
   });
 
   it("shows immediate access feedback and elapsed time while a slow check is pending", async () => {

@@ -41,7 +41,7 @@ export function ReferenceUpload({
         type="file"
         hidden
         disabled={pending}
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,image/mpo,.mpo"
         aria-label={`Upload reference for ${person.name}`}
         onChange={(event) => {
           const file = event.target.files?.[0];

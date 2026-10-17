@@ -3,3 +3,7 @@ export interface PreparationProgressState {
   message: string;
   uploadPercent?: number;
 }
+
+export function isUploadUnconfirmed(progress: PreparationProgressState | null): boolean {
+  return progress !== null && progress.phase !== "queued" && progress.phase !== "preparing";
+}

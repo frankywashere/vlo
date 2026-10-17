@@ -24,6 +24,33 @@ MAX_SEGMENTS = 60
 MAX_FRAME_BYTES = 2_000_000
 
 
+def merge_all_people_masks(archive: Path, output: Path, metadata: dict):
+    """Union every non-background SAM label per frame into the compose label 1.
+
+    No identity continuity or scene matching is needed. Empty shots remain
+    empty, and newly detected people are included regardless of their ID.
+    """
+    if Path(archive).resolve() == Path(output).resolve():
+        raise _invalid("Save the combined masks separately from the detected masks.")
+    validation = {**metadata, "scene_cuts": [], "anchor": {"frame": 0, "time": 0}}
+    coverage = []
+    try:
+        with _maps(archive, validation) as read, zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as masks:
+            for index in range(metadata["frames"]):
+                selected = (read(index) > 0).astype(np.uint16)
+                coverage.append(int(np.count_nonzero(selected)))
+                buffer = BytesIO()
+                Image.fromarray(selected).save(buffer, "PNG")
+                masks.writestr(f"labels/labels_{index:05d}.png", buffer.getvalue())
+        if not any(coverage):
+            raise PublicError("No people were detected in this clip. Try a clearer section or turn enhanced masking off.",
+                              code="no_people_detected")
+        return coverage
+    except Exception:
+        Path(output).unlink(missing_ok=True)
+        raise
+
+
 def _invalid(message="The tracking masks could not be read."):
     return PublicError(message, code="tracking_invalid")
 

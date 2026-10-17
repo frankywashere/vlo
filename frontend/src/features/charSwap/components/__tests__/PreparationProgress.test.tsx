@@ -26,7 +26,7 @@ describe("scene check progress", () => {
     expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
     expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument();
     expect(
-      screen.getByText("Keep this tab open until the upload is confirmed. Your saved job will then appear in your Library."),
+      screen.getByRole("dialog", {name: "Keep this page open"}),
     ).toBeInTheDocument();
   });
 
@@ -64,6 +64,19 @@ describe("scene check progress", () => {
     );
     expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
     expect(screen.queryByText("100%")).not.toBeInTheDocument();
-    expect(screen.getByText("You can leave now. Find this job under Current processing jobs in your Library.")).toBeInTheDocument();
+    expect(screen.getByText("Upload saved. You can close this page.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps the warning at 100 percent until server confirmation arrives", () => {
+    const {rerender} = render(<PreparationProgress progress={{phase: "uploading", message: "Uploading…", uploadPercent: 100}} elapsedSeconds={5} />);
+    expect(screen.getByRole("dialog", {name: "Keep this page open"})).toBeInTheDocument();
+    expect(screen.getByText(/keep this page visible and your screen awake/)).toBeInTheDocument();
+    rerender(<PreparationProgress progress={{phase: "confirming", message: "Confirming upload…"}} elapsedSeconds={6} />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(/Please wait for confirmation/)).toBeInTheDocument();
+    rerender(<PreparationProgress progress={{phase: "queued", message: "Queued"}} elapsedSeconds={7} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Upload saved. You can close this page.")).toBeInTheDocument();
   });
 });

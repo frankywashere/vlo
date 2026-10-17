@@ -63,6 +63,30 @@ beforeEach(() => {
 });
 
 describe("walkthrough store readiness", () => {
+  it("uses one reference for everyone and clears stale selections when changing modes", () => {
+    prepareReferences();
+    const store = useCharSwapStore.getState();
+    store.reviewTracking(matchingIssues());
+    store.setReplaceAllPeople(true);
+    let state = useCharSwapStore.getState();
+    expect(state.replaceAllPeople).toBe(true);
+    expect(state.targets.map((target) => target.name)).toEqual(["All people"]);
+    expect(state.assignments).toEqual({});
+    expect(state.references).toEqual([]);
+    expect(state.issues).toEqual([]);
+    expect(state.trackingReady).toBe(false);
+    store.assignReference("all-people", {id: "bear", name: "Bear", url: "/bear.png"});
+    expect(useCharSwapStore.getState().assignments).toEqual({"all-people": "bear"});
+    store.selectTarget(PERSON_A);
+    state = useCharSwapStore.getState();
+    expect(state.replaceAllPeople).toBe(false);
+    expect(state.targets).toEqual([PERSON_A]);
+    expect(state.assignments).toEqual({});
+    store.setReplaceAllPeople(true);
+    store.changeTrim([1, 5]);
+    expect(useCharSwapStore.getState().replaceAllPeople).toBe(false);
+    expect(useCharSwapStore.getState().targets).toEqual([]);
+  });
   it("blocks review until tracking finishes, even when references are complete", () => {
     prepareReferences();
     useCharSwapStore.getState().visit("review");

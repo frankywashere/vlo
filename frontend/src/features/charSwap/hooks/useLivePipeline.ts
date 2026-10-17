@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PreparationProgressState } from "../model/preparation";
+import { isUploadUnconfirmed } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import {
   assertLiveKey,
@@ -61,6 +62,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   const [preparationElapsedSeconds, setPreparationElapsedSeconds] = useState(0);
   const preparationStartedAt = useRef(0);
   const preparing = preparationProgress !== null;
+  const uploadUnconfirmed = isUploadUnconfirmed(preparationProgress);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
@@ -77,6 +79,16 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   const enabled = config?.live === true && config.available && isSecureLiveOrigin();
   const jobId = job?.id;
   const jobStatus = job?.status;
+
+  useEffect(() => {
+    if (!uploadUnconfirmed) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [uploadUnconfirmed]);
 
   useEffect(() => {
     if (!preparing) return;
@@ -160,7 +172,9 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     }
     currentJob.current = clean;
     setJob(clean);
-    setPreparationProgress(clean.status === "queued" || clean.status === "preparing"
+    setPreparationProgress(clean.upload_confirmation_pending
+      ? {phase: "confirming", message: "Your files uploaded, but the server confirmation is delayed. Keep this page open while we check your job. Do not submit again."}
+      : clean.status === "queued" || clean.status === "preparing"
       ? {phase: clean.status, message: clean.message || (clean.status === "queued" ? "Your clip is queued for scene checks…" : "Checking the selected person and preparing your guide…")}
       : null);
     setError(clean.status === "failed" || clean.status === "submission_unknown"

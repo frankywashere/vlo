@@ -86,6 +86,30 @@ describe("CharSwap walkthrough", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])("takes everyone through one reference and the correct review flow (Easy: %s)", async (easy) => {
+    useCharSwapStore.getState().setEasyMode(easy);
+    const user = userEvent.setup();
+    render(<CharSwapWalkthrough />);
+    await user.click(screen.getByRole("button", {name: "Try sample clip"}));
+    await waitFor(() => expect(screen.getByRole("button", {name: "Trim clip"})).toBeEnabled());
+    await user.click(screen.getByRole("button", {name: "Trim clip"}));
+    await user.click(screen.getByRole("button", {name: "Select people"}));
+    await user.click(screen.getByRole("button", {name: "Replace all people"}));
+    expect(screen.getByRole("button", {name: "Replace all people"})).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("textbox", {name: /Rename/})).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", {name: "Choose references"}));
+    expect(screen.getAllByRole("button", {name: "Use sample teddy bear"})).toHaveLength(1);
+    await user.click(screen.getByRole("button", {name: "Use sample teddy bear"}));
+    if (!easy) {
+      await user.click(screen.getByRole("button", {name: "Check all scenes"}));
+      expect(screen.getByRole("heading", {name: "Check your prepared clip"})).toBeInTheDocument();
+      expect(screen.queryByText(/Sample review moment/)).not.toBeInTheDocument();
+    }
+    await user.click(screen.getByRole("button", {name: "Choose access"}));
+    expect(screen.getByRole("heading", {name: "How would you like to pay?"})).toBeInTheDocument();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("takes two selected people through assignment and review without submitting a paid job", async () => {
     const user = userEvent.setup();
     render(<CharSwapWalkthrough />);

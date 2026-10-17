@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   createInitialState,
+  setReplaceAllPeople,
   setClip,
   setTrim,
   toggleTarget,
@@ -35,6 +36,7 @@ interface CharSwapStore extends WalkthroughState {
   selectionVersion: number;
   trackingReady: boolean;
   error: string | null;
+  setReplaceAllPeople: (enabled: boolean) => void;
   setEasyMode: (enabled: boolean) => void;
   setEnhancedCharacterMasking: (enabled: boolean) => void;
   loadClip: (clip: ClipAsset) => void;
@@ -58,6 +60,11 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   selectionVersion: 0,
   trackingReady: false,
   error: null,
+  setReplaceAllPeople: (enabled) => set((state) => {
+    const updated = setReplaceAllPeople(state, enabled);
+    return updated === state ? state : {...updated,
+      selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null};
+  }),
   setEasyMode: (enabled) =>
     set((state) => enabled === (state.easyMode ?? true) ? state : {
       easyMode: enabled,

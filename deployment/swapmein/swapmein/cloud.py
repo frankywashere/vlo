@@ -37,7 +37,7 @@ def valid_spend_cap(body: dict, project_number: str):
         if (budget.get("budgetFilter", {}).get("projects") == ["projects/" + project_number]
                 and budget.get("budgetFilter", {}).get("services") == ["services/152E-C115-5142"]
                 and budget.get("spendCap", {}).get("outputState") == "CONFIGURED"
-                and amount.get("currencyCode") == "CAD" and 0 < value <= 7):
+                and amount.get("currencyCode") == "CAD" and 0 < value <= 20):
             return True
     return False
 

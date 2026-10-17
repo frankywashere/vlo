@@ -13,7 +13,7 @@ import AddPhotoAlternateOutlined from "@mui/icons-material/AddPhotoAlternateOutl
 import CheckRounded from "@mui/icons-material/CheckRounded";
 import CloseRounded from "@mui/icons-material/CloseRounded";
 import { useCharSwapStore } from "../useCharSwapStore";
-import type { ReferenceAsset, TargetPerson } from "../model/model";
+import { ALL_PEOPLE_TARGET_ID, type ReferenceAsset, type TargetPerson } from "../model/model";
 import type { DemoManifest } from "../services/demo";
 import { PersonBadge } from "./PersonBadge";
 import { ReferenceUpload } from "./ReferenceUpload";
@@ -47,7 +47,7 @@ function ReferenceCard({
   const pending = pendingIds.includes(person.id);
   return (
     <Box sx={{ ...PANEL, borderLeft: `3px solid ${person.color}` }}>
-      <PersonBadge person={person} subtitle="Original person" />
+      <PersonBadge person={person} subtitle={person.id === ALL_PEOPLE_TARGET_ID ? "One reference for everyone in every scene" : "Original person"} />
       <Divider sx={{ my: 2 }} />
       <Box
         sx={{
@@ -100,7 +100,7 @@ function ReferenceCard({
         </ButtonBase>
         <Stack spacing={1.25} alignItems="flex-start" sx={{ minWidth: 0 }}>
           <Typography fontWeight={600}>
-            {reference ? reference.name : `Who replaces ${person.name}?`}
+            {reference ? reference.name : person.id === ALL_PEOPLE_TARGET_ID ? "Your replacement character" : `Who replaces ${person.name}?`}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Use one clear image showing the character’s face and look.
@@ -182,6 +182,9 @@ export function ReferencesStep({
     );
   return (
     <Stack spacing={2.5}>
+      <Typography variant="body2" color="text.secondary">
+        JPG, PNG and WebP photos are converted automatically. For multi-picture JPEGs, we use the main photo.
+      </Typography>
       {targets.map((person) => (
         <ReferenceCard
           key={person.id}
@@ -198,8 +201,9 @@ export function ReferencesStep({
         />
       ))}
       <Typography variant="body2" color="text.secondary">
-        Each card connects one original person to one replacement. You can use
-        the same reference more than once.
+        {targets[0]?.id === ALL_PEOPLE_TARGET_ID
+          ? "Everyone will become a separate version of this character. Their individual positions and motion stay separate."
+          : "Each card connects one original person to one replacement. You can use the same reference more than once."}
       </Typography>
     </Stack>
   );

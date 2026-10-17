@@ -15,7 +15,22 @@ def estimate(duration: int, rate: float = .074):
     return math.ceil(duration * 2 * rate * 1000) / 1000
 
 
-def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay"):
+def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, replace_all_people: bool = False):
+    if replace_all_people:
+        marker = ("People are covered by colored depth imagery describing their shape and motion, not their appearance. Remove all depth-map colors from the completed characters. "
+                  if mask_style == "depth" else "Remove all selection overlays from the completed characters. ") if enhanced_masking else ""
+        return (
+            "Use reference video 1 as the source scene and precise motion guide. "
+            "Replace every person in every scene with a separate instance of the character from reference image 1, "
+            "including each person's entire head, hands, body and feet. "
+            + marker +
+            "Keep each replacement in its original person's position, following that person's individual motion, "
+            "pose, interactions and speaking timing. Do not merge people, add extra characters, or leave human body parts. "
+            "Include people entering later scenes. In frames without people, preserve the scene without adding anyone. "
+            f"Preserve the background, camera, lighting and exact {duration}-second timing. "
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
+            "Replace the existing people rather than adding characters beside them."
+        )
     if not enhanced_masking:
         anchor = anchor or {"x": .5, "y": .5, "time": 0}
         return (
@@ -64,8 +79,8 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
     )
 
 
-def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True):
-    prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style)
+def generation_payload(duration: int, image_url: str, video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, replace_all_people: bool = False):
+    prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
     if not audio_processing:
         prompt = prompt.replace(
             "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
