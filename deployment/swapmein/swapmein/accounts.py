@@ -7,6 +7,7 @@ from google.oauth2 import id_token
 
 from .errors import PublicError
 from .security import digest
+from .job_settings import settings_used
 
 LIBRARY_SECONDS = 30 * 86400
 
@@ -43,6 +44,7 @@ def bind_job(records, job: dict, session: dict, title: str = "Your clip") -> dic
         "id": job["id"], "title": job["title"], "created_at": job["created_at"],
         "status": job["status"], "provider": job.get("provider", "reAPI"),
         "access_mode": job.get("access_mode", "api-key"),
+        "settings_used": settings_used(job),
     })
     records.update(f"accounts/{account_id}/index.json", lambda current: {
         "jobs": [job["id"], *[item for item in (current or {}).get("jobs", []) if item != job["id"]]][:50]
@@ -61,6 +63,7 @@ def archive_completed(records, job: dict):
         "created_at": job["created_at"], "completed_at": (current or {}).get("completed_at") or completed_at,
         "expires_at": (current or {}).get("expires_at") or job.get("library_expires_at") or completed_at + LIBRARY_SECONDS,
         "output_uri": job["output_uri"], "thumbnail_uri": job.get("thumbnail_uri"),
+        "settings_used": settings_used(job),
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),
         "selection_targets": job.get("normalized_targets") or job.get("setup", {}).get("targets"),
         **{key: job[key] for key in ("provider_task", "provider_billing", "app_credits_charged", "generation_credits", "audio_processing") if key in job},

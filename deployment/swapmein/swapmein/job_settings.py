@@ -1,0 +1,44 @@
+"""Public, durable settings summaries without credentials, URLs or prompts."""
+import math
+
+
+def settings_used(job):
+    result = dict(job.get("settings_used") or {})
+    setup = job.get("setup") or {}
+    for key in ("easy_mode", "replace_all_people", "audio_processing"):
+        value = job.get(key, setup.get(key))
+        if isinstance(value, bool):
+            result[key] = value
+    if isinstance(setup.get("enhanced_character_masking"), bool):
+        result["enhanced_masking"] = setup["enhanced_character_masking"]
+    elif job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "gray"}:
+        result["enhanced_masking"] = job["mask_style"] != "none"
+    if job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "gray"}:
+        result["mask_style"] = job["mask_style"]
+    trim = setup.get("trim")
+    if isinstance(trim, (list, tuple)) and len(trim) == 2 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in trim):
+        result["trim"] = list(trim)
+    targets = job.get("normalized_targets") or setup.get("targets")
+    if targets:
+        result["people_count"] = len(targets)
+        result["reference_count"] = len({target["reference_index"] for target in targets if "reference_index" in target})
+    elif setup.get("anchor"):
+        result["people_count"] = 1
+    if job.get("reference_uris"):
+        result["reference_count"] = len(job["reference_uris"])
+    elif job.get("reference_uri"):
+        result["reference_count"] = 1
+    for key in ("duration", "width", "height"):
+        if isinstance(job.get(key), (int, float)):
+            result[key] = job[key]
+    media = job.get("preparation_media") or {}
+    for key in ("width", "height", "fps"):
+        if isinstance(media.get(key), (int, float)):
+            result["prep_" + key] = media[key]
+    generation = job.get("generation_settings") or {}
+    if generation.get("model") in {"minimax-h3", "MiniMax-H3"}:
+        result["model"] = "MiniMax H3"
+    if generation.get("resolution") in {"768P", "768p"}:
+        result["requested_resolution"] = "768p"
+    allowed = {"easy_mode", "replace_all_people", "audio_processing", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution"}
+    return {key: value for key, value in result.items() if key in allowed}

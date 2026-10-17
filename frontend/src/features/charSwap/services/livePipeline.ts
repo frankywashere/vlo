@@ -29,7 +29,27 @@ export type LiveJobStatus =
   | "failed"
   | "submission_unknown";
 
+export interface JobSettingsUsed {
+  easy_mode?: boolean;
+  enhanced_masking?: boolean;
+  audio_processing?: boolean;
+  replace_all_people?: boolean;
+  mask_style?: string;
+  trim?: number[];
+  people_count?: number;
+  reference_count?: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  prep_width?: number;
+  prep_height?: number;
+  prep_fps?: number;
+  model?: string;
+  requested_resolution?: string;
+}
+
 export interface LivePipelineJob {
+  settings_used?: JobSettingsUsed;
   /** Browser-only: the upload finished but queue acknowledgement was lost. */
   upload_confirmation_pending?: boolean;
   replace_all_people?: boolean;

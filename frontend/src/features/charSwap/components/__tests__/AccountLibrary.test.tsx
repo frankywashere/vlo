@@ -118,6 +118,7 @@ describe("private account library", () => {
       status: "completed" as const,
       output_url: "https://storage.googleapis.com/output.mp4",
       thumbnail_url: "https://storage.googleapis.com/poster.jpg",
+      settings_used: { easy_mode: false, enhanced_masking: true, audio_processing: false },
     };
     vi.mocked(loadAccountJobs).mockResolvedValue([complete]);
     vi.mocked(setJobHidden).mockResolvedValue({});
@@ -127,6 +128,9 @@ describe("private account library", () => {
       await screen.findByRole("link", { name: "Download video" }),
     ).toHaveAttribute("href", complete.output_url);
     expect(screen.getByLabelText(complete.title)).toHaveAttribute("poster", complete.thumbnail_url);
+    await user.click(screen.getByText("Settings used"));
+    expect(screen.getByText("Enhanced masking")).toBeVisible();
+    expect(screen.getAllByText("Off")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() =>
       expect(setJobHidden).toHaveBeenCalledWith(job.id, true),

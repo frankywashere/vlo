@@ -149,6 +149,8 @@ def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monke
     submitted = client.post("/internal/generate", json={"job_id": job_id})
     assert submitted.status_code == 200
     assert len(provider.submissions) == 1
+    assert records.data[f"jobs/{job_id}.json"]["generation_settings"] == {
+        "model": provider.submissions[0]["model"], "resolution": provider.submissions[0]["resolution"]}
     assert records.data[f"accounts/{account_id}/wallet.json"]["balance"] == 200 - (quoted if quoted is not None else duration * 10)
     assert ("poll-provider", job_id) in cloud.enqueued
     assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200

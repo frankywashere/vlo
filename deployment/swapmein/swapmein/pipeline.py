@@ -94,6 +94,7 @@ class Pipeline:
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
                 self.update_job(job_id, duration=metadata["duration"], width=metadata["width"], height=metadata["height"],
                                 normalized_uri=source_uri, normalized_targets=targets, preparation_version=options.preparation_version,
+                                preparation_media={"width": metadata["width"], "height": metadata["height"], "fps": 24},
                                 target_styles=targets if multi else [])
                 emit("preparation_normalized", job_id=job_id, preparation_version=options.preparation_version,
                      width=metadata["width"], height=metadata["height"], frames=metadata["frames"], fps=24,

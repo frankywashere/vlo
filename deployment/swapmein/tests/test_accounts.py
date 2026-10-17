@@ -80,10 +80,15 @@ def test_saved_video_survives_short_lived_preparation_records(api, monkeypatch):
     job = {"id": "b" * 32, "account_id": account, "key_fingerprint": digest("key"), "status": "completed", "created_at": time.time(), "title": "Saved", "completed_at": time.time() - 10, "output_uri": "gs://private-app/library/saved.mp4"}
     accounts.bind_job(records, job, job, "Saved")
     job["thumbnail_uri"] = "gs://private-app/library/poster.jpg"
+    job["setup"] = {"easy_mode": False, "enhanced_character_masking": True, "trim": [1.3, 6.3]}
+    job["audio_processing"] = False
     accounts.archive_completed(records, job)
     result = client.get("/api/account/jobs").json()["jobs"][0]
     assert result["status"] == "completed" and "output_url" in result
     assert "thumbnail_url" in result
+    assert result["settings_used"]["easy_mode"] is False
+    assert result["settings_used"]["enhanced_masking"] is True
+    assert result["settings_used"]["audio_processing"] is False
     assert result["completed_at"] == job["completed_at"]
     accounts.archive_completed(records, {**job, "completed_at": time.time()})
     assert client.get("/api/account/jobs").json()["jobs"][0]["completed_at"] == job["completed_at"]

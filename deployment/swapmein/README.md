@@ -425,3 +425,12 @@ URL, including after the short-lived job record expires. This avoids depending
 on mobile Safari decoding a video frame before playback. Poster creation is
 logged and can retry from the saved final video without another paid render;
 temporary cleanup never includes the Library directory.
+
+Library entries retain an allowlisted `settings_used` summary: source trim, mode
+and masking/audio choices, selected-person/reference counts, actual preparation
+size/frame rate, submitted model/quality and resulting dimensions when recorded.
+These summaries exclude keys, media URLs and prompts. The Library exposes them
+under an expandable Settings used section, even after temporary job records
+expire. Missing historical fields remain unknown rather than taking current
+site defaults. Preparation media dimensions and provider model/quality are saved
+at their respective processing/submission stages for future jobs.

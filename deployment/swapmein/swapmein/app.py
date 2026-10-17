@@ -33,6 +33,7 @@ from .storage import (Records, check_preparation_capacity, claim_job, reserve_pr
 from .tracking import resolve_tracking
 from .diagnostics import emit, provider_billing
 from .accounts import lookup_credit_recipient, verify_account, bind_job, archive_completed, index_path
+from .job_settings import settings_used
 from .commerce import (credit_grant_history, grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
                        save_catalog, staff_role, wallet_view, feature_view, save_features)
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
@@ -212,6 +213,7 @@ def view(job: dict):
                           else "Generation needs review." if credits_mode and status == "failed"
                           else job.get("message", "")),
               "access_mode": "credits" if credits_mode else "api-key",
+              "settings_used": settings_used(job),
               "replace_all_people": bool(job.get("setup", {}).get("replace_all_people", False))}
     if not credits_mode:
         result["provider"] = job.get("provider", "reAPI")
@@ -973,6 +975,7 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
             public = view(job)
         else:
             public = {"id": job_id, "access_mode": item.get("access_mode", "api-key"),
+                      "settings_used": settings_used(item),
                       "status": item.get("status", "failed"), "message": "Preparation records have expired."}
             if item.get("selection_targets"):
                 public["selection_targets"] = item["selection_targets"]
@@ -1084,7 +1087,9 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         if balance < round(job_estimate(job) * 1000):
             raise PublicError("Your provider allowance is below the current estimate. Check credits and token limits before generating.", 402)
     try:
-        records.update(f"jobs/{job_id}.json", lambda current: claim_job(current, {"ready"}, "submitting"))
+        records.update(f"jobs/{job_id}.json", lambda current: {
+            **claim_job(current, {"ready"}, "submitting"),
+            "generation_settings": {"model": payload["model"], "resolution": payload["resolution"]}})
     except PublicError as error:
         if error.status_code == 409:
             current, _ = records.read(f"jobs/{job_id}.json")

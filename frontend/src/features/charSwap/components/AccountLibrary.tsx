@@ -25,6 +25,7 @@ import {
   resolveLiveTracking,
 } from "../services/livePipeline";
 import { JobElapsedTime } from "./JobElapsedTime";
+import { JobSettings } from "./JobSettings";
 import { SceneTrackingReview } from "./SceneTrackingReview";
 import { loadAccountAccess } from "../services/commerce";
 import { TARGET_COLORS } from "../limits";
@@ -337,6 +338,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
               <Typography variant="body2" color="text.secondary">
                 {job.message}
               </Typography>
+              <JobSettings settings={job.settings_used} />
               <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 2 }}>
                 {job.output_url ? (
                   <Button component="a" href={job.output_url} download>
