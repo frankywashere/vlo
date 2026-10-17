@@ -89,3 +89,31 @@ def lookup_credit_recipient(project: str, email: str) -> dict:
     if len(matches) != 1 or not isinstance(matches[0].get("localId"), str) or not matches[0]["localId"]:
         raise PublicError("No active Google account found. Ask the user to sign in to recastfx first.", 404)
     return {"account_id": digest(matches[0]["localId"]), "email": email}
+
+
+def registered_accounts(project: str, cursor: str | None = None):
+    """One bounded Firebase page; never expose UIDs, tokens or auth internals."""
+    import httpx
+    from .cloud import access_token
+    from .diagnostics import emit
+    try:
+        response = httpx.get(f"https://identitytoolkit.googleapis.com/v1/projects/{project}/accounts:batchGet",
+            headers={"Authorization": "Bearer " + access_token()},
+            params={"maxResults": 1000, **({"nextPageToken": cursor} if cursor else {})}, timeout=15)
+        response.raise_for_status()
+        body = response.json()
+        accounts = []
+        for user in body.get("users", []):
+            email = user.get("email")
+            if (not isinstance(email, str) or not email or len(email) > 254
+                    or not any(provider.get("providerId") == "google.com" for provider in user.get("providerUserInfo", []))):
+                continue
+            accounts.append({"email": email.strip().lower(),
+                "display_name": str(user.get("displayName") or "")[:200], "disabled": user.get("disabled") is True})
+        next_cursor = body.get("nextPageToken") or None
+        if next_cursor is not None and (not isinstance(next_cursor, str) or len(next_cursor) > 4096):
+            raise ValueError("Invalid account page")
+        return {"accounts": accounts, "next_cursor": next_cursor}
+    except Exception as error:
+        emit("admin_account_directory_failed", error=error)
+        raise PublicError("The account list is unavailable. Try refreshing it shortly.", 503) from None

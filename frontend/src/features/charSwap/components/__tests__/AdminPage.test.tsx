@@ -8,7 +8,7 @@ vi.mock("../../services/commerce", () => ({
   loadCreditAdmin: async () => ({ role: api.role, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
-  savePipelineSettings: api.pipeline, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadCreditStaff: vi.fn(), setCreditStaff: vi.fn(),
+  savePipelineSettings: api.pipeline, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
 }));
 beforeEach(() => { api.pipeline.mockReset().mockImplementation(async (settings) => ({ ...settings, revision: settings.revision + 1 })); api.role = "owner"; api.grant.mockReset(); api.save.mockReset().mockImplementation(async (catalog) => ({ ...catalog, revision: catalog.revision + 1 })); });
 afterEach(() => cleanup());
@@ -105,4 +105,15 @@ it("lets read-only staff see every section with all mutations disabled", async (
   expect(screen.getByLabelText("Private reAPI key")).toHaveValue("");
   expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
+});
+
+it("selects a registered account for both key and staff controls without changing access", async () => {
+  const user = userEvent.setup();
+  render(<AdminPage />);
+  await user.click(await screen.findByRole("button", {name: "Select helper@example.com"}));
+  await waitFor(() => expect(screen.getByLabelText("User Google email")).toHaveValue("helper@example.com"));
+  expect(screen.getByLabelText("Team member Google email")).toHaveValue("helper@example.com");
+  expect(await screen.findByText("Personal API-key access: Enabled")).toBeInTheDocument();
+  expect(await screen.findByText("Currently has no admin access.")).toBeInTheDocument();
+  expect(api.grant).not.toHaveBeenCalled();
 });

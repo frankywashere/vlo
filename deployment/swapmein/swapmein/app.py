@@ -32,7 +32,7 @@ from .storage import (Records, check_preparation_capacity, claim_job, reserve_pr
                       check_queue_capacity, reserve_queued_preparation, claim_queued_slot)
 from .tracking import resolve_tracking
 from .diagnostics import emit, provider_billing
-from .accounts import lookup_credit_recipient, verify_account, bind_job, archive_completed, index_path
+from .accounts import lookup_credit_recipient, registered_accounts, verify_account, bind_job, archive_completed, index_path
 from .job_settings import settings_used
 from .commerce import (credit_grant_history, grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
                        save_catalog, staff_role, staff_permissions, require_permission, wallet_view, feature_view, save_features)
@@ -462,6 +462,25 @@ def update_private_provider_key(body: PrivateProviderKey, x_firebase_token: str 
     save_server_provider_key(key)
     emit("private_provider_key_saved", actor_id=digest(account["email"]))
     return {"configured": True, "balance_usd": round(balance / 1000, 3)}
+
+
+@app.get("/api/commerce/admin/accounts")
+def account_directory(cursor: str | None = Query(default=None, min_length=1, max_length=4096), x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, actor, {"owner", "pricing_admin", "viewer"})
+    page = registered_accounts(settings.project, cursor)
+    emit("admin_account_directory_loaded", actor_id=digest(actor["email"]), account_count=len(page["accounts"]), has_next_page=bool(page["next_cursor"]))
+    return page
+
+
+@app.get("/api/commerce/admin/api-key-access")
+def get_api_key_access(email: str, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, actor, {"owner", "pricing_admin", "viewer"})
+    email = valid_account_email(email)
+    return {"email": email, "enabled": api_key_permission(records, {"email": email})}
 
 
 @app.get("/api/commerce/admin/staff")

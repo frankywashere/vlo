@@ -451,3 +451,12 @@ panel. Legacy pricing admins retain pricing-only editing unless explicitly
 updated. Delegated staff managers may grant only permissions they themselves
 hold; they cannot elevate themselves or modify bootstrap owners. Staff changes
 record the actor, target, active state and permission set in Cloud Logging.
+
+The Registered accounts directory uses Firebase's paginated `accounts:batchGet`
+API with the gateway's existing `firebaseauth.users.get` permission. Each staff-
+only response returns Google account email, display name and disabled state;
+UIDs, tokens and other authentication internals are discarded. The browser loads
+all pages, searches name/email locally, and labels loading or partial failures.
+Selecting an account loads current personal-key eligibility and staff permissions
+without saving. Existing write permissions still govern every access change.
+People remain listed after signing out; they do not need to be online.

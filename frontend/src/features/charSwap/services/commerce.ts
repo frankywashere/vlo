@@ -156,6 +156,21 @@ export function loadCreditStaff(email: string) {
   return commerceRequest<StaffAccess>("/api/commerce/admin/staff?email=" + encodeURIComponent(email));
 }
 
+export interface RegisteredAccount {
+  email: string;
+  display_name: string;
+  disabled: boolean;
+}
+
+export function loadRegisteredAccounts(cursor?: string) {
+  return commerceRequest<{accounts: RegisteredAccount[]; next_cursor: string | null}>(
+    "/api/commerce/admin/accounts" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""));
+}
+
+export function loadApiKeyAccess(email: string) {
+  return commerceRequest<{email: string; enabled: boolean}>("/api/commerce/admin/api-key-access?email=" + encodeURIComponent(email));
+}
+
 
 export function grantAccountCredits(email: string, credits: number, reason: string, requestId: string) {
   return commerceRequest<{email: string; credits: number; balance: number; request_id: string}>(

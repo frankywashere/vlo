@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { StaffAccessPanel } from "../StaffAccessPanel";
@@ -45,4 +45,20 @@ it("cannot grant permissions beyond the staff manager's own access", async () =>
   await user.click(screen.getByRole("button", {name:"Load staff access"}));
   expect(await screen.findByRole("checkbox", {name:"Replace the private generation key"})).toBeDisabled();
   expect(screen.getByRole("checkbox", {name:"Manage staff permissions"})).toBeEnabled();
+});
+
+it("does not overwrite a newly selected account when a previous save finishes late", async () => {
+  let resolveSave: (value: {email: string; role: string; active: boolean; permissions: StaffPermission[]}) => void = () => {};
+  api.load.mockImplementation(async email => ({email, role:"viewer", active:false, permissions:[]}));
+  api.save.mockImplementation(() => new Promise(resolve => { resolveSave = resolve; }));
+  const user = userEvent.setup();
+  const {rerender} = render(<StaffAccessPanel canManage grantable={all} selectedEmail="first@example.com" />);
+  await screen.findByText("Currently has no admin access.");
+  await user.click(screen.getByRole("button", {name:"Save staff access"}));
+  rerender(<StaffAccessPanel canManage grantable={all} selectedEmail="second@example.com" />);
+  await screen.findByText("Currently has no admin access.");
+  await act(async () => { resolveSave({email:"first@example.com",role:"viewer",active:true,permissions:["pricing"]}); });
+  await screen.findByText("Currently has no admin access.");
+  expect(screen.getByLabelText("Team member Google email")).toHaveValue("second@example.com");
+  expect(screen.getByRole("checkbox", {name:"Edit prices and credit packs"})).not.toBeChecked();
 });
