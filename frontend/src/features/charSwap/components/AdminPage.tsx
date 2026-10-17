@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Box, Button, Card, CardContent, Container, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
-import { loadApiKeyAccess, loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, setApiKeyAccess } from "../services/commerce";
+import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey } from "../services/commerce";
 import { AccountDirectory } from "./AccountDirectory";
-import { StaffAccessPanel } from "./StaffAccessPanel";
+import { AccountAccessPanel } from "./AccountAccessPanel";
 import { CreditGrantPanel } from "./CreditGrantPanel";
 import { DEFAULT_MARGIN_MODEL, marginPricing } from "../utils/marginPricing";
 import type { StaffPermission, MarginModel } from "../services/commerce";
@@ -15,30 +15,13 @@ export function AdminPage() {
   const [margin, setMargin] = useState<MarginModel>(DEFAULT_MARGIN_MODEL);
   const [useMargin, setUseMargin] = useState(false);
   const estimate = marginPricing(margin);
-  const [email, setEmail] = useState("");
   const [selectedEmail, setSelectedEmail] = useState("");
-  const [keyAccess, setKeyAccess] = useState<{email: string; enabled: boolean} | null>(null);
-  const [keyAccessError, setKeyAccessError] = useState("");
-  const keyAccessRequest = useRef(0);
   const permissions: StaffPermission[] = admin?.permissions ?? (admin?.role === "owner" ? ["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"] : admin?.role === "pricing_admin" ? ["pricing"] : []);
   const can = (permission: StaffPermission) => permissions.includes(permission);
   const [privateKey, setPrivateKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const refreshKeyAccess = useCallback(async (target: string) => {
-    const request = ++keyAccessRequest.current;
-    setKeyAccess(null); setKeyAccessError("");
-    try {
-      const result = await loadApiKeyAccess(target);
-      if (request === keyAccessRequest.current) setKeyAccess(result);
-    } catch (cause) { if (request === keyAccessRequest.current) setKeyAccessError(cause instanceof Error ? cause.message : "Key access could not be loaded."); }
-  }, []);
-  useEffect(() => {
-    if (!selectedEmail) return;
-    setEmail(selectedEmail); void refreshKeyAccess(selectedEmail);
-    return () => { keyAccessRequest.current += 1; };
-  }, [selectedEmail, refreshKeyAccess]);
 
   useEffect(() => {
     let active = true;
@@ -89,6 +72,7 @@ export function AdminPage() {
       {admin && <>
         {permissions.length === 0 && <Alert severity="info">Read-only admin access. You can view all sections, but cannot change settings or grant credits.</Alert>}
         <AccountDirectory selectedEmail={selectedEmail} onSelect={setSelectedEmail} />
+        {selectedEmail && <AccountAccessPanel key={selectedEmail} email={selectedEmail} grantable={permissions} />}
         <Card variant="outlined"><CardContent><Stack spacing={2}>
           <Typography variant="h5">Service controls</Typography>
           <Typography>Stripe mode: {admin.features.stripe_mode === "live" ? "Live payments (USD)" : "Sandbox"}</Typography>
@@ -153,15 +137,6 @@ export function AdminPage() {
           })}>Save private key</Button>
         </Stack></Box></CardContent></Card>
         <CreditGrantPanel readOnly={!can("grant_credits")} />
-        <Card id="account-key-access" variant="outlined" sx={{scrollMarginTop: 100}}><CardContent><Box component="fieldset" disabled={busy || !can("api_key_access")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
-          <Typography variant="h5">Account permissions</Typography>
-          <Typography color="text.secondary">Allow a specific Google account to bring its own provider key.</Typography>
-          <TextField label="User Google email" type="email" value={email} onChange={(event) => { keyAccessRequest.current += 1; setEmail(event.target.value); setKeyAccess(null); setKeyAccessError(""); }} autoComplete="off" />
-          {keyAccess && keyAccess.email === email.trim().toLowerCase() && <Typography role="status">Personal API-key access: {keyAccess.enabled ? "Enabled" : "Disabled"}</Typography>}
-          {keyAccessError && <Alert severity="warning">{keyAccessError}</Alert>}
-          <Stack direction="row" spacing={1}><Button disabled={busy || !email.trim()} onClick={() => void run(async () => { const request = ++keyAccessRequest.current; const result = await setApiKeyAccess(email, true); if (request === keyAccessRequest.current) { setKeyAccess(result); setMessage("API-key access enabled."); } })}>Enable key access</Button><Button disabled={busy || !email.trim()} onClick={() => void run(async () => { const request = ++keyAccessRequest.current; const result = await setApiKeyAccess(email, false); if (request === keyAccessRequest.current) { setKeyAccess(result); setMessage("API-key access disabled."); } })}>Disable key access</Button></Stack>
-        </Stack></Box><Button disabled={busy || !email.trim()} onClick={() => void refreshKeyAccess(email.trim())}>Refresh key access</Button></CardContent></Card>
-        <StaffAccessPanel canManage={can("manage_staff")} grantable={permissions} selectedEmail={selectedEmail} />
       </>}
     </Stack>
   </Container>;

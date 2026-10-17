@@ -18,7 +18,7 @@ it("shows owner service switches but blocks activation until credentials are rea
   await waitFor(() => expect(screen.getByRole("heading", { name: "Service controls" })).toBeInTheDocument());
   expect(screen.getByRole("switch", { name: "Enable credit checkout" })).toBeDisabled();
   expect(screen.getByRole("switch", { name: "Enable generation using recastfx credits" })).toBeDisabled();
-  expect(screen.getByRole("heading", { name: "Account permissions" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Account access" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.1);
   expect(screen.getByLabelText("Pack price (USD)")).toHaveValue(20);
   expect(screen.getByLabelText("Private reAPI key")).toHaveAttribute("type", "password");
@@ -29,7 +29,7 @@ it("lets pricing staff edit prices but not service or account access", async () 
   render(<AdminPage />);
   await waitFor(() => expect(screen.getByRole("heading", { name: "Credit pricing" })).toBeInTheDocument());
   expect(screen.getByRole("switch", { name: "Enable credit checkout" })).toBeDisabled();
-  expect(screen.getByRole("heading", { name: "Account permissions" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Account access" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Private reAPI key")).toBeDisabled();
   expect(screen.getByRole("button", {name: "Grant credits"})).toBeDisabled();
 });
@@ -100,19 +100,27 @@ it("lets read-only staff see every section with all mutations disabled", async (
   api.role = "viewer";
   render(<AdminPage />);
   await screen.findByText(/Read-only admin access/);
-  for (const name of ["Service controls", "Audio processing", "Credit pricing", "Private generation account", "Grant user credits", "Account permissions", "Staff permissions"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
-  for (const name of ["Save pricing", "Save private key", "Grant credits", "Enable key access"]) expect(screen.getByRole("button", {name})).toBeDisabled();
+  for (const name of ["Service controls", "Audio processing", "Credit pricing", "Private generation account", "Grant user credits"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
+  for (const name of ["Save pricing", "Save private key", "Grant credits"]) expect(screen.getByRole("button", {name})).toBeDisabled();
   expect(screen.getByLabelText("Private reAPI key")).toHaveValue("");
   expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
+  const user = userEvent.setup();
+  await user.click(screen.getByText("Registered accounts", {exact:true}));
+  await user.click(await screen.findByRole("button", {name:"Select helper@example.com"}));
+  expect(await screen.findByRole("switch", {name:"Allow own API key"})).toBeDisabled();
+  expect(await screen.findByRole("button", {name:"Save staff access"})).toBeDisabled();
 });
 
 it("selects a registered account for both key and staff controls without changing access", async () => {
   const user = userEvent.setup();
   render(<AdminPage />);
+  await user.click(await screen.findByText("Registered accounts", {exact:true}));
   await user.click(await screen.findByRole("button", {name: "Select helper@example.com"}));
-  await waitFor(() => expect(screen.getByLabelText("User Google email")).toHaveValue("helper@example.com"));
-  expect(screen.getByLabelText("Team member Google email")).toHaveValue("helper@example.com");
+  expect(await screen.findByRole("heading", {name:"Account access"})).toBeInTheDocument();
+  expect(screen.queryByLabelText("User Google email")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Team member Google email")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", {name:"Load staff access"})).not.toBeInTheDocument();
   expect(await screen.findByText("Personal API-key access: Enabled")).toBeInTheDocument();
   expect(await screen.findByText("Currently has no admin access.")).toBeInTheDocument();
   expect(api.grant).not.toHaveBeenCalled();

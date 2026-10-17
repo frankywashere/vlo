@@ -12,10 +12,8 @@ beforeEach(() => {
 });
 it("grants view-only access with no boxes, then saves explicitly chosen permissions", async () => {
   const user = userEvent.setup();
-  render(<StaffAccessPanel canManage grantable={all} />);
+  render(<StaffAccessPanel canManage grantable={all} selectedEmail="helper@example.com" />);
   expect(screen.queryByRole("button", {name:"Save staff access"})).not.toBeInTheDocument();
-  await user.type(screen.getByLabelText("Team member Google email"), "helper@example.com");
-  await user.click(screen.getByRole("button", {name:"Load staff access"}));
   await user.click(await screen.findByRole("button", {name:"Save staff access"}));
   await screen.findByText("Read-only admin access enabled.");
   expect(api.save).toHaveBeenLastCalledWith("helper@example.com", "viewer", true, []);
@@ -29,20 +27,14 @@ it("grants view-only access with no boxes, then saves explicitly chosen permissi
 });
 it("loads existing checkboxes and blocks changes for read-only staff", async () => {
   api.load.mockResolvedValue({email:"helper@example.com", role:"viewer", active:true, permissions:["pricing"]});
-  const user = userEvent.setup();
-  render(<StaffAccessPanel canManage={false} grantable={[]} />);
-  await user.type(screen.getByLabelText("Team member Google email"), "helper@example.com");
-  await user.click(screen.getByRole("button", {name:"Load staff access"}));
+  render(<StaffAccessPanel canManage={false} grantable={[]} selectedEmail="helper@example.com" />);
   const pricing = await screen.findByRole("checkbox", {name:"Edit prices and credit packs"});
   expect(pricing).toBeChecked(); expect(pricing).toBeDisabled();
   expect(screen.getByRole("button", {name:"Save staff access"})).toBeDisabled();
   expect(api.save).not.toHaveBeenCalled();
 });
 it("cannot grant permissions beyond the staff manager's own access", async () => {
-  const user = userEvent.setup();
-  render(<StaffAccessPanel canManage grantable={["manage_staff"]} />);
-  await user.type(screen.getByLabelText("Team member Google email"), "helper@example.com");
-  await user.click(screen.getByRole("button", {name:"Load staff access"}));
+  render(<StaffAccessPanel canManage grantable={["manage_staff"]} selectedEmail="helper@example.com" />);
   expect(await screen.findByRole("checkbox", {name:"Replace the private generation key"})).toBeDisabled();
   expect(screen.getByRole("checkbox", {name:"Manage staff permissions"})).toBeEnabled();
 });
@@ -59,6 +51,6 @@ it("does not overwrite a newly selected account when a previous save finishes la
   await screen.findByText("Currently has no admin access.");
   await act(async () => { resolveSave({email:"first@example.com",role:"viewer",active:true,permissions:["pricing"]}); });
   await screen.findByText("Currently has no admin access.");
-  expect(screen.getByLabelText("Team member Google email")).toHaveValue("second@example.com");
+  expect(api.load).toHaveBeenLastCalledWith("second@example.com");
   expect(screen.getByRole("checkbox", {name:"Edit prices and credit packs"})).not.toBeChecked();
 });

@@ -10,6 +10,7 @@ export function AccountDirectory({ selectedEmail, onSelect }: { selectedEmail: s
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [visible, setVisible] = useState(10);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     let active = true;
     setLoading(true); setError(""); setAccounts([]);
@@ -34,9 +35,14 @@ export function AccountDirectory({ selectedEmail, onSelect }: { selectedEmail: s
   }, [refresh]);
   const search = query.trim().toLowerCase();
   const matches = accounts.filter(account => `${account.email} ${account.display_name}`.toLowerCase().includes(search));
-  return <Card variant="outlined"><CardContent><Stack spacing={2}>
+  return <Card variant="outlined"><Box component="details" open={expanded} onToggle={event => { setExpanded(event.currentTarget.open); if (!event.currentTarget.open) setVisible(10); }}>
+    <Box component="summary" sx={{ cursor: "pointer", p: 2.5, minHeight: 48 }}>
+      <Typography component="span" variant="h5">Registered accounts</Typography>
+      <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 2 }}>{loading ? "Loading…" : error ? "Couldn’t load all accounts" : `${accounts.length} accounts`}</Typography>
+    </Box>
+    <CardContent sx={{ pt: 0 }}><Stack spacing={2}>
     <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
-      <Typography variant="h5">Registered accounts</Typography>
+      <Typography variant="body2" color="text.secondary">Choose an account to manage its access.</Typography>
       <Button disabled={loading} onClick={() => setRefresh(value => value + 1)}>Refresh accounts</Button>
     </Stack>
     <Typography color="text.secondary">Everyone who has signed up with Google, including people who are signed out. Select an account to load its personal API-key and staff permissions below. Selecting does not save changes.</Typography>
@@ -46,12 +52,11 @@ export function AccountDirectory({ selectedEmail, onSelect }: { selectedEmail: s
     {!loading && !error && <Typography variant="body2" color="text.secondary">{accounts.length} registered {accounts.length === 1 ? "account" : "accounts"} · {matches.length} matching</Typography>}
     {!loading && matches.length === 0 && <Typography>No accounts match your search.</Typography>}
     <List aria-label="Registered accounts" disablePadding>
-      {matches.slice(0, visible).map(account => <ListItemButton key={account.email} selected={selectedEmail === account.email} aria-label={`Select ${account.email}`} onClick={() => onSelect(account.email)} sx={{borderRadius: 1, overflowWrap: "anywhere"}}>
+      {matches.slice(0, visible).map(account => <ListItemButton key={account.email} selected={selectedEmail === account.email} aria-label={`Select ${account.email}`} onClick={() => { onSelect(account.email); setExpanded(false); setVisible(10); }} sx={{borderRadius: 1, overflowWrap: "anywhere"}}>
         <ListItemText primary={account.display_name || account.email} secondary={account.display_name ? account.email : undefined} />
         {account.disabled && <Chip size="small" label="Account disabled" />}
       </ListItemButton>)}
     </List>
     {matches.length > visible && <Button onClick={() => setVisible(value => value + 10)}>Show more accounts</Button>}
-    {selectedEmail && <Alert severity="info">Selected: {selectedEmail}<Stack direction="row" flexWrap="wrap" gap={1} sx={{mt:1}}><Button component="a" href="#account-key-access">Personal API-key access</Button><Button component="a" href="#staff-permissions">Staff permissions</Button></Stack></Alert>}
-  </Stack></CardContent></Card>;
+  </Stack></CardContent></Box></Card>;
 }

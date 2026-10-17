@@ -460,3 +460,11 @@ all pages, searches name/email locally, and labels loading or partial failures.
 Selecting an account loads current personal-key eligibility and staff permissions
 without saving. Existing write permissions still govern every access change.
 People remain listed after signing out; they do not need to be online.
+
+The account picker starts collapsed and shows ten matching rows at a time when
+expanded, with Show more for additional rows. Search still covers every loaded
+Firebase page. Selecting someone collapses the list and opens a single Account
+access panel with their email, personal-key toggle and staff permission checkboxes.
+Duplicate email inputs and routine Load access buttons are removed. Personal-key
+changes apply immediately with confirmation; staff changes require Save staff
+access. Both controls retain server-enforced permissions and read-only states.
