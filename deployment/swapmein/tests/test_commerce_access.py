@@ -292,9 +292,9 @@ def test_easy_preflight_checks_selected_duration_instead_of_maximum(api, monkeyp
     session = {"access_mode": "credits", "account_id": account_id}
     def setup(duration):
         return Setup(trim=[1.3, 1.3 + duration], anchor={"x": .5, "y": .5, "time": 2}, easy_mode=True, auto_generate=True)
-    gateway.check_automatic_generation(records, setup(5), session)
+    gateway.check_generation_funding(records, setup(5), session)
     with pytest.raises(PublicError) as error:
-        gateway.check_automatic_generation(records, setup(15), session)
+        gateway.check_generation_funding(records, setup(15), session)
     assert "Add enough" in str(error.value)
 
 

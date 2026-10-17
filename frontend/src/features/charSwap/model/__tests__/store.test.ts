@@ -84,9 +84,9 @@ describe("walkthrough store readiness", () => {
     expect(useCharSwapStore.getState().step).toBe("matches");
     expect(store.chooseMatch("issue-person-b", null)).toBe(true);
     store.next();
-    expect(useCharSwapStore.getState().step).toBe("access");
-    store.next();
     expect(useCharSwapStore.getState().step).toBe("review");
+    store.next();
+    expect(useCharSwapStore.getState().step).toBe("generation");
     expect(useCharSwapStore.getState().error).toBeNull();
   });
 
@@ -169,7 +169,6 @@ describe("walkthrough store readiness", () => {
   });
 });
 
-
 it("defaults Easy mode on and changing it invalidates the guide while preserving selections and references", () => {
   useCharSwapStore.getState().reset();
   expect(useCharSwapStore.getState().easyMode).toBe(true);
@@ -177,7 +176,7 @@ it("defaults Easy mode on and changing it invalidates the guide while preserving
   const store = useCharSwapStore.getState();
   store.visit("references");
   store.next();
-  expect(useCharSwapStore.getState().step).toBe("access");
+  expect(useCharSwapStore.getState().step).toBe("review");
   const before = useCharSwapStore.getState();
   store.setEasyMode(false);
   const after = useCharSwapStore.getState();

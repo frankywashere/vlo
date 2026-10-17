@@ -6,6 +6,7 @@ declareHostMenus();
 
 describe("Wave 3 host menu subjects", () => {
   it.each([
+    ["recast.account", { slot: "recast.account" }],
     [
       "masks.add.options",
       {

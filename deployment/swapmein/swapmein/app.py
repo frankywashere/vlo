@@ -156,15 +156,13 @@ def job_estimate(job):
     return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
 
 
-def check_automatic_generation(records, setup: Setup, active_session: dict):
-    if not setup.auto_generate:
-        return
-    if not setup.easy_mode:
+def check_generation_funding(records, setup: Setup, active_session: dict):
+    if setup.auto_generate and not setup.easy_mode:
         raise PublicError("Automatic generation requires Easy mode.", 409)
-    if active_session.get("access_mode") == "api-key":
-        return
     if active_session.get("access_mode") != "credits":
-        raise PublicError("Choose recastfx credits or an authorized API key.", 409)
+        if setup.auto_generate and active_session.get("access_mode") != "api-key":
+            raise PublicError("Choose recastfx credits or an authorized API key.", 409)
+        return
     if not feature_view(records)["credit_generation"]:
         raise PublicError("Credit-funded generation is not available yet.", 503)
     catalog = public_catalog(records)
@@ -231,8 +229,8 @@ def view(job: dict):
         result["tracking_segments"] = job["tracking_plan"]["segments"]
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]
-        if job.get("normalized_uri"):
-            result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
+    if job.get("normalized_uri"):
+        result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
     if credits_mode and job.get("app_credits_charged") is not None:
         result["app_credits_charged"] = job["app_credits_charged"]
     if not credits_mode and job.get("actual_credits") is not None:
@@ -510,6 +508,9 @@ def session(options: ProviderSelection = Body(default=ProviderSelection()), x_re
         if not feature_view(records)["credit_generation"]:
             raise PublicError("Credit-funded generation is not available yet.", 503)
         balance = wallet_view(records, account["account_id"])["balance"]
+        minimum_credits = generation_credit_cost(4, public_catalog(records)["credits_per_generation"])
+        if balance < minimum_credits:
+            raise PublicError("Add enough credits before starting a new recast.", 402)
         key_fingerprint = digest("recastfx-credits")
     else:
         if settings.require_account and (not account or not api_key_permission(records, account)):
@@ -553,7 +554,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         options = Setup.model_validate_json(setup)
     except ValidationError:
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
-    check_automatic_generation(records, options, active_session)
+    check_generation_funding(records, options, active_session)
     job_id = uuid.uuid4().hex
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.auto_generate and active_session.get("access_mode") == "api-key" else None)
@@ -633,7 +634,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     records, cloud, _ = services()
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
-    check_automatic_generation(records, options.setup, active_session)
+    check_generation_funding(records, options.setup, active_session)
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.setup.auto_generate and active_session.get("access_mode") == "api-key" else None)
     # Bound abandoned upload storage separately; no preparation slot or worker is
@@ -679,7 +680,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         return {"id": job_id, "status": job["status"]}
     if manifest["expires_at"] <= time.time():
         raise PublicError("This upload expired. Prepare the clip again.", 409)
-    check_automatic_generation(records, Setup.model_validate(manifest["setup"]), active_session)
+    check_generation_funding(records, Setup.model_validate(manifest["setup"]), active_session)
     if (manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
             and not manifest.get("auto_key_ciphertext")):
         raise PublicError("Re-enter your API key before submitting this job.", 409)

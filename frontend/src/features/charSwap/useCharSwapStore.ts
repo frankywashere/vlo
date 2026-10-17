@@ -27,8 +27,8 @@ export const STEPS: Step[] = [
   "people",
   "references",
   "matches",
-  "access",
   "review",
+  "generation",
 ];
 interface CharSwapStore extends WalkthroughState {
   step: Step;
@@ -59,13 +59,20 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   trackingReady: false,
   error: null,
   setEasyMode: (enabled) =>
-    set((state) => enabled === (state.easyMode ?? true) ? state : {
-      easyMode: enabled,
-      selectionVersion: state.selectionVersion + 1,
-      trackingReady: false,
-      issues: [], decisions: {},
-      step: ["matches", "access", "review"].includes(state.step) ? "references" : state.step,
-    }),
+    set((state) =>
+      enabled === (state.easyMode ?? true)
+        ? state
+        : {
+            easyMode: enabled,
+            selectionVersion: state.selectionVersion + 1,
+            trackingReady: false,
+            issues: [],
+            decisions: {},
+            step: ["matches", "review", "generation"].includes(state.step)
+              ? "references"
+              : state.step,
+          },
+    ),
   setEnhancedCharacterMasking: (enabled) =>
     set((state) =>
       enabled === state.enhancedCharacterMasking
@@ -76,7 +83,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
             trackingReady: false,
             issues: [],
             decisions: {},
-            step: ["matches", "access", "review"].includes(state.step)
+            step: ["matches", "review", "generation"].includes(state.step)
               ? "references"
               : state.step,
           },
@@ -170,7 +177,10 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     const state = get();
     if (
       canVisitStep(state, step) &&
-      (!["access", "review"].includes(step) || state.trackingReady || ((state.easyMode ?? true) || (state.clip?.mode === "upload" && !state.enhancedCharacterMasking)))
+      (!["review", "generation"].includes(step) ||
+        state.trackingReady ||
+        (state.easyMode ?? true) ||
+        (state.clip?.mode === "upload" && !state.enhancedCharacterMasking))
     )
       set({ step, error: null });
   },
@@ -181,8 +191,11 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
       return;
     }
     if (state.step === "matches" && !state.trackingReady) return;
-    const steps = (state.easyMode ?? true) || (state.clip?.mode === "upload" && !state.enhancedCharacterMasking)
-      ? STEPS.filter((step) => step !== "matches") : STEPS;
+    const steps =
+      (state.easyMode ?? true) ||
+      (state.clip?.mode === "upload" && !state.enhancedCharacterMasking)
+        ? STEPS.filter((step) => step !== "matches")
+        : STEPS;
     const next = steps[steps.indexOf(state.step) + 1];
     if (next) set({ step: next, error: null });
   },

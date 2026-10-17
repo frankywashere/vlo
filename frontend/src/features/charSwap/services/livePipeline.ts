@@ -31,6 +31,9 @@ export type LiveJobStatus =
 
 export interface LivePipelineJob {
   audio_processing?: boolean;
+  created_at?: number;
+  completed_at?: number;
+  updated_at?: number;
   provider?: GenerationProvider;
   access_mode?: GenerationAccessMode;
   app_credits_charged?: number;

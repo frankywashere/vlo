@@ -637,3 +637,14 @@ Before releasing this history view, run `swapmein.commerce.backfill_credit_grant
 A complete margin report is not implemented yet. Stripe processing fees belong to credit purchases, not individual renders. Their authoritative source is the charge's expanded BalanceTransaction (`fee`, `currency`, `exchange_rate`, and `fee_details`); allocate a purchase's fee over credits consumed for a per-render estimate. Preserve settlement currency (earlier payments settled in CAD; USD settlement was subsequently enabled) before presenting any USD equivalent. Free/admin-granted credits have no customer payment or Stripe fee to allocate.
 
 Google worker start/stop events provide operational windows, not invoice-exact billable time. Compute estimates require deployed CPU/RAM/GPU allocations, region and billing mode, startup/shutdown and minimum charges; shared gateway work, storage/egress, Cloud Tasks, logs, Artifact Registry and deployment builds are additional costs. Reconcile estimates against Google Monitoring billable-instance metrics and Cloud Billing reports/exports rather than presenting operational stopwatch time as the final bill. No billing export or automatic full-cost aggregation was enabled by this change.
+
+### Local UI credit previews
+
+For account-specific UI testing, add `VITE_LOCAL_PREVIEW_ACCOUNT=your-sign-in-email` and
+`VITE_LOCAL_PREVIEW_CREDITS=100` to the ignored `frontend/.env.local`, then rebuild the
+public client. Only that signed-in account on `localhost`, `127.0.0.1`, or `[::1]`
+receives the labelled preview balance. LAN and hosted origins use the real wallet.
+The local preview uses fixed design pricing (13 credits per second) and sample packs,
+so its balance and quote work without the hosted commerce service being available.
+The preview does not mutate wallets, authorize paid jobs, or simulate finished videos;
+purchases link to the secure hosted app. Remove these variables and rebuild to disable it.

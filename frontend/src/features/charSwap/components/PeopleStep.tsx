@@ -1,13 +1,11 @@
 import { useShallow } from "zustand/react/shallow";
 import {
-  Alert,
   Avatar,
   Box,
   Button,
   Chip,
   IconButton,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
 import CheckRounded from "@mui/icons-material/CheckRounded";
@@ -27,17 +25,15 @@ interface PeopleStepProps {
   maxPeople?: number;
 }
 export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
-  const { clip, trim, targets, selectTarget, renameTarget, setError } =
-    useCharSwapStore(
-      useShallow((s) => ({
-        clip: s.clip,
-        trim: s.trim,
-        targets: s.targets,
-        selectTarget: s.selectTarget,
-        renameTarget: s.renameTarget,
-        setError: s.setError,
-      })),
-    );
+  const { clip, trim, targets, selectTarget, setError } = useCharSwapStore(
+    useShallow((s) => ({
+      clip: s.clip,
+      trim: s.trim,
+      targets: s.targets,
+      selectTarget: s.selectTarget,
+      setError: s.setError,
+    })),
+  );
   if (!clip) return null;
   const sample = clip.mode === "demo" ? (demo?.people ?? []) : [];
   function choose(person: TargetPerson) {
@@ -45,6 +41,11 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
       targets.length >= maxPeople &&
       !targets.some((p) => p.id === person.id)
     ) {
+      if (maxPeople === 1 && targets[0]) {
+        selectTarget(targets[0]);
+        selectTarget(person);
+        return;
+      }
       setError(
         maxPeople === 1
           ? "The live beta supports one person per swap. Remove the current selection to choose someone else."
@@ -108,139 +109,154 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
     });
   }
   return (
-    <Stack spacing={2.5}>
-      <VideoPreview
-        clip={clip}
-        trim={trim}
-        selectable
-        onPoint={choosePoint}
-        poster={clip.mode === "demo" ? demo?.poster : undefined}
-        overlay={(time) => (
-          <>
-            {sample.map((person) => {
-              const box = boxAtTime(person, time);
-              const selected = targets.some(
-                (target) => target.id === person.id,
-              );
-              return (
-                box && (
-                  <Box
-                    component="button"
-                    key={person.id}
-                    aria-label={`${selected ? "Deselect" : "Select"} ${person.name}`}
-                    aria-pressed={selected}
-                    onClick={() => chooseSample(person, time)}
-                    sx={{
-                      position: "absolute",
-                      left: `${box.x * 100}%`,
-                      top: `${box.y * 100}%`,
-                      width: `${box.width * 100}%`,
-                      height: `${box.height * 100}%`,
-                      border: `${selected ? 3 : 1}px solid ${selected ? person.color : "#ffffff70"}`,
-                      borderRadius: 1.5,
-                      bgcolor: selected ? `${person.color}12` : "transparent",
-                      cursor: "pointer",
-                      minWidth: 44,
-                      minHeight: 44,
-                      transition: "border-color .15s",
-                    }}
-                  >
+    <Box
+      sx={{
+        display: "grid",
+        gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) 300px" },
+        gap: 3,
+        alignItems: "start",
+      }}
+    >
+      <Box sx={{ minWidth: 0 }}>
+        <VideoPreview
+          clip={clip}
+          trim={trim}
+          selectable
+          maxPreviewHeight={380}
+          onPoint={choosePoint}
+          poster={clip.mode === "demo" ? demo?.poster : undefined}
+          overlay={(time) => (
+            <>
+              {sample.map((person) => {
+                const box = boxAtTime(person, time);
+                const selected = targets.some(
+                  (target) => target.id === person.id,
+                );
+                return (
+                  box && (
                     <Box
-                      component="span"
+                      component="button"
+                      key={person.id}
+                      aria-label={`${selected ? "Deselect" : "Select"} ${person.name}`}
+                      aria-pressed={selected}
+                      onClick={() => chooseSample(person, time)}
                       sx={{
                         position: "absolute",
-                        top: 6,
-                        left: 6,
-                        bgcolor: selected ? person.color : "#121212dd",
-                        color: selected ? "#102133" : "white",
-                        borderRadius: 0.75,
-                        px: 1,
-                        py: 0.6,
-                        fontSize: 12,
-                        fontWeight: 650,
-                        whiteSpace: "nowrap",
+                        left: `${box.x * 100}%`,
+                        top: `${box.y * 100}%`,
+                        width: `${box.width * 100}%`,
+                        height: `${box.height * 100}%`,
+                        border: `${selected ? 3 : 1}px solid ${selected ? person.color : "#ffffff70"}`,
+                        borderRadius: 1.5,
+                        bgcolor: selected ? `${person.color}12` : "transparent",
+                        cursor: "pointer",
+                        minWidth: 44,
+                        minHeight: 44,
+                        transition: "border-color .15s",
                       }}
                     >
-                      {selected && "✓ "}
-                      {person.name}
+                      <Box
+                        component="span"
+                        sx={{
+                          position: "absolute",
+                          top: 6,
+                          left: 6,
+                          bgcolor: selected ? person.color : "#121212dd",
+                          color: selected ? "#102133" : "white",
+                          borderRadius: 0.75,
+                          px: 1,
+                          py: 0.6,
+                          fontSize: 12,
+                          fontWeight: 650,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {selected && "✓ "}
+                        {person.name}
+                      </Box>
                     </Box>
-                  </Box>
-                )
-              );
-            })}
-            {!sample.length &&
-              targets
-                .filter((target) => Math.abs(target.anchor.time - time) < 0.5)
-                .map((target) => (
-                  <Box
-                    key={target.id}
-                    component="button"
-                    onClick={() => choose(target)}
-                    aria-label={`Deselect ${target.name}`}
+                  )
+                );
+              })}
+              {!sample.length &&
+                targets
+                  .filter((target) => Math.abs(target.anchor.time - time) < 0.5)
+                  .map((target) => (
+                    <Box
+                      key={target.id}
+                      component="button"
+                      onClick={() => choose(target)}
+                      aria-label={`Deselect ${target.name}`}
+                      sx={{
+                        position: "absolute",
+                        left: `${target.anchor.x * 100}%`,
+                        top: `${target.anchor.y * 100}%`,
+                        transform: "translate(-50%, -50%)",
+                        width: 44,
+                        height: 44,
+                        border: `2px solid ${target.color}`,
+                        borderRadius: "50%",
+                        bgcolor: "#142437aa",
+                        color: target.color,
+                        cursor: "pointer",
+                        fontSize: 20,
+                      }}
+                    >
+                      <CheckRounded />
+                    </Box>
+                  ))}
+            </>
+          )}
+        />
+        {!!sample.length && (
+          <Stack
+            direction="row"
+            spacing={1.5}
+            flexWrap="wrap"
+            useFlexGap
+            sx={{ mt: 2 }}
+          >
+            {sample.map((person) => (
+              <Button
+                key={person.id}
+                variant={
+                  targets.some((p) => p.id === person.id)
+                    ? "contained"
+                    : "outlined"
+                }
+                onClick={() => chooseSample(person, trim[0])}
+                startIcon={
+                  <Avatar
+                    src={person.thumbnail}
+                    variant="rounded"
                     sx={{
-                      position: "absolute",
-                      left: `${target.anchor.x * 100}%`,
-                      top: `${target.anchor.y * 100}%`,
-                      transform: "translate(-50%, -50%)",
-                      width: 44,
-                      height: 44,
-                      border: `2px solid ${target.color}`,
-                      borderRadius: "50%",
-                      bgcolor: "#142437aa",
-                      color: target.color,
-                      cursor: "pointer",
-                      fontSize: 20,
+                      width: 32,
+                      height: 32,
+                      "& img": { objectPosition: "center top" },
                     }}
-                  >
-                    <CheckRounded />
-                  </Box>
-                ))}
-          </>
+                  />
+                }
+                sx={{ minHeight: 48 }}
+              >
+                {person.name}
+              </Button>
+            ))}
+          </Stack>
         )}
-      />
-      {!!sample.length && (
-        <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-          {sample.map((person) => (
-            <Button
-              key={person.id}
-              variant={
-                targets.some((p) => p.id === person.id)
-                  ? "contained"
-                  : "outlined"
-              }
-              onClick={() => chooseSample(person, trim[0])}
-              startIcon={
-                <Avatar
-                  src={person.thumbnail}
-                  variant="rounded"
-                  sx={{
-                    width: 32,
-                    height: 32,
-                    "& img": { objectPosition: "center top" },
-                  }}
-                />
-              }
-              sx={{ minHeight: 48 }}
-            >
-              {person.name}
-            </Button>
-          ))}
-        </Stack>
-      )}
-      <Box sx={PANEL}>
+      </Box>
+      <Box sx={{ ...PANEL, p: 3, borderRadius: "5px" }}>
         <Stack
           direction="row"
           justifyContent="space-between"
           alignItems="center"
           sx={{ mb: targets.length ? 2 : 0 }}
         >
-          <Typography fontWeight={600}>People to replace</Typography>
+          <Typography fontWeight={650}>Your selection</Typography>
           <Chip size="small" label={`${targets.length} selected`} />
         </Stack>
         {!targets.length && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Pause on a clear frame, then tap a person. Everyone else stays in
-            the shot.
+            Pause the video, then click the person you want to recast.
           </Typography>
         )}
         <Stack spacing={2}>
@@ -261,20 +277,12 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
                   "& img": { objectPosition: "center top" },
                 }}
               />
-              <TextField
-                label="Person label"
-                size="small"
-                defaultValue={person.name}
-                key={`${person.id}-${person.name}`}
-                onBlur={(event) => renameTarget(person.id, event.target.value)}
-                slotProps={{
-                  htmlInput: {
-                    maxLength: 40,
-                    "aria-label": `Rename ${person.name}`,
-                  },
-                }}
-                sx={{ flex: 1 }}
-              />
+              <Box sx={{ flex: 1 }}>
+                <Typography fontWeight={650}>{person.name}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Selected for replacement
+                </Typography>
+              </Box>
               <IconButton
                 aria-label={`Remove ${person.name}`}
                 sx={{ width: 44, height: 44 }}
@@ -285,16 +293,21 @@ export function PeopleStep({ demo, maxPeople = 3 }: PeopleStepProps) {
             </Stack>
           ))}
         </Stack>
+        <Box
+          sx={{ mt: 3, pt: 2, borderTop: "1px solid", borderColor: "divider" }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {targets.length
+              ? "This is who will change."
+              : "Choose a clear frame."}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
+            {targets.length
+              ? "Click someone else to change your selection. Next, add their new character."
+              : "Aim for the face or body. You’ll add the replacement character next."}
+          </Typography>
+        </Box>
       </Box>
-      {clip.mode === "upload" && (
-        <Alert severity="info" role="note">
-          These taps save your starting points. Automatic masks and tracking
-          will be connected in the next build.
-        </Alert>
-      )}
-      <Typography variant="body2" color="text.secondary">
-        You’ll choose a replacement image for each person next.
-      </Typography>
-    </Stack>
+    </Box>
   );
 }
