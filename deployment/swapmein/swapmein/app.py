@@ -221,7 +221,8 @@ def view(job: dict):
             ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
             for target in targets]
     reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
-    if reference_uris:
+    temporary_media_available = not job.get("temporary_media_cleanup_started_at")
+    if reference_uris and temporary_media_available:
         result["reference_urls"] = [cloud.signed_url(uri) for uri in reference_uris]
         result["reference_url"] = result["reference_urls"][0]
     if "duration" in job:
@@ -238,9 +239,9 @@ def view(job: dict):
         if field in job:
             result[field] = job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
-        if job.get(field):
+        if job.get(field) and (field == "output_uri" or temporary_media_available):
             result[output] = cloud.signed_url(job[field])
-    if job.get("tracking_plan"):
+    if job.get("tracking_plan") and temporary_media_available:
         result["tracking_segments"] = job["tracking_plan"]["segments"]
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]

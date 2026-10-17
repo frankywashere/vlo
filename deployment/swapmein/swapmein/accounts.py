@@ -59,9 +59,11 @@ def archive_completed(records, job: dict):
         "status": "completed", "provider": job.get("provider", "reAPI"),
         "access_mode": job.get("access_mode", "api-key"),
         "created_at": job["created_at"], "completed_at": (current or {}).get("completed_at") or completed_at,
-        "expires_at": time.time() + LIBRARY_SECONDS, "output_uri": job["output_uri"],
+        "expires_at": (current or {}).get("expires_at") or job.get("library_expires_at") or completed_at + LIBRARY_SECONDS,
+        "output_uri": job["output_uri"],
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),
         "selection_targets": job.get("normalized_targets") or job.get("setup", {}).get("targets"),
+        **{key: job[key] for key in ("provider_task", "provider_billing", "app_credits_charged", "generation_credits", "audio_processing") if key in job},
     })
 
 

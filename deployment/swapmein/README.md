@@ -398,3 +398,23 @@ build. Run the relevant gateway tests from this directory with
 `.venv/bin/python -m pytest tests -q`, frontend walkthrough tests/build from
 `frontend`, and the repository extension-surface check before release. Passing
 local tests is not a new paid-generation quality proof or evidence of deployment.
+
+### Completed-job temporary media cleanup
+
+After final export, the finish task saves the account Library entry, verifies that
+its output matches the job and that the final GCS object is nonempty, then deletes
+only that job's upload, preparation, mask, depth, audio and reviewed-guide scratch
+objects. The final Library video, account archive (including provider billing and
+charged credits), payment records and upload manifest remain. Removed preview URLs
+are no longer advertised by the job API. Library retention remains unchanged.
+
+Library-save or cleanup failures retry through the existing finish task without
+another generation or export. Deletions use object-generation preconditions and
+bounded per-job prefixes; active, failed, uncertain-provider and operator-only
+jobs are excluded. New reviewed-guide prefixes include the parent job ID. Older
+unattributable review prefixes are not bulk-deleted. This is not a historical
+backfill or a change to failed/abandoned-upload retention.
+
+GCS soft-delete policy still applies: the worker bucket currently retains deleted
+objects for seven days before physical removal. This change does not disable that
+recovery policy or delete model weights.

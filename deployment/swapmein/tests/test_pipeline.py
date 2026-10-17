@@ -10,6 +10,8 @@ from swapmein.pipeline import Pipeline
 @pytest.mark.parametrize("audio_processing", [None, True, False])
 @pytest.mark.parametrize("account_id", [None, "b" * 64])
 def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing):
+    # This test isolates export/re-export. Cleanup safety is covered separately.
+    monkeypatch.setattr("swapmein.pipeline.cleanup_completed_media", lambda *_: None)
     job_id = "a" * 32
     path = f"jobs/{job_id}.json"
     class Records:

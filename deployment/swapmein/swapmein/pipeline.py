@@ -16,6 +16,7 @@ from .storage import Records, claim_job, release_preparation
 from .tracking import analyze_tracking, analyze_multi_tracking, merge_all_people_masks
 from .tracking_preview import create_selection_preview
 from .accounts import archive_completed, LIBRARY_SECONDS
+from .cleanup import cleanup_completed_media
 
 
 class Pipeline:
@@ -289,7 +290,7 @@ class Pipeline:
     def rebuild_reviewed_guide(self, job, remaining):
         """Reuse SAM masks, depth and vocals; a user match never starts generation."""
         job_id = job["id"]
-        run_id = "sm-guide-review-" + uuid.uuid4().hex
+        run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
         self.update_job(job_id, message="Applying your scene matches and rebuilding the guide.")
         with self.cloud.worker("audio") as invoke:
             payload = {"input_uri": job["normalized_uri"],
@@ -318,12 +319,19 @@ class Pipeline:
             section_count=len(job["tracking_plan"]["segments"]))
 
     def finalize(self, job_id: str):
+        def claim_export(current):
+            if current and current.get("status") == "completed":
+                return current
+            return claim_job(current, {"finalizing"}, "finishing")
         try:
-            job = self.records.update(f"jobs/{job_id}.json", lambda current: claim_job(current, {"finalizing"}, "finishing"))
+            job = self.records.update(f"jobs/{job_id}.json", claim_export)
         except PublicError as error:
             if error.status_code in {404, 409}:
                 return
             raise
+        if job["status"] == "completed":
+            self.complete_library_delivery(job)
+            return
         try:
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -345,15 +353,27 @@ class Pipeline:
                     width=output_dimensions["width"], height=output_dimensions["height"])
                 emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=audio_processing, width=output_dimensions["width"], height=output_dimensions["height"],
                      **job.get("provider_billing", {}))
-                try:
-                    archive_completed(self.records, completed)
-                    emit("account_library_saved", job_id=job_id)
-                except Exception as error:
-                    # An index retry must never turn a valid exported video into a failure.
-                    emit("account_library_save_pending", error=error, job_id=job_id)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
             self.update_job(job_id, status="failed", message=error.message)
+            return
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="failed", message="The generated video needs manual review and could not be exported.")
+            return
+        self.complete_library_delivery(completed)
+
+    def complete_library_delivery(self, job):
+        # Errors here deliberately propagate to the existing Cloud Tasks retry.
+        # The exported video remains completed: no regeneration or export repeats.
+        try:
+            archive_completed(self.records, job)
+            emit("account_library_saved", job_id=job["id"])
+        except Exception as error:
+            emit("account_library_save_pending", error=error, job_id=job["id"])
+            raise
+        try:
+            cleanup_completed_media(self.settings, self.records, self.cloud, job["id"])
+        except Exception as error:
+            emit("account_library_cleanup_retry", error=error, job_id=job["id"])
+            raise
