@@ -73,6 +73,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           if (reusable) {
             for (const field of [
               "output_url",
+              "thumbnail_url",
               "guide_url",
               "reference_url",
               "tracking_url",
@@ -301,6 +302,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                 playsInline
                 preload="metadata"
                 src={job.output_url}
+                poster={job.thumbnail_url}
                 aria-label={job.title}
                 sx={{
                   display: "block",

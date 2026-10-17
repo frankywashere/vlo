@@ -52,6 +52,7 @@ export interface LivePipelineJob {
   tracking_choices?: TrackingReviewChoice[];
   guide_url?: string;
   output_url?: string;
+  thumbnail_url?: string;
   duration?: number;
   width?: number;
   height?: number;
@@ -296,7 +297,7 @@ function readJob(value: unknown): LivePipelineJob {
     job.scene_cut_count = value.scene_cut_count;
   if (["queued", "pending", "processing", "running", "generating", "unknown"].includes(String(value.provider_state)))
     job.provider_state = value.provider_state as LivePipelineJob["provider_state"];
-  for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url", "reference_url"] as const) {
+  for (const field of ["tracking_url", "source_preview_url", "guide_url", "output_url", "thumbnail_url", "reference_url"] as const) {
     const url = value[field];
     if (typeof url !== "string") continue;
     try {

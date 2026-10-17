@@ -69,6 +69,14 @@ def run(command: list[str], timeout: int = 90):
         raise PublicError("The video could not be processed within the beta limits.") from None
 
 
+def create_poster(source: Path, output: Path):
+    """Extract a small first-frame JPEG without decoding the entire video."""
+    run(["ffmpeg", "-v", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(source),
+         "-map", "0:v:0", "-frames:v", "1", "-vf",
+         "scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+         "-q:v", "3", str(output)], timeout=30)
+
+
 def probe(path: Path):
     result = json.loads(run(["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-show_entries",
                           "format=duration,format_name:stream=codec_type,width,height,sample_aspect_ratio,r_frame_rate,duration,nb_frames:stream_tags=rotate:stream_side_data=rotation",

@@ -238,8 +238,8 @@ def view(job: dict):
     for field in ["created_at", "completed_at", "updated_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing"]:
         if field in job:
             result[field] = job[field]
-    for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url")]:
-        if job.get(field) and (field == "output_uri" or temporary_media_available):
+    for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
+        if job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available):
             result[output] = cloud.signed_url(job[field])
     if job.get("tracking_plan") and temporary_media_available:
         result["tracking_segments"] = job["tracking_plan"]["segments"]
@@ -981,6 +981,8 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
             if item.get("output_uri") and item.get("expires_at", 0) > time.time():
                 public.update(status="completed", output_url=cloud.signed_url(item["output_uri"]),
                               message="Your saved video is ready.")
+                if item.get("thumbnail_uri"):
+                    public["thumbnail_url"] = cloud.signed_url(item["thumbnail_uri"])
             elif item.get("status") == "completed":
                 public.update(status="expired", message="The 30-day video retention period has ended.")
             else:

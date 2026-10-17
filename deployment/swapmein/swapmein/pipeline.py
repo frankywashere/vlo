@@ -9,7 +9,7 @@ from .config import Settings
 from .errors import PublicError
 from .diagnostics import emit
 from .limits import MAX_SOURCE_BYTES
-from .media import Setup, finish, normalize, original_guide, sam_input_video, select_label, validate_guide_media
+from .media import Setup, create_poster, finish, normalize, original_guide, sam_input_video, select_label, validate_guide_media
 from .mask_geometry import resize_label_archive
 from .multi_tracking import build_selected_masks, selected_tracks, style_targets
 from .storage import Records, claim_job, release_preparation
@@ -348,11 +348,16 @@ class Pipeline:
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
                 completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if audio_processing
-                             else "Your video is ready at its generated resolution, with the returned audio."), output_uri=output_uri,
+                             else "Your video is ready at its generated resolution, with the returned audio."), output_uri=output_uri, thumbnail_uri=None,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"])
                 emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=audio_processing, width=output_dimensions["width"], height=output_dimensions["height"],
                      **job.get("provider_billing", {}))
+                try:
+                    completed = self.ensure_library_poster(completed, output)
+                except Exception as error:
+                    # Delivery retries poster creation without re-exporting video.
+                    emit("library_poster_pending", job_id=job_id, error=error)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
             self.update_job(job_id, status="failed", message=error.message)
@@ -363,10 +368,27 @@ class Pipeline:
             return
         self.complete_library_delivery(completed)
 
+    def ensure_library_poster(self, job, source=None):
+        if not job.get("account_id") or job.get("thumbnail_uri"):
+            return job
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            if source is None:
+                source = root / "final.mp4"
+                self.cloud.download(job["output_uri"], source)
+            poster = root / "poster.jpg"
+            create_poster(source, poster)
+            uri = self.cloud.upload(self.settings.app_bucket,
+                f"library/{job['account_id']}/{job['id']}/poster-{uuid.uuid4().hex}.jpg", poster, "image/jpeg")
+            updated = self.update_job(job["id"], thumbnail_uri=uri)
+            emit("library_poster_saved", job_id=job["id"])
+            return updated
+
     def complete_library_delivery(self, job):
         # Errors here deliberately propagate to the existing Cloud Tasks retry.
         # The exported video remains completed: no regeneration or export repeats.
         try:
+            job = self.ensure_library_poster(job)
             archive_completed(self.records, job)
             emit("account_library_saved", job_id=job["id"])
         except Exception as error:

@@ -110,10 +110,12 @@ def test_completed_cleanup_hides_removed_previews_but_keeps_download(api):
     job = {"id": "a" * 32, "status": "completed", "access_mode": "credits",
            "reference_uri": "gs://private-app/reference.jpg", "guide_uri": "gs://private-app/guide.mp4",
            "tracking_uri": "gs://private-app/tracking.mp4", "normalized_uri": "gs://private-app/source.mp4",
-           "tracking_plan": {"segments": []}, "output_uri": "gs://private-app/final.mp4"}
+           "tracking_plan": {"segments": []}, "output_uri": "gs://private-app/final.mp4",
+           "thumbnail_uri": "gs://private-app/poster.jpg"}
     assert "guide_url" in gateway.view(job)
     result = gateway.view({**job, "temporary_media_cleanup_started_at": time.time()})
     assert "output_url" in result
+    assert "thumbnail_url" in result
     assert not {"guide_url", "tracking_url", "reference_urls", "reference_url", "source_preview_url", "tracking_segments"} & result.keys()
 
 

@@ -20,7 +20,7 @@ OUTPUT = f"gs://app/library/{ACCOUNT}/{JOB}/recastfx-result.mp4"
 class Records:
     def __init__(self):
         self.data = {f"jobs/{JOB}.json": {"id": JOB, "account_id": ACCOUNT, "status": "completed",
-            "created_at": 100, "completed_at": 200, "output_uri": OUTPUT,
+            "created_at": 100, "completed_at": 200, "output_uri": OUTPUT, "thumbnail_uri": OUTPUT.replace(".mp4", ".jpg"),
             "provider_billing": {"provider_cost_usd": .5}, "app_credits_charged": 100},
             index_path(ACCOUNT, JOB): {"status": "completed", "output_uri": OUTPUT}}
 
@@ -155,3 +155,26 @@ def test_library_write_failure_preserves_all_media_then_retries_without_export(p
     assert saved["provider_billing"]["provider_cost_usd"] == .5 and saved["app_credits_charged"] == 100
     pipeline.finalize(JOB)
     assert records.data[index_path(ACCOUNT, JOB)]["expires_at"] == expires
+
+
+def test_poster_retry_reads_saved_final_and_never_calls_provider(prepared, monkeypatch):
+    records, _, cloud, _ = prepared
+    records.data[f"jobs/{JOB}.json"].pop("thumbnail_uri")
+    downloads = []
+    def download(uri, path):
+        downloads.append(uri)
+        path.write_bytes(b"saved final")
+    def poster(source, destination):
+        assert source.read_bytes() == b"saved final"
+        destination.write_bytes(b"jpeg")
+    def upload(bucket, key, source, content_type):
+        assert key.startswith(f"library/{ACCOUNT}/{JOB}/poster-")
+        assert content_type == "image/jpeg" and source.read_bytes() == b"jpeg"
+        return f"gs://{bucket}/{key}"
+    cloud.download, cloud.upload = download, upload
+    monkeypatch.setattr("swapmein.pipeline.create_poster", poster)
+    pipeline = Pipeline(SETTINGS, records, cloud)
+    saved = pipeline.ensure_library_poster(records.data[f"jobs/{JOB}.json"])
+    assert saved["thumbnail_uri"].endswith(".jpg")
+    pipeline.ensure_library_poster(saved)
+    assert downloads == [OUTPUT]

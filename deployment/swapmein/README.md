@@ -418,3 +418,10 @@ backfill or a change to failed/abandoned-upload retention.
 GCS soft-delete policy still applies: the worker bucket currently retains deleted
 objects for seven days before physical removal. This change does not disable that
 recovery policy or delete model weights.
+
+Finished account videos also save a first-frame JPEG poster (at most 640 pixels
+per side) in the same Library directory. The Library video uses the signed poster
+URL, including after the short-lived job record expires. This avoids depending
+on mobile Safari decoding a video frame before playback. Poster creation is
+logged and can retry from the saved final video without another paid render;
+temporary cleanup never includes the Library directory.

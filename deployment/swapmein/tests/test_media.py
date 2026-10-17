@@ -307,3 +307,19 @@ def test_easy_mode_defaults_on_and_requires_a_real_boolean():
     for value in ["false", 0, None]:
         with pytest.raises(ValidationError):
             options(easy_mode=value)
+
+
+def test_poster_extracts_one_bounded_frame_without_changing_video(tmp_path):
+    import shutil
+    import subprocess
+    import hashlib
+    from swapmein.media import create_poster
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg unavailable")
+    source, poster = tmp_path / "video.mp4", tmp_path / "poster.jpg"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=1280x720:d=0.2", "-c:v", "libx264", str(source)], check=True)
+    checksum = hashlib.sha256(source.read_bytes()).hexdigest()
+    create_poster(source, poster)
+    with Image.open(poster) as image:
+        assert image.format == "JPEG" and image.size == (640, 360)
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == checksum
