@@ -25,7 +25,7 @@ The browser bundle contains the public Firebase app configuration. It contains n
 
 ## Flow
 
-### Local change awaiting deployment: Replace all people
+### Replace all people
 
 The People step now offers **Replace all people** alongside tapping a specific
 person. It creates one group reference slot: every person becomes a separate
@@ -47,11 +47,11 @@ selection clears the previous assignments and prepared tracking state.
   in preparation logs. Existing duration pricing and audio settings are unchanged.
 
 Validation uses local synthetic masks/media, API fakes and walkthrough tests;
-there has been no paid all-person generation or production rollout of this mode.
+there has been no paid all-person generation test. The mode is deployed on recastfx.com.
 
 ### Existing account flow
 
-Local upload improvements awaiting deployment: camera multi-picture JPEGs (MPO)
+Reference upload handling: camera multi-picture JPEGs (MPO)
 are flattened to their main photo and converted to the same standard JPEG used
 for JPG/PNG/WebP references. Animation remains unsupported, and dimension/size
 checks remain active. Normalization logs record only the source/output formats
