@@ -12,6 +12,7 @@ import CheckRounded from "@mui/icons-material/CheckRounded";
 import { useShallow } from "zustand/react/shallow";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { LivePipelineJob } from "../services/livePipeline";
+import { isUploadUnconfirmed } from "../model/preparation";
 import type { PreparationProgressState } from "../model/preparation";
 import { useVideoDownload } from "../hooks/useVideoDownload";
 import { VideoPreview } from "./VideoPreview";
@@ -53,6 +54,7 @@ export function GenerationPage({
   );
   const download = useVideoDownload();
   if (!clip) return null;
+  const uploadSaved = Boolean(job && !job.upload_confirmation_pending && !isUploadUnconfirmed(preparation));
   const complete = job?.status === "completed";
   const failed = job?.status === "failed" || Boolean(error && !job);
   const unknown = job?.status === "submission_unknown";
@@ -99,7 +101,7 @@ export function GenerationPage({
           <Typography color="text.secondary" sx={{ mt: 1 }}>
             {complete
               ? "Watch it, save it, and make another."
-              : job
+              : uploadSaved
                 ? "Your job is saved. You can come back to it in your library."
                 : "Keep this tab open until your upload is confirmed."}
           </Typography>

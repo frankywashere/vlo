@@ -501,7 +501,7 @@ export function CharSwapWalkthrough({
                     " credits. Your choices are saved while you top up."}
               </Alert>
             )}
-          {step !== "generation" && pipeline.preparationProgress && (
+          {(step !== "generation" || isUploadUnconfirmed(pipeline.preparationProgress)) && pipeline.preparationProgress && (
             <Box sx={{ mb: 2 }}>
               <PreparationProgress
                 title="Preparing your clip"

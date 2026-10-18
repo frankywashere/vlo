@@ -289,6 +289,19 @@ describe("explicit generation approval", () => {
     expect(live.prepare.mock.calls[0][1]).toBe(true);
   });
 
+  it.each(["checking_access", "uploading", "confirming"] as const)("keeps the prominent upload warning on the generation page during %s", (phase) => {
+    const store = useCharSwapStore.getState();
+    store.setEasyMode(true);
+    store.visit("generation");
+    live.job = {id: "pending-upload", status: "queued", upload_confirmation_pending: true};
+    live.busy = true;
+    live.preparationProgress = {phase, message: "Confirming your upload is saved."};
+    render(<CharSwapWalkthrough onLibrary={() => {}} />);
+    expect(screen.getByRole("dialog", {name: "Keep this page open"})).toBeInTheDocument();
+    expect(screen.queryByText(/Your job is saved/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Create another recast"})).not.toBeInTheDocument();
+  });
+
   it("retains an uncertain submission without offering another generation", () => {
     const store = useCharSwapStore.getState();
     store.setEasyMode(true);
