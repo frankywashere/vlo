@@ -14,7 +14,7 @@ afterEach(() => cleanup());
 
 function properties() {
   return {live: true, accessMode: "credits" as const, hasPreviewKey: false, isSampleKey: false,
-    onApiSettings: vi.fn(), creditBalance: 2000};
+    onApiSettings: vi.fn(), creditBalance: 2000, generationCredits: 50};
 }
 
 describe("truthful preparation status at final review", () => {
@@ -40,7 +40,16 @@ describe("truthful preparation status at final review", () => {
     store.setEasyMode(easy);
     store.setEnhancedCharacterMasking(false);
     render(<ReviewStep {...properties()} />);
-    expect(screen.getByText(/no SAM tracking/)).toBeInTheDocument();
+    expect(screen.getByText(/no person tracking/)).toBeInTheDocument();
     expect(screen.queryByText(/Tracking checks completed|automatic tracking|Tracking guide prepared/)).not.toBeInTheDocument();
   });
+});
+
+it("keeps personal-key controls hidden for ordinary users and available only to eligible accounts", () => {
+  const {rerender} = render(<ReviewStep {...properties()} />);
+  expect(screen.queryByText("Use my API key")).not.toBeInTheDocument();
+  rerender(<ReviewStep {...properties()} accessMode="api-key" apiKeyAllowed hasKey={false} />);
+  expect(screen.getByRole("radio", {name: "Use my API key"})).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Add API key"})).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Generate video"})).toBeDisabled();
 });

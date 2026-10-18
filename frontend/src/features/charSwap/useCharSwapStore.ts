@@ -28,10 +28,13 @@ export const STEPS: Step[] = [
   "people",
   "references",
   "matches",
-  "access",
   "review",
+  "generation",
 ];
 interface CharSwapStore extends WalkthroughState {
+  retryNotice?: string;
+  retryNeedsSource?: boolean;
+  restoreRetry: (draft: import("./services/jobRecovery").RetryDraft) => void;
   step: Step;
   selectionVersion: number;
   trackingReady: boolean;
@@ -66,13 +69,20 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
       selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null};
   }),
   setEasyMode: (enabled) =>
-    set((state) => enabled === (state.easyMode ?? true) ? state : {
-      easyMode: enabled,
-      selectionVersion: state.selectionVersion + 1,
-      trackingReady: false,
-      issues: [], decisions: {},
-      step: ["matches", "access", "review"].includes(state.step) ? "references" : state.step,
-    }),
+    set((state) =>
+      enabled === (state.easyMode ?? true)
+        ? state
+        : {
+            easyMode: enabled,
+            selectionVersion: state.selectionVersion + 1,
+            trackingReady: false,
+            issues: [],
+            decisions: {},
+            step: ["matches", "generation"].includes(state.step)
+              ? "review"
+              : state.step,
+          },
+    ),
   setEnhancedCharacterMasking: (enabled) =>
     set((state) =>
       enabled === state.enhancedCharacterMasking
@@ -83,14 +93,19 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
             trackingReady: false,
             issues: [],
             decisions: {},
-            step: ["matches", "access", "review"].includes(state.step)
-              ? "references"
+            step: ["matches", "generation"].includes(state.step)
+              ? "review"
               : state.step,
           },
     ),
+  restoreRetry: (draft) => set((state) => ({...createInitialState(), ...draft, step: "clip",
+    selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null})),
   loadClip: (clip) =>
     set((state) => ({
-      ...setClip(state, clip),
+      ...(state.retryNeedsSource ? {...state, clip, retryNeedsSource: false,
+        trim: state.trim[1] <= clip.duration ? state.trim : [0, Math.min(15, Math.floor(clip.duration))] as [number, number],
+        ...(state.trim[1] <= clip.duration ? {} : {targets: [], assignments: {}, replaceAllPeople: false}),
+      } : {...setClip(state, clip), retryNotice: undefined}),
       selectionVersion: state.selectionVersion + 1,
       step: "clip",
       trackingReady: false,
@@ -177,7 +192,10 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     const state = get();
     if (
       canVisitStep(state, step) &&
-      (!["access", "review"].includes(step) || state.trackingReady || ((state.easyMode ?? true) || (state.clip?.mode === "upload" && !state.enhancedCharacterMasking)))
+      (step !== "generation" ||
+        state.trackingReady ||
+        (state.easyMode ?? true) ||
+        (state.clip?.mode === "upload" && !state.enhancedCharacterMasking))
     )
       set({ step, error: null });
   },
@@ -187,9 +205,12 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
       set({ error: getStepBlocker(state, state.step) });
       return;
     }
-    if (state.step === "matches" && !state.trackingReady) return;
-    const steps = (state.easyMode ?? true) || (state.clip?.mode === "upload" && !state.enhancedCharacterMasking)
-      ? STEPS.filter((step) => step !== "matches") : STEPS;
+    if (state.step === "review" || state.step === "generation" || state.step === "matches" && !state.trackingReady) return;
+    const steps =
+      (state.easyMode ?? true) ||
+      (state.clip?.mode === "upload" && !state.enhancedCharacterMasking)
+        ? STEPS.filter((step) => step !== "matches")
+        : STEPS;
     const next = steps[steps.indexOf(state.step) + 1];
     if (next) set({ step: next, error: null });
   },
@@ -197,6 +218,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   reset: () =>
     set({
       ...createInitialState(),
+      retryNotice: undefined, retryNeedsSource: false,
       selectionVersion: get().selectionVersion + 1,
       step: "clip",
       trackingReady: false,

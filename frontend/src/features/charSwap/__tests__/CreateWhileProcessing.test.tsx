@@ -66,6 +66,7 @@ vi.mock("../services/accounts", () => ({
 }));
 
 beforeEach(() => {
+  globalThis.history.replaceState({}, "", "/");
   vi.clearAllMocks();
   fixture.job = null;
   fixture.busy = false;
@@ -90,14 +91,14 @@ afterEach(() => {
 async function openWorkspace(easyMode = true) {
   const user = userEvent.setup();
   const app = render(<SwapMeinApp />);
-  await user.click(screen.getByRole("button", { name: "Start creating" }));
+  await user.click(screen.getByRole("button", { name: "Create" }));
   act(() => {
     const store = useCharSwapStore.getState();
     store.setEasyMode(easyMode);
     store.loadClip({ id: "source", name: "current-take.mp4", url: "blob:source", mode: "upload", duration: 5, width: 1280, height: 720 });
     store.visit("trim");
   });
-  await waitFor(() => expect(screen.getByRole("heading", { name: "Choose your section" })).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Choose your moment." })).toBeInTheDocument());
   fixture.reset.mockClear();
   return { app, user };
 }
@@ -148,7 +149,7 @@ describe("visible Create controls while an account job is saved", () => {
     app.rerender(<SwapMeinApp />);
     await clickCreate(entry, user);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Choose video" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Upload your clip" })).toBeInTheDocument());
     expect(useCharSwapStore.getState().clip).toBeNull();
     expect(useCharSwapStore.getState().step).toBe("clip");
     expect(fixture.reset).toHaveBeenCalled();
@@ -159,13 +160,14 @@ describe("visible Create controls while an account job is saved", () => {
 
     await user.click(screen.getByRole("button", { name: "Library" }));
     expect(await screen.findByText("Saved first swap")).toBeInTheDocument();
-    expect(screen.getByText(status.replaceAll("_", " "))).toBeInTheDocument();
+    const labels = { queued: "In queue", preparing: "Preparing", tracking_review: "Needs review", ready: "Ready to generate", generating: "Generating", finalizing: "Finishing", completed: "Ready", failed: "Needs attention" };
+    expect(screen.getByText(labels[status], {exact: true})).toBeInTheDocument();
   });
 
   it.each(["header", "library"] as const)("%s Create retains an unsubmitted draft when no job exists", async (entry) => {
     const { user } = await openWorkspace();
     await clickCreate(entry, user);
-    expect(screen.getByRole("heading", { name: "Choose your section" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Choose your moment." })).toBeInTheDocument();
     expect(useCharSwapStore.getState().clip?.id).toBe("source");
     expect(fixture.reset).not.toHaveBeenCalled();
   });
@@ -211,7 +213,7 @@ describe("visible Create controls while an account job is saved", () => {
 
     fixture.job = { ...fixture.job!, status: "generating", generation_started_at: 1_792_000_010 };
     app.rerender(<SwapMeinApp />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Choose video" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Upload your clip" })).toBeInTheDocument());
     expect(fixture.savedJobs[0].id).toBe("durable-render");
     expect(fixture.generate).not.toHaveBeenCalled();
   });

@@ -1,127 +1,261 @@
-# recastfx launch setup
+# RecastFX pipeline and deployment map
 
-The `launch` branch starts from the last `tasty` implementation. It uses the approved landing/create/library design and bundled before/after media from `delicious`, while retaining the working Cloud Run pipeline. The `delicious` local password/SQLite backend and its unverified provider adapters are not deployed.
+This is the product-level map of RecastFX: what the website does, how a clip
+moves through preparation and generation, which Google Cloud pieces support it,
+and where the implementation lives in this repository. The detailed gateway
+contracts and operator runbook are in
+[`deployment/swapmein/README.md`](../deployment/swapmein/README.md); this page
+explains how the parts fit together.
 
-## Sites and services
+## Reading this document
 
-| Component | Deployment / dependency | Purpose |
+Cloud names, regions, queues, resource limits, defaults and software versions
+below are taken from the checked-in deployment and application source. They
+describe the repository's intended configuration. This document does **not**
+confirm which immutable revisions currently receive traffic, whether a queue is
+paused, whether a worker is stopped, or which live feature switches and secret
+bindings are set. Verify those in Google Cloud/Firebase before making a claim
+about live state. Never copy provider keys, Stripe secrets, service credentials,
+customer files or account records into this document.
+
+The separate legacy `swapmein-api` deployment and older `charswap` Hosting site
+are not the RecastFX product path described here. The `delicious` branch was a
+design reference; its local password/SQLite backend is not the production
+account system.
+
+## At a glance
+
+```text
+Browser (React + Firebase Auth)
+  ├─ Firebase Hosting: recastfx-franky / recastfx.com
+  ├─ signed, direct video/reference upload ───────────────┐
+  └─ authenticated JSON API → Cloud Run recastfx-api     │
+                                      │                    ▼
+                         private GCS app bucket ←─────────┘
+                                      │
+                         Cloud Tasks: swapmein-jobs
+                         (prep, serialized worker lease)
+                                      │
+                      Cloud Run proof-gpu (SAM 3)
+                      Cloud Run proof-audio (CPU tasks)
+                                      │
+                     guide saved to private GCS
+                                      │
+                      reAPI / ToAPIs MiniMax H3
+                                      │
+                 Cloud Tasks: recastfx-renders
+                    (submit, poll, export tasks)
+                                      │
+             final video + poster → private GCS Library
+```
+
+## Website, identity and account data
+
+| Part | Intended configuration | Responsibility |
 |---|---|---|
-| New website | Firebase Hosting `recastfx-franky` in `charswap-franky-20261013` | https://recastfx.com (Firebase fallback: https://recastfx-franky.web.app) |
-| Original website | Hosting `charswap-franky-20261013` | Remains on its original gateway and release |
-| New API | Cloud Run `recastfx-api`, `us-east4` | Requires a verified Google account for new sessions; private account library and job recovery |
-| Identity | Firebase Authentication / Identity Platform, Google provider | Google sign-in only; email/password is not enabled |
-| Browser identity client | Modular Firebase JS SDK (`firebase/app`, `firebase/auth`) | Google popup login, restored login session, refreshed ID tokens |
-| Server identity verification | Existing `google-auth` | Verifies token signature, audience, issuer, expiry, Google provider and verified email |
-| Library metadata | Private GCS `accounts/<hashed-uid>/...` in existing app bucket | Latest 50 jobs per account; output links regenerated after authorization |
-| Saved media | Private GCS `library/<hashed-uid>/<job>/...` | 30-day finished-video retention; temporary uploads, guides and jobs retain two-day cleanup |
-| Preparation queue | Existing Cloud Tasks `swapmein-jobs` | Serialized dispatch; pending jobs wait for the shared worker lease rather than taking it |
-| Visual preparation | Existing `proof-gpu` | Depth Anything then SAM 3 for enhanced mode; no SAM 3.1 upgrade in this release |
-| Audio preparation | Existing `proof-audio` | Vocal isolation and pitch-shift preparation |
-| Compositing and export | Existing CPU/gateway code and FFmpeg | Depth inside selected mask, background preserved, native generated resolution and original trimmed audio |
-| Video generation | reAPI or ToAPIs MiniMax H3 adapters | User-supplied provider key and credits; remote provider queue |
-| Safety and diagnostics | Existing budget checks, shared GCS lease, shutdown tasks and structured logs | Existing worker bounds and fail-closed shutdown protections remain active |
+| Website | Firebase Hosting site `recastfx-franky`; `firebase.launch.json` routes `/api/**` to `recastfx-api` in `us-east4`; custom domain config includes `recastfx.com` | Serves the RecastFX single-page app and applies security/cache headers. |
+| Browser app | Vite, React 19, TypeScript, Material UI 7 and modular Firebase JS SDK 13 | Landing page, dark/light appearance, Create walkthrough, Library, account sign-in and Admin UI. |
+| Sign-in | Firebase Authentication / Identity Platform with Google provider | Supplies a signed ID token. New RecastFX jobs require a verified Google account. |
+| Gateway identity check | Python `google-auth` verifies Firebase tokens; account authorization also checks job ownership | Keeps one user's jobs, credits and Library private from other users. |
+| Persistent records | Private Cloud Storage JSON records under hashed account/job paths in the app bucket | Stores job state, Library index, settings used, wallet/payment/grant records and administrative state. The browser does not get direct access to arbitrary bucket paths. |
+| Video files | Private Google Cloud Storage | Holds upload tickets, source/reference media, intermediate guides and finished Library files. Browser media transfer uses short-lived signed URLs. |
 
-The browser bundle contains the public Firebase app configuration. It contains no operator provider key, service-account key or provider credit balance. API responses are not cached by Hosting. GCS objects are private and accessed through short-lived signed links.
+The Firebase web configuration shipped to browsers is public application
+configuration. Server credentials and provider keys belong in Secret Manager or
+encrypted job-scoped storage, never in the frontend bundle or source repository.
 
-## Flow
+## Website layout and creation options
 
-### Replace all people
+The polished UI has a shared account header, a signed-in Library homepage (the logo opens Create for signed-in users and Home for visitors),
+combined upload/trim screen, selected-person/reference mapping, and a Generate
+review page. Settings contains account and credits tabs. The Generate page owns
+manual scene review and enhanced masking controls, chosen before preparation.
+Changing an option invalidates the prepared guide while keeping selections and
+references. Easy mode prepares and submits after final approval. Explicit masked
+mode first prepares the guide, opens scene/guide review, then requires final
+render approval. Masking off skips that mask-review detour. Eligible accounts
+retain a private-key access choice on Generate; other accounts never see it.
 
-The People step now offers **Replace all people** alongside tapping a specific
-person. It creates one group reference slot: every person becomes a separate
-instance of the same reference character. Changing between group and individual
-selection clears the previous assignments and prepared tracking state.
+Credit users must have the minimum clip price before starting, and the full
+selected duration's price before preparation. These checks do not debit credits;
+the existing paid-submission path still owns the charge. This is not a credit
+reservation for every simultaneous draft.
 
-- **Enhanced on:** Depth Anything and SAM run as before. The gateway unions all
-  nonzero SAM labels per frame into a separate mask archive for the existing depth
-  compositor. IDs can change between scenes; no individual scene matching is
-  needed. Empty shots stay empty. A clip with no detected people stops before
-  generation. People SAM misses can still be missing from the guide.
-- **Enhanced off:** SAM and depth remain skipped. The prompt requests every person
-  in every scene, with one separate replacement per person, without tap coordinates.
-- **Easy mode:** preparation and submission remain queued after the final review.
-- **Non-Easy mode:** enhanced mode retains a whole-guide approval step, labeled
-  Guide rather than individual scene matching. Non-enhanced mode retains its
-  existing Access/review flow.
-- The mode is saved in the job setup, returned when reopening the job, and included
-  in preparation logs. Existing duration pricing and audio settings are unchanged.
+Library cards use **View progress** for active preparation/rendering and **View
+details** for failed jobs. The details view keeps its status refresh as a
+secondary action. Failed-job details check actual file availability. “Review and retry” restores the original clip, trim, selected people, reference mappings and modes into a fresh draft. Missing inputs require upload, followed by review of the current quote and explicit submission. “Retry saving video” queues only export of an existing provider result, with no generation call or new credit charge. If export inputs have expired, the UI directs the user to support rather than another paid render.
 
-Validation uses local synthetic masks/media, API fakes and walkthrough tests;
-there has been no paid all-person generation test. The mode is deployed on recastfx.com.
+## User journey and preparation
 
-### Existing account flow
+1. A user signs in with Google, uploads one source clip and one or more still
+   reference images, selects the source interval, chooses replacement targets,
+   and reviews the credit quote and processing options.
+2. The browser uploads media directly to private Cloud Storage using signed PUT
+   URLs. The source limit is 100 MiB; references are limited to five stills,
+   each up to 5 MiB. The gateway confirms the uploaded object generation and
+   size before it accepts the job. A completed upload confirmation is the safe
+   point to leave the page; jobs are recoverable from the account Library.
+3. The gateway saves the immutable job setup and queues preparation. New clips
+   use preparation version 2. Duration is 4–15 whole seconds; trim start/end
+   positions and character taps can be fractional seconds. The shared media
+   timeline is normalized to 24 fps. Working dimensions preserve aspect ratio,
+   cap the short side at 768 pixels, and do not upscale smaller footage.
+4. Enhanced character masking defaults on in source. In that path, the GPU
+   worker creates a Depth Anything guide from the working video. The gateway
+   makes a separate 854×480 SAM input from that depth video, with the same
+   frames and timing; SAM labels are resized back using nearest-neighbor
+   interpolation. Taps select SAM labels for individual targets. Replace All
+   People unions detected foreground labels. The CPU compositor puts depth
+   imagery inside the selected mask or masks while keeping the original
+   background. Multiple targets use distinct depth hues to associate each
+   person with a reference.
+5. Enhanced masking off skips Depth Anything, SAM and mask preview. The
+   normalized source-looking video becomes the guide; individual targets are
+   described to the provider using their tap location and clip-relative time.
+   Replace All People instead asks the provider to replace each person, using a
+   single shared reference. Model identity tracking is not performed in this
+   mode.
+6. Easy mode defaults on and skips manual guide approval. With Easy mode off,
+   enhanced individual-selection jobs can ask for confirmation in sections
+   flagged by cuts, gaps or abrupt mask changes. Those are review heuristics,
+   not a calibrated identity-confidence score. The user sees still frames,
+   chooses the selected person or “Not visible here,” and maps the choice to the
+   correct reference. Group replacement does not require per-person choices.
+7. For new jobs the owner-managed audio-processing switch defaults off when no
+   saved setting exists.
+   Off retains the source soundtrack in the guide, skips vocal isolation and
+   pitch shifting, and lets the provider-returned soundtrack accompany export.
+   If enabled, the CPU audio worker separates vocals with Demucs, raises them by
+   three semitones, and places them in the guide; final export restores the
+   selected original soundtrack interval. Existing jobs retain their saved
+   audio setting, and older records without a setting follow the legacy
+   processing behavior.
+8. Before a version 2 guide is published, the gateway checks its dimensions,
+   24 fps frame count, duration and audio coverage against the saved selection.
+   The guide limit is 50 MiB. These checks also apply after a scene review.
 
-Reference upload handling: camera multi-picture JPEGs (MPO)
-are flattened to their main photo and converted to the same standard JPEG used
-for JPG/PNG/WebP references. Animation remains unsupported, and dimension/size
-checks remain active. Normalization logs record only the source/output formats
-and whether a camera photo was flattened.
+SAM IDs are tracking labels, not proof that the same person was found after a
+cut. SAM can miss body parts or switch identities. Depth imagery is a generated
+guide supplied to the video model; the numbered tracking preview and translucent
+selection preview are review aids, not the submitted guide. Face mesh is not
+connected to this current preparation path.
 
-Before the final Easy-mode submission, review text explains that the page must
-stay open until the upload is saved. During upload and confirmation, a prominent
-mobile-friendly dialog shows real progress and asks users to keep the page
-visible. A browser leave/refresh guard is active only during that period (mobile
-browser force-close behavior cannot be prevented). Uploading 100% is not treated
-as server confirmation. A delayed acknowledgement keeps the warning active until
-the job can be read back successfully; it does not initiate a second upload.
-Confirmed queued/preparing jobs instead show a clear safe-to-close notice and
-continue in the Library.
+## Generation and finished Library video
 
-1. Browse the landing page and light/dark theme without an account.
-2. Sign in with Google to create or open the private library.
-3. Upload up to 100 MiB, trim, tap the person, assign the reference, and choose settings/access. Easy mode remains the default. Enhanced mode retains the depth/SAM preparation already used on `tasty`.
-4. A server-side job is attached to that Google identity, then queued for the existing worker pool. Distinct users do not share session ownership or library results.
-5. When Easy mode is off, the existing scene-match review remains available. Review the prepared guide before approving a paid provider request.
-6. The provider render is checked while its tab is open. The original soundtrack is restored by the export task. Download from the wizard or library.
+After approval (or Easy preparation), a durable one-time submission claim
+protects against duplicate paid requests. The gateway submits the prepared guide
+and reference images to the selected reAPI or ToAPIs MiniMax H3 adapter. It
+records the provider task ID and checks status through the render queue. A
+submission with an ambiguous network outcome is marked for operator/provider
+history review and is never automatically resent.
 
-## Recovery and queue boundaries
+When the provider reports completion, a background finish task downloads the
+result, exports MP4 at 24 fps while retaining the provider's returned pixel
+dimensions, and trims extra ending frames to the selected duration. It does not
+retime motion in a longer result. If audio processing is enabled, the selected
+original soundtrack is restored. The finished file and a small JPEG poster are
+saved to the user's private Library. The Library retains finished files for 30
+days, shows job status/elapsed time and the recorded settings, and can renew
+authorized playback/download links.
 
-- Preparation and export are Cloud Tasks work and do not depend on keeping a tab open.
-- Pending preparation admission is bounded to two hours. Only one preparation owns the worker lease; an expired or unconfirmed shutdown lease still requires operator recovery.
-- Provider keys are kept only in browser memory. They are never stored in GCS, job metadata, logs, account records or the Git repository.
-- If the browser closes during provider generation, that remote render continues. Open its library job and enter the same provider key to resume checking and trigger export when ready. The library cannot poll a provider unattended without that key.
-- Reopening a prepared job allows guide/reference approval and paid generation. Scene-review jobs can reopen their scene stills and submit corrections with the original provider key.
-- The library refreshes server job state every 15 seconds while visible. After a user starts/resumes provider checking in its dialog, it checks every 10 seconds while that dialog is open. Status checks do not restart generation.
-- A generation with an uncertain submission outcome is never blindly resubmitted; check the provider's task history.
-- Unfinished preparation records expire after two days. Finished video links can be renewed from the library for 30 days. Account indexes keep the latest 50 jobs, with soft removal and Undo; “Remove” is not immediate physical media deletion.
-- An existing legacy site's anonymous job is not automatically imported into a Google account.
+After the Library entry and final object are verified, cleanup removes only
+that completed job's temporary uploads, guides, masks, depth/audio intermediates
+and review files. The final Library video, poster, account archive and financial
+records remain under their own retention rules. Failed, active and uncertain
+jobs are not treated as completed cleanup candidates. Storage soft-delete can
+delay physical removal. The detailed cleanup exclusions are documented in the
+[gateway runbook](../deployment/swapmein/README.md#completed-job-temporary-media-cleanup).
 
-## Present versus later
+## Cloud services and limits in deployment source
 
-| `delicious` feature | Launch implementation |
+These identifiers and bounds come from `deployment/swapmein/deploy.py`,
+`deploy_launch.py` and `swapmein/config.py`; check deployed configuration before
+using them as live facts.
+
+| Resource | Source-configured role |
 |---|---|
-| Landing, showcase, create wizard, library | Implemented with the working pipeline |
-| Accounts | Google only; no custom password database |
-| Render cards and status | Real private jobs and server/provider status, not demo cards |
-| Queued renders | Real shared prep/export tasks and provider queue; no invented progress percentage |
-| API access | Existing reAPI/ToAPIs keys entered by each user |
-| Credit balance / top-up | Preview only; purchases disabled, no payment processor or operator-funded generation |
-| Other provider names | Not enabled until their adapters are verified |
-| Email login, billing, account deletion, administrative dashboard | Later work |
+| Google Cloud project | `charswap-franky-20261013`, project number `634011479314`; worker/gateway region `us-east4`. |
+| RecastFX gateway | Cloud Run service `recastfx-api`; source deploy settings use minimum 0, maximum 1 instance, concurrency 4, 2 vCPU, 2 GiB memory and 1,800-second request timeout. This API handles auth, upload tickets, job state, billing/admin endpoints, task orchestration and FFmpeg final export; it is not the model GPU. |
+| Preparation queue | Cloud Tasks `swapmein-jobs`; source setup limits it to one concurrent dispatch and one dispatch per minute. The preparation lease serializes access to shared workers. |
+| Render queue | Cloud Tasks `recastfx-renders`; source setup caps it at five concurrent dispatches and one per second for provider submission/status and finishing work. These are queue dispatch bounds, not a promise of provider-side render concurrency. |
+| Shutdown queue | Cloud Tasks `proof-shutdown`; registers bounded backup shutdowns around temporary worker activation. A failed or unconfirmed safety step blocks preparation and requires operator recovery. |
+| GPU worker | Private Cloud Run `proof-gpu`; invoked for depth and SAM operations. Repository worker patches assume existing immutable base images and checkpoints; the gateway release does not install/download model weights. |
+| CPU/audio worker | Private Cloud Run `proof-audio`; performs Demucs vocal separation when enabled and CPU video composition of the prepared guide. It uses a pinned Pillow overlay for current compositor code. |
+| App storage | `<project>-app` bucket in deployment configuration; account/job records and private uploads, outputs, Library and posters. Lifecycle rules distinguish two-day temporary prefixes from 30-day Library media. |
+| Worker storage | `<project>-proof` bucket; private inputs and worker outputs, model/build assets and diagnostics. Worker objects are not the customer Library. Avoid broad deletion or lifecycle changes. |
+| Artifact Registry | `us-east4-docker.pkg.dev/<project>/proof/...` repositories in deploy source. Stores immutable gateway and worker container images; retained images can incur storage charges while services are idle. |
+| Secret Manager | Deployment references named provider, job-encryption and Stripe secrets | Stores operator credentials. Secret names/bindings may be described in source; secret values must never be copied into docs/logs. |
+| Cloud identities | `swapmein-gateway`, `proof-worker`, `proof-shutdown` service-account roles are scoped in deployment source. Gateway calls exact workers/queues/storage and registers shutdowns using narrowly granted identities. Verify IAM before changing it. |
 
-## Cost implications
+The deployment code checks the configured Cloud Run spend cap before worker
+activation. Budget alerts and the Cloud Run cap are separate. The cap does not
+cover Firebase Hosting, Cloud Storage, Cloud Tasks, Artifact Registry, Cloud
+Build, network transfer, logging, Stripe or third-party video-provider charges.
+No current invoice total or actual service status is asserted here.
 
-A second Hosting site and Firebase web-app registration do not provision an always-on server. The new API has minimum zero / maximum one instance; it shares the existing workers. Google sign-in is configured without SMS. Actual costs still include Hosting traffic/storage above free allowances, GCS media and operations, on-demand API/worker/Cloud Tasks usage, Artifact Registry containers, and provider credits. Thirty-day library retention adds storage versus the original two-day outputs; it is not a new unlimited-storage promise. The existing project Cloud Run spend cap is preserved, but it does not cap Hosting, Storage, Registry, Auth, or third-party provider bills.
+## Payments, credits and Admin
 
-## Deployment and verification
+Stripe Checkout sells site credits in USD. A signed Stripe webhook grants credits
+only after a verified paid checkout event; the browser success redirect is not
+proof of payment. Refund events reverse wallet credits. A user spends RecastFX
+credits on a generation, while the gateway uses its private provider credential
+for ordinary accounts. Customer credits, provider-account credits and provider
+reported usage are different units. Stripe sales do not automatically buy
+additional reAPI balance.
 
-- `firebase.launch.json` targets only `recastfx-franky` and rewrites `/api/**` to `recastfx-api`.
-- `deployment/swapmein/deploy_launch.py` verifies the project, billing account, existing cap and worker state; deploys an isolated gateway image; preserves the original API revision; adds both websites to upload CORS and thirty-day library lifecycle cleanup.
-- The frontend uses `npm run build:swapmein --prefix frontend`; the legacy build command is retained for compatibility.
-- Tests cover account ownership, ID-token claim rejection, key binding, library expiration, queued admission, walkthrough behavior, and recovery UI. Live Google sign-in, restored login after refresh, authenticated library access, anonymous access rejection, and the 390-pixel light/dark landing layout were verified. No new paid provider generation was submitted for this release.
+The Admin area is shown to authorized staff/owners. Main sections and credit grant history are independently collapsible, preserving draft form values. Credit recipients can be searched by name or email or entered directly; selection never grants credits. Selected account access can be closed without changing permissions. The shared provider credential is labeled System API key. Owner-controlled settings
+cover checkout/generation switches, USD credit catalog and margin estimate,
+credit grants, pipeline audio settings and the private provider key. Staff
+permissions are enforced by the gateway for each write. A staff account with no
+write permissions has read-only access to the admin dashboard. Personal API-key
+eligibility is a separate per-user switch; only enabled users see their own
+provider-key option. Saved private credentials are never returned to the
+browser.
 
-References: [Firebase Google sign-in](https://firebase.google.com/docs/auth/web/google-signin), [Firebase multiple Hosting sites](https://firebase.google.com/docs/hosting/multisites), [Google Auth ID-token verification](https://googleapis.dev/python/google-auth/latest/reference/google.oauth2.id_token.html).
+## Software and repository map
 
-## Custom domain
+| Software / source | What it does |
+|---|---|
+| Frontend `frontend/` | React 19, TypeScript, Vite, Material UI 7, Firebase JS SDK 13, Zustand and the media/UI libraries in [`package.json`](../frontend/package.json); product routes and RecastFX workflow. The hosting-specific build is `npm run build:swapmein`. |
+| Gateway `deployment/swapmein/swapmein/` | Python 3.12, FastAPI/Starlette, Pydantic, Google Cloud Storage/Tasks clients, Google Auth, HTTPX/Requests, Stripe SDK, cryptography, NumPy and Pillow. The exact pinned runtime set is in [`requirements.txt`](../deployment/swapmein/requirements.txt). |
+| Gateway container | Debian Bookworm slim Python base plus system FFmpeg and CA certificates; runs as non-root. Exact Python pins are in [`requirements.txt`](../deployment/swapmein/requirements.txt). |
+| GPU/CPU worker overlays | Source contracts and patch recipes are in [`worker_patch/README.md`](../deployment/swapmein/worker_patch/README.md). Existing worker images supply the large inference runtime/model weights. Current pipeline uses Depth Anything and SAM 3; CPU audio mode uses Demucs `htdemucs`; FFmpeg handles decode, normalization and encoding. |
+| Deployment | [`deploy_launch.py`](../deployment/swapmein/deploy_launch.py) is the RecastFX-specific gateway deployment entry point; [`deploy.py`](../deployment/swapmein/deploy.py) contains shared scoped setup/build/runtime helpers. `firebase.launch.json` builds and publishes the website to the RecastFX Hosting site. |
+| Deep contracts and runbook | [`deployment/swapmein/README.md`](../deployment/swapmein/README.md) documents API requests, validations, queues, state recovery, provider fields, storage cleanup, logging and operational checks. |
 
-`recastfx.com` is registered at GoDaddy and attached to the `recastfx-franky` Hosting site. Firebase manages its HTTPS certificate. `www.recastfx.com` is attached as a permanent redirect to the root domain.
+The repository's pinned package versions describe the gateway image build, not
+every package inside the pre-existing GPU/audio worker base images. Those base
+image contents and currently deployed digests must be inspected separately for
+an operational inventory.
 
-| DNS type | Host | Value |
-|---|---|---|
-| A | `@` | `199.36.158.100` |
-| TXT | `@` | `hosting-site=recastfx-franky` |
-| CNAME | `www` | `recastfx-franky.web.app` |
+The gateway runtime pins are FastAPI 0.143.1, Starlette 1.8.0, Pydantic
+2.14.1, Uvicorn 0.54.0, python-multipart 0.0.32, google-cloud-storage 3.17.0,
+google-cloud-tasks 2.26.0, google-auth 2.62.0, Requests 2.34.2, HTTPX 0.28.1,
+NumPy 2.5.4, Pillow 12.3.0, Stripe 15.4.0 and cryptography 50.0.2. The
+container is based on `python:3.12-slim-bookworm`, adds FFmpeg and CA
+certificates, and runs as a non-root user. The CPU worker patch pins Pillow
+11.3.0 for its retained CPython 3.12 base. The GPU inference stack and model
+checkpoint package versions are inherited from private base images, so their
+complete inventory cannot be derived from these source patches alone.
 
-The default GoDaddy nameservers, `_domainconnect` and `_dmarc` records are preserved. Both domain names are in Firebase Authentication's authorized domains, the new API's allowed origins and the private upload bucket's CORS policy. The Firebase authentication helper domain remains `charswap-franky-20261013.firebaseapp.com`; changing the website domain does not require moving the Google OAuth callback.
+## Where to verify changes
 
-Check DNS and Hosting's `hostState`, `ownershipState` and `cert.state` after changes. Saving DNS records is not proof that a managed certificate has finished provisioning. The `.web.app` URL remains usable during propagation.
+- User flow and presentation: `frontend/src/features/charSwap/`.
+- API endpoints and background route registration: `deployment/swapmein/swapmein/app.py`.
+- Media normalization, guide creation and export: `media.py`, `pipeline.py`,
+  `tracking.py`, `multi_tracking.py`, `mask_geometry.py` and `cleanup.py`.
+- Provider request/poll contracts and prompt construction: `provider.py`.
+- User records, job state and storage preconditions: `storage.py`, `accounts.py`
+  and `job_settings.py`.
+- Credits, Stripe, provider credentials and staff permissions: `commerce.py`,
+  `stripe_billing.py` and `provider_credentials.py`.
+- Cloud task calls, worker activation/shutdown and private service invocation:
+  `cloud.py`, `deploy.py` and `deploy_launch.py`.
+- Hosting rewrite and browser security headers: `firebase.launch.json`.
+
+For a deployment or incident report, record the time checked, Cloud Run service
+revision and traffic, queue state/rates, worker instance modes, bucket lifecycle
+rules, Firebase Hosting bundle and relevant secret *bindings* without exposing
+secret values. A successful source build or local test does not prove that the
+same revision is live, that a paid generation succeeded, or that a model result
+looks good.

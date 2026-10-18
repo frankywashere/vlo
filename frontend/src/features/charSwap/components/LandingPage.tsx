@@ -1,40 +1,65 @@
 import { Box, Button, Stack, Typography } from "@mui/material";
 import { BeforeAfterShowcase } from "./BeforeAfterShowcase";
+import { HowItWorks } from "./HowItWorks";
+import { LandingExamples } from "./LandingExamples";
 
-export function LandingPage({ onStart }: { onStart: () => void }) {
+interface LandingPageProps {
+  onStart: () => void;
+}
+
+export function LandingPage({ onStart }: LandingPageProps) {
   return (
-    <Box
-      component="main"
-      sx={{
-        maxWidth: 1200,
-        mx: "auto",
-        px: { xs: 3, md: 5 },
-        pt: { xs: 5, md: 9 },
-        pb: 7,
-      }}
-    >
+    <Box component="main" sx={{ overflow: "hidden" }}>
       <Box
+        component="section"
+        aria-labelledby="landing-title"
         sx={{
+          maxWidth: 1260,
+          mx: "auto",
+          px: { xs: 2.5, md: 5 },
+          pt: { xs: 6, md: 10 },
+          pb: { xs: 7, md: 10 },
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+          gridTemplateColumns: { xs: "1fr", md: ".9fr 1.1fr" },
+          gap: { xs: 5, md: 6 },
           alignItems: "center",
-          gap: { xs: 5, md: 7 },
         }}
       >
         <Box>
-          <Typography
-            variant="overline"
-            color="primary"
-            sx={{ letterSpacing: ".12em", fontWeight: 700 }}
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="center"
+            sx={{ mb: 3 }}
           >
-            Your video, recast
-          </Typography>
+            <Box
+              aria-hidden
+              sx={{ width: 26, height: 2, bgcolor: "primary.main" }}
+            />
+            <Typography
+              variant="overline"
+              sx={{ fontSize: 11, letterSpacing: ".16em", fontWeight: 700 }}
+            >
+              Your video, recast
+            </Typography>
+          </Stack>
           <Typography
             component="h1"
-            variant="h1"
-            sx={{ fontSize: { xs: 50, sm: 76, lg: 88 }, mt: 1, mb: 3 }}
+            id="landing-title"
+            sx={{
+              fontSize: {
+                xs: "clamp(46px, 14vw, 80px)",
+                md: "clamp(60px, 6.5vw, 94px)",
+              },
+              fontWeight: 800,
+              letterSpacing: "-.075em",
+              lineHeight: 0.98,
+              mb: 3.5,
+            }}
           >
-            Same scene.
+            <Box component="span" sx={{ whiteSpace: "nowrap" }}>
+              Same scene.
+            </Box>
             <br />
             <Box component="span" sx={{ color: "primary.main" }}>
               New you.
@@ -42,88 +67,93 @@ export function LandingPage({ onStart }: { onStart: () => void }) {
           </Typography>
           <Typography
             color="text.secondary"
-            sx={{ maxWidth: 425, fontSize: 17 }}
+            sx={{
+              maxWidth: 365,
+              fontSize: { xs: 16, md: 18 },
+              lineHeight: 1.7,
+            }}
           >
-            Step into the story. Turn a person in your video into a new
-            character—with a clip, a reference, and a little imagination.
+            Recast anyone in your video. Bring a character, change the lead, and
+            keep the scene you love.
           </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 3.5 }}>
-            <Button variant="contained" size="large" onClick={onStart}>
+          <Stack direction="row" gap={1.5} flexWrap="wrap" sx={{ mt: 4 }}>
+            <Button
+              variant="contained"
+              size="large"
+              onClick={onStart}
+              sx={{ px: 3.5, minHeight: 52 }}
+            >
               Start creating
             </Button>
             <Button
               component="a"
               href="#how-it-works"
-              sx={{ color: "text.primary" }}
+              sx={{ color: "text.primary", px: 1, minHeight: 52 }}
             >
               See how it works
             </Button>
           </Stack>
         </Box>
-        <BeforeAfterShowcase />
+        <Box
+          component="figure"
+          sx={{ m: 0, position: "relative", minWidth: 0 }}
+        >
+          <Box
+            aria-hidden
+            sx={{
+              position: "absolute",
+              width: "65%",
+              top: -16,
+              right: -16,
+              bottom: 44,
+              border: "1px solid",
+              borderColor: "primary.main",
+              borderRadius: "5px",
+              opacity: 0.4,
+            }}
+          />
+          <Box sx={{ position: "relative" }}>
+            <BeforeAfterShowcase />
+          </Box>
+          <Stack
+            component="figcaption"
+            direction="row"
+            justifyContent="space-between"
+            gap={2}
+            sx={{ mt: 2, px: 0.5 }}
+          >
+            <Typography
+              variant="caption"
+              sx={{ fontWeight: 700, letterSpacing: ".08em" }}
+            >
+              THE CHARACTER CHANGES.
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              The scene stays yours.
+            </Typography>
+          </Stack>
+        </Box>
       </Box>
+      <HowItWorks onStart={onStart} />
+      <LandingExamples />
       <Box
-        component="section"
-        id="how-it-works"
+        component="footer"
         sx={{
-          mt: { xs: 6, md: 8 },
-          pt: 4,
-          borderTop: 1,
-          borderColor: "divider",
-          scrollMarginTop: 24,
+          maxWidth: 1260,
+          mx: "auto",
+          px: { xs: 2.5, md: 5 },
+          py: 3,
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 2,
         }}
       >
-        <Typography
-          variant="overline"
-          color="primary"
-          sx={{ letterSpacing: ".12em", fontWeight: 700 }}
-        >
-          A simple three-step flow
+        <Typography variant="caption" color="text.secondary">
+          recastfx
         </Typography>
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" },
-            gap: 3.5,
-            mt: 2,
-          }}
-        >
-          {[
-            [
-              "Pick your scene.",
-              "Upload a clip, trim it, and choose who to replace.",
-            ],
-            [
-              "Choose a character.",
-              "Add a reference image for each person’s new look.",
-            ],
-            [
-              "Make the reveal.",
-              "Review your setup, generate, and download your video.",
-            ],
-          ].map(([title, description], index) => (
-            <Stack
-              direction="row"
-              spacing={1.5}
-              key={title}
-              alignItems="flex-start"
-            >
-              <Typography color="primary" fontWeight={750}>
-                {String(index + 1).padStart(2, "0")}
-              </Typography>
-              <Box>
-                <Typography fontWeight={650}>{title}</Typography>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mt: 0.5 }}
-                >
-                  {description}
-                </Typography>
-              </Box>
-            </Stack>
-          ))}
-        </Box>
+        <Typography variant="caption" color="text.secondary">
+          Same scene. New possibilities.
+        </Typography>
       </Box>
     </Box>
   );

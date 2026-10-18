@@ -54,6 +54,9 @@ export interface LivePipelineJob {
   upload_confirmation_pending?: boolean;
   replace_all_people?: boolean;
   audio_processing?: boolean;
+  created_at?: number;
+  completed_at?: number;
+  updated_at?: number;
   provider?: GenerationProvider;
   access_mode?: GenerationAccessMode;
   app_credits_charged?: number;

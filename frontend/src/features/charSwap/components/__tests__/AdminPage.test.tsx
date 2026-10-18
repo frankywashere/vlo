@@ -10,27 +10,34 @@ vi.mock("../../services/commerce", () => ({
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
   savePipelineSettings: api.pipeline, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
 }));
+async function renderExpandedAdmin() {
+  render(<AdminPage />);
+  await screen.findByRole("heading", {name: "Service controls"});
+  for (const name of ["Service controls", "Audio processing", "Credit pricing", "System API key", "Grant user credits", "Credit grant history"]) {
+    await userEvent.click(screen.getByRole("heading", {name}));
+  }
+}
 beforeEach(() => { api.pipeline.mockReset().mockImplementation(async (settings) => ({ ...settings, revision: settings.revision + 1 })); api.role = "owner"; api.grant.mockReset(); api.save.mockReset().mockImplementation(async (catalog) => ({ ...catalog, revision: catalog.revision + 1 })); });
 afterEach(() => cleanup());
 
 it("shows owner service switches but blocks activation until credentials are ready", async () => {
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   await waitFor(() => expect(screen.getByRole("heading", { name: "Service controls" })).toBeInTheDocument());
   expect(screen.getByRole("switch", { name: "Enable credit checkout" })).toBeDisabled();
   expect(screen.getByRole("switch", { name: "Enable generation using recastfx credits" })).toBeDisabled();
   expect(screen.queryByRole("heading", { name: "Account access" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.1);
   expect(screen.getByLabelText("Pack price (USD)")).toHaveValue(20);
-  expect(screen.getByLabelText("Private reAPI key")).toHaveAttribute("type", "password");
+  expect(screen.getByLabelText("System API key")).toHaveAttribute("type", "password");
 });
 
 it("lets pricing staff edit prices but not service or account access", async () => {
   api.role = "pricing_admin";
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   await waitFor(() => expect(screen.getByRole("heading", { name: "Credit pricing" })).toBeInTheDocument());
   expect(screen.getByRole("switch", { name: "Enable credit checkout" })).toBeDisabled();
   expect(screen.queryByRole("heading", { name: "Account access" })).not.toBeInTheDocument();
-  expect(screen.getByLabelText("Private reAPI key")).toBeDisabled();
+  expect(screen.getByLabelText("System API key")).toBeDisabled();
   expect(screen.getByRole("button", {name: "Grant credits"})).toBeDisabled();
 });
 
@@ -38,7 +45,7 @@ it("lets pricing staff edit prices but not service or account access", async () 
 it("lets owners grant credits and reuses the same operation when a response is uncertain", async () => {
   api.grant.mockRejectedValueOnce(new Error("Connection lost")).mockResolvedValueOnce({email: "customer@example.com", credits: 100, balance: 150});
   const user = userEvent.setup();
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   await user.type(await screen.findByLabelText("Credit recipient email"), "customer@example.com");
   await user.type(screen.getByLabelText("Credits to grant"), "100");
   await user.type(screen.getByLabelText("Reason for credit grant"), "Support adjustment");
@@ -52,7 +59,7 @@ it("lets owners grant credits and reuses the same operation when a response is u
 
 it("lets admins preview a margin-based rate before saving", async () => {
   const user = userEvent.setup();
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   await user.click(await screen.findByRole("switch", {name: "Calculate pricing from target margin"}));
   expect(screen.getByLabelText("Target margin (%)")).toHaveValue(30);
   expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.13);
@@ -65,7 +72,7 @@ it("lets admins preview a margin-based rate before saving", async () => {
 
 it("saves the margin assumptions with the calculated quote", async () => {
   const user = userEvent.setup();
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   await user.click(await screen.findByRole("switch", { name: "Calculate pricing from target margin" }));
   await user.click(screen.getByRole("button", { name: "Save pricing" }));
   await screen.findByText("Pricing saved.");
@@ -77,7 +84,7 @@ it("saves the margin assumptions with the calculated quote", async () => {
 
 it("defaults audio processing off and confirms saved changes without touching payment controls", async () => {
   const user = userEvent.setup();
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   const toggle = await screen.findByRole("switch", { name: "Enable audio processing" });
   expect(toggle).not.toBeChecked();
   await user.click(toggle);
@@ -92,17 +99,17 @@ it("defaults audio processing off and confirms saved changes without touching pa
 
 it("does not let pricing staff change audio behavior", async () => {
   api.role = "pricing_admin";
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   expect(await screen.findByRole("switch", { name: "Enable audio processing" })).toBeDisabled();
 });
 
 it("lets read-only staff see every section with all mutations disabled", async () => {
   api.role = "viewer";
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   await screen.findByText(/Read-only admin access/);
-  for (const name of ["Service controls", "Audio processing", "Credit pricing", "Private generation account", "Grant user credits"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
-  for (const name of ["Save pricing", "Save private key", "Grant credits"]) expect(screen.getByRole("button", {name})).toBeDisabled();
-  expect(screen.getByLabelText("Private reAPI key")).toHaveValue("");
+  for (const name of ["Service controls", "Audio processing", "Credit pricing", "System API key", "Grant user credits"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
+  for (const name of ["Save pricing", "Save system key", "Grant credits"]) expect(screen.getByRole("button", {name})).toBeDisabled();
+  expect(screen.getByLabelText("System API key")).toHaveValue("");
   expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
   const user = userEvent.setup();
@@ -114,7 +121,7 @@ it("lets read-only staff see every section with all mutations disabled", async (
 
 it("selects a registered account for both key and staff controls without changing access", async () => {
   const user = userEvent.setup();
-  render(<AdminPage />);
+  await renderExpandedAdmin();
   await user.click(await screen.findByText("Registered accounts", {exact:true}));
   await user.click(await screen.findByRole("button", {name: "Select helper@example.com"}));
   expect(await screen.findByRole("heading", {name:"Account access"})).toBeInTheDocument();
@@ -124,4 +131,34 @@ it("selects a registered account for both key and staff controls without changin
   expect(await screen.findByText("Personal API-key access: Enabled")).toBeInTheDocument();
   expect(await screen.findByText("Currently has no admin access.")).toBeInTheDocument();
   expect(api.grant).not.toHaveBeenCalled();
+});
+
+
+it("starts sections collapsed and preserves pricing edits across collapse", async () => {
+  const user = userEvent.setup();
+  render(<AdminPage />);
+  const pricing = await screen.findByRole("heading", {name: "Credit pricing"});
+  expect(pricing.closest("details")).not.toHaveAttribute("open");
+  await user.click(pricing);
+  await user.clear(screen.getByLabelText("Price per video second (USD)"));
+  await user.type(screen.getByLabelText("Price per video second (USD)"), "0.25");
+  await user.click(pricing);
+  expect(pricing.closest("details")).not.toHaveAttribute("open");
+  await user.click(pricing);
+  expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.25);
+  expect(api.save).not.toHaveBeenCalled();
+});
+
+it("closes a selected account without saving, then permits another selection", async () => {
+  const user = userEvent.setup();
+  render(<AdminPage />);
+  await user.click(await screen.findByText("Registered accounts", {exact: true}));
+  await user.click(await screen.findByRole("button", {name: "Select helper@example.com"}));
+  const close = await screen.findByRole("button", {name: "Close account"});
+  await waitFor(() => expect(close).toBeEnabled());
+  await user.click(close);
+  expect(screen.queryByRole("heading", {name: "Account access"})).not.toBeInTheDocument();
+  await user.click(screen.getByText("Registered accounts", {exact: true}));
+  await user.click(await screen.findByRole("button", {name: "Select helper@example.com"}));
+  expect(await screen.findByRole("heading", {name: "Account access"})).toBeVisible();
 });

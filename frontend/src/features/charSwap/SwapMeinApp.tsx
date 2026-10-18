@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -16,23 +16,38 @@ import {
 import { ThemeProvider } from "@mui/material/styles";
 import Google from "@mui/icons-material/Google";
 import { CharSwapWalkthrough } from "./CharSwapWalkthrough";
+import type { CharSwapWalkthroughHandle } from "./CharSwapWalkthrough";
 import { AppHeader } from "./components/AppHeader";
 import { LandingPage } from "./components/LandingPage";
 import { AccountLibrary } from "./components/AccountLibrary";
-import { CommerceDialog } from "./components/CommerceDialog";
+import { SettingsPage } from "./components/SettingsPage";
+import type { SettingsTab } from "./components/SettingsPage";
 import { AdminPage } from "./components/AdminPage";
 import { loadAccountAccess } from "./services/commerce";
 import { useAccount } from "./hooks/useAccount";
+import { useLiveCredits } from "./hooks/useLiveCredits";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
 
+type AppView = "home" | "create" | "library" | "settings" | "admin";
 type AccountState = ReturnType<typeof useAccount>;
+
+function readDestination(): AppView {
+  const query = new URL(globalThis.location.href).searchParams;
+  if (["success", "cancelled"].includes(query.get("checkout") ?? ""))
+    return "settings";
+  const page = query.get("page");
+  return page === "create" ||
+    page === "library" ||
+    page === "settings" ||
+    page === "admin"
+    ? page
+    : "home";
+}
 
 export function SwapMeinApp() {
   const account = useAccount();
-  const [destination, setDestination] = useState<"home" | "create" | "library" | "admin">(
-    "home",
-  );
+  const [destination, setDestination] = useState<AppView>(readDestination);
   const [colorMode, setColorMode] = useState<"light" | "dark">(() => {
     try {
       return localStorage.getItem("recastfx:appearance") === "dark"
@@ -42,6 +57,21 @@ export function SwapMeinApp() {
       return "light";
     }
   });
+  useEffect(() => {
+    const onPopState = () => setDestination(readDestination());
+    globalThis.addEventListener("popstate", onPopState);
+    return () => globalThis.removeEventListener("popstate", onPopState);
+  }, []);
+  function navigate(next: AppView) {
+    const url = new URL(globalThis.location.href);
+    if (next === "home") url.searchParams.delete("page");
+    else url.searchParams.set("page", next);
+    if (next !== "settings") url.searchParams.delete("tab");
+    if (url.href !== globalThis.location.href)
+      globalThis.history.pushState(null, "", url);
+    setDestination(next);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
   function toggleAppearance() {
     const next = colorMode === "light" ? "dark" : "light";
     setColorMode(next);
@@ -69,6 +99,7 @@ export function SwapMeinApp() {
             "*": {
               scrollBehavior: "auto !important",
               transition: "none !important",
+              animation: "none !important",
             },
           },
         }}
@@ -77,12 +108,20 @@ export function SwapMeinApp() {
         key={account.user?.uid ?? "signed-out"}
         account={account}
         destination={destination}
-        onDestination={setDestination}
+        onDestination={navigate}
         colorMode={colorMode}
         toggleAppearance={toggleAppearance}
       />
     </ThemeProvider>
   );
+}
+
+interface AccountWorkspaceProps {
+  account: AccountState;
+  destination: AppView;
+  onDestination: (next: AppView) => void;
+  colorMode: "light" | "dark";
+  toggleAppearance: () => void;
 }
 
 function AccountWorkspace({
@@ -91,55 +130,86 @@ function AccountWorkspace({
   toggleAppearance,
   destination,
   onDestination,
-}: {
-  account: AccountState;
-  destination: "home" | "create" | "library" | "admin";
-  onDestination: (next: "home" | "create" | "library" | "admin") => void;
-  colorMode: "light" | "dark";
-  toggleAppearance: () => void;
-}) {
-  const [view, setView] = useState<"home" | "create" | "library" | "admin">(
-    account.user ? destination : "home",
-  );
+}: AccountWorkspaceProps) {
+  const view = account.user
+    ? destination === "home"
+      ? "library"
+      : destination
+    : "home";
   const [started, setStarted] = useState(
-    !!account.user && destination === "create",
+    Boolean(account.user) && destination === "create",
   );
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [commerceOpen, setCommerceOpen] = useState(false);
-  const [pending, setPending] = useState<"create" | "library" | "admin" | null>(null);
+  const [authMode, setAuthMode] = useState<"sign-in" | "create">("sign-in");
   const [busy, setBusy] = useState(false);
-  const [createRequest, setCreateRequest] = useState(0);
+  const creationRef = useRef<CharSwapWalkthroughHandle>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [staffRole, setStaffRole] = useState<string | null>(null);
+  const [appError, setAppError] = useState("");
+  const [jobStatus, setJobStatus] = useState("");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(() => {
+    const query = new URL(globalThis.location.href).searchParams;
+    const tab = query.get("tab");
+    return query.has("checkout") || tab === "credits"
+      ? "credits"
+      : tab === "generation"
+        ? tab
+        : "account";
+  });
+  const credits = useLiveCredits(
+    Boolean(account.user),
+    jobStatus,
+    account.user?.email,
+  );
   useEffect(() => {
     if (!account.user) return;
     let active = true;
-    void loadAccountAccess().then((access) => { if (active) setStaffRole(access.role); }).catch(() => { if (active) setStaffRole(null); });
-    return () => { active = false; };
+    void loadAccountAccess()
+      .then((access) => {
+        if (active) setStaffRole(access.role);
+      })
+      .catch(() => {
+        if (active) setStaffRole(null);
+      });
+    return () => {
+      active = false;
+    };
   }, [account.user]);
   useEffect(() => () => useCharSwapStore.getState().reset(), []);
   useEffect(() => {
     if (!account.user) return;
     const url = new URL(globalThis.location.href);
-    if (!["success", "cancelled"].includes(url.searchParams.get("checkout") ?? "")) return;
-    setCommerceOpen(true);
+    if (!url.searchParams.has("checkout")) return;
     url.searchParams.delete("checkout");
-    globalThis.history.replaceState(null, "", url.toString());
+    url.searchParams.set("page", "settings");
+    url.searchParams.set("tab", "credits");
+    globalThis.history.replaceState(null, "", url);
   }, [account.user]);
-  function navigate(next: typeof view, newSwap = true) {
-    onDestination(next);
-    if (next !== "home" && !account.user) {
-      setPending(next);
-      setAccountOpen(true);
-      return;
-    }
+  function navigate(next: AppView) {
     if (next === "create") {
       setStarted(true);
-      if (newSwap) setCreateRequest((request) => request + 1);
+      creationRef.current?.startAnotherIfSaved();
     }
-    setView(next);
-    window.scrollTo({ top: 0, behavior: "instant" });
+    onDestination(next);
+    if (!account.user && next !== "home") {
+      setAuthMode("create");
+      setAccountOpen(true);
+    }
+  }
+  function showSettings(tab: SettingsTab) {
+    setSettingsTab(tab);
+    navigate("settings");
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set("tab", tab);
+    globalThis.history.replaceState(null, "", url);
+  }
+  async function signOut() {
+    try {
+      await account.signOut();
+      onDestination("home");
+    } catch {
+      setAppError("Sign-out did not finish. Please try again.");
+    }
   }
   async function login() {
     setAuthBusy(true);
@@ -149,57 +219,80 @@ function AccountWorkspace({
       setAuthBusy(false);
     }
   }
-  // The workspace is keyed by account: changing accounts unmounts the wizard,
-  // clearing its provider key and object URLs before showing another library.
-  const label = account.user ? "Account" : "Sign in";
   return (
     <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
       {account.loading && (
         <LinearProgress aria-label="Restoring your account" />
       )}
-      {view !== "create" && (
-        <AppHeader
-          active={view}
-          colorMode={colorMode}
-          onToggleAppearance={toggleAppearance}
-          onHome={() => navigate("home")}
-          onCreate={() => navigate("create")}
-          onLibrary={() => navigate("library")}
-          onAdmin={staffRole ? () => navigate("admin") : undefined}
-          onSettings={() => {
-            navigate("create", false);
-            if (account.user) setSettingsOpen(true);
-          }}
-          locked={busy || account.loading}
-          accountLabel={label}
-          onAccount={() => setAccountOpen(true)}
-        />
+      <AppHeader
+        signedIn={Boolean(account.user)}
+        active={view}
+        colorMode={colorMode}
+        onToggleAppearance={toggleAppearance}
+        onHome={() => navigate("home")}
+        onCreate={() => navigate("create")}
+        onLibrary={() => navigate("library")}
+        onAdmin={staffRole ? () => navigate("admin") : undefined}
+        onSettings={() => showSettings("account")}
+        locked={account.loading}
+        accountName={account.displayName ?? account.user?.displayName}
+        accountEmail={account.user?.email}
+        photoUrl={account.user?.photoURL}
+        credits={credits.wallet?.balance}
+        onCredits={() => showSettings("credits")}
+        onSignOut={() => void signOut()}
+        onAccount={() => {
+          onDestination("home");
+          setAuthMode("sign-in");
+          setAccountOpen(true);
+        }}
+        onCreateAccount={() => navigate("create")}
+      />
+      {appError && (
+        <Alert severity="error" onClose={() => setAppError("")}>
+          {appError}
+        </Alert>
       )}
       {view === "home" && <LandingPage onStart={() => navigate("create")} />}
-      {started && account.user && (
+      {account.user && (started || view === "create") && (
         <Box hidden={view !== "create"}>
           <CharSwapWalkthrough
-            colorMode={colorMode}
-            onToggleAppearance={toggleAppearance}
-            onHome={() => navigate("home")}
-            onLibrary={() => navigate("library")}
-            onAdmin={staffRole ? () => navigate("admin") : undefined}
+            ref={creationRef}
+            credits={credits}
             onBusyChange={setBusy}
-            createRequest={createRequest}
-            settingsOpen={settingsOpen}
-            onSettingsClose={() => setSettingsOpen(false)}
-            accountLabel={label}
-            onAccount={() => setAccountOpen(true)}
-            onCredits={() => setCommerceOpen(true)}
+            onJobChange={(job) => setJobStatus(job.status)}
+            onCredits={() => showSettings("credits")}
+            onLibrary={() => navigate("library")}
           />
         </Box>
       )}
       {view === "library" && account.user && (
-        <AccountLibrary onCreate={() => navigate("create")} />
+        <AccountLibrary retryDisabled={busy} onCreate={() => navigate("create")} onRetry={(draft) => {
+          setStarted(true);
+          useCharSwapStore.getState().restoreRetry(draft);
+          onDestination("create");
+        }} />
+      )}
+      {view === "settings" && account.user && (
+        <SettingsPage
+          credits={credits}
+          tab={settingsTab}
+          onTab={showSettings}
+          name={account.displayName ?? account.user.displayName}
+          email={account.user.email}
+          photoUrl={account.user.photoURL}
+          emailVerified={account.user.emailVerified}
+          createdAt={account.user.metadata?.creationTime}
+          lastSignInAt={account.user.metadata?.lastSignInTime}
+          onUpdateName={account.updateName}
+          onLibrary={() => navigate("library")}
+          onSignOut={() => void signOut()}
+          locked={busy}
+        />
       )}
       {view === "admin" && account.user && staffRole && <AdminPage />}
       <Dialog
-        open={accountOpen}
+        open={accountOpen && !account.user}
         onClose={() => {
           if (!authBusy) setAccountOpen(false);
         }}
@@ -207,70 +300,60 @@ function AccountWorkspace({
         fullWidth
       >
         <DialogTitle>
-          {account.user ? "Your account" : "Welcome to recastfx"}
+          {authMode === "create"
+            ? "Create your account"
+            : "Welcome to recastfx"}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2}>
-            {account.user ? (
-              <>
-                <Typography fontWeight={650}>
-                  {account.user.displayName ?? "Google account"}
-                </Typography>
-                <Typography color="text.secondary">
-                  {account.user.email}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Your library is private to this account.
-                </Typography>
-                <Button variant="outlined" onClick={() => { setAccountOpen(false); setCommerceOpen(true); }}>
-                  Credits and account access
-                </Button>
-                {busy && (
-                  <Alert severity="info">
-                    A job is running. You can return to its status from your library.
-                  </Alert>
-                )}
-              </>
-            ) : (
-              <>
-                <Typography>
-                  Sign in to create swaps and keep your finished videos in your
-                  private library.
-                </Typography>
-                <Button
-                  startIcon={<Google />}
-                  variant="contained"
-                  disabled={authBusy || account.loading}
-                  onClick={() => void login()}
-                >
-                  Continue with Google
-                </Button>
-                <Typography variant="caption" color="text.secondary">
-                  By continuing, you allow recastfx to save your jobs and
-                  finished videos to your account. Videos are kept for 30 days.
-                </Typography>
-              </>
-            )}
-            {pending && !account.user && (
-              <Typography variant="body2" color="text.secondary">
-                Sign in to continue to{" "}
-                {pending === "library" ? "your library" : pending === "admin" ? "admin" : "your new swap"}.
-              </Typography>
-            )}
+            <Typography>
+              {authMode === "create"
+                ? "Create your account with Google to start recasting and save your videos in your library."
+                : "Sign in with Google to pick up where you left off."}
+            </Typography>
+            <Button
+              startIcon={<Google />}
+              variant="contained"
+              disabled={authBusy || account.loading}
+              onClick={() => void login()}
+            >
+              Continue with Google
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              Your finished videos are saved to your account for 30 days.
+            </Typography>
+            <Button
+              disabled={authBusy}
+              onClick={() =>
+                setAuthMode(authMode === "create" ? "sign-in" : "create")
+              }
+              sx={{ alignSelf: "flex-start", px: 0 }}
+            >
+              {authMode === "create"
+                ? "Already have an account? Sign in"
+                : "New here? Create an account"}
+            </Button>
             {account.error && <Alert severity="error">{account.error}</Alert>}
-            {authBusy && <LinearProgress />}
+            {account.errorCode === "auth/unauthorized-domain" && (
+              <Button
+                component="a"
+                href="https://recastfx.com/"
+                variant="outlined"
+              >
+                Open recastfx.com
+              </Button>
+            )}
+            {authBusy && (
+              <LinearProgress aria-label="Waiting for Google sign-in" />
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button disabled={authBusy} onClick={() => setAccountOpen(false)}>
             Close
           </Button>
-          {account.user && (
-            <Button onClick={() => void account.signOut()}>Sign out</Button>
-          )}
         </DialogActions>
       </Dialog>
-      {account.user && <CommerceDialog open={commerceOpen} onClose={() => {setCommerceOpen(false); globalThis.dispatchEvent(new Event("recastfx:credits-updated"));}} />}
     </Box>
   );
 }

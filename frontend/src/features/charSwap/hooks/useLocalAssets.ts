@@ -29,6 +29,8 @@ export function useLocalAssets() {
       clip?.url,
       ...references.map((reference) => reference.url),
     ]);
+    // Retry drafts also own local copies downloaded from their saved inputs.
+    for (const url of retained) if (url?.startsWith("blob:")) urls.current.add(url);
     for (const url of urls.current)
       if (!retained.has(url) && !pending.current.has(url)) release(url);
   }, [clip, references]);

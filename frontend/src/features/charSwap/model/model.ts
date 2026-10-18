@@ -1,7 +1,13 @@
 import { MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 
 export type Step =
-  "clip" | "trim" | "people" | "references" | "matches" | "access" | "review";
+  | "clip"
+  | "trim"
+  | "people"
+  | "references"
+  | "matches"
+  | "review"
+  | "generation";
 
 export interface ClipAsset {
   id: string;
@@ -65,8 +71,8 @@ const STEPS: Step[] = [
   "people",
   "references",
   "matches",
-  "access",
   "review",
+  "generation",
 ];
 const MIN_CLIP_SECONDS = 1;
 const MAX_CLIP_SECONDS = 15;
@@ -94,7 +100,10 @@ export function setClip(
     ...state,
     replaceAllPeople: false,
     clip,
-    trim: [0, Math.min(Math.max(Math.floor(clip.duration), 0), MAX_CLIP_SECONDS)],
+    trim: [
+      0,
+      Math.min(Math.max(Math.floor(clip.duration), 0), MAX_CLIP_SECONDS),
+    ],
     targets: [],
     references: [],
     assignments: {},
@@ -316,8 +325,8 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       }
       return null;
     case "matches":
-    case "access":
     case "review":
+    case "generation":
       return getUnresolvedIssues(state).length > 0
         ? "Confirm each uncertain match before continuing."
         : null;

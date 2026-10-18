@@ -160,15 +160,13 @@ def job_estimate(job):
     return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
 
 
-def check_automatic_generation(records, setup: Setup, active_session: dict):
-    if not setup.auto_generate:
-        return
-    if not setup.easy_mode:
+def check_generation_funding(records, setup: Setup, active_session: dict):
+    if setup.auto_generate and not setup.easy_mode:
         raise PublicError("Automatic generation requires Easy mode.", 409)
-    if active_session.get("access_mode") == "api-key":
-        return
     if active_session.get("access_mode") != "credits":
-        raise PublicError("Choose recastfx credits or an authorized API key.", 409)
+        if setup.auto_generate and active_session.get("access_mode") != "api-key":
+            raise PublicError("Choose recastfx credits or an authorized API key.", 409)
+        return
     if not feature_view(records)["credit_generation"]:
         raise PublicError("Credit-funded generation is not available yet.", 503)
     catalog = public_catalog(records)
@@ -247,8 +245,8 @@ def view(job: dict):
         result["tracking_segments"] = job["tracking_plan"]["segments"]
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]
-        if job.get("normalized_uri"):
-            result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
+    if job.get("normalized_uri") and temporary_media_available:
+        result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
     if credits_mode and job.get("app_credits_charged") is not None:
         result["app_credits_charged"] = job["app_credits_charged"]
     if not credits_mode and job.get("actual_credits") is not None:
@@ -562,6 +560,9 @@ def session(options: ProviderSelection = Body(default=ProviderSelection()), x_re
         if not feature_view(records)["credit_generation"]:
             raise PublicError("Credit-funded generation is not available yet.", 503)
         balance = wallet_view(records, account["account_id"])["balance"]
+        minimum_credits = generation_credit_cost(4, public_catalog(records)["credits_per_generation"])
+        if balance < minimum_credits:
+            raise PublicError("Add enough credits before starting a new recast.", 402)
         key_fingerprint = digest("recastfx-credits")
     else:
         if settings.require_account and (not account or not api_key_permission(records, account)):
@@ -606,7 +607,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     except ValidationError:
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
     validate_reference_mapping(options, 1)
-    check_automatic_generation(records, options, active_session)
+    check_generation_funding(records, options, active_session)
     job_id = uuid.uuid4().hex
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.auto_generate and active_session.get("access_mode") == "api-key" else None)
@@ -719,7 +720,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     records, cloud, _ = services()
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
-    check_automatic_generation(records, options.setup, active_session)
+    check_generation_funding(records, options.setup, active_session)
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.setup.auto_generate and active_session.get("access_mode") == "api-key" else None)
     # Bound abandoned upload storage separately; no preparation slot or worker is
@@ -773,7 +774,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
     if len(raw_reference_uris) != len(reference_sizes):
         raise PublicError("Reference uploads are incomplete. Prepare the clip again.", 409)
     validate_reference_mapping(options, len(raw_reference_uris))
-    check_automatic_generation(records, options, active_session)
+    check_generation_funding(records, options, active_session)
     if (manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
             and not manifest.get("auto_key_ciphertext")):
         raise PublicError("Re-enter your API key before submitting this job.", 409)
@@ -1030,6 +1031,88 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
                       "completed_at": public.get("completed_at") or item.get("completed_at"),
                       "expires_at": item.get("expires_at") or job and job.get("library_expires_at")})
     return {"jobs": items, "retention_days": 30, "limit": 50}
+
+
+def retry_assets(job, cloud):
+    if not job or job.get("temporary_media_cleanup_started_at"):
+        return None, []
+    source = job.get("source_uri")
+    source = source if source and cloud.asset_exists(source) else None
+    references = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
+    return source, [uri if cloud.asset_exists(uri) else None for uri in references]
+
+
+def export_recoverable(job, cloud):
+    if not job or not job.get("provider_output") or not job.get("normalized_uri"):
+        return False
+    if job.get("temporary_media_cleanup_started_at") or not cloud.asset_exists(job["normalized_uri"]):
+        return False
+    return not job.get("audio_processing", True) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
+
+
+@app.get("/api/account/jobs/{job_id}/recovery")
+def account_job_recovery(job_id: str, x_firebase_token: str | None = Header(default=None)):
+    account, item, job = account_job(job_id, x_firebase_token)
+    if job and job.get("status") not in {"failed"}:
+        raise PublicError("This job is still active or already finished. Refresh its status.", 409)
+    records, cloud, _ = services()
+    # Never offer a second paid render while a completed provider result can be saved.
+    if job and job.get("provider_output"):
+        can_save = export_recoverable(job, cloud)
+        return {"action": "save" if can_save else "support", "no_new_charge": True,
+                "message": ("Your render finished. Retry saving it without another generation charge." if can_save
+                            else "A rendered result exists, but required export files are missing. Contact support to recover it; do not pay for another render.")}
+    if job and (job.get("status") == "submission_unknown" or job.get("provider_task") and job.get("provider_state") != "failed"):
+        raise PublicError("The previous submission needs review before another generation. Contact support.", 409)
+    source, references = retry_assets(job, cloud)
+    setup = (job or {}).get("setup") or item.get("retry_setup") or {}
+    saved = settings_used(job or item)
+    wallet, _ = records.read(f"accounts/{account['account_id']}/wallet.json")
+    charged = (job or item).get("app_credits_charged", abs((wallet or {}).get("applied", {}).get("generation:" + job_id, 0)))
+    refunded = (wallet or {}).get("applied", {}).get("refund:" + job_id, 0)
+    result = {"action": "retry", "settings": saved,
+              "trim": setup.get("trim") or saved.get("trim"),
+              "targets": setup.get("targets") or ([] if setup.get("anchor") or setup.get("replace_all_people") else item.get("selection_targets") or []),
+              "anchor": setup.get("anchor"), "target_name": setup.get("target_name", "Selected person"),
+              "source_url": cloud.signed_url(source) if source else None,
+              "reference_urls": [cloud.signed_url(uri) if uri else None for uri in references],
+              "credits_charged": charged, "credits_returned": refunded,
+              "message": "Review your setup before submitting again. The current credit price will be shown before confirmation."}
+    emit("job_recovery_checked", job_id=job_id, source_available=bool(source), references_available=sum(bool(uri) for uri in references))
+    return result
+
+
+@app.post("/api/account/jobs/{job_id}/retry-saving", status_code=202)
+def retry_saving_video(job_id: str, approval: Approval, x_firebase_token: str | None = Header(default=None)):
+    _, _, job = account_job(job_id, x_firebase_token)
+    if not approval.approved:
+        raise PublicError("Confirm retrying the save.")
+    records, cloud, _ = services()
+    if job and job.get("status") in {"finalizing", "finishing", "completed"}:
+        return view(job)
+    if not job or job.get("status") != "failed" or not export_recoverable(job, cloud):
+        raise PublicError("This result cannot be saved automatically. Contact support to recover the render.", 409)
+    claimed = False
+    def claim(current):
+        nonlocal claimed
+        claimed = False
+        if current and current.get("status") in {"finalizing", "finishing", "completed"}:
+            return current
+        updated = claim_job(current, {"failed"}, "finalizing")
+        if current.get("provider_output") != job.get("provider_output"):
+            raise PublicError("The job changed. Refresh its details.", 409)
+        claimed = True
+        return {**updated, "message": "Retrying the save of your existing render. No new generation charge."}
+    updated = records.update(f"jobs/{job_id}.json", claim)
+    if claimed:
+        try:
+            # A fresh task name avoids Cloud Tasks' retention of the original export task.
+            cloud.enqueue("finish", job_id, task_token=uuid.uuid4().hex)
+        except Exception:
+            # The queue may have accepted the task: never roll back into a second claim.
+            emit("export_recovery_queue_unconfirmed", job_id=job_id)
+        emit("export_recovery_requested", job_id=job_id)
+    return view(updated)
 
 
 @app.post("/api/account/jobs/{job_id}/session")

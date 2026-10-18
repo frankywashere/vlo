@@ -34,7 +34,7 @@ def ensure_private_provider_secret():
 def runtime_settings(current: dict, live_account: str | None = None):
     env = current.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])
     values = {item["name"]: item["value"] for item in env
-              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID"} and "value" in item}
+              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID", "COMMERCE_OWNER_EMAILS"} and "value" in item}
     bindings = {}
     for item in env:
         ref = item.get("valueFrom", {}).get("secretKeyRef")

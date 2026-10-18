@@ -64,3 +64,13 @@ export function setJobHidden(id: string, hidden: boolean) {
     body: JSON.stringify({ hidden }),
   });
 }
+
+export function loadJobRecovery(id: string) {
+  return request<import("./jobRecovery").JobRecovery>(`/api/account/jobs/${encodeURIComponent(id)}/recovery`);
+}
+
+export function retrySavingVideo(id: string) {
+  return request<LivePipelineJob>(`/api/account/jobs/${encodeURIComponent(id)}/retry-saving`, {
+    method: "POST", body: JSON.stringify({approved: true}),
+  });
+}

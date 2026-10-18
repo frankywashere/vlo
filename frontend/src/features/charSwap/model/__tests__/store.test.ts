@@ -87,13 +87,13 @@ describe("walkthrough store readiness", () => {
     expect(useCharSwapStore.getState().replaceAllPeople).toBe(false);
     expect(useCharSwapStore.getState().targets).toEqual([]);
   });
-  it("blocks review until tracking finishes, even when references are complete", () => {
+  it("blocks generation until tracking finishes, even when references are complete", () => {
     prepareReferences();
-    useCharSwapStore.getState().visit("review");
+    useCharSwapStore.getState().visit("generation");
     expect(useCharSwapStore.getState().step).toBe("clip");
     useCharSwapStore.getState().reviewTracking([]);
-    useCharSwapStore.getState().visit("review");
-    expect(useCharSwapStore.getState().step).toBe("review");
+    useCharSwapStore.getState().visit("generation");
+    expect(useCharSwapStore.getState().step).toBe("generation");
   });
 
   it("requires all overlapping matches to be resolved without assigning the same candidate twice", () => {
@@ -108,7 +108,7 @@ describe("walkthrough store readiness", () => {
     expect(useCharSwapStore.getState().step).toBe("matches");
     expect(store.chooseMatch("issue-person-b", null)).toBe(true);
     store.next();
-    expect(useCharSwapStore.getState().step).toBe("access");
+    expect(useCharSwapStore.getState().step).toBe("review");
     store.next();
     expect(useCharSwapStore.getState().step).toBe("review");
     expect(useCharSwapStore.getState().error).toBeNull();
@@ -186,13 +186,12 @@ describe("walkthrough store readiness", () => {
     const after = useCharSwapStore.getState();
     expect(after.enhancedCharacterMasking).toBe(false);
     expect(after.trackingReady).toBe(false);
-    expect(after.step).toBe("references");
+    expect(after.step).toBe("review");
     expect(after.selectionVersion).toBe(before.selectionVersion + 1);
     expect(after.references).toEqual(before.references);
     expect(after.assignments).toEqual(before.assignments);
   });
 });
-
 
 it("defaults Easy mode on and changing it invalidates the guide while preserving selections and references", () => {
   useCharSwapStore.getState().reset();
@@ -201,17 +200,17 @@ it("defaults Easy mode on and changing it invalidates the guide while preserving
   const store = useCharSwapStore.getState();
   store.visit("references");
   store.next();
-  expect(useCharSwapStore.getState().step).toBe("access");
+  expect(useCharSwapStore.getState().step).toBe("review");
   const before = useCharSwapStore.getState();
   store.setEasyMode(false);
   const after = useCharSwapStore.getState();
   expect(after.easyMode).toBe(false);
-  expect(after.step).toBe("references");
+  expect(after.step).toBe("review");
   expect(after.trackingReady).toBe(false);
   expect(after.selectionVersion).toBe(before.selectionVersion + 1);
   expect(after.targets).toEqual(before.targets);
   expect(after.assignments).toEqual(before.assignments);
   expect(after.references).toEqual(before.references);
   store.next();
-  expect(useCharSwapStore.getState().step).toBe("matches");
+  expect(useCharSwapStore.getState().step).toBe("review");
 });

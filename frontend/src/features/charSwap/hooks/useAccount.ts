@@ -5,10 +5,15 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
+  updateProfile,
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import type { User } from "firebase/auth";
 import { setAccountTokenSupplier } from "../services/accountContext";
+import {
+  getSignInErrorCode,
+  getSignInErrorMessage,
+} from "../utils/signInErrors";
 
 // Firebase web configuration identifies the app; it is public, not a provider key.
 const firebase = initializeApp({
@@ -26,6 +31,11 @@ export function useAccount() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<{
+    uid: string;
+    name: string;
+  } | null>(null);
   useEffect(
     () =>
       onAuthStateChanged(
@@ -45,18 +55,43 @@ export function useAccount() {
   );
   async function signIn() {
     setError(null);
+    setErrorCode(null);
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       await signInWithPopup(auth, provider);
-    } catch {
-      setError(
-        "Google sign-in did not finish. Allow the sign-in popup and try again.",
-      );
+    } catch (cause) {
+      const code = getSignInErrorCode(cause);
+      if (code?.startsWith("auth/"))
+        console.warn("Google sign-in failed:", code);
+      setErrorCode(code);
+      setError(getSignInErrorMessage(code));
     }
   }
   async function signOut() {
     await firebaseSignOut(auth);
   }
-  return { user, loading, error, signIn, signOut };
+  async function updateName(name: string) {
+    const current = auth.currentUser;
+    const clean = name.trim();
+    if (!current || !clean || clean.length > 80)
+      throw new Error("Enter a name between 1 and 80 characters.");
+    await updateProfile(current, { displayName: clean });
+    if (auth.currentUser?.uid === current.uid)
+      setProfileName({ uid: current.uid, name: clean });
+  }
+  const displayName =
+    user && profileName?.uid === user.uid
+      ? profileName.name
+      : user?.displayName;
+  return {
+    user,
+    displayName,
+    loading,
+    error,
+    errorCode,
+    signIn,
+    signOut,
+    updateName,
+  };
 }
