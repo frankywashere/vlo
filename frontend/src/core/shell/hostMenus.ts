@@ -25,6 +25,9 @@ import { hostMenuCatalog } from "./hostMenuCatalog";
  * extension boundary as `JsonValue`.
  */
 export interface HostMenuSubjectMap {
+  readonly "recast.account": {
+    readonly slot: "recast.account";
+  };
   readonly "timeline.clip.context": {
     readonly slot: "timeline.clip.context";
     readonly clip: ExtensionTimelineClipSnapshot;
@@ -413,6 +416,8 @@ function validateProjectsItemSubject(subject: unknown): boolean {
 // Exhaustive over HostMenuSubjectMap: a subject-map entry without a validator
 // (or a validator for an unmapped menu) fails to compile.
 const HOST_MENU_SUBJECT_VALIDATORS = {
+  "recast.account": (subject: unknown) =>
+    isRecord(subject) && subject.slot === "recast.account",
   "timeline.clip.context": validateClipContextSubject,
   "timeline.marker.context": validateMarkerContextSubject,
   "timeline.track.context": validateTrackContextSubject,
@@ -446,6 +451,7 @@ const CLIP_SNAPSHOT_SCHEMA = {
 // discovery. Documentation-grade (field path → type name); the validators
 // above are authoritative.
 const HOST_MENU_SUBJECT_SCHEMAS = {
+  "recast.account": { slot: "'recast.account'" },
   "timeline.clip.context": {
     slot: "'timeline.clip.context'",
     clip: CLIP_SNAPSHOT_SCHEMA,

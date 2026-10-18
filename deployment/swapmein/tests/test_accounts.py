@@ -49,6 +49,7 @@ def test_private_library_recovery_and_key_binding(api, monkeypatch):
     headers, owner = authenticated(api)
     job_id = ready_job(records, owner)
     job = records.data[f"jobs/{job_id}.json"]
+    job["normalized_uri"] = "gs://private-app/normalized.mp4"
     job["created_at"] = time.time()
     job = accounts.bind_job(records, job, {"account_id": digest("a"), "key_fingerprint": digest("valid-example-key")}, "My take")
     records.data[f"jobs/{job_id}.json"] = job
@@ -58,6 +59,7 @@ def test_private_library_recovery_and_key_binding(api, monkeypatch):
     result = client.get("/api/account/jobs", headers=own)
     assert result.status_code == 200
     assert result.json()["jobs"][0]["title"] == "My take"
+    assert "/normalized.mp4?" in result.json()["jobs"][0]["source_preview_url"]
     assert "owner" not in result.text and "key_fingerprint" not in result.text
     assert client.get("/api/account/jobs", headers=other).json()["jobs"] == []
     endpoint = f"/api/account/jobs/{job_id}/session"

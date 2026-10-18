@@ -1,393 +1,387 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Alert, Avatar, Box, Button, Stack, Typography } from "@mui/material";
-import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
-import DownloadRounded from "@mui/icons-material/DownloadRounded";
-import KeyOutlined from "@mui/icons-material/KeyOutlined";
+import { Alert, Avatar, Box, Button, Stack, Typography, RadioGroup, Radio, FormControlLabel } from "@mui/material";
 import { useCharSwapStore } from "../useCharSwapStore";
-import { formatTime } from "../utils/videoGeometry";
-import { GenerationProgress } from "./GenerationProgress";
-import { PersonBadge } from "./PersonBadge";
 import type { LivePipelineJob } from "../services/livePipeline";
 import { VideoPreview } from "./VideoPreview";
-import { PANEL } from "./stepStyles";
+import { GenerationOptions } from "./GenerationOptions";
+import { formatTime } from "../utils/videoGeometry";
 
 interface ReviewStepProps {
+  accessMode?: "credits" | "api-key";
+  apiKeyAllowed?: boolean;
+  hasKey?: boolean;
   provider?: "reAPI" | "ToAPIs";
+  onApiSettings?: () => void;
+  onAccessModeChange?: (mode: "credits" | "api-key") => void;
+  trackingReady?: boolean;
+  onOptionsChange?: () => void;
   live?: boolean;
   job?: LivePipelineJob | null;
-  generating?: boolean;
-  accessLocked?: boolean;
-  onGenerate?: () => void;
-  onRefresh?: () => void;
-  accessMode?: "api-key" | "credits";
-  sampleCreditBalance?: number;
+  busy?: boolean;
   creditBalance?: number;
-  generationCredits?: number;
-  hasPreviewKey: boolean;
-  isSampleKey: boolean;
-  onApiSettings: () => void;
+  generationCredits: number;
+  creditsAvailable?: boolean;
+  onGenerate?: () => void;
+  onCredits?: () => void;
 }
 
 export function ReviewStep({
-  provider = "reAPI",
+  accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
+  onApiSettings, onAccessModeChange, trackingReady = false, onOptionsChange,
   live = false,
   job = null,
-  generating = false,
-  accessLocked = false,
-  onGenerate,
-  onRefresh,
-  accessMode = "api-key",
-  sampleCreditBalance = 100,
+  busy = false,
   creditBalance,
-  generationCredits = 150,
-  hasPreviewKey,
-  isSampleKey,
-  onApiSettings,
+  generationCredits,
+  creditsAvailable = true,
+  onGenerate,
+  onCredits,
 }: ReviewStepProps) {
-  const {
-    easyMode,
-    replaceAllPeople,
-    enhancedCharacterMasking,
-    clip,
-    trim,
-    targets,
-    references,
-    assignments,
-    issues,
-    visit,
-  } = useCharSwapStore(
-    useShallow((s) => ({
-      easyMode: s.easyMode,
-      replaceAllPeople: s.replaceAllPeople,
-      enhancedCharacterMasking: s.enhancedCharacterMasking,
-      clip: s.clip,
-      trim: s.trim,
-      targets: s.targets,
-      references: s.references,
-      assignments: s.assignments,
-      issues: s.issues,
-      visit: s.visit,
-    })),
-  );
+  const { clip, trim, targets, references, assignments, easyMode, enhancedCharacterMasking, visit } =
+    useCharSwapStore(
+      useShallow((state) => ({
+        clip: state.clip,
+        trim: state.trim,
+        targets: state.targets,
+        references: state.references,
+        assignments: state.assignments,
+        easyMode: state.easyMode ?? true,
+        enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
+        visit: state.visit,
+      })),
+    );
   const [playableGuide, setPlayableGuide] = useState<string | null>(null);
-  const guideIdentity = `${job?.id}:${job?.guide_url}`;
-  const guidePlayable = playableGuide === guideIdentity;
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
-  const prepared = Boolean(job && ["ready", "generating", "finalizing", "completed"].includes(job.status));
-  const automaticPreparationPending = live && !replaceAllPeople && Boolean(enhancedCharacterMasking)
-    && (easyMode ?? true) && !prepared;
   if (!clip) return null;
-  async function downloadVideo() {
-    if (!job?.output_url || downloading) return;
-    setDownloading(true);
-    setDownloadError(null);
-    try {
-      const response = await fetch(job.output_url);
-      if (!response.ok) throw new Error("Download failed");
-      const url = URL.createObjectURL(await response.blob());
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "recastfx-video.mp4";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch {
-      setDownloadError("The video couldn’t download. Refresh the video links and try again.");
-    } finally {
-      setDownloading(false);
-    }
-  }
+  const guideIdentity = String(job?.id) + ":" + String(job?.guide_url);
+  const guide =
+    !easyMode && enhancedCharacterMasking && job?.status === "ready" && job.guide_url
+      ? job.guide_url
+      : null;
+  const enoughCredits =
+    accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits;
+  const needsPreparation = !job || ["failed", "completed"].includes(job.status);
+  const canSubmit = enoughCredits && !busy && creditsAvailable && (
+    live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && (!enhancedCharacterMasking || trackingReady && playableGuide === guideIdentity))
+    : !easyMode && enhancedCharacterMasking && !trackingReady
+  );
   return (
-    <Stack spacing={2.5}>
-      <Box sx={PANEL}>
-        <Stack
-          direction="row"
-          justifyContent="space-between"
-          alignItems="center"
-        >
-          <Box>
-            <Typography fontWeight={600}>{clip.name}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Easy mode: {(easyMode ?? true) ? "On" : "Off"}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Enhanced character masking:{" "}
-              {(enhancedCharacterMasking ?? true) ? "On" : "Off"}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {formatTime(trim[0])}–{formatTime(trim[1])} ·{" "}
-              {(trim[1] - trim[0]).toFixed(1)} seconds
-            </Typography>
-          </Box>
-        </Stack>
-      </Box>
-      <Box sx={PANEL}>
-        <Stack
-          direction="row"
-          alignItems="center"
-          justifyContent="space-between"
-          spacing={2}
+    <Box
+      sx={{
+        display: "grid",
+        gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) 340px" },
+        gap: 2.5,
+        alignItems: "start",
+      }}
+    >
+      <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+        <Box
+          component="section"
+          aria-label="Your clip"
+          sx={{
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: "5px",
+            bgcolor: "background.paper",
+            overflow: "hidden",
+          }}
         >
           <Stack
             direction="row"
-            spacing={1.5}
             alignItems="center"
-            sx={{ minWidth: 0 }}
+            justifyContent="space-between"
+            gap={2}
+            sx={{ px: 2, py: 1.5 }}
           >
-            <KeyOutlined sx={{ color: "primary.main" }} />
-            <Box>
-              <Typography fontWeight={600}>
-                {accessMode === "credits"
-                  ? "recastfx credits"
-                  : `Your ${provider} account`}
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="caption" color="text.secondary">
+                Your clip
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {accessMode === "credits" ? (
-                  live ? `${creditBalance === undefined ? "—" : creditBalance.toLocaleString()} credits available` : `${sampleCreditBalance} sample credits · Preview`
-                ) : (
-                  <>
-                    MiniMax H3 ·{" "}
-                    {hasPreviewKey
-                      ? isSampleKey
-                        ? "Sample key added"
-                        : live && job
-                          ? "Key verified for this job"
-                          : "Key entered, unverified"
-                      : "No API key added"}
-                  </>
-                )}
+              <Typography
+                variant="body2"
+                fontWeight={650}
+                noWrap
+                title={clip.name}
+              >
+                {clip.name}
               </Typography>
             </Box>
           </Stack>
-          <Button
-            variant="outlined"
-            disabled={accessLocked}
-            size="small"
-            onClick={
-              accessMode === "credits" ? () => visit("access") : onApiSettings
-            }
-            sx={{ flexShrink: 0 }}
+          <Box sx={{ px: 1.5 }}>
+            <VideoPreview
+              key={guide ?? clip.url}
+              clip={
+                guide
+                  ? {
+                      ...clip,
+                      url: guide,
+                      duration: job?.duration ?? trim[1] - trim[0],
+                      width: job?.width ?? clip.width,
+                      height: job?.height ?? clip.height,
+                    }
+                  : clip
+              }
+              trim={guide ? [0, job?.duration ?? trim[1] - trim[0]] : trim}
+              maxPreviewHeight={300}
+              onPlayableChange={(playable) =>
+                setPlayableGuide(playable ? guideIdentity : null)
+              }
+            />
+          </Box>
+          <Stack
+            direction="row"
+            flexWrap="wrap"
+            alignItems="center"
+            justifyContent="space-between"
+            gap={1}
+            sx={{ px: 2, py: 1.5 }}
           >
-            {accessMode === "credits"
-              ? "Edit access"
-              : hasPreviewKey
-                ? "Edit key"
-                : "Add key"}
-          </Button>
-        </Stack>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-          {accessMode === "credits"
-            ? `This generation costs ${generationCredits} credits.`
-            : `When connected, video generation uses your ${provider} credit balance.`}
-        </Typography>
-      </Box>
-      <Box sx={PANEL}>
-        <Stack
-          direction="row"
-          justifyContent="space-between"
-          alignItems="center"
-          sx={{ mb: 2 }}
-        >
-          <Typography fontWeight={600}>Your replacements</Typography>
-          <Button
-            size="small"
-            disabled={generating}
-            onClick={() => visit("references")}
-          >
-            Edit references
-          </Button>
-        </Stack>
-        <Stack spacing={2}>
-          {targets.map((person) => {
-            const reference = references.find(
-              (item) => item.id === assignments[person.id],
-            );
-            return (
-              <Box
-                key={person.id}
-                sx={{
-                  minWidth: 0,
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) 24px minmax(0, 1fr)",
-                  alignItems: "center",
-                  gap: 1.5,
-                }}
-              >
-                <Box sx={{ minWidth: 0 }}>
-                  <PersonBadge person={person} compact stackedOnMobile />
-                </Box>
-                <ArrowForwardRounded sx={{ color: "text.secondary" }} />
-                <Stack
-                  direction={{ xs: "column", sm: "row" }}
-                  alignItems="center"
-                  spacing={1.5}
-                  sx={{ minWidth: 0 }}
-                >
-                  <Avatar
-                    src={reference?.url}
-                    variant="rounded"
-                    sx={{ width: 56, height: 64 }}
-                  />
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      minWidth: 0,
-                      overflowWrap: "anywhere",
-                      textAlign: { xs: "center", sm: "left" },
-                    }}
-                  >
-                    {reference?.name}
-                  </Typography>
-                </Stack>
-              </Box>
-            );
-          })}
-        </Stack>
-      </Box>
-      <Box sx={PANEL}>
-        <Typography fontWeight={600} sx={{ mb: 1.5 }}>
-          Ready for generation
-        </Typography>
-        <Stack spacing={1}>
-          <Typography variant="body2" color="text.secondary">
-            ✓ Every selected person has a reference
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {automaticPreparationPending ? "→ " : "✓ "}
-            {replaceAllPeople
-              ? "Everyone will use the same reference character"
-              : issues.length
-              ? `${issues.length} review ${issues.length === 1 ? "section" : "sections"} confirmed`
-              : live
-                ? job?.tracking_reviewed
-                  ? "Scene matches checked and applied"
-                  : (easyMode ?? true) && enhancedCharacterMasking
-                    ? !job || job.status === "failed"
-                      ? "Automatic preparation after submission"
-                      : prepared ? "Easy mode: automatic tracking, no scene matching"
-                        : "Automatic preparation in progress; no scene matching"
-                    : enhancedCharacterMasking
-                      ? prepared ? "Tracking guide prepared" : "Tracking will be checked during preparation"
-                      : "Masking off: positions and timestamps identify your people; no SAM tracking"
-                : "No uncertain sections"}
-            {clip.mode === "demo" ? " (sample)" : ""}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            ✓ {job?.audio_processing ? "Original soundtrack restored on export" : "Audio included in your video"}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            ✓ Final video keeps its generated resolution
-          </Typography>
-        </Stack>
-      </Box>
-      <Alert severity="info" role="note">
-        {live
-          ? accessMode === "credits"
-            ? job?.message || ((easyMode ?? true)
-              ? "After submitting, keep this page open until we confirm your upload is saved. Then you can close it and follow preparation and generation in your Library."
-              : "Review the prepared guide, then submit once using your recastfx credits. You can follow the job in your Library.")
-            : job?.message || ((easyMode ?? true)
-              ? `After submitting, keep this page open until we confirm your upload is saved. Your ${provider} key is encrypted for this job so it can then finish after you close the tab.`
-              : `Review the prepared guide before generating. This uses your own ${provider} credits.`)
-          : "This is the UI preview. Generation is not connected yet, and nothing has been submitted or charged."}
-      </Alert>
-      {live && !(easyMode ?? true) && job?.status === "ready" && job.guide_url && (
-        <Box sx={PANEL}>
-          <Typography fontWeight={600} sx={{ mb: 2 }}>
-            Review your prepared clip
-          </Typography>
-          <VideoPreview
-            key={guideIdentity}
-            clip={{
-              ...clip,
-              id: "prepared-guide",
-              name: "Prepared guide",
-              url: job.guide_url,
-              width: job.width ?? clip.width,
-              height: job.height ?? clip.height,
-              duration: job.duration ?? trim[1] - trim[0],
-            }}
-            trim={[0, job.duration ?? trim[1] - trim[0]]}
-            onPlayableChange={(playable) =>
-              setPlayableGuide(playable ? guideIdentity : null)
-            }
-          />
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            {enhancedCharacterMasking
-              ? "Watch every scene. The colored depth guide should cover only your selected person. Audio is included in your video."
-              : "Check your section before generating. MiniMax uses your selected position and timestamp; audio is included in your video."}
-          </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {(trim[1] - trim[0]).toFixed(1)} seconds selected
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {formatTime(trim[0])}–{formatTime(trim[1])}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {job?.audio_processing ? "Original audio" : "Audio included"}
+            </Typography>
+          </Stack>
         </Box>
-      )}
-      {live && job && <GenerationProgress job={job} provider={provider} />}
-      {live && job && (
-        <Button variant="outlined" onClick={onRefresh}>
-          Refresh status and video links
-        </Button>
-      )}
-      {live && accessMode === "api-key" && job?.actual_provider_credits !== undefined && (
-        <Typography variant="body2" color="text.secondary">
-          {provider} reported charge: US$
-          {(job.actual_provider_credits / 1000).toFixed(3)}.
+        <Typography variant="body2" color="text.secondary" role="status">
+          {!enhancedCharacterMasking ? "Masking is off; no person tracking." : easyMode
+            ? !job || job.status === "failed" ? "Automatic preparation after submission."
+              : ["queued", "preparing"].includes(job.status) ? "Automatic preparation in progress; no scene matching."
+              : "Easy mode: automatic tracking, no scene matching."
+            : "Review scene matches before generation."}
         </Typography>
-      )}
-      {live &&
-        accessMode === "api-key" && job?.actual_provider_credits === undefined &&
-        job?.estimated_cost_usd !== undefined && (
+        {guide && (
           <Typography variant="body2" color="text.secondary">
-            {provider} estimate: US${job.estimated_cost_usd.toFixed(2)}.
-            {provider === "ToAPIs"
-              ? "Based on the US$0.80 five-second test; not a price quote."
-              : "Provider pricing can change."}{" "}
-            H3 generates at 768p; the download keeps that resolution.
+            Watch the prepared clip and check the selected person before
+            generating.
           </Typography>
         )}
-      {job?.status === "completed" && job.output_url && (
-        <>
-          <VideoPreview
-            clip={{
-              ...clip,
-              width: job.width ?? clip.width,
-              height: job.height ?? clip.height,
-              url: job.output_url,
-              duration: job.duration ?? trim[1] - trim[0],
-            }}
-            trim={[0, job.duration ?? trim[1] - trim[0]]}
-          />
-        </>
-      )}
-      {downloadError && <Alert severity="error">{downloadError}</Alert>}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-        <Button
-          variant="contained"
-          size="large"
-          onClick={onGenerate}
-          disabled={
-            !live ||
-            (accessMode === "api-key" && (!hasPreviewKey || isSampleKey)) ||
-            (accessMode === "credits" && (creditBalance ?? -1) < generationCredits) ||
-            generating ||
-            ((easyMode ?? true)
-              ? !!job && job.status !== "failed"
-              : job?.status !== "ready" || !guidePlayable)
-          }
-          sx={{ flex: 1 }}
-        >
-          {generating ? "Processing…" : (easyMode ?? true) ? "Submit swap" : "Generate replacements"}
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<DownloadRounded />}
-          onClick={() => void downloadVideo()}
-          disabled={job?.status !== "completed" || !job.output_url || downloading}
-          size="large"
-        >
-          {downloading ? "Downloading…" : "Download video"}
-        </Button>
       </Stack>
-    </Stack>
+      <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+        <GenerationOptions disabled={busy} onChange={onOptionsChange} />
+        {!!targets.length && (
+          <Box
+            component="section"
+            aria-label="Character change"
+            sx={{
+              p: 2,
+              border: "1px solid",
+              borderColor: "divider",
+              borderRadius: "5px",
+              bgcolor: "background.paper",
+            }}
+          >
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="center"
+              sx={{ mb: 1.5 }}
+            >
+              <Typography variant="body2" fontWeight={650}>
+                Character change
+              </Typography>
+              <Button
+                size="small"
+                aria-label="Edit character"
+                onClick={() => visit("references")}
+                disabled={busy}
+                sx={{ minHeight: 32, px: 0 }}
+              >
+                Edit
+              </Button>
+            </Stack>
+            <Stack spacing={2}>
+              {targets.map((person) => {
+                const reference = references.find(
+                  (item) => item.id === assignments[person.id],
+                );
+                return (
+                  <Box
+                    key={person.id}
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0, 1fr) 24px minmax(0, 1fr)",
+                      gap: 1,
+                      alignItems: "center",
+                    }}
+                  >
+                    <Stack
+                      direction={{ xs: "column", sm: "row" }}
+                      alignItems={{ xs: "flex-start", sm: "center" }}
+                      spacing={1.5}
+                      sx={{ minWidth: 0 }}
+                    >
+                      <Avatar
+                        src={person.thumbnail}
+                        alt={person.name}
+                        variant="rounded"
+                        sx={{ width: 56, height: 70, borderRadius: "5px" }}
+                      />
+                      <Box sx={{ minWidth: 0, maxWidth: "100%" }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Original
+                        </Typography>
+                        <Typography variant="body2" fontWeight={650} noWrap>
+                          {person.name}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    <Typography
+                      color="text.secondary"
+                      aria-hidden
+                      sx={{ textAlign: "center", fontSize: 22 }}
+                    >
+                      →
+                    </Typography>
+                    <Stack
+                      direction={{ xs: "column", sm: "row" }}
+                      alignItems={{ xs: "flex-start", sm: "center" }}
+                      spacing={1.5}
+                      sx={{ minWidth: 0 }}
+                    >
+                      <Avatar
+                        src={reference?.url}
+                        alt={reference?.name ?? "Replacement character"}
+                        variant="rounded"
+                        sx={{ width: 56, height: 70, borderRadius: "5px" }}
+                      />
+                      <Box sx={{ minWidth: 0, maxWidth: "100%" }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Becomes
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          fontWeight={650}
+                          noWrap
+                          title={reference?.name}
+                        >
+                          {reference?.name ?? "Your character"}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </Box>
+                );
+              })}
+            </Stack>
+          </Box>
+        )}
+        <Stack
+          component="section"
+          aria-label="Generation summary"
+          spacing={2.5}
+          sx={{
+            p: { xs: 2.5, sm: 3 },
+            bgcolor: "background.paper",
+            border: "1px solid",
+            borderColor: "divider",
+            borderTop: "3px solid",
+            borderTopColor: "primary.main",
+            borderRadius: "5px",
+          }}
+        >
+          {apiKeyAllowed && <Box>
+            <RadioGroup aria-label="Generation access" value={accessMode}
+              onChange={(_, value) => { if (value === "credits" || value === "api-key") onAccessModeChange?.(value); }}>
+              <FormControlLabel disabled={busy} value="credits" control={<Radio />} label="recastfx credits" />
+              <FormControlLabel disabled={busy} value="api-key" control={<Radio />} label="Use my API key" />
+            </RadioGroup>
+            {accessMode === "api-key" && <Button disabled={busy} onClick={onApiSettings}>{hasKey ? "Edit API key" : "Add API key"}</Button>}
+          </Box>}
+          {accessMode === "credits" ? <>
+          <Box>
+            <Typography variant="body2" color="text.secondary">
+              Generation cost
+            </Typography>
+            <Typography
+              role="status"
+              aria-label="Generation cost"
+              sx={{
+                mt: 1,
+                fontSize: 52,
+                fontWeight: 750,
+                letterSpacing: "-.045em",
+                lineHeight: 1.1,
+              }}
+            >
+              {generationCredits.toLocaleString()}
+              <Box
+                component="span"
+                sx={{
+                  fontSize: 16,
+                  letterSpacing: 0,
+                  fontWeight: 500,
+                  color: "text.secondary",
+                }}
+              >
+                {" "}
+                credits
+              </Box>
+            </Typography>
+          </Box>
+          <Stack
+            spacing={1.25}
+            sx={{ p: 1.5, bgcolor: "action.hover", borderRadius: "5px" }}
+          >
+            <Stack direction="row" justifyContent="space-between" gap={2}>
+              <Typography variant="body2" color="text.secondary">
+                Your balance
+              </Typography>
+              <Typography variant="body2" fontWeight={650}>
+                {creditBalance === undefined
+                  ? "—"
+                  : creditBalance.toLocaleString()}
+              </Typography>
+            </Stack>
+            {creditBalance !== undefined && (
+              <Stack direction="row" justifyContent="space-between" gap={2}>
+                <Typography variant="body2" color="text.secondary">
+                  {enoughCredits ? "After generation" : "Credits needed"}
+                </Typography>
+                <Typography
+                  component="output"
+                  aria-label={
+                    enoughCredits
+                      ? "Balance after generation"
+                      : "Credits needed"
+                  }
+                  variant="body2"
+                  fontWeight={650}
+                  color={enoughCredits ? "text.primary" : "primary.main"}
+                >
+                  {Math.abs(creditBalance - generationCredits).toLocaleString()}
+                </Typography>
+              </Stack>
+            )}
+          </Stack>
+          {!enoughCredits && (
+            <Button variant="outlined" onClick={onCredits}>
+              Add credits
+            </Button>
+          )}
+          </> : <Typography>Generation uses your {provider} account.</Typography>}
+          {live && !creditsAvailable && (
+            <Alert severity="warning">
+              Credit generation is unavailable right now. Your setup is kept
+              here.
+            </Alert>
+          )}
+          <Button
+            variant="contained"
+            size="large"
+            disabled={!canSubmit}
+            onClick={onGenerate}
+          >
+            {busy ? "Preparing…" : !easyMode && enhancedCharacterMasking && needsPreparation && !trackingReady ? "Prepare and review" : "Generate video"}
+          </Button>
+          <Typography variant="caption" color="text.secondary">
+            Your video will appear in your library.
+          </Typography>
+        </Stack>
+      </Stack>
+    </Box>
   );
 }

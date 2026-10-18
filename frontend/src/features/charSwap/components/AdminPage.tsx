@@ -62,7 +62,7 @@ export function AdminPage() {
     });
   }
 
-  return <Container maxWidth="lg" sx={{ py: { xs: 3, md: 6 } }}>
+  return <Container maxWidth="lg" sx={{ py: { xs: 3, md: 6 }, "& .MuiCard-root": { borderRadius: "5px", boxShadow: "none" }, "& .MuiCardContent-root": { p: { xs: 2, md: 3 } } }}>
     <Typography variant="h3" component="h1" fontWeight={800}>Admin</Typography>
     <Typography color="text.secondary" sx={{ mb: 3 }}>Manage recastfx payments, credits, and staff access.</Typography>
     <Stack spacing={2}>

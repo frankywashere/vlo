@@ -126,7 +126,7 @@ describe("trim step", () => {
     useCharSwapStore.getState().changeTrim([0, 5]);
     render(<TrimStep demo={null} />);
     const grip = screen.getByRole("slider", { name: "Move selected section" });
-    for (let i = 0; i < 13; i++) fireEvent.keyDown(grip, {key: "ArrowRight"});
+    for (let i = 0; i < 13; i++) fireEvent.keyDown(grip, { key: "ArrowRight" });
     expect(useCharSwapStore.getState().trim).toEqual([1.3, 6.3]);
     const end = screen.getByRole("spinbutton", { name: "End (seconds)" });
     fireEvent.change(end, { target: { value: "7.7" } });
@@ -137,7 +137,8 @@ describe("trim step", () => {
   it.each([
     { duration: 10, start: 1.3, expected: [1, 10] },
     { duration: 20, start: 6, expected: [6, 15] },
-  ])("resizes from the start without moving the end of a $duration second clip",
+  ])(
+    "resizes from the start without moving the end of a $duration second clip",
     ({ duration, start, expected }) => {
       useCharSwapStore.getState().loadClip({ ...CLIP, duration });
       render(<TrimStep demo={null} />);
@@ -147,7 +148,9 @@ describe("trim step", () => {
       });
 
       expect(useCharSwapStore.getState().trim).toEqual(expected);
-      expect(screen.getByLabelText("Preview range")).toHaveTextContent(expected.join(","));
+      expect(screen.getByLabelText("Preview range")).toHaveTextContent(
+        expected.join(","),
+      );
     },
   );
 
@@ -165,53 +168,80 @@ describe("trim step", () => {
 
   it("stops the middle grip at each boundary without losing duration or access to the end handle", () => {
     render(<TrimStep demo={null} />);
-    const grip = screen.getByRole("slider", {name: "Move selected section"});
-    fireEvent.keyDown(grip, {key: "End"});
+    const grip = screen.getByRole("slider", { name: "Move selected section" });
+    fireEvent.keyDown(grip, { key: "End" });
     expect(useCharSwapStore.getState().trim).toEqual([5, 20]);
-    fireEvent.keyDown(grip, {key: "ArrowRight"});
+    fireEvent.keyDown(grip, { key: "ArrowRight" });
     expect(useCharSwapStore.getState().trim).toEqual([5, 20]);
-    fireEvent.keyDown(grip, {key: "Home"});
+    fireEvent.keyDown(grip, { key: "Home" });
     expect(useCharSwapStore.getState().trim).toEqual([0, 15]);
-    fireEvent.change(screen.getByRole("slider", {name: "Clip end"}), {target: {value: "10"}});
+    fireEvent.change(screen.getByRole("slider", { name: "Clip end" }), {
+      target: { value: "10" },
+    });
     expect(useCharSwapStore.getState().trim).toEqual([0, 10]);
-    fireEvent.keyDown(grip, {key: "End"});
+    fireEvent.keyDown(grip, { key: "End" });
     expect(useCharSwapStore.getState().trim).toEqual([10, 20]);
   });
 
-  it("previews the full uploaded clip without trim controls in the upload step", () => {
+  it("edits the selected range directly in Clip and can browse templates without discarding it", async () => {
+    const user = userEvent.setup();
     useCharSwapStore.getState().changeTrim([3, 8]);
     render(
       <ClipStep demo={null} busy={false} onImport={vi.fn()} onDemo={vi.fn()} />,
     );
 
-    expect(screen.getByLabelText("Preview range")).toHaveTextContent("0,20");
+    expect(screen.getByLabelText("Preview range")).toHaveTextContent("3,8");
     expect(
       screen.queryByRole("spinbutton", { name: "Start (seconds)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("spinbutton", { name: "End (seconds)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("slider", { name: "Clip start" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Use template:/ }),
     ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change clip" }));
+    expect(
+      screen.getByRole("group", { name: "Clip upload area" }),
+    ).toBeVisible();
     expect(
       screen.queryByRole("spinbutton", { name: "End (seconds)" }),
     ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Keep current clip" }));
     expect(
-      screen.queryByRole("slider", { name: "Clip trim" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("spinbutton", { name: "End (seconds)" }),
+    ).toHaveValue(8);
     expect(useCharSwapStore.getState().trim).toEqual([3, 8]);
   });
 });
 
-
 it("shows the credit estimate without a dollar price and updates it when the quote changes", () => {
   const { rerender } = render(<TrimStep demo={null} estimatedCredits={150} />);
-  expect(screen.getByRole("status", {name: "Credit estimate"})).toHaveTextContent("Estimated cost: 150 credits");
+  expect(
+    screen.getByRole("status", { name: "Credit estimate" }),
+  ).toHaveTextContent("Estimated cost: 150 credits");
   rerender(<TrimStep demo={null} estimatedCredits={50} />);
-  expect(screen.getByRole("status", {name: "Credit estimate"})).toHaveTextContent("Estimated cost: 50 credits");
-  expect(screen.getByRole("status", {name: "Credit estimate"}).textContent).not.toContain("$");
+  expect(
+    screen.getByRole("status", { name: "Credit estimate" }),
+  ).toHaveTextContent("Estimated cost: 50 credits");
+  expect(
+    screen.getByRole("status", { name: "Credit estimate" }).textContent,
+  ).not.toContain("$");
 });
 
-
 it("shows only the quoted credits for a customer generation in review", () => {
-  render(<ReviewStep live accessMode="credits" creditBalance={100} generationCredits={50}
-    hasPreviewKey={false} isSampleKey={false} onApiSettings={() => {}} />);
-  expect(screen.getByText("This generation costs 50 credits.")).toBeInTheDocument();
+  render(<ReviewStep live creditBalance={100} generationCredits={50} />);
+  expect(
+    screen.getByRole("status", { name: "Generation cost" }),
+  ).toHaveTextContent("50 credits");
+  expect(screen.getByLabelText("Balance after generation")).toHaveTextContent(
+    "50",
+  );
   expect(screen.queryByText(/US\$/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/regardless of clip length/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/regardless of clip length/),
+  ).not.toBeInTheDocument();
 });

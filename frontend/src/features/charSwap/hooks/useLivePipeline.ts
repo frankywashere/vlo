@@ -267,7 +267,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     setWorking(true);
     preparationStartedAt.current = Date.now();
     setPreparationElapsedSeconds(0);
-    setPreparationProgress({phase: "checking_access", message: "Checking your API key and connecting to the service…"});
+    setPreparationProgress({phase: "checking_access", message: accessMode === "credits" ? "Checking your credits…" : "Checking your API key…"});
     try {
       const access = await ensureSession(controller.signal);
       const prepared = await createLiveJob(state, access.token, controller.signal, (progress) => {

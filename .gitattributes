@@ -8,6 +8,7 @@
 # Host implementation spine.
 /frontend/src/features/extensions/** extension-surface=host
 /frontend/src/core/shell/** extension-surface=host
+/frontend/src/features/charSwap/components/AppHeader.tsx extension-surface=adapter
 /backend/services/extensions/** extension-surface=host
 /backend/services/jobs/** extension-surface=host
 # These modules translate the public extension names onto the shared host

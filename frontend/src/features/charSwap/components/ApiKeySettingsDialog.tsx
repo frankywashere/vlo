@@ -119,7 +119,7 @@ function ApiKeyPreviewEditor({
       </DialogTitle>
       <DialogContent dividers sx={{ py: 3 }}>
         <Stack spacing={3}>
-          <Box>
+          {onEasyModeChange && <Box>
             <FormControlLabel label="Easy mode" control={<Switch checked={easyMode} disabled={maskingLocked}
               onChange={(_, checked) => onEasyModeChange?.(checked)} />} />
             <Typography variant="body2" color="text.secondary">
@@ -128,8 +128,8 @@ function ApiKeyPreviewEditor({
             <Typography variant="caption" color="text.secondary">
               Saved automatically. Changing modes requires preparing a new guide. Review the final guide for changes of person across scenes.
             </Typography>
-          </Box>
-          <Box>
+          </Box>}
+          {onMaskingChange && <Box>
             <FormControlLabel
               label="Use enhanced character masking"
               control={
@@ -148,7 +148,7 @@ function ApiKeyPreviewEditor({
             <Typography variant="caption" color="text.secondary">
               Masking is saved automatically. Changing masking requires a new guide review.
             </Typography>
-          </Box>
+          </Box>}
           {!apiKeyAllowed && <Alert severity="info" id="charswap-api-settings-notice">
             Generation uses recastfx credits. Your clip settings are saved automatically.
           </Alert>}

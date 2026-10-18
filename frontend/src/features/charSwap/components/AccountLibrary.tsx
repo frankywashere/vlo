@@ -3,12 +3,14 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   LinearProgress,
+  IconButton,
+  Tooltip,
   Stack,
   TextField,
   Typography,
@@ -28,9 +30,11 @@ import { JobElapsedTime } from "./JobElapsedTime";
 import { JobSettings } from "./JobSettings";
 import { SceneTrackingReview } from "./SceneTrackingReview";
 import { loadAccountAccess } from "../services/commerce";
+import { GenerationCard } from "./GenerationCard";
+import { isGenerationRunning } from "../utils/libraryJobs";
 import { TARGET_COLORS } from "../limits";
+import RefreshRounded from "@mui/icons-material/RefreshRounded";
 
-const ACTIVE = new Set(["queued", "preparing", "generating", "finalizing"]);
 interface AccountLibraryProps {
   onCreate: () => void;
 }
@@ -45,9 +49,16 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
   const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
   useEffect(() => {
     let active = true;
-    void loadAccountAccess().then((value) => { if (active) setApiKeyAllowed(value.api_key_enabled); })
-      .catch(() => { if (active) setApiKeyAllowed(false); });
-    return () => { active = false; };
+    void loadAccountAccess()
+      .then((value) => {
+        if (active) setApiKeyAllowed(value.api_key_enabled);
+      })
+      .catch(() => {
+        if (active) setApiKeyAllowed(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
   const [busy, setBusy] = useState(false);
   const [autoCheck, setAutoCheck] = useState(false);
@@ -175,7 +186,12 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
   );
 
   useEffect(() => {
-    if (!autoCheck || busy || (selected?.access_mode !== "credits" && !key.trim()) || selected?.status !== "generating")
+    if (
+      !autoCheck ||
+      busy ||
+      (selected?.access_mode !== "credits" && !key.trim()) ||
+      selected?.status !== "generating"
+    )
       return;
     const timer = globalThis.setTimeout(() => {
       void act(false);
@@ -198,45 +214,93 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         );
     }
   }
-  const selectedTargets = selected?.selection_targets?.map((target, index) => ({...target,
-    color: target.color ?? TARGET_COLORS[index % TARGET_COLORS.length]})) ?? [];
+  const selectedTargets = selected?.selection_targets?.map((target, index) => ({ ...target,
+    color: target.color ?? TARGET_COLORS[index % TARGET_COLORS.length] })) ?? [];
   const selectedReferences = selected?.reference_urls ?? (selected?.reference_url ? [selected.reference_url] : []);
-  const sections = [
-    { title: "Current processing jobs", jobs: jobs.filter((item) => !["completed", "failed", "expired"].includes(item.status)) },
-    { title: "Finished videos", jobs: jobs.filter((item) => item.status === "completed") },
-    { title: "Needs attention", jobs: jobs.filter((item) => ["failed", "expired"].includes(item.status)) },
-  ];
+  const processingCount = jobs.filter(isGenerationRunning).length;
   return (
     <Box
       component="main"
       sx={{ maxWidth: 1200, mx: "auto", px: { xs: 3, md: 5 }, py: 6 }}
     >
       <Stack
-        direction="row"
+        direction={{ xs: "column", sm: "row" }}
         justifyContent="space-between"
         gap={2}
         sx={{ mb: 3 }}
       >
         <Box>
-          <Typography variant="overline" color="primary">
-            Your workspace
-          </Typography>
-          <Typography component="h1" variant="h3">
-            Your library
+          <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
+            <Typography
+              component="h1"
+              variant="h3"
+              sx={{ fontSize: { xs: 32, md: 42 } }}
+            >
+              Your library
+            </Typography>
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              role="status"
+              aria-live="polite"
+              sx={{
+                px: 1.5,
+                py: 0.75,
+                bgcolor: processingCount
+                  ? "action.selected"
+                  : "background.paper",
+                borderRadius: "5px",
+                color: processingCount ? "primary.main" : "text.secondary",
+              }}
+            >
+              {(loading || processingCount > 0) && (
+                <CircularProgress size={14} color="inherit" aria-hidden />
+              )}
+              <Typography variant="caption" fontWeight={600}>
+                {loading
+                  ? "Loading your videos"
+                  : processingCount
+                    ? `${processingCount} ${processingCount === 1 ? "video" : "videos"} in progress`
+                    : "All caught up"}
+              </Typography>
+            </Stack>
+          </Stack>
+          <Typography color="text.secondary" variant="body2" sx={{ mt: 1 }}>
+            Your recasts, saved for 30 days.
           </Typography>
         </Box>
-        <Button
-          onClick={onCreate}
-          variant="contained"
-          sx={{ alignSelf: "center" }}
+        <Stack
+          direction="row"
+          spacing={1.5}
+          alignItems="center"
+          sx={{ alignSelf: { xs: "flex-start", sm: "center" }, flexShrink: 0 }}
         >
-          Create a swap
-        </Button>
+          <Tooltip title="Refresh library">
+            <span>
+              <IconButton
+                aria-label="Refresh library"
+                onClick={() => void refresh()}
+                disabled={loading}
+                sx={{
+                  border: "1px solid",
+                  borderColor: "divider",
+                  color: "text.secondary",
+                }}
+              >
+                <RefreshRounded fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Button
+            onClick={onCreate}
+            variant="contained"
+            sx={{ alignSelf: "center" }}
+          >
+            Create a swap
+          </Button>
+        </Stack>
       </Stack>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Your latest 50 swaps, saved to your Google account. Finished videos are
-        kept for 30 days. Download the ones you want to keep.
-      </Typography>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -253,9 +317,6 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           Removed from your library.
         </Alert>
       )}
-      <Button onClick={() => void refresh()} disabled={loading} sx={{ mb: 2 }}>
-        Refresh library
-      </Button>
       {loading && <LinearProgress aria-label="Loading your library" />}
       {!loading && !jobs.length && (
         <Box
@@ -264,7 +325,7 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
             textAlign: "center",
             border: 1,
             borderColor: "divider",
-            borderRadius: 3,
+            borderRadius: "5px",
           }}
         >
           <Typography variant="h6">Your first swap starts here.</Typography>
@@ -276,108 +337,40 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           </Button>
         </Box>
       )}
-      {sections.map((section) => (section.jobs.length > 0 || section.title === "Current processing jobs") && (
-        <Box key={section.title} component="section" aria-label={section.title} sx={{ mb: 5 }}>
-          <Typography component="h2" variant="h5" sx={{ mb: 2 }}>{section.title}</Typography>
-          {!section.jobs.length && <Typography color="text.secondary">No jobs processing right now.</Typography>}
-          <Box sx={{
+      {!!jobs.length && (
+        <Box
+          component="section"
+          aria-label="Your generations"
+          sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0,1fr))", lg: "repeat(3, minmax(0,1fr))" },
+            gridTemplateColumns: {
+              xs: "1fr",
+              sm: "repeat(2, minmax(0, 1fr))",
+              lg: "repeat(3, minmax(0, 1fr))",
+            },
             gap: 3,
-          }}>
-        {section.jobs.map((job) => (
-          <Box
-            key={job.id}
-            sx={{
-              border: 1,
-              borderColor: "divider",
-              bgcolor: "background.paper",
-              borderRadius: 3,
-              overflow: "hidden",
-            }}
-          >
-            {job.output_url && (
-              <Box
-                component="video"
-                controls
-                playsInline
-                preload="metadata"
-                src={job.output_url}
-                poster={job.thumbnail_url}
-                aria-label={job.title}
-                sx={{
-                  display: "block",
-                  width: "100%",
-                  aspectRatio: "16/9",
-                  bgcolor: "#211e1d",
-                }}
-              />
-            )}
-            <Box sx={{ p: 2.5 }}>
-              <Typography variant="h6" noWrap>
-                {job.title}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {new Date(job.created_at * 1000).toLocaleDateString()} ·{" "}
-                {job.access_mode === "credits" ? "recastfx credits" : apiKeyAllowed ? job.provider ?? "Provider" : "Swap"}
-              </Typography>
-              <Box sx={{ my: 1.5 }}>
-                <Chip
-                  size="small"
-                  label={job.status.replaceAll("_", " ")}
-                  color={job.status === "completed" ? "success" : "default"}
-                />
-              </Box>
-              <JobElapsedTime job={job} />
-              {ACTIVE.has(job.status) && (
-                <LinearProgress
-                  aria-label={`${job.title} ${job.status}`}
-                  sx={{ my: 2 }}
-                />
-              )}
-              <Typography variant="body2" color="text.secondary">
-                {job.message}
-              </Typography>
-              <JobSettings settings={job.settings_used} />
-              <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 2 }}>
-                {job.output_url ? (
-                  <Button component="a" href={job.output_url} download>
-                    Download video
-                  </Button>
-                ) : (
-                  job.status !== "expired" && (
-                    <Button
-                      onClick={() => {
-                        setKey("");
-                        setSelected(job);
-                        setError(null);
-                        setTrackingErrorSegmentId(null);
-                      }}
-                    >
-                      {job.status === "tracking_review" ? "Check scene matches"
-                        : job.status === "ready" ? (job.easy_mode ? "Continue generation" : "Review prepared clip")
-                          : job.status === "generating" ? "View render status" : "Open job"}
-                    </Button>
-                  )
-                )}
-                {!ACTIVE.has(job.status) && (
-                  <Button color="inherit" onClick={() => void hide(job, true)}>
-                    Remove
-                  </Button>
-                )}
-              </Stack>
-            </Box>
-          </Box>
-        ))}
-          </Box>
+          }}
+        >
+          {jobs.map((job) => (
+            <GenerationCard
+              key={job.id}
+              job={job}
+              onOpen={() => {
+                setKey("");
+                setSelected(job);
+                setError(null);
+              }}
+              onRemove={() => void hide(job, true)}
+            />
+          ))}
         </Box>
-      ))}
+      )}
       <Dialog open={!!selected} onClose={close} maxWidth="md" fullWidth>
         <DialogTitle>{selected?.title}</DialogTitle>
         <DialogContent>
           <Stack spacing={2}>
             <Typography>{selected?.message}</Typography>
-            {selected && <JobElapsedTime job={selected} />}
+            {selected && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used} /></>}
             {selected?.guide_url && !selected.easy_mode && (
               <Box
                 component="video"
@@ -406,15 +399,22 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
               <Alert severity="info">
                 {selected.easy_mode
                   ? "Easy mode has prepared your clip. Continuing starts a paid generation"
-                  : "Review the guide and reference. Approving below starts a paid generation"}
-                {" "}using your {selected.access_mode === "credits" ? "recastfx credits" : apiKeyAllowed ? `${selected.provider} balance` : "account balance"}
+                  : "Review the guide and reference. Approving below starts a paid generation"}{" "}
+                using your{" "}
+                {selected.access_mode === "credits"
+                  ? "recastfx credits"
+                  : apiKeyAllowed
+                    ? `${selected.provider} balance`
+                    : "account balance"}
                 {selected.estimated_cost_usd !== undefined
                   ? ` (estimated US$${selected.estimated_cost_usd.toFixed(2)})`
                   : ""}
                 .
               </Alert>
             )}
-            {apiKeyAllowed && selected?.access_mode !== "credits" && selected &&
+            {apiKeyAllowed &&
+              selected?.access_mode !== "credits" &&
+              selected &&
               ["ready", "generating", "tracking_review"].includes(
                 selected.status,
               ) && (
@@ -454,7 +454,11 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
                   duration={selected.duration ?? 0}
                   width={selected.width ?? 854}
                   height={selected.height ?? 480}
-                  busy={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
+                  busy={
+                    busy ||
+                    (selected.access_mode !== "credits" &&
+                      (!apiKeyAllowed || !key.trim()))
+                  }
                   initialChoices={selected.tracking_choices}
                   errorSegmentId={trackingErrorSegmentId}
                   errorMessage={error}
@@ -505,19 +509,29 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           </Button>
           {selected?.status === "generating" && (
             <Button
-              disabled={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
+              disabled={
+                busy ||
+                (selected.access_mode !== "credits" &&
+                  (!apiKeyAllowed || !key.trim()))
+              }
               onClick={() => void act(false)}
             >
-              Check provider status
+              Refresh status
             </Button>
           )}
           {selected?.status === "ready" && (
             <Button
               variant="contained"
-              disabled={busy || (selected.access_mode !== "credits" && (!apiKeyAllowed || !key.trim()))}
+              disabled={
+                busy ||
+                (selected.access_mode !== "credits" &&
+                  (!apiKeyAllowed || !key.trim()))
+              }
               onClick={() => void act(true)}
             >
-              {selected.easy_mode ? "Continue generation" : "Approve and generate"}
+              {selected.easy_mode
+                ? "Continue generation"
+                : "Approve and generate"}
             </Button>
           )}
         </DialogActions>

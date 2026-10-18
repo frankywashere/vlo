@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Box, IconButton, Slider, Stack, Typography } from "@mui/material";
+import {
+  Box,
+  IconButton,
+  Slider,
+  Stack,
+  Typography,
+  useMediaQuery,
+} from "@mui/material";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import PauseRounded from "@mui/icons-material/PauseRounded";
 import VolumeOffRounded from "@mui/icons-material/VolumeOffRounded";
@@ -18,6 +25,7 @@ interface VideoPreviewProps {
   overlay?: (time: number) => ReactNode;
   onPoint?: (point: NormalizedPoint, video: HTMLVideoElement) => void;
   onPlayableChange?: (playable: boolean) => void;
+  maxPreviewHeight?: number;
 }
 
 export function VideoPreview({
@@ -29,7 +37,14 @@ export function VideoPreview({
   overlay,
   onPoint,
   onPlayableChange,
+  maxPreviewHeight = 420,
 }: VideoPreviewProps) {
+  const shortDesktop = useMediaQuery(
+    "(min-width: 900px) and (max-height: 800px)",
+  );
+  const previewHeight = shortDesktop
+    ? Math.min(maxPreviewHeight, 220)
+    : maxPreviewHeight;
   const [start, end] = trim;
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -58,7 +73,7 @@ export function VideoPreview({
       sx={{
         bgcolor: "#0d0f12",
         border: "1px solid #30343b",
-        borderRadius: 2,
+        borderRadius: "5px",
         overflow: "hidden",
       }}
     >
@@ -78,7 +93,7 @@ export function VideoPreview({
           }}
           sx={{
             position: "relative",
-            width: `min(100%, ${(420 * clip.width) / clip.height}px)`,
+            width: `min(100%, ${(previewHeight * clip.width) / clip.height}px)`,
             aspectRatio: `${clip.width}/${clip.height}`,
             lineHeight: 0,
           }}
@@ -227,6 +242,7 @@ export function VideoPreview({
               placeItems: "center",
               bgcolor: "#15171c",
               p: 2,
+              color: "white",
             }}
           >
             This video couldn't be opened.
@@ -237,7 +253,15 @@ export function VideoPreview({
         direction="row"
         spacing={1}
         alignItems="center"
-        sx={{ px: 1, py: 0.5, borderTop: "1px solid #292d34" }}
+        sx={{
+          px: 1,
+          py: 0.5,
+          borderTop: "1px solid",
+          borderColor: "divider",
+          bgcolor: "background.paper",
+          color: "text.primary",
+          "& .MuiIconButton-root": { color: "inherit" },
+        }}
       >
         <IconButton
           aria-label={playing ? "Pause clip" : "Play clip"}

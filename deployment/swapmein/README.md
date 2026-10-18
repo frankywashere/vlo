@@ -468,3 +468,16 @@ access panel with their email, personal-key toggle and staff permission checkbox
 Duplicate email inputs and routine Load access buttons are removed. Personal-key
 changes apply immediately with confirmation; staff changes require Save staff
 access. Both controls retain server-enforced permissions and read-only states.
+
+### Polished creation flow
+
+Generation options are selected on Generate, before preparation. Changing an
+option invalidates only the current draft's guide/approval, preserving target and
+reference assignments. Easy mode still submits a durable background job; explicit
+masked mode goes through scene/guide review before paid approval. Masking off
+skips that detour. Authorized personal-key access remains a per-account option.
+
+Credit sessions require the current minimum four-second price; all credit-funded
+preparation requires the full selected-duration balance. Preflight checks do not
+charge or reserve credits; the existing durable generation claim still governs
+charging. Existing owner emails and secret bindings are preserved on deployment.

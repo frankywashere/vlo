@@ -52,7 +52,7 @@ function ReferenceCard({
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", sm: "150px 1fr" },
+          gridTemplateColumns: { xs: "1fr", sm: "220px 1fr" },
           gap: 2.5,
           alignItems: "center",
         }}
@@ -67,19 +67,20 @@ function ReferenceCard({
           aria-label={`${reference ? "Change" : "Upload"} reference image for ${person.name}`}
           sx={{
             width: "100%",
-            height: 164,
+            height: 220,
             minWidth: 44,
             minHeight: 44,
-            borderRadius: 1.5,
-            bgcolor: "#14171c",
-            border: "1px dashed #49515d",
+            borderRadius: "5px",
+            bgcolor: "background.default",
+            border: "1px dashed",
+            borderColor: "divider",
             display: "grid",
             placeItems: "center",
             overflow: "hidden",
             transition: "border-color .15s, background-color .15s",
-            "&:hover": { borderColor: "primary.main", bgcolor: "#1c2938" },
+            "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" },
             "&.Mui-focusVisible": {
-              outline: "2px solid #a3d1ff",
+              outline: "2px solid #cc3f37",
               outlineOffset: 3,
             },
             "&.Mui-disabled": { opacity: 0.6 },
