@@ -4,11 +4,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CreditGrantPanel } from "../CreditGrantPanel";
 const api = vi.hoisted(() => ({grant: vi.fn(), history: vi.fn()}));
 vi.mock("../../services/commerce", () => ({
-  CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant, loadCreditGrants: api.history,
+  CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant, loadCreditGrants: api.history, loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [], next_cursor: null}),
 }));
 const grant = {request_id: "a".repeat(32), email: "customer@example.com", credits: 100,
   reason: "Support adjustment", actor_email: "owner@example.com", created_at: 1792080000,
   completed_at: 1792080001, status: "completed"};
+async function renderExpandedGrants() {
+  render(<CreditGrantPanel />);
+  await userEvent.click(screen.getByRole("heading", {name: "Grant user credits"}));
+  await userEvent.click(screen.getByRole("heading", {name: "Credit grant history"}));
+}
 beforeEach(() => {
   api.grant.mockReset(); api.history.mockReset();
   api.grant.mockResolvedValue({email: grant.email, credits: 100, balance: 150});
@@ -26,7 +31,7 @@ it("shows progress, confirms beside the button, and refreshes history", async ()
   let finish!: (result: {email: string; credits: number; balance: number}) => void;
   api.grant.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   api.history.mockResolvedValueOnce({grants: [], next_cursor: null}).mockResolvedValueOnce({grants: [grant], next_cursor: null});
-  render(<CreditGrantPanel />);
+  await renderExpandedGrants();
   const user = await fillGrant();
   await user.click(screen.getByRole("button", {name: "Grant credits"}));
   expect(screen.getByRole("button", {name: "Granting credits…"})).toBeDisabled();
@@ -42,7 +47,7 @@ it("shows progress, confirms beside the button, and refreshes history", async ()
 });
 it("does not retry a confirmed grant when history reload fails", async () => {
   api.history.mockResolvedValueOnce({grants: [], next_cursor: null}).mockRejectedValueOnce(new Error("History temporarily unavailable."));
-  render(<CreditGrantPanel />);
+  await renderExpandedGrants();
   const user = await fillGrant();
   await user.click(screen.getByRole("button", {name: "Grant credits"}));
   await screen.findByText("Credits granted");
@@ -58,7 +63,7 @@ it("loads older grants without losing or duplicating rows", async () => {
   const older = {...grant, request_id: "b".repeat(32), email: "older@example.com", created_at: 1792000000};
   api.history.mockResolvedValueOnce({grants: [grant], next_cursor: "older-page"})
     .mockResolvedValueOnce({grants: [grant, older], next_cursor: null});
-  render(<CreditGrantPanel />);
+  await renderExpandedGrants();
   await userEvent.click(await screen.findByRole("button", {name: "Load older grants"}));
   await screen.findByText(older.email);
   expect(api.history).toHaveBeenLastCalledWith("older-page");
@@ -67,7 +72,7 @@ it("loads older grants without losing or duplicating rows", async () => {
 });
 it("keeps an uncertain grant separate from success and retries the same operation", async () => {
   api.grant.mockRejectedValueOnce(new Error("Connection lost"));
-  render(<CreditGrantPanel />);
+  await renderExpandedGrants();
   const user = await fillGrant();
   await user.click(screen.getByRole("button", {name: "Grant credits"}));
   await screen.findByText("Connection lost");

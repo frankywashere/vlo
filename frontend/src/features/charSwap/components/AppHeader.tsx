@@ -98,8 +98,8 @@ export function AppHeader({
         }}
       >
         <Button
-          aria-label="recastfx home"
-          onClick={onHome}
+          aria-label={signedIn ? "recastfx Create" : "recastfx home"}
+          onClick={signedIn ? onCreate : onHome}
           sx={{
             color: "text.primary",
             minWidth: 0,

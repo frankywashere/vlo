@@ -66,7 +66,7 @@ encrypted job-scoped storage, never in the frontend bundle or source repository.
 
 ## Website layout and creation options
 
-The polished UI has a shared account header, a signed-in Library homepage,
+The polished UI has a shared account header, a signed-in Library homepage (the logo opens Create for signed-in users and Home for visitors),
 combined upload/trim screen, selected-person/reference mapping, and a Generate
 review page. Settings contains account and credits tabs. The Generate page owns
 manual scene review and enhanced masking controls, chosen before preparation.
@@ -203,7 +203,7 @@ for ordinary accounts. Customer credits, provider-account credits and provider
 reported usage are different units. Stripe sales do not automatically buy
 additional reAPI balance.
 
-The Admin area is shown to authorized staff/owners. Owner-controlled settings
+The Admin area is shown to authorized staff/owners. Main sections and credit grant history are independently collapsible, preserving draft form values. Credit recipients can be searched by name or email or entered directly; selection never grants credits. Selected account access can be closed without changing permissions. The shared provider credential is labeled System API key. Owner-controlled settings
 cover checkout/generation switches, USD credit catalog and margin estimate,
 credit grants, pipeline audio settings and the private provider key. Staff
 permissions are enforced by the gateway for each write. A staff account with no

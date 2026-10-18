@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Card, CardContent, Container, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Container, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
 import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey } from "../services/commerce";
+import { AdminSection } from "./AdminSection";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
 import { CreditGrantPanel } from "./CreditGrantPanel";
@@ -72,9 +73,8 @@ export function AdminPage() {
       {admin && <>
         {permissions.length === 0 && <Alert severity="info">Read-only admin access. You can view all sections, but cannot change settings or grant credits.</Alert>}
         <AccountDirectory selectedEmail={selectedEmail} onSelect={setSelectedEmail} />
-        {selectedEmail && <AccountAccessPanel key={selectedEmail} email={selectedEmail} grantable={permissions} />}
-        <Card variant="outlined"><CardContent><Stack spacing={2}>
-          <Typography variant="h5">Service controls</Typography>
+        {selectedEmail && <AccountAccessPanel key={selectedEmail} email={selectedEmail} grantable={permissions} onClose={() => setSelectedEmail("")} />}
+        <AdminSection title="Service controls"><Stack spacing={2}>
           <Typography>Stripe mode: {admin.features.stripe_mode === "live" ? "Live payments (USD)" : "Sandbox"}</Typography>
           <Typography color="text.secondary">Requires service-control permission. Turning a service off stops new requests; it does not cancel work already submitted.</Typography>
           <Box>
@@ -85,9 +85,8 @@ export function AdminPage() {
             <FormControlLabel control={<Switch checked={admin.features.credit_generation} disabled={busy || !can("service_controls") || (!admin.features.readiness.credit_generation && !admin.features.credit_generation)} onChange={(event) => void updateFeature("credit_generation", event.target.checked)} />} label="Enable generation using recastfx credits" />
             {!admin.features.readiness.credit_generation && <Typography variant="body2" color="text.secondary">Requires the private provider key on the gateway.</Typography>}
           </Box>
-        </Stack></CardContent></Card>
-        <Card variant="outlined"><CardContent><Stack spacing={2}>
-          <Typography variant="h5">Audio processing</Typography>
+        </Stack></AdminSection>
+        <AdminSection title="Audio processing"><Stack spacing={2}>
           <FormControlLabel control={<Switch checked={admin.pipeline?.audio_processing ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
@@ -100,20 +99,19 @@ export function AdminPage() {
             }} />} label="Enable audio processing" />
           <Typography color="text.secondary">Off by default. When off, the source soundtrack is sent with the clip and the provider’s returned audio is kept. When on, vocals are separated and pitch-shifted before generation, then the original soundtrack is restored on export.</Typography>
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
-        </Stack></CardContent></Card>
-        <Card variant="outlined"><CardContent><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
-          <Typography variant="h5">Credit pricing</Typography>
+        </Stack></AdminSection>
+        <AdminSection title="Credit pricing"><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography color="text.secondary">All prices are in USD. One credit equals US$0.01. Generation pricing scales with clip length. Credit packs start at US$20.00.</Typography>
           <FormControlLabel control={<Switch checked={useMargin} onChange={(event) => setUseMargin(event.target.checked)} />} label="Calculate pricing from target margin" />
           {useMargin && <Stack spacing={2}>
             <TextField label="Target margin (%)" type="number" value={margin.target_margin_percent} onChange={(event) => setMargin({ ...margin, target_margin_percent: Number(event.target.value) })} inputProps={{ min: 0, max: 95, step: 1 }} />
             <Typography color="text.secondary">Estimate based on a typical clip, not guaranteed profit. Includes provider, cloud, and allocated payment fees; excludes shared overhead. Rounded up to a whole credit per second.</Typography>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+            <Box sx={{ display: "grid", gridTemplateColumns: {xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))"}, gap: 2, "& .MuiFormControl-root": {minWidth: 0, width: "100%"}, "& .MuiInputLabel-root": {position: "static", transform: "none", whiteSpace: "normal", overflow: "visible", textOverflow: "clip", maxWidth: "100%", mb: 1}, "& legend": {display: "none"} }}>
               <TextField label="Provider cost per second (USD)" type="number" value={margin.provider_usd_per_second} onChange={(event) => setMargin({ ...margin, provider_usd_per_second: Number(event.target.value) })} inputProps={{ min: 0, step: 0.0001 }} />
               <TextField label="Cloud cost per clip (USD)" type="number" value={margin.cloud_usd_per_run} onChange={(event) => setMargin({ ...margin, cloud_usd_per_run: Number(event.target.value) })} inputProps={{ min: 0, step: 0.01 }} />
               <TextField label="Payment fees (% of sales)" type="number" value={margin.payment_fee_percent} onChange={(event) => setMargin({ ...margin, payment_fee_percent: Number(event.target.value) })} inputProps={{ min: 0, max: 50, step: 0.01 }} />
               <TextField label="Typical clip length (seconds)" type="number" value={margin.reference_seconds} onChange={(event) => setMargin({ ...margin, reference_seconds: Number(event.target.value) })} inputProps={{ min: 1, max: 15, step: 1 }} />
-            </Stack>
+            </Box>
             {estimate ? <Alert severity="info">Calculated rate: {estimate.credits} credits per second. Estimated margin: {estimate.estimatedMargin.toFixed(1)}% at {margin.reference_seconds} seconds. A 5-second clip costs {estimate.credits * 5} credits; 15 seconds costs {estimate.credits * 15} credits. Save pricing to apply.</Alert> : <Alert severity="error">Check the cost assumptions. Margin plus payment fees must be below 100%.</Alert>}
           </Stack>}
           <TextField label="Price per video second (USD)" type="number" disabled={useMargin} value={useMargin && estimate ? (estimate.credits / 100).toFixed(2) : rate} onChange={(event) => setRate(event.target.value)} inputProps={{min: 0.01, step: 0.01}} helperText={`${(useMargin ? estimate?.credits : Math.round(Number(rate) * 100)) || 0} credits per second`} />
@@ -126,16 +124,15 @@ export function AdminPage() {
           </Stack>)}
           <Stack direction="row" spacing={1}><Button disabled={busy || packs.length >= 8} onClick={() => setPacks((current) => [...current, { id: "", name: "", credits: 2000, price_cents: 2000, active: false }])}>Add pack</Button>
             <Button variant="contained" disabled={busy || (useMargin ? !estimate : !rate) || packs.length === 0} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, credits_per_generation: (useMargin ? estimate!.credits : Math.round(Number(rate) * 100)) * 15, margin_model: useMargin ? margin : null }); setAdmin({ ...admin, catalog }); setRate((catalog.credits_per_generation / 1500).toFixed(2)); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
-        </Stack></Box></CardContent></Card>
-        <Card variant="outlined"><CardContent><Box component="fieldset" disabled={busy || !can("provider_key")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
-          <Typography variant="h5">Private generation account</Typography>
-          <Typography color="text.secondary">This key funds customer generations. It is validated and stored in Google Secret Manager. The saved key is never displayed.</Typography>
-          <TextField label="Private reAPI key" type="password" value={privateKey} onChange={(event) => setPrivateKey(event.target.value)} autoComplete="off" />
+        </Stack></Box></AdminSection>
+        <AdminSection title="System API key"><Box component="fieldset" disabled={busy || !can("provider_key")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
+          <Typography color="text.secondary">Used to fund customer generations. Stored securely and never displayed.</Typography>
+          <TextField label="System API key" type="password" value={privateKey} onChange={(event) => setPrivateKey(event.target.value)} autoComplete="off" />
           <Button variant="outlined" disabled={busy || !privateKey.trim()} onClick={() => void run(async () => {
             await savePrivateProviderKey(privateKey.trim()); setPrivateKey("");
-            setAdmin(await loadCreditAdmin()); setMessage("Private generation key saved securely. You can now enable credit-funded generation.");
-          })}>Save private key</Button>
-        </Stack></Box></CardContent></Card>
+            setAdmin(await loadCreditAdmin()); setMessage("System API key saved securely. You can now enable credit-funded generation.");
+          })}>Save system key</Button>
+        </Stack></Box></AdminSection>
         <CreditGrantPanel readOnly={!can("grant_credits")} />
       </>}
     </Stack>

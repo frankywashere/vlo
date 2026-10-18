@@ -118,10 +118,8 @@ describe("recastfx workspace", () => {
     expect(
       within(steps).queryByRole("button", { name: "Access" }),
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "recastfx home" }));
-    expect(
-      screen.getByRole("heading", { name: "Your library" }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "recastfx Create" }));
+    expect(screen.getByRole("button", { name: "Upload your clip" })).toBeInTheDocument();
   });
 
   it("opens Settings as a page from the avatar and keeps a single shared header", async () => {
@@ -235,4 +233,19 @@ describe("recastfx workspace", () => {
       screen.getByRole("menuitem", { name: "Switch to light mode" }),
     ).toBeInTheDocument();
   });
+});
+
+
+it("opens Create from the signed-in logo and home from the signed-out logo", async () => {
+  const user = userEvent.setup();
+  const mounted = render(<SwapMeinApp />);
+  await screen.findByRole("heading", {name: "Your library"});
+  await user.click(screen.getByRole("button", {name: "recastfx Create"}));
+  expect(new URL(location.href).searchParams.get("page")).toBe("create");
+  mounted.unmount();
+  auth.user = null;
+  render(<SwapMeinApp />);
+  await user.click(screen.getByRole("button", {name: "recastfx home"}));
+  expect(new URL(location.href).searchParams.has("page")).toBe(false);
+  expect(screen.getByRole("heading", {name: /Same scene.*New you/})).toBeVisible();
 });
