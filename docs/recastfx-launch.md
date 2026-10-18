@@ -66,6 +66,8 @@ encrypted job-scoped storage, never in the frontend bundle or source repository.
 
 ## Website layout and creation options
 
+The template section is marked Coming soon; unfinished template choices are unavailable. Uploads and the working sample-clip action remain available.
+
 The polished UI has a shared account header, a signed-in Library homepage (the logo opens Create for signed-in users and Home for visitors),
 combined upload/trim screen, selected-person/reference mapping, and a Generate
 review page. Settings contains account and credits tabs. The Generate page owns
