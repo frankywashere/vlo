@@ -44,7 +44,7 @@ def bind_job(records, job: dict, session: dict, title: str = "Your clip") -> dic
         "id": job["id"], "title": job["title"], "created_at": job["created_at"],
         "status": job["status"], "provider": job.get("provider", "reAPI"),
         "access_mode": job.get("access_mode", "api-key"),
-        "settings_used": settings_used(job),
+        "settings_used": settings_used(job), "retry_setup": job.get("setup", {}),
     })
     records.update(f"accounts/{account_id}/index.json", lambda current: {
         "jobs": [job["id"], *[item for item in (current or {}).get("jobs", []) if item != job["id"]]][:50]

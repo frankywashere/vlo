@@ -1033,6 +1033,88 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
     return {"jobs": items, "retention_days": 30, "limit": 50}
 
 
+def retry_assets(job, cloud):
+    if not job or job.get("temporary_media_cleanup_started_at"):
+        return None, []
+    source = job.get("source_uri")
+    source = source if source and cloud.asset_exists(source) else None
+    references = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
+    return source, [uri if cloud.asset_exists(uri) else None for uri in references]
+
+
+def export_recoverable(job, cloud):
+    if not job or not job.get("provider_output") or not job.get("normalized_uri"):
+        return False
+    if job.get("temporary_media_cleanup_started_at") or not cloud.asset_exists(job["normalized_uri"]):
+        return False
+    return not job.get("audio_processing", True) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
+
+
+@app.get("/api/account/jobs/{job_id}/recovery")
+def account_job_recovery(job_id: str, x_firebase_token: str | None = Header(default=None)):
+    account, item, job = account_job(job_id, x_firebase_token)
+    if job and job.get("status") not in {"failed"}:
+        raise PublicError("This job is still active or already finished. Refresh its status.", 409)
+    records, cloud, _ = services()
+    # Never offer a second paid render while a completed provider result can be saved.
+    if job and job.get("provider_output"):
+        can_save = export_recoverable(job, cloud)
+        return {"action": "save" if can_save else "support", "no_new_charge": True,
+                "message": ("Your render finished. Retry saving it without another generation charge." if can_save
+                            else "A rendered result exists, but required export files are missing. Contact support to recover it; do not pay for another render.")}
+    if job and (job.get("status") == "submission_unknown" or job.get("provider_task") and job.get("provider_state") != "failed"):
+        raise PublicError("The previous submission needs review before another generation. Contact support.", 409)
+    source, references = retry_assets(job, cloud)
+    setup = (job or {}).get("setup") or item.get("retry_setup") or {}
+    saved = settings_used(job or item)
+    wallet, _ = records.read(f"accounts/{account['account_id']}/wallet.json")
+    charged = (job or item).get("app_credits_charged", abs((wallet or {}).get("applied", {}).get("generation:" + job_id, 0)))
+    refunded = (wallet or {}).get("applied", {}).get("refund:" + job_id, 0)
+    result = {"action": "retry", "settings": saved,
+              "trim": setup.get("trim") or saved.get("trim"),
+              "targets": setup.get("targets") or ([] if setup.get("anchor") or setup.get("replace_all_people") else item.get("selection_targets") or []),
+              "anchor": setup.get("anchor"), "target_name": setup.get("target_name", "Selected person"),
+              "source_url": cloud.signed_url(source) if source else None,
+              "reference_urls": [cloud.signed_url(uri) if uri else None for uri in references],
+              "credits_charged": charged, "credits_returned": refunded,
+              "message": "Review your setup before submitting again. The current credit price will be shown before confirmation."}
+    emit("job_recovery_checked", job_id=job_id, source_available=bool(source), references_available=sum(bool(uri) for uri in references))
+    return result
+
+
+@app.post("/api/account/jobs/{job_id}/retry-saving", status_code=202)
+def retry_saving_video(job_id: str, approval: Approval, x_firebase_token: str | None = Header(default=None)):
+    _, _, job = account_job(job_id, x_firebase_token)
+    if not approval.approved:
+        raise PublicError("Confirm retrying the save.")
+    records, cloud, _ = services()
+    if job and job.get("status") in {"finalizing", "finishing", "completed"}:
+        return view(job)
+    if not job or job.get("status") != "failed" or not export_recoverable(job, cloud):
+        raise PublicError("This result cannot be saved automatically. Contact support to recover the render.", 409)
+    claimed = False
+    def claim(current):
+        nonlocal claimed
+        claimed = False
+        if current and current.get("status") in {"finalizing", "finishing", "completed"}:
+            return current
+        updated = claim_job(current, {"failed"}, "finalizing")
+        if current.get("provider_output") != job.get("provider_output"):
+            raise PublicError("The job changed. Refresh its details.", 409)
+        claimed = True
+        return {**updated, "message": "Retrying the save of your existing render. No new generation charge."}
+    updated = records.update(f"jobs/{job_id}.json", claim)
+    if claimed:
+        try:
+            # A fresh task name avoids Cloud Tasks' retention of the original export task.
+            cloud.enqueue("finish", job_id, task_token=uuid.uuid4().hex)
+        except Exception:
+            # The queue may have accepted the task: never roll back into a second claim.
+            emit("export_recovery_queue_unconfirmed", job_id=job_id)
+        emit("export_recovery_requested", job_id=job_id)
+    return view(updated)
+
+
 @app.post("/api/account/jobs/{job_id}/session")
 def resume_account_job(job_id: str, x_firebase_token: str | None = Header(default=None),
                        x_reapi_key: str | None = Header(default=None)):

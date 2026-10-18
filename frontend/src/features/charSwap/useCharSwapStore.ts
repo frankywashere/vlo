@@ -32,6 +32,9 @@ export const STEPS: Step[] = [
   "generation",
 ];
 interface CharSwapStore extends WalkthroughState {
+  retryNotice?: string;
+  retryNeedsSource?: boolean;
+  restoreRetry: (draft: import("./services/jobRecovery").RetryDraft) => void;
   step: Step;
   selectionVersion: number;
   trackingReady: boolean;
@@ -95,9 +98,14 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
               : state.step,
           },
     ),
+  restoreRetry: (draft) => set((state) => ({...createInitialState(), ...draft, step: "clip",
+    selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null})),
   loadClip: (clip) =>
     set((state) => ({
-      ...setClip(state, clip),
+      ...(state.retryNeedsSource ? {...state, clip, retryNeedsSource: false,
+        trim: state.trim[1] <= clip.duration ? state.trim : [0, Math.min(15, Math.floor(clip.duration))] as [number, number],
+        ...(state.trim[1] <= clip.duration ? {} : {targets: [], assignments: {}, replaceAllPeople: false}),
+      } : {...setClip(state, clip), retryNotice: undefined}),
       selectionVersion: state.selectionVersion + 1,
       step: "clip",
       trackingReady: false,
@@ -210,6 +218,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   reset: () =>
     set({
       ...createInitialState(),
+      retryNotice: undefined, retryNeedsSource: false,
       selectionVersion: get().selectionVersion + 1,
       step: "clip",
       trackingReady: false,

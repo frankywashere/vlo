@@ -143,6 +143,10 @@ class Cloud:
         )
         return {"url": url, "headers": headers}
 
+    def asset_exists(self, uri: str):
+        bucket, key = self.split_uri(uri)
+        return self.blob(bucket, key).exists(timeout=10)
+
     def verify_upload(self, uri: str, size: int):
         bucket, key = self.split_uri(uri)
         if bucket != self.settings.app_bucket or type(size) is not int or size <= 0:

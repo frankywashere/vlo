@@ -83,9 +83,7 @@ reservation for every simultaneous draft.
 
 Library cards use **View progress** for active preparation/rendering and **View
 details** for failed jobs. The details view keeps its status refresh as a
-secondary action. Error details do not promise reusable files after temporary
-media expires. The approved retry-with-restored-files flow still requires a
-separate implementation; this UI release does not restart failed paid jobs.
+secondary action. Failed-job details check actual file availability. “Review and retry” restores the original clip, trim, selected people, reference mappings and modes into a fresh draft. Missing inputs require upload, followed by review of the current quote and explicit submission. “Retry saving video” queues only export of an existing provider result, with no generation call or new credit charge. If export inputs have expired, the UI directs the user to support rather than another paid render.
 
 ## User journey and preparation
 

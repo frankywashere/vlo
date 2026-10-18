@@ -19,6 +19,8 @@ import {
   loadAccountJobs,
   resumeAccountJob,
   setJobHidden,
+  loadJobRecovery,
+  retrySavingVideo,
 } from "../services/accounts";
 import type { AccountJob } from "../services/accounts";
 import {
@@ -35,11 +37,18 @@ import { isGenerationRunning } from "../utils/libraryJobs";
 import { TARGET_COLORS } from "../limits";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 
+import { restoreRetryDraft } from "../services/jobRecovery";
+import type { JobRecovery, RetryDraft } from "../services/jobRecovery";
+
 interface AccountLibraryProps {
+  retryDisabled?: boolean;
+  onRetry?: (draft: RetryDraft) => void;
   onCreate: () => void;
 }
 
-export function AccountLibrary({ onCreate }: AccountLibraryProps) {
+export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: AccountLibraryProps) {
+  const [recovery, setRecovery] = useState<JobRecovery | null>(null);
+  const [checkingRecovery, setCheckingRecovery] = useState(false);
   const [jobs, setJobs] = useState<AccountJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +151,41 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
       controller.current?.abort();
     };
   }, [refresh]);
+  useEffect(() => {
+    setRecovery(null);
+    setCheckingRecovery(false);
+    if (!selected || !["failed", "expired"].includes(selected.status)) return;
+    let active = true;
+    setCheckingRecovery(true);
+    void loadJobRecovery(selected.id).then((result) => {
+      if (active) setRecovery(result);
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : "Retry availability could not be checked.");
+    }).finally(() => { if (active) setCheckingRecovery(false); });
+    return () => { active = false; };
+  }, [selected?.id, selected?.status]);
+
+  async function recoverJob() {
+    if (!selected || !recovery || busy || retryDisabled) return;
+    setBusy(true);
+    setError(null);
+    controller.current = new AbortController();
+    try {
+      // Recheck on click: the inputs may have expired while details were open.
+      const current = await loadJobRecovery(selected.id);
+      setRecovery(current);
+      if (current.action === "save") {
+        const result = await retrySavingVideo(selected.id);
+        if (mounted.current) { setSelected({...selected, ...result}); await refresh(); }
+      } else if (current.action === "retry" && onRetry) {
+        const draft = await restoreRetryDraft(current, controller.current.signal);
+        if (mounted.current) onRetry(draft);
+      }
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : "This job could not be restored.");
+    } finally { if (mounted.current) setBusy(false); }
+  }
+
   function close() {
     if (busy) return;
     setAutoCheck(false);
@@ -370,6 +414,15 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
         <DialogContent>
           <Stack spacing={2}>
             <Typography>{selected?.message}</Typography>
+            {checkingRecovery && <LinearProgress aria-label="Checking saved files" />}
+            {recovery && <Alert severity={recovery.action === "support" ? "warning" : "info"}>
+              {recovery.message}
+              {recovery.action === "retry" && <>
+                <br />{recovery.source_url ? "Your source clip is available." : "Your source clip has expired; upload it again."}
+                <br />{(recovery.reference_urls ?? []).filter(Boolean).length} reference images available. Missing references will be marked for upload.
+                <br />{recovery.credits_charged ? `${recovery.credits_charged} credits charged; ${recovery.credits_returned ?? 0} credits returned.` : "No generation credits were charged."}
+              </>}
+            </Alert>}
             {selected && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used} /></>}
             {selected?.guide_url && !selected.easy_mode && (
               <Box
@@ -507,6 +560,12 @@ export function AccountLibrary({ onCreate }: AccountLibraryProps) {
           <Button disabled={busy} onClick={close}>
             Close
           </Button>
+          {recovery && (recovery.action === "save" || recovery.action === "retry" && onRetry) && (
+            <Button variant="contained" disabled={busy || checkingRecovery || retryDisabled} onClick={() => void recoverJob()}>
+              {recovery.action === "save" ? "Retry saving video" : recovery.source_url && recovery.reference_urls?.every(Boolean)
+                ? "Review and retry" : "Upload files to retry"}
+            </Button>
+          )}
           {selected?.status === "generating" && (
             <Button
               disabled={

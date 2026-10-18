@@ -267,7 +267,11 @@ function AccountWorkspace({
         </Box>
       )}
       {view === "library" && account.user && (
-        <AccountLibrary onCreate={() => navigate("create")} />
+        <AccountLibrary retryDisabled={busy} onCreate={() => navigate("create")} onRetry={(draft) => {
+          setStarted(true);
+          useCharSwapStore.getState().restoreRetry(draft);
+          onDestination("create");
+        }} />
       )}
       {view === "settings" && account.user && (
         <SettingsPage

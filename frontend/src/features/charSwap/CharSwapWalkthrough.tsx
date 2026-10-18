@@ -151,6 +151,7 @@ export function CharSwapWalkthrough({
   );
   const [demo, setDemo] = useState<DemoManifest | null>(null);
   const [loadingDemo, setLoadingDemo] = useState(false);
+  const retryNotice = useCharSwapStore((state) => state.retryNotice);
   const [resetDialog, setResetDialog] = useState(false);
   const sampleRequest = useRef(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -501,6 +502,7 @@ export function CharSwapWalkthrough({
                     " credits. Your choices are saved while you top up."}
               </Alert>
             )}
+          {retryNotice && <Alert severity="info" sx={{mb: 2}}>{retryNotice}</Alert>}
           {(step !== "generation" || isUploadUnconfirmed(pipeline.preparationProgress)) && pipeline.preparationProgress && (
             <Box sx={{ mb: 2 }}>
               <PreparationProgress
