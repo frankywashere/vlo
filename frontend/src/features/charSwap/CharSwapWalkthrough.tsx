@@ -677,7 +677,7 @@ export function CharSwapWalkthrough({
                 <Button
                   startIcon={<ArrowBackRounded />}
                   disabled={Boolean(locked)}
-                  onClick={() => visit(flowSteps[current - 1])}
+                  onClick={() => visit(step === "review" && (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) ? "references" : flowSteps[current - 1])}
                   sx={{ color: "text.secondary" }}
                 >
                   Back

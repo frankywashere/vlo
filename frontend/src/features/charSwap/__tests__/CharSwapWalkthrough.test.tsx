@@ -149,6 +149,20 @@ describe("CharSwap walkthrough", () => {
     );
   });
 
+  it("returns to character assignment from Generate before manual preparation has started", async () => {
+    const user = userEvent.setup();
+    const store = useCharSwapStore.getState();
+    store.loadClip(sample.clip);
+    store.selectTarget({...sample.people[0], anchor: {x: .2, y: .3, time: 0}});
+    store.assignReference(sample.people[0].id, sample.reference);
+    store.visit("review");
+    render(<CharSwapWalkthrough />);
+    await user.click(screen.getByRole("button", {name: "Back"}));
+    expect(useCharSwapStore.getState().step).toBe("references");
+    expect(useCharSwapStore.getState().references[0].id).toBe(sample.reference.id);
+    expect(screen.queryByText(/Preparation has not started/)).not.toBeInTheDocument();
+  });
+
   it("clears dependent choices when a reviewed clip is retrimmed", async () => {
     const user = userEvent.setup();
     render(<CharSwapWalkthrough />);
