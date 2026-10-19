@@ -47,9 +47,9 @@ def selected_tracks(archive: Path, metadata: dict, targets: list[dict], *, allow
     return result
 
 
-def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], output: Path):
+def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], output: Path, *, allow_unmatched=False):
     """Remap chosen SAM IDs to stable person slots, rejecting ambiguous overlap."""
-    if any(type(target.get("selected_label")) is not int or not 1 <= target["selected_label"] <= 65535
+    if any(type(target.get("selected_label")) is not int or not (0 if allow_unmatched else 1) <= target["selected_label"] <= 65535
            for target in targets):
         raise PublicError("Review each unmatched person before building the guide.", code="tracking_review_invalid")
     width, height, frames, _, _ = _metadata(metadata)
@@ -61,6 +61,8 @@ def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], out
                 source = read(frame)
                 mapped = np.zeros((height, width), dtype=np.uint16)
                 for target in targets:
+                    if target["selected_label"] == 0:
+                        continue
                     mask = source == target["selected_label"]
                     if np.any(mask & (mapped > 0)):
                         raise PublicError("Two selected people resolve to the same track. Select them in the same scene, or turn Easy mode off and review their scene matches.",
@@ -70,7 +72,7 @@ def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], out
                 buffer = BytesIO()
                 Image.fromarray(mapped).save(buffer, "PNG")
                 destination.writestr(f"labels/labels_{frame:05d}.png", buffer.getvalue())
-        if not any(coverage):
+        if not any(coverage) and not allow_unmatched:
             raise PublicError("None of the selected people were detected.", code="no_people_detected")
         temporary.replace(output)
         return coverage

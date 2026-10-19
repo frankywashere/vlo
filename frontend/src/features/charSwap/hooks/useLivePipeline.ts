@@ -30,6 +30,7 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "generating", "finalizin
 const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
+  hideAudioToggle?: boolean;
   faceMeshOptions?: LivePipelineConfig["face_mesh_options"];
   referenceCleanupAvailable?: boolean;
   referenceCleanupEndpoint?: string;
@@ -441,6 +442,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   return {
     enabled,
     creditsAvailable: config?.credits_available === true,
+    hideAudioToggle: config?.hide_audio_toggle,
     faceMeshOptions: config?.face_mesh_options,
     referenceCleanupAvailable: config?.reference_cleanup_available === true,
     referenceCleanupEndpoint: config?.reference_cleanup_endpoint,

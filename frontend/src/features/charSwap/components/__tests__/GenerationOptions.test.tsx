@@ -112,3 +112,12 @@ it("always shows a working Face mesh switch for admins while public visibility i
   expect(mesh).not.toBeChecked();
   expect(useCharSwapStore.getState().faceMesh).toBe(false);
 });
+
+it("hides the audio switch globally even for admins without changing saved audio choices", () => {
+  useCharSwapStore.getState().setSubmitWithoutAudio(true);
+  const view = render(<GenerationOptions hideAudioToggle isAdmin />);
+  expect(screen.queryByRole("switch", {name: "Submit without audio"})).not.toBeInTheDocument();
+  expect(useCharSwapStore.getState().submitWithoutAudio).toBe(true);
+  view.rerender(<GenerationOptions hideAudioToggle={false} isAdmin />);
+  expect(screen.getByRole("switch", {name: "Submit without audio"})).toBeChecked();
+});

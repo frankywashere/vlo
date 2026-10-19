@@ -318,3 +318,15 @@ it("saves masked and unmasked face-mesh defaults separately from user-switch vis
   await waitFor(()=>expect(visible).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision:1,face_mesh_user_control:true});
 });
+
+it("lets authorized admins hide and reveal the audio switch globally", async () => {
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "Hide Submit without audio switch globally"});
+  expect(toggle).not.toBeChecked();
+  await userEvent.click(toggle);
+  await screen.findByText(/Submit without audio switch hidden globally/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 0, hide_audio_toggle: true});
+  await userEvent.click(toggle);
+  await screen.findByText(/Submit without audio switch shown globally/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 1, hide_audio_toggle: false});
+});

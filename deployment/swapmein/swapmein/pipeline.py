@@ -171,7 +171,16 @@ class Pipeline:
                         masks = resized
                         masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "working-masks.zip", masks, "application/zip")
                     raw_masks_uri = masks_uri
-                    if options.replace_all_people:
+                    initial_recovery = None
+                    if options.easy_mode and options.preparation_version >= 2 and not options.replace_all_people:
+                        from .initial_mask_recovery import recover_initial_selection
+                        initial_recovery = recover_initial_selection(self, job, masks, metadata, targets or [{
+                            "id": "person", "name": options.target_name, "reference_index": 0,
+                            "anchor": metadata["anchor"]}], root, remaining)
+                    if initial_recovery is not None:
+                        masks_uri, coverage, targets = initial_recovery
+                        label = 1
+                    elif options.replace_all_people:
                         combined = root / "all-people-masks.zip"
                         detection_summary = {}
                         coverage = merge_all_people_masks(masks, combined, metadata, detection_summary=detection_summary)

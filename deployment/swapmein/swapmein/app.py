@@ -26,6 +26,7 @@ from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, 
 from .media import Anchor, Setup, normalize_reference, strip_audio
 from .pipeline import Pipeline
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
+from .provider_failure import provider_failure, failure_message
 from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
@@ -223,6 +224,7 @@ def view(job: dict, *, review_thumbnails: bool = True):
     credits_mode = job.get("access_mode") == "credits"
     result = {"id": job["id"], "status": status,
               "message": ("Your video is processing." if credits_mode and status in {"generating", "finalizing"}
+                          else failure_message(job.get("provider_failure"), True) if credits_mode and status == "failed" and job.get("provider_failure")
                           else "Generation needs review." if credits_mode and status == "failed"
                           else job.get("message", "")),
               "access_mode": "credits" if credits_mode else "api-key",
@@ -320,6 +322,7 @@ def config():
             "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "multi-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
             "accounts_required": settings.require_account, "credits_available": credit_ready,
+            "hide_audio_toggle": mesh.get("hide_audio_toggle", False),
             "face_mesh_options": {key: mesh.get(key, default) for key, default in (
                 ("face_mesh_masked_default", True), ("face_mesh_unmasked_default", False), ("face_mesh_user_control", False))},
             "reference_cleanup_available": bool(settings.reference_cleanup_url),
@@ -561,6 +564,7 @@ class PipelineSettingsUpdate(BaseModel):
     face_mesh_masked_default: bool | None = None
     face_mesh_unmasked_default: bool | None = None
     face_mesh_user_control: bool | None = None
+    hide_audio_toggle: bool | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
@@ -569,7 +573,7 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
     records, _, _ = services()
     return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
-                                  body.face_mesh_unmasked_default, body.face_mesh_user_control)
+                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle)
 
 
 @app.post("/api/commerce/admin/features")
@@ -1549,12 +1553,13 @@ def provider_status(job_id: str, job: dict, key: str):
     if body.get("status") != job.get("provider_state"):
         emit("provider_state_changed", job_id=job_id, provider=job.get("provider"), state=body.get("status") if isinstance(body.get("status"), str) and body.get("status") in {"failed", "completed", "queued", "pending", "processing", "running", "generating"} else "unknown")
     if body.get("status") == "failed":
-        emit("provider_generation_failed", job_id=job_id, provider=job.get("provider", "reAPI"), **billing)
+        failure = provider_failure(body)
+        emit("provider_generation_failed", job_id=job_id, provider=job.get("provider", "reAPI"),
+             failure_category=failure["category"], provider_error_code=failure["code"], **billing)
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
             "auto_key_ciphertext": None,
-            "message": ("The generation failed. Your recastfx credits were returned."
-                        if job.get("access_mode") == "credits" else
-                        "The provider rejected or failed the generation. Check its task details and refund in your dashboard.")
+            "provider_state": "failed", "provider_failure": failure,
+            "message": failure_message(failure, job.get("access_mode") == "credits")
         } if current["status"] == "generating" and current.get("provider_task") == job["provider_task"] else current)
         if updated["status"] == "failed" and job.get("access_mode") == "credits":
             apply_wallet_change(records, job["account_id"], "refund:" + job_id,

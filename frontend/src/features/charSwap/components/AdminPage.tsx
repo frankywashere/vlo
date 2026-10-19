@@ -106,6 +106,17 @@ export function AdminPage() {
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.hide_audio_toggle ?? false}
+            disabled={busy || !can("pipeline_settings")}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, hide_audio_toggle: enabled});
+                setAdmin({...admin, pipeline});
+                setMessage(`Submit without audio switch ${enabled ? "hidden" : "shown"} globally. Audio settings are unchanged.`);
+              });
+            }} />} label="Hide Submit without audio switch globally" />
+          <Typography color="text.secondary">Hides the switch for everyone, including admins. Does not change saved choices or running jobs. Refresh an open create page after changing visibility.</Typography>
           {([
             ["face_mesh_masked_default", "Face mesh default with Enhanced Masking", true],
             ["face_mesh_unmasked_default", "Face mesh default without masking", false],
