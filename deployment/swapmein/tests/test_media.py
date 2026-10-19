@@ -343,3 +343,20 @@ def test_letterboxed_camera_cuts_do_not_reuse_one_tracking_section(tmp_path):
         "[0:v][1:v]concat=n=2:v=1:a=0,pad=480:360:80:60:black[v]", "-map", "[v]",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)], check=True)
     assert detect_scene_cuts(source) == [2.0]
+
+
+def test_silent_remux_preserves_video_and_restores_trimmed_original_audio(tmp_path):
+    from swapmein.media import strip_audio
+    original, silent, output = (tmp_path / name for name in ("original.mp4", "silent.mp4", "final.mp4"))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=blue:s=320x240:r=24:d=6",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-c:v", "libx264", "-c:a", "aac", str(original)], check=True)
+    strip_audio(original, silent)
+    assert not any(s["codec_type"] == "audio" for s in probe(silent)["streams"])
+    def video_hash(path):
+        return subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v", "-c", "copy", "-f", "hash", "-"])
+    assert video_hash(original) == video_hash(silent)
+    finish(silent, original, output, 4, audio_source=original, audio_start=1.25)
+    assert decoded_audio_samples(output) >= 3.95 * 44100
+    samples = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(output), "-vn", "-ac", "1", "-ar", "44100", "-f", "f32le", "-"])
+    audio = np.frombuffer(samples, dtype=np.float32)[:44100]
+    assert abs(np.argmax(abs(np.fft.rfft(audio))) - 440) <= 1

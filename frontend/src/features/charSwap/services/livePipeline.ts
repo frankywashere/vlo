@@ -35,6 +35,7 @@ export type LiveJobStatus =
 
 export interface JobSettingsUsed {
   easy_mode?: boolean;
+  submit_without_audio?: boolean;
   enhanced_masking?: boolean;
   audio_processing?: boolean;
   replace_all_people?: boolean;
@@ -88,6 +89,7 @@ export interface LivePipelineJob {
   tracking_continuous?: boolean;
   tracking_performed?: boolean;
   easy_mode?: boolean;
+  submit_without_audio?: boolean;
   auto_generate?: boolean;
   scene_cut_count?: number;
   mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
@@ -707,6 +709,7 @@ export async function createLiveJob(
           target_name: target.name,
           enhanced_character_masking: state.enhancedCharacterMasking ?? true,
           easy_mode: state.easyMode ?? true,
+          submit_without_audio: state.submitWithoutAudio ?? false,
           auto_generate: autoGenerate,
         },
       }),

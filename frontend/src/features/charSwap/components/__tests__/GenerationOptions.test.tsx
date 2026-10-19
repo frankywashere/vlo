@@ -58,3 +58,17 @@ it("locks both options while preparation is busy", () => {
   expect(screen.getByRole("switch", { name: "Review scene changes manually" })).toBeDisabled();
   expect(screen.getByRole("switch", { name: "Enhanced person masking" })).toBeDisabled();
 });
+
+
+it("saves silent submission independently and resets to sending audio", async () => {
+  const user = userEvent.setup();
+  const invalidate = vi.fn();
+  render(<GenerationOptions onChange={invalidate} />);
+  const toggle = screen.getByRole("switch", {name: "Submit without audio"});
+  expect(toggle).not.toBeChecked();
+  await user.click(toggle);
+  expect(useCharSwapStore.getState()).toMatchObject({submitWithoutAudio: true, easyMode: true, enhancedCharacterMasking: true, trackingReady: false});
+  expect(invalidate).toHaveBeenCalledOnce();
+  useCharSwapStore.getState().reset();
+  expect(useCharSwapStore.getState().submitWithoutAudio).toBe(false);
+});

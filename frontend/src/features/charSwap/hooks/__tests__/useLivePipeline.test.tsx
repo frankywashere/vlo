@@ -119,6 +119,7 @@ describe("live BYOK pipeline", () => {
   });
   it.each([false, true].flatMap((enhanced) => [false, true].map((easy) => ({enhanced, easy}))))("uploads every selected person's assigned image once (enhanced: $enhanced, Easy: $easy)", async ({enhanced, easy}) => {
     const state = setup();
+    state.submitWithoutAudio = true;
     state.enhancedCharacterMasking = enhanced;
     state.easyMode = easy;
     state.targets.push({...state.targets[0], id: "second", name: "Person 2", anchor: {x: .8, y: .3, time: 3}},
@@ -136,7 +137,7 @@ describe("live BYOK pipeline", () => {
     await act(async () => {expect(await result.current.prepare(state, easy)).toBe(true);});
     const body = JSON.parse(String(calls("/api/uploads")[0][1]?.body));
     expect(body.reference_sizes).toEqual([9, 11]);
-    expect(body.setup).toMatchObject({preparation_version: 2, easy_mode: easy, enhanced_character_masking: enhanced, auto_generate: easy});
+    expect(body.setup).toMatchObject({preparation_version: 2, easy_mode: easy, enhanced_character_masking: enhanced, submit_without_audio: true, auto_generate: easy});
     expect(body.setup.targets.map((target: {id: string; reference_index: number}) => [target.id, target.reference_index]))
       .toEqual([["person", 0], ["second", 1], ["third", 0]]);
     expect(requests.mock.calls.filter(([input, options]) => String(input).startsWith("https://storage.googleapis.com/") && options?.method === "PUT")).toHaveLength(3);
@@ -281,7 +282,7 @@ describe("live BYOK pipeline", () => {
     expect(ticket.reference_sizes).toEqual([9]);
     expect(ticket.setup).toEqual({
       preparation_version: 2,
-      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true, easy_mode: true, auto_generate: false,
+      trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true, easy_mode: true, submit_without_audio: false, auto_generate: false,
       targets: [{id: "person", name: "Person 1", anchor: {x: .5, y: .4, time: 2}, reference_index: 0}],
     });
     expect(String(upload?.body)).not.toContain(USER_KEY);

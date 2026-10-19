@@ -207,7 +207,7 @@ class Pipeline:
                     else:
                         preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
                 # Existing jobs without a snapshot retain their original audio behavior.
-                audio_processing = job.get("audio_processing", True)
+                audio_processing = job.get("audio_processing", True) and not options.submit_without_audio
                 self.update_job(job_id, message="Preparing vocals and the generation guide." if audio_processing
                                 else "Preparing the generation guide with your source audio.")
                 emit("preparation_audio_mode", job_id=job_id, audio_processing=audio_processing)
@@ -422,7 +422,8 @@ class Pipeline:
                 self.cloud.download_provider(job["provider_output"], raw)
                 self.cloud.download(job["normalized_uri"], original)
                 audio_processing = job.get("audio_processing", True)
-                if audio_processing:
+                restore_audio = audio_processing or job.get("setup", {}).get("submit_without_audio", False)
+                if restore_audio:
                     self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
                     output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded,
                                                audio_start=job["setup"]["trim"][0])
@@ -430,11 +431,11 @@ class Pipeline:
                     output_dimensions = finish(raw, original, output, job["duration"], restore_audio=False)
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
-                completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if audio_processing
+                completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if restore_audio
                              else "Your video is ready at its generated resolution, with the returned audio."), output_uri=output_uri, thumbnail_uri=None,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"])
-                emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=audio_processing, width=output_dimensions["width"], height=output_dimensions["height"],
+                emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=restore_audio, submit_without_audio=job.get("setup", {}).get("submit_without_audio", False), width=output_dimensions["width"], height=output_dimensions["height"],
                      **job.get("provider_billing", {}))
                 try:
                     completed = self.ensure_library_poster(completed, output)

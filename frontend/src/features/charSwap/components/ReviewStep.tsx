@@ -168,6 +168,7 @@ export function ReviewStep({
             sx={{ p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: "5px", bgcolor: "background.paper" }}>
             <Typography component="h2" variant="subtitle1" fontWeight={700}>Prepared settings</Typography>
             <Typography variant="body2">Manual scene review: On</Typography>
+            <Typography variant="body2">Submit without audio: {job.settings_used?.submit_without_audio ? "On" : "Off"}</Typography>
             <Typography variant="body2">
               Enhanced person masking: {(job.settings_used?.enhanced_masking ?? enhancedCharacterMasking) ? "On" : "Off"}
             </Typography>

@@ -5,10 +5,12 @@ import math
 def settings_used(job):
     result = dict(job.get("settings_used") or {})
     setup = job.get("setup") or {}
-    for key in ("easy_mode", "replace_all_people", "audio_processing"):
+    for key in ("easy_mode", "replace_all_people", "audio_processing", "submit_without_audio"):
         value = job.get(key, setup.get(key))
         if isinstance(value, bool):
             result[key] = value
+    if setup.get("submit_without_audio"):
+        result["audio_processing"] = False
     if isinstance(setup.get("enhanced_character_masking"), bool):
         result["enhanced_masking"] = setup["enhanced_character_masking"]
     elif job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "gray"}:
@@ -40,5 +42,5 @@ def settings_used(job):
         result["model"] = "MiniMax H3"
     if generation.get("resolution") in {"768P", "768p"}:
         result["requested_resolution"] = "768p"
-    allowed = {"easy_mode", "replace_all_people", "audio_processing", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution"}
+    allowed = {"submit_without_audio", "easy_mode", "replace_all_people", "audio_processing", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution"}
     return {key: value for key, value in result.items() if key in allowed}

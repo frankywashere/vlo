@@ -61,6 +61,7 @@ class Setup(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     enhanced_character_masking: bool = Field(default=True, strict=True)
     easy_mode: bool = Field(default=True, strict=True)
+    submit_without_audio: bool = Field(default=False, strict=True)
     auto_generate: bool = Field(default=False, strict=True)
     replace_all_people: bool = Field(default=False, strict=True)
     preparation_version: Literal[1, 2] = 2
@@ -343,6 +344,21 @@ def original_guide(source: Path, vocals: Path, output: Path, metadata: dict):
     require_audio_duration(checked, duration)
     if decoded_audio_samples(output) < math.floor((duration - .05) * 44100):
         raise PublicError("The generation guide lost vocal audio samples.")
+
+
+def strip_audio(source: Path, output: Path):
+    """Remux a separate provider input without decoding or altering video frames."""
+    before = probe(source)
+    video = next(stream for stream in before["streams"] if stream["codec_type"] == "video")
+    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe",
+         "-i", str(source), "-map", "0:v:0", "-c:v", "copy", "-an", "-map_metadata", "-1",
+         "-movflags", "+faststart", str(output)], timeout=60)
+    after = probe(output)
+    result = next(stream for stream in after["streams"] if stream["codec_type"] == "video")
+    if (any(stream["codec_type"] == "audio" for stream in after["streams"])
+            or any(result.get(key) != video.get(key) for key in ("width", "height", "nb_frames", "r_frame_rate"))
+            or abs(float(after["format"]["duration"]) - float(before["format"]["duration"])) > .05):
+        raise PublicError("The silent generation input could not be verified. No generation was submitted.")
 
 
 def finish(raw: Path, original: Path, output: Path, duration: int,

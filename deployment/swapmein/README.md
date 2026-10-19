@@ -16,6 +16,21 @@ traffic and Firebase bundle before reporting a rollout complete. The older
 [pipeline overview](../../docs/charswap-walkthrough.md) contains historical proofs;
 use the contracts below for these changes.
 
+## Silent provider input
+
+“Submit without audio” is an opt-in, per-job generation option (`setup.submit_without_audio`, default false).
+It applies to Easy/manual review and masked/unmasked flows. Preparation skips vocal separation/pitch processing
+for these jobs. The shared submission path uses CPU FFmpeg stream-copy to create and verify an audio-free
+MP4, cached against the exact guide URI; the audible preview and original upload remain unchanged.
+The provider prompt describes a silent reference and requests unchanged visual timing.
+
+Export discards provider audio and restores the original upload's selected soundtrack window at
+`setup.trim[0]`, including when Admin audio processing is off. Missing source audio blocks submission;
+normal export validation checks soundtrack length, video duration and native generated dimensions.
+Retries retain the option, and the Library settings record it. Silent scratch files use the existing
+job-owned cleanup prefix. No new GPU service is involved. Local media tests verify bit-identical video
+packets after stripping, nonzero soundtrack trim, and restored audio; they do not establish provider lip-sync quality.
+
 ## Preparation and selection
 
 - Clips are 4–15 seconds with a whole-second **duration**. Start/end positions and

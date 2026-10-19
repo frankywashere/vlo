@@ -128,7 +128,7 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
     )
 
 
-def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, replace_all_people: bool = False, targets: list[dict] | None = None):
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None):
     images = [image_url] if isinstance(image_url, str) else image_url
     if (not isinstance(images, list) or not 1 <= len(images) <= 5
             or any(not isinstance(url, str) or not url for url in images)):
@@ -149,7 +149,13 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         prompt = multi_replacement_prompt(duration, targets, enhanced_masking, mask_style)
     else:
         prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
-    if not audio_processing:
+    if submit_without_audio:
+        for instruction in (
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
+            "The video contains isolated vocals pitched up three semitones. Use these embedded vocals for performance and mouth synchronization, without extra dialogue.",
+        ):
+            prompt = prompt.replace(instruction, "The reference video is silent. Preserve its exact visual timing, mouth movements, expressions, and performance. The original soundtrack will be restored after generation.")
+    elif not audio_processing:
         prompt = prompt.replace(
             "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
             "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")

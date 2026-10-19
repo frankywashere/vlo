@@ -116,3 +116,50 @@ def test_experimental_toggle_requires_pipeline_settings_permission(api, monkeypa
     client, records = setup_staff(api, monkeypatch, permissions)
     result = client.post("/api/commerce/admin/pipeline", json={"revision": 0, "retry_missing_masks_with_sam": True})
     assert result.status_code == (200 if "pipeline_settings" in permissions else 403)
+
+
+@pytest.mark.parametrize("audio_processing", [True, False])
+@pytest.mark.parametrize("mask_style", ["none", "gray", "depth", "cyan_overlay", "depth_multi"])
+def test_silent_prompt_never_claims_embedded_audio(audio_processing, mask_style):
+    payload = generation_payload(5, "image", "silent-video", mask_style != "none", mask_style=mask_style,
+        audio_processing=audio_processing, submit_without_audio=True)
+    assert "reference video is silent" in payload["prompt"]
+    assert "embedded" not in payload["prompt"] and "pitched" not in payload["prompt"]
+
+
+def test_silent_submission_sends_separate_asset_and_only_submits_once(api, monkeypatch):
+    client, records, cloud, provider = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    job = records.data[f"jobs/{job_id}.json"]
+    job["setup"]["submit_without_audio"] = True
+    job["source_uri"] = "gs://private-app/source.bin"
+    job["audio_processing"] = False
+    downloads = []
+    def download(uri, destination):
+        downloads.append(uri)
+        destination.write_bytes(b"guide-with-audio")
+    def strip(source, destination):
+        assert source.read_bytes() == b"guide-with-audio"
+        destination.write_bytes(b"silent-guide")
+    monkeypatch.setattr(cloud, "asset_exists", lambda uri: True, raising=False)
+    monkeypatch.setattr(cloud, "download", download)
+    monkeypatch.setattr(gateway, "strip_audio", strip)
+    for _ in range(2):
+        response = client.post(f"/api/jobs/{job_id}/generate", headers=headers, json={"approved": True})
+        assert response.status_code == 200, response.text
+    assert len(provider.submissions) == 1
+    assert "silent-" in provider.submissions[0]["reference_video_urls"][0]
+    assert downloads == ["gs://private-app/guide.mp4"]
+    assert job["guide_uri"] == "gs://private-app/guide.mp4"
+    assert response.json()["settings_used"]["submit_without_audio"] is True
+
+
+def test_silent_submission_requires_original_soundtrack_before_provider_charge(api):
+    client, records, _, provider = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    records.data[f"jobs/{job_id}.json"]["setup"]["submit_without_audio"] = True
+    response = client.post(f"/api/jobs/{job_id}/generate", headers=headers, json={"approved": True})
+    assert response.status_code == 409
+    assert not provider.submissions

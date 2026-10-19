@@ -5,6 +5,7 @@ import { useCharSwapStore } from "../useCharSwapStore";
 export function GenerationOptions({ disabled = false, onChange }: { disabled?: boolean; onChange?: () => void }) {
   const defaults = useCharSwapStore(useShallow(state => ({
     manual: !(state.easyMode ?? true), enhanced: state.enhancedCharacterMasking ?? true,
+    silent: state.submitWithoutAudio ?? false, setSilent: state.setSubmitWithoutAudio,
     setEasyMode: state.setEasyMode, setEnhanced: state.setEnhancedCharacterMasking,
   })));
   const { manual, enhanced } = defaults;
@@ -28,6 +29,15 @@ export function GenerationOptions({ disabled = false, onChange }: { disabled?: b
           label={<Typography variant="body2" fontWeight={650}>Enhanced person masking</Typography>} />
         <Typography id="enhanced-mask-help" variant="body2" color="text.secondary" sx={{ mt: .5 }}>
           Adds a visual guide when the person is hard to distinguish in the scene.
+        </Typography>
+      </Box>
+      <Box>
+        <FormControlLabel sx={{ m: 0, width: "100%", justifyContent: "space-between" }} labelPlacement="start"
+          control={<Switch checked={defaults.silent} disabled={disabled} onChange={(_, value) => { onChange?.(); defaults.setSilent(value); }}
+            slotProps={{ input: { role: "switch", "aria-describedby": "silent-submit-help" } }} />}
+          label={<Typography variant="body2" fontWeight={650}>Submit without audio</Typography>} />
+        <Typography id="silent-submit-help" variant="body2" color="text.secondary" sx={{ mt: .5 }}>
+          Send MiniMax a silent clip. Restore your original soundtrack after generation.
         </Typography>
       </Box>
       {manual && <Typography variant="caption" color="text.secondary">You’ll check scene matches before generation.</Typography>}

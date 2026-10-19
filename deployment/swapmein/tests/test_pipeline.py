@@ -7,9 +7,10 @@ from swapmein.config import Settings
 from swapmein.pipeline import Pipeline
 
 
+@pytest.mark.parametrize("submit_without_audio", [False, True])
 @pytest.mark.parametrize("audio_processing", [None, True, False])
 @pytest.mark.parametrize("account_id", [None, "b" * 64])
-def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing):
+def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing, submit_without_audio):
     # This test isolates export/re-export. Cleanup safety is covered separately.
     monkeypatch.setattr("swapmein.pipeline.cleanup_completed_media", lambda *_: None)
     monkeypatch.setattr(Pipeline, "ensure_library_poster", lambda self, job, source=None: job)
@@ -19,7 +20,7 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
         def __init__(self):
             self.data = {path: {"id": job_id, "status": "finalizing", "duration": 5, "account_id": account_id, "created_at": 1000000,
                 "provider_output": "https://cdn.reapi.ai/raw.mp4", "normalized_uri": "gs://private-app/normalized.mp4",
-                "source_uri": "gs://private-app/upload.bin", "setup": {"trim": [1.25, 6.25]}}}
+                "source_uri": "gs://private-app/upload.bin", "setup": {"trim": [1.25, 6.25], "submit_without_audio": submit_without_audio}}}
 
         def update(self, key, mutation):
             self.data[key] = mutation(copy.deepcopy(self.data.get(key)))
@@ -45,7 +46,7 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     def finish(raw, original, output, duration, audio_source=None, audio_start=0, restore_audio=True):
         assert raw.read_bytes() == b"provider-video"
         assert original.read_bytes() == b"normalized-shape"
-        if audio_processing is False:
+        if audio_processing is False and not submit_without_audio:
             assert audio_source is None and not restore_audio
         else:
             assert audio_source.read_bytes() == b"original-upload"
@@ -76,13 +77,14 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
         assert archived["status"] == "completed"
 
 
+@pytest.mark.parametrize("submit_without_audio", [False, True])
 @pytest.mark.parametrize("replace_all", [False, True])
 @pytest.mark.parametrize("easy", [None, False, True])
 @pytest.mark.parametrize("enabled,scene_cuts,coverage", [(True, [], [100] * 120), (True, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 120), (False, [2.0], [100] * 48 + [0] * 72),
     (False, [], [100] * 48 + [0] * 72)])
 @pytest.mark.parametrize("audio_processing", [None, True, False])
-def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage, easy, audio_processing, replace_all):
+def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch, enabled, scene_cuts, coverage, easy, audio_processing, replace_all, submit_without_audio):
     from contextlib import contextmanager
     import time
     job_id = "b" * 32
@@ -160,6 +162,9 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
     auto_generate = easy is True and enabled and not scene_cuts and all(coverage)
     if auto_generate:
         records.data[path]["setup"]["auto_generate"] = True
+    records.data[path]["setup"]["submit_without_audio"] = submit_without_audio
+    if submit_without_audio:
+        audio_processing = False  # No Demucs or pitch work when none of it will be sent.
     Pipeline(Settings(), records, cloud).prepare(job_id)
     assert cloud.enqueued == ([("generate", job_id)] if auto_generate else [])
     assert records.data[path]["status"] == ("tracking_review" if enabled and needs_review or not enabled and easy is not True and not replace_all else "ready")

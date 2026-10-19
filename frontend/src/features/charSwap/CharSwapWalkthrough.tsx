@@ -119,6 +119,7 @@ export function CharSwapWalkthrough({
     issues,
     decisions,
     easyMode,
+    submitWithoutAudio,
     enhancedCharacterMasking,
     selectionVersion,
     trackingReady,
@@ -142,6 +143,7 @@ export function CharSwapWalkthrough({
       issues: state.issues,
       decisions: state.decisions,
       easyMode: state.easyMode ?? true,
+      submitWithoutAudio: state.submitWithoutAudio ?? false,
       enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
       selectionVersion: state.selectionVersion,
       trackingReady: state.trackingReady,
@@ -221,6 +223,7 @@ export function CharSwapWalkthrough({
     locked || assets.busy || loadingDemo || assets.pendingReferences.length > 0;
   const state = {
     easyMode,
+    submitWithoutAudio,
     enhancedCharacterMasking,
     clip,
     trim,

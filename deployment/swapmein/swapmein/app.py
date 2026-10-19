@@ -23,7 +23,7 @@ from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
-from .media import Anchor, Setup, normalize_reference
+from .media import Anchor, Setup, normalize_reference, strip_audio
 from .pipeline import Pipeline
 from .pipeline_settings import pipeline_settings, save_pipeline_settings
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
@@ -1224,7 +1224,7 @@ def export_recoverable(job, cloud):
         return False
     if job.get("temporary_media_cleanup_started_at") or not cloud.asset_exists(job["normalized_uri"]):
         return False
-    return not job.get("audio_processing", True) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
+    return not (job.get("audio_processing", True) or job.get("setup", {}).get("submit_without_audio", False)) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
 
 
 @app.get("/api/account/jobs/{job_id}/recovery")
@@ -1357,7 +1357,26 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True, **job["setup"]})
     reference_uris = job.get("reference_uris") or [job["reference_uri"]]
     validate_reference_mapping(options, len(reference_uris))
-    image_urls, video_url = [cloud.signed_url(uri) for uri in reference_uris], cloud.signed_url(job["guide_uri"])
+    submission_uri = job["guide_uri"]
+    if options.submit_without_audio:
+        if not job.get("source_uri") or not cloud.asset_exists(job["source_uri"]):
+            raise PublicError("The original soundtrack is unavailable. Upload the source again before generating.", 409)
+        # Cache against the exact guide version; reviewed guides must never reuse a stale silent input.
+        cached = job.get("silent_submission") or {}
+        if cached.get("guide_uri") == submission_uri and cloud.asset_exists(cached.get("uri", "")):
+            submission_uri = cached["uri"]
+        else:
+            with tempfile.TemporaryDirectory() as temporary:
+                source, silent = Path(temporary) / "guide.mp4", Path(temporary) / "silent.mp4"
+                cloud.download(submission_uri, source)
+                strip_audio(source, silent)
+                silent_uri = cloud.upload(settings.app_bucket,
+                    f"outputs/{job_id}/silent-{uuid.uuid4().hex}.mp4", silent, "video/mp4")
+            records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                "silent_submission": {"guide_uri": submission_uri, "uri": silent_uri}})
+            submission_uri = silent_uri
+            emit("silent_generation_input_prepared", job_id=job_id)
+    image_urls, video_url = [cloud.signed_url(uri) for uri in reference_uris], cloud.signed_url(submission_uri)
     anchor = options.anchor.model_dump() if options.anchor else None
     if anchor:
         anchor["time"] -= options.trim[0]
@@ -1371,7 +1390,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         raise PublicError("This clip's person assignments have changed. Prepare it again before generating.", 409)
     payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
         job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
-        replace_all_people=options.replace_all_people, targets=targets)
+        replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio)
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)
