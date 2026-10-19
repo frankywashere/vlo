@@ -1,3 +1,4 @@
+import { UploadSavedNotice } from "./components/UploadSavedNotice";
 import { processingStageCopy } from "./utils/processingStage";
 import { trimDuration } from "./utils/trimRange";
 import { warmReferenceCleanup } from "./services/referenceCleanup";
@@ -459,13 +460,7 @@ export function CharSwapWalkthrough({
           : canGoTo(!easyMode && item === "matches" && !pipeline.job ? "review" : item)}
         onVisit={(item) => visit(!easyMode && item === "matches" && !pipeline.job ? "review" : item)} />
       {step !== "generation" && renderCanContinueInLibrary && (
-        <Alert severity="success" sx={{ mb: 2 }} action={manualPreparation || sceneReviewActive ? undefined : <Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
-          {stageCopy && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
-            ? "Your scene choices are saved. You can close this tab and follow progress in your Library."
-            : !easyMode && !replaceAllPeople && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
-            ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
-            : "Your upload is saved. You can safely close this tab and see progress in your Library."}
-        </Alert>
+        <UploadSavedNotice action={manualPreparation || sceneReviewActive ? undefined : <Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>} />
       )}
       <ApiKeySettingsDialog apiKeyAllowed={apiKeyAllowed} open={apiSettingsOpen && apiKeyAllowed}
         apiKey={apiKey} provider={provider} live={pipeline.enabled} onSave={saveKey} onClear={clearKey}

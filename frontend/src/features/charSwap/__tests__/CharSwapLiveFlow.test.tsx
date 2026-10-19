@@ -328,7 +328,7 @@ describe("explicit generation approval", () => {
       live.busy = true;
       live.preparationProgress = {phase: "preparing", message: "Preparing"};
       render(<CharSwapWalkthrough onLibrary={() => {}} />);
-      expect(screen.getByText(easy ? /You can safely close this tab/ : /Return to your Library after processing to review each scene and choose who to replace/)).toBeInTheDocument();
+      expect(screen.getByText("You may now close your browser")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", {name: easy ? "Start a new recast" : "Start a new recast while this processes"}));
       expect(useCharSwapStore.getState().clip).toBeNull();
       expect(live.generate).not.toHaveBeenCalled();
@@ -354,7 +354,7 @@ describe("explicit generation approval", () => {
       expect(screen.queryByRole("switch")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", {name: "Back"})).not.toBeInTheDocument();
       expect(screen.queryByText("Upload saved. You can close this page.")).not.toBeInTheDocument();
-      expect(screen.getByText(/Your upload is saved. You can close this tab. Return to your Library after processing/)).toBeVisible();
+      expect(screen.getByText("You may now close your browser")).toBeVisible();
     });
 
   it("keeps the new-recast action hidden until manual upload confirmation", () => {
@@ -389,7 +389,8 @@ describe("explicit generation approval", () => {
     live.job = { id: "saved-upload", status: "preparing" };
     live.busy = true;
     render(<CharSwapWalkthrough onLibrary={() => {}} />);
-    expect(screen.getByText(/You can safely close this tab and see progress in your Library/)).toBeVisible();
+    expect(screen.getByText("You may now close your browser")).toBeVisible();
+    expect(screen.getByText("See progress in Library")).toBeVisible();
     expect(screen.queryByRole("button", {name: "Open your library"})).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: "Start a new recast"}));
     expect(useCharSwapStore.getState().clip).toBeNull();
