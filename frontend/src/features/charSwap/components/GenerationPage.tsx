@@ -45,11 +45,13 @@ export function GenerationPage({
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
-  const { clip, trim, references } = useCharSwapStore(
+  const { clip, trim, references, easyMode, replaceAllPeople } = useCharSwapStore(
     useShallow((state) => ({
       clip: state.clip,
       trim: state.trim,
       references: state.references,
+      easyMode: state.easyMode ?? true,
+      replaceAllPeople: state.replaceAllPeople,
     })),
   );
   const download = useVideoDownload();
@@ -102,7 +104,9 @@ export function GenerationPage({
             {complete
               ? "Watch it, save it, and make another."
               : uploadSaved
-                ? "Your upload is saved. You can safely close this tab and see progress in your Library."
+                ? !easyMode && !replaceAllPeople && ["queued", "preparing"].includes(job?.status ?? "")
+                  ? "Your upload is saved. We’re processing the scenes. You can close this tab and return to this clip in your Library to choose people in each scene when it says Needs attention."
+                  : "Your upload is saved. You can safely close this tab and see progress in your Library."
                 : "Keep this tab open until your upload is confirmed."}
           </Typography>
         </Box>

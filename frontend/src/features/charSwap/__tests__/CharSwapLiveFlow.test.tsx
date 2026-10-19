@@ -329,7 +329,7 @@ describe("explicit generation approval", () => {
       live.busy = true;
       live.preparationProgress = {phase: "preparing", message: "Preparing"};
       render(<CharSwapWalkthrough onLibrary={() => {}} />);
-      expect(screen.getByText(/You can safely close this tab/)).toBeInTheDocument();
+      expect(screen.getByText(easy ? /You can safely close this tab/ : /return to this clip in your Library to choose people in each scene/)).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", {name: "Start a new recast"}));
       expect(useCharSwapStore.getState().clip).toBeNull();
       expect(live.generate).not.toHaveBeenCalled();

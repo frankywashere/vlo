@@ -337,3 +337,17 @@ def test_multi_person_review_error_returns_the_specific_target_scene(tracking_re
     assert response.json()["segment_id"] == "t1-segment-000"
     assert response.json()["code"] == code
     assert job["status"] == "tracking_review" and not cloud.enqueued and not provider.submissions
+
+
+def test_unresolved_anchor_is_publicly_null_without_mutating_the_private_review_plan(tracking_review):
+    client, records, cloud, provider, headers, job_id, calls = tracking_review
+    job = records.data[f"jobs/{job_id}.json"]
+    job["selected_label"] = 0
+    job["tracking_plan"]["segments"][0]["selected_label"] = 0
+    before = copy.deepcopy(job)
+    response = client.get(f"/api/jobs/{job_id}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["selected_label"] is None
+    assert response.json()["tracking_segments"][0]["selected_label"] is None
+    assert records.data[f"jobs/{job_id}.json"] == before
+    assert not cloud.enqueued and not provider.submissions

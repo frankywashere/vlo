@@ -427,7 +427,9 @@ export function CharSwapWalkthrough({
         onVisit={(item) => visit(!easyMode && item === "matches" && !pipeline.job ? "review" : item)} />
       {step !== "generation" && renderCanContinueInLibrary && (
         <Alert severity="success" sx={{ mb: 2 }} action={<Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
-          Your upload is saved. You can safely close this tab and see progress in your Library.
+          {!easyMode && !replaceAllPeople && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
+            ? "Your upload is saved. We’re processing the scenes. You can close this tab and return to this clip in your Library to choose people in each scene when it says Needs attention."
+            : "Your upload is saved. You can safely close this tab and see progress in your Library."}
         </Alert>
       )}
       <ApiKeySettingsDialog apiKeyAllowed={apiKeyAllowed} open={apiSettingsOpen && apiKeyAllowed}

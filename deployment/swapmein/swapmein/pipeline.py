@@ -89,6 +89,8 @@ class Pipeline:
                 metadata["anchor"].setdefault("time", metadata["anchor"].get("frame", 0) / 24)
                 if not options.easy_mode:
                     metadata["review_all_scenes"] = True
+                    if options.preparation_version >= 2:
+                        metadata["allow_unmatched_anchor"] = True
                 targets = style_targets(metadata["targets"]) if metadata.get("targets") else []
                 if targets:
                     metadata["targets"] = targets
@@ -116,13 +118,15 @@ class Pipeline:
                             depth_run = "sm-depth-" + job_id
                             depth_result = invoke("/benchmark", {"input_uri": source_uri, "run_id": depth_run, "operation": "depth"}, remaining())
                             depth_uri = self.cloud.worker_output(depth_result, depth_run, "depth.mp4")
-                            local_depth, sam_input = root / "depth.mp4", root / "sam-input.mp4"
-                            self.cloud.download(depth_uri, local_depth, MAX_SOURCE_BYTES)
-                            sam_metadata = sam_input_video(local_depth, sam_input)
+                            sam_input = root / "sam-input.mp4"
+                            # Detect people in the same RGB footage the user selected.
+                            # Depth stays at guide resolution for the later compositor.
+                            sam_metadata = sam_input_video(normalized, sam_input)
                             sam_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "sam-input.mp4", sam_input, "video/mp4")
                             result = invoke("/benchmark", {"input_uri": sam_uri, "run_id": sam_run, "operation": "sam"}, remaining())
                             emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
-                                 height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24)
+                                 height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
+                                 source="normalized_rgb")
                         else:
                             result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both"}, remaining())
                             depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
@@ -147,7 +151,8 @@ class Pipeline:
                         emit("all_people_masks_prepared", job_id=job_id, frames=len(coverage),
                              empty_frames=sum(count == 0 for count in coverage), **detection_summary)
                     elif multi:
-                        tracks = selected_tracks(masks, metadata, targets)
+                        tracks = selected_tracks(masks, metadata, targets,
+                            allow_unmatched=bool(metadata.get("allow_unmatched_anchor")))
                         if not options.easy_mode:
                             plan = analyze_multi_tracking(masks, metadata, targets)
                         if not plan or not plan["review_required"]:
@@ -156,7 +161,16 @@ class Pipeline:
                             masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "selected-people-masks.zip", combined, "application/zip")
                         label = 1
                     else:
-                        label, coverage = select_label(masks, metadata, require_continuous=False)
+                        if metadata.get("allow_unmatched_anchor"):
+                            # An unmatched initial tap is a review task, not a
+                            # reason to discard already prepared masks and depth.
+                            selected = selected_tracks(masks, metadata, [{"id": "person",
+                                "name": options.target_name, "reference_index": 0,
+                                "anchor": metadata["anchor"]}], allow_unmatched=True)
+                            label = selected[0]["selected_label"]
+                            coverage = [0] * metadata["frames"] if label == 0 else []
+                        if label != 0:
+                            label, coverage = select_label(masks, metadata, require_continuous=False)
                     # Easy mode retains the original selected ID across all frames,
                     # including cuts and gaps, just as preparation did before scene review.
                     if not options.easy_mode and not options.replace_all_people and not multi:
@@ -215,8 +229,13 @@ class Pipeline:
                         "tracking_vocals_uri": vocals_input, "tracking_revision": 1,
                         "tracking_reviewed": False}
                     if plan["review_required"]:
+                        review_message = "Match your person in the flagged sections before the guide is built."
+                        if plan.get("unresolved_anchor"):
+                            review_message = ("We could not match an initial selection. Select each person in the scenes below, or mark them not visible."
+                                if plan.get("detected_people_available") else
+                                "SAM did not detect any people in this clip. Restart with enhanced masking off, or choose a clearer clip. No generation was submitted.")
                         self.update_job(job_id, status="tracking_review",
-                            message="Match your person in the flagged sections before the guide is built.",
+                            message=review_message,
                             tracking_uri=preview, selected_label=label, tracking_performed=True,
                             tracking_continuous=False, mask_style=mask_style, review_required=True,
                             scene_cut_count=len(metadata.get("scene_cuts", [])),

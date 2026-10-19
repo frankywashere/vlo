@@ -14,8 +14,10 @@ from PIL import Image
 import pytest
 
 from swapmein.config import Settings
+from swapmein.errors import PublicError
 from swapmein.media import probe, sam_input_video
 from swapmein.pipeline import Pipeline
+from swapmein.tracking import resolve_multi_tracking, resolve_tracking
 
 
 @pytest.fixture(scope="module")
@@ -23,13 +25,18 @@ def media(tmp_path_factory):
     if not shutil.which("ffmpeg"):
         pytest.skip("FFmpeg needed for the V2 geometry proof")
     directory = tmp_path_factory.mktemp("pipeline-v2-media")
-    working, sam, audio, masks, legacy = (directory / name for name in
-                                  ("working.mp4", "sam.mp4", "vocals.wav", "masks.zip", "legacy.mp4"))
+    working, sam, audio, masks, legacy, depth, empty_masks = (directory / name for name in
+        ("working.mp4", "sam.mp4", "vocals.wav", "masks.zip", "legacy.mp4", "depth.mp4", "empty-masks.zip"))
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
         "color=c=red:s=960x768:r=24:d=4", "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
         "-c:v", "libx264", "-threads", "2", "-c:a", "aac", "-pix_fmt", "yuv420p", str(working)], check=True)
     geometry = sam_input_video(working, sam)
     assert geometry == {"width": 600, "height": 480, "frames": 96, "duration": 4, "fps": 24}
+    # Different imagery makes an accidental depth-to-SAM connection observable,
+    # even though both sources have exactly the same dimensions and timeline.
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=blue:s=960x768:r=24:d=4", "-c:v", "libx264", "-threads", "2",
+        "-pix_fmt", "yuv420p", str(depth)], check=True)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(working), "-vn", str(audio)], check=True)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(working), "-vf", "scale=600:480",
                     "-c:v", "libx264", "-threads", "2", "-c:a", "copy", str(legacy)], check=True)
@@ -41,7 +48,13 @@ def media(tmp_path_factory):
     with zipfile.ZipFile(masks, "w", zipfile.ZIP_DEFLATED) as archive:
         for frame in range(96):
             archive.writestr(f"labels/labels_{frame:05d}.png", buffer.getvalue())
-    return {"working": working, "sam": sam, "audio": audio, "masks": masks, "geometry": geometry, "legacy": legacy}
+    buffer = BytesIO()
+    Image.fromarray(np.zeros_like(labels)).save(buffer, "PNG")
+    with zipfile.ZipFile(empty_masks, "w", zipfile.ZIP_DEFLATED) as archive:
+        for frame in range(96):
+            archive.writestr(f"labels/labels_{frame:05d}.png", buffer.getvalue())
+    return {"working": working, "sam": sam, "audio": audio, "masks": masks, "geometry": geometry,
+            "legacy": legacy, "depth": depth, "empty_masks": empty_masks}
 
 
 def image_at(archive_bytes, index=24):
@@ -49,7 +62,8 @@ def image_at(archive_bytes, index=24):
         return np.array(Image.open(BytesIO(archive.read(f"labels/labels_{index:05d}.png"))))
 
 
-def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False):
+def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
+            background_tap=False, no_people=False):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -58,6 +72,9 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                         "anchor": {"x": .75, "y": .5, "time": 1}})
     options = {"trim": [0, 4], "anchor": {"x": .25, "y": .5, "time": 1},
                "easy_mode": easy, "enhanced_character_masking": enhanced, "auto_generate": easy}
+    if background_tap:
+        targets[0]["anchor"].update(x=.03, y=.03)
+        options["anchor"].update(x=.03, y=.03)
     if not legacy:
         options["preparation_version"] = 2
         if selection != "all":
@@ -65,7 +82,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
     if selection == "all":
         options.update(replace_all_people=True, anchor=None)
     metadata = {"duration": 4, "frames": 96, "width": 600 if legacy else 960,
-                "height": 480 if legacy else 768, "anchor": {"x": .25, "y": .5, "time": 1, "frame": 24},
+                "height": 480 if legacy else 768, "anchor": {**options["anchor"], "frame": 24} if selection != "all" else
+                    {"x": .5, "y": .5, "time": 0, "frame": 0},
                 "scene_cuts": [2.0], "preparation_version": 1 if legacy else 2,
                 "targets": [] if legacy or selection == "all" else
                     [{**target, "anchor": {**target["anchor"], "frame": 24}} for target in targets]}
@@ -77,7 +95,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
     sam_inputs = []
     def low_copy(source, destination):
         # The actual helper was exercised once by the module fixture. Cache its
-        # media here while checking each orchestration invokes it on full depth.
+        # media while checking every mode selects RGB, never the depth artifact.
+        assert source.read_bytes() == media["working"].read_bytes()
         video = next(s for s in probe(source)["streams"] if s["codec_type"] == "video")
         assert (video["width"], video["height"], int(video["nb_frames"])) == (960, 768, 96)
         sam_inputs.append(source.name)
@@ -130,8 +149,9 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         def worker_output(self, _result, run, filename):
             uri = f"gs://worker/{run}/{filename}"
             if uri not in self.objects:
-                self.objects[uri] = (media["masks"].read_bytes() if filename == "masks.zip" else
+                self.objects[uri] = (media["empty_masks" if no_people else "masks"].read_bytes() if filename == "masks.zip" else
                     media["audio"].read_bytes() if filename == "vocals_plus3.wav" else
+                    media["depth"].read_bytes() if filename == "depth.mp4" and not legacy else
                     media["legacy" if legacy else "working"].read_bytes())
             return uri
         @contextmanager
@@ -164,7 +184,7 @@ def test_v2_keeps_high_resolution_depth_and_per_person_reference_mapping(monkeyp
     assert (job["width"], job["height"], job["preparation_version"]) == (960, 768, 2)
     gpu = [payload for kind, _, payload in cloud.calls if kind == "gpu"]
     assert [payload["operation"] for payload in gpu] == (["depth", "sam"] if enhanced else [])
-    assert sam_inputs == (["depth.mp4"] if enhanced else [])
+    assert sam_inputs == (["normalized.mp4"] if enhanced else [])
     assert cloud.enqueued == ([("generate", job["id"])] if easy else [])
     assert originals == ([True] if not enhanced and audio_processing else [])
     if selection == "multi":
@@ -175,6 +195,9 @@ def test_v2_keeps_high_resolution_depth_and_per_person_reference_mapping(monkeyp
         assert not job["tracking_performed"] and job["tracking_uri"] is None
         assert not previews
         return
+    sam_payload = next(payload for payload in gpu if payload["operation"] == "sam")
+    assert cloud.objects[sam_payload["input_uri"]] == media["sam"].read_bytes()
+    assert cloud.objects[sam_payload["input_uri"]] != media["depth"].read_bytes()
     composed = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]
     assert len(composed) == (0 if needs_review else 1)
     if needs_review:
@@ -192,7 +215,7 @@ def test_v2_keeps_high_resolution_depth_and_per_person_reference_mapping(monkeyp
         payload = composed[0]
         assert payload["input_uri"] == job["normalized_uri"]
         assert payload["depth_uri"].endswith("/depth.mp4") and "sam-input" not in payload["depth_uri"]
-        assert cloud.objects[payload["depth_uri"]] == media["working"].read_bytes()
+        assert cloud.objects[payload["depth_uri"]] == media["depth"].read_bytes()
         labels = image_at(cloud.objects[payload["masks_uri"]])
         assert labels.shape == (768, 960)
         assert set(np.unique(labels)) == ({0, 1, 2} if selection == "multi" else {0, 1} if selection == "all" else {0, 7, 40000})
@@ -200,6 +223,20 @@ def test_v2_keeps_high_resolution_depth_and_per_person_reference_mapping(monkeyp
         assert payload["guide_audio_uri"] == job["normalized_uri"] if not audio_processing else payload["guide_audio_uri"].endswith("vocals_plus3.wav")
         if selection == "multi":
             assert payload["target_styles"] == [{"label": target["label"], "color": target["color"]} for target in job["normalized_targets"]]
+
+
+def test_sam_working_copy_keeps_rgb_pixels_distinct_from_full_resolution_depth(media):
+    def first_pixel(path):
+        raw = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path),
+            "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        return tuple(raw)
+
+    sam_rgb = first_pixel(media["sam"])
+    depth_rgb = first_pixel(media["depth"])
+    assert sam_rgb[0] > 200 and sam_rgb[2] < 30
+    assert depth_rgb[2] > 200 and depth_rgb[0] < 30
+    depth_stream = next(stream for stream in probe(media["depth"])["streams"] if stream["codec_type"] == "video")
+    assert (depth_stream["width"], depth_stream["height"], int(depth_stream["nb_frames"])) == (960, 768, 96)
 
 
 def test_saved_legacy_single_keeps_the_original_combined_gpu_operation(monkeypatch, media):
@@ -212,3 +249,59 @@ def test_saved_legacy_single_keeps_the_original_combined_gpu_operation(monkeypat
     payload = next(payload for _, endpoint, payload in cloud.calls if endpoint == "/compose")
     assert payload["selected_label"] == 7 and "target_styles" not in payload
     assert image_at(cloud.objects[payload["masks_uri"]]).shape == (480, 600)
+
+
+@pytest.mark.parametrize("selection", ["single", "multi"])
+@pytest.mark.parametrize("easy", [False, True])
+def test_v2_background_anchor_requires_explicit_manual_matches_without_rerunning_sam(
+        monkeypatch, media, tmp_path, selection, easy):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
+        selection=selection, audio_processing=False, background_tap=True)
+    assert not cloud.enqueued
+    assert [payload["operation"] for kind, _, payload in cloud.calls if kind == "gpu"] == ["depth", "sam"]
+    assert not [endpoint for _, endpoint, _ in cloud.calls if endpoint == "/compose"]
+    if easy:
+        assert job["status"] == "failed" and "missed" in job["message"]
+        return
+    assert job["status"] == "tracking_review", job.get("message")
+    assert "could not match an initial selection" in job["message"]
+    plan = job["tracking_plan"]
+    assert plan["unresolved_anchor"] and plan["detected_people_available"]
+    assert all(section["needs_review"] for section in plan["segments"])
+    archive = tmp_path / "detected.zip"
+    archive.write_bytes(cloud.objects[job["tracking_masks_uri"]])
+    choices = [{"segment_id": section["id"], "absent": False,
+        "anchor": {"x": .75 if section.get("target_id") == "person-2" else .25,
+                   "y": .5, "time": section["seek_time"]}} for section in plan["segments"]]
+    output = tmp_path / "reviewed.zip"
+    resolver = resolve_multi_tracking if selection == "multi" else resolve_tracking
+    resolved = resolver(archive, job["tracking_metadata"], plan, choices, output)
+    assert all(count > 0 for count in resolved["coverage"])
+    assert set(np.unique(image_at(output.read_bytes()))) == ({0, 1, 2} if selection == "multi" else {0, 1})
+    assert {assignment["selected_label"] for assignment in resolved["assignments"]} == ({7, 40000} if selection == "multi" else {7})
+    assert not cloud.enqueued  # Reviewing a match never pays for another render.
+
+
+@pytest.mark.parametrize("selection", ["single", "multi"])
+def test_manual_total_detection_miss_stays_reviewable_with_explicit_explanation(
+        monkeypatch, media, tmp_path, selection):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=False, enhanced=True,
+        selection=selection, audio_processing=False, no_people=True)
+    assert job["status"] == "tracking_review", job.get("message")
+    assert "SAM did not detect any people" in job["message"] and "masking off" in job["message"]
+    plan = job["tracking_plan"]
+    assert plan["unresolved_anchor"] and plan["detected_people_available"] is False
+    assert not cloud.enqueued and not [endpoint for _, endpoint, _ in cloud.calls if endpoint == "/compose"]
+    archive = tmp_path / "empty.zip"
+    archive.write_bytes(cloud.objects[job["tracking_masks_uri"]])
+    resolver = resolve_multi_tracking if selection == "multi" else resolve_tracking
+    choices = [{"segment_id": section["id"], "absent": True, "anchor": None} for section in plan["segments"]]
+    with pytest.raises(PublicError, match="at least one section"):
+        resolver(archive, job["tracking_metadata"], plan, choices, tmp_path / "invalid.zip")
+
+
+def test_saved_legacy_manual_background_anchor_keeps_existing_failure_policy(monkeypatch, media):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=False, enhanced=True,
+        selection="single", audio_processing=False, legacy=True, background_tap=True)
+    assert job["status"] == "failed" and "missed" in job["message"]
+    assert [payload["operation"] for kind, _, payload in cloud.calls if kind == "gpu"] == ["both"]

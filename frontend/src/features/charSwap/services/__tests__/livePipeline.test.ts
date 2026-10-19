@@ -96,6 +96,13 @@ const reviewSegment = {id: "segment-001", start_frame: 48, end_frame: 120, start
 const reviewJob = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 1, tracking_segments: [reviewSegment]};
 
 describe("scene tracking review contract", () => {
+  it("accepts an unresolved initial tap as a scene requiring a fresh selection", async () => {
+    const segment = {...reviewSegment, reason: "unmatched_anchor", selected_label: null};
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_segments: [segment]})));
+    const received = await getLiveJob("job-1", "session", new AbortController().signal);
+    expect(received.tracking_segments?.[0]).toEqual(segment);
+    expect(received.status).toBe("tracking_review");
+  });
   it("preserves the normalized source and review bounds without fabricating confidence or candidates", async () => {
     requests.mockResolvedValue(new Response(JSON.stringify(reviewJob)));
     expect(await getLiveJob("job-1", "session", new AbortController().signal)).toEqual(reviewJob);

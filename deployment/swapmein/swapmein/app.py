@@ -238,7 +238,7 @@ def view(job: dict):
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
     for field in ["created_at", "completed_at", "updated_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing"]:
         if field in job:
-            result[field] = job[field]
+            result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
         if job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available):
             result[output] = cloud.signed_url(job[field])
@@ -246,6 +246,9 @@ def view(job: dict):
         result["tracking_segments"] = []
         for section in job["tracking_plan"]["segments"]:
             preview = {**section}
+            # Zero is a private unresolved-anchor sentinel, never a person ID.
+            if preview.get("selected_label") == 0:
+                preview["selected_label"] = None
             frame = str(math.floor(section["seek_time"] * 24 + 1e-7))
             uri = job.get("scene_thumbnail_uris", {}).get(frame)
             if uri:

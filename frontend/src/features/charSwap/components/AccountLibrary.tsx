@@ -491,6 +491,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             {selected?.status === "tracking_review" &&
               selected.source_preview_url && (
                 <SceneTrackingReview
+                  enhancedMasking={selected.mask_style !== "none"}
                   sourceUrl={selected.source_preview_url}
                   trackingUrl={selected.tracking_url}
                   segments={selected.tracking_segments ?? []}

@@ -51,22 +51,54 @@ export function VideoPreview({
   const [time, setTime] = useState(trim[0]);
   const [muted, setMuted] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [frameReady, setFrameReady] = useState(false);
+  const pendingSeek = useRef<number | null>(null);
+  const previewSource = useRef(clip.url);
   const [keyboardPoint, setKeyboardPoint] = useState({ x: 0.5, y: 0.5 });
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
+      const next = seekTo ?? start;
+      const sourceChanged = previewSource.current !== clip.url;
+      previewSource.current = clip.url;
+      const settled = !sourceChanged && video.readyState >= 2 && !video.seeking && video.currentTime === next;
+      setFrameReady(settled);
+      pendingSeek.current = settled ? null : next;
       video.pause();
-      video.currentTime = seekTo ?? start;
+      if (!settled) video.currentTime = next;
     }
   }, [clip.url, start, end, seekTo]);
 
   function seek(next: number) {
     const video = videoRef.current;
     if (video) {
+      const settled = video.readyState >= 2 && !video.seeking && video.currentTime === next;
+      setFrameReady(settled);
+      pendingSeek.current = settled ? null : next;
       video.pause();
-      video.currentTime = next;
+      if (!settled) video.currentTime = next;
     }
     setTime(next);
+  }
+  function reportFrameReady() {
+    const video = videoRef.current;
+    if (!video || video.seeking || video.readyState < 2 ||
+        video.currentTime < start || video.currentTime >= end ||
+        (pendingSeek.current !== null && Math.abs(video.currentTime - pendingSeek.current) > 1 / 48)) return;
+    pendingSeek.current = null;
+    setFrameReady(true);
+  }
+  function selectPoint(point: NormalizedPoint) {
+    const video = videoRef.current;
+    // currentTime changes before the browser has decoded the requested frame.
+    // Never pair coordinates from the old visible image with the new time.
+    if (!video || !frameReady || video.seeking || video.readyState < 2 || failed ||
+        video.currentTime < start || video.currentTime >= end) {
+      setFrameReady(false);
+      return;
+    }
+    video.pause();
+    onPoint?.(point, video);
   }
   return (
     <Box
@@ -109,6 +141,8 @@ export function VideoPreview({
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onLoadedMetadata={() => {
+              setFrameReady(false);
+              pendingSeek.current = seekTo ?? start;
               if (videoRef.current)
                 videoRef.current.currentTime = seekTo ?? start;
               setFailed(false);
@@ -117,17 +151,21 @@ export function VideoPreview({
             onLoadedData={() => {
               setFailed(false);
               onPlayableChange?.(true);
+              reportFrameReady();
             }}
+            onSeeking={() => setFrameReady(false)}
+            onSeeked={reportFrameReady}
+            onCanPlay={reportFrameReady}
             onError={() => {
               setFailed(true);
+              setFrameReady(false);
               onPlayableChange?.(false);
             }}
             onTimeUpdate={() => {
               const video = videoRef.current;
               if (!video) return;
               if (video.currentTime >= trim[1]) {
-                video.pause();
-                video.currentTime = trim[0];
+                seek(trim[0]);
               }
               setTime(video.currentTime);
             }}
@@ -145,6 +183,7 @@ export function VideoPreview({
               tabIndex={0}
               aria-label="Tap a person in the paused video"
               aria-description="Use arrow keys to position the crosshair, then press Enter to select."
+              aria-disabled={!frameReady || failed}
               onKeyDown={(event) => {
                 if (
                   ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
@@ -181,29 +220,22 @@ export function VideoPreview({
                   }));
                 } else if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
-                  const video = videoRef.current;
-                  if (video) {
-                    video.pause();
-                    onPoint(keyboardPoint, video);
-                  }
+                  selectPoint(keyboardPoint);
                 }
               }}
               onClick={(event) => {
-                const video = videoRef.current;
-                if (!video) return;
-                video.pause();
                 const point = pointInVideo(
                   event.clientX,
                   event.clientY,
                   event.currentTarget.getBoundingClientRect(),
                   clip,
                 );
-                if (point) onPoint(point, video);
+                if (point) selectPoint(point);
               }}
               sx={{
                 position: "absolute",
                 inset: 0,
-                cursor: "crosshair",
+                cursor: frameReady && !failed ? "crosshair" : "wait",
                 touchAction: "manipulation",
                 "&:focus-visible": {
                   outline: "2px solid #a3d1ff",
@@ -249,6 +281,11 @@ export function VideoPreview({
           </Typography>
         )}
       </Box>
+      {selectable && !frameReady && !failed && (
+        <Typography role="status" variant="caption" sx={{display: "block", px: 1.5, py: 1}}>
+          Loading frame… Wait for it to finish before selecting a person.
+        </Typography>
+      )}
       <Stack
         direction="row"
         spacing={1}

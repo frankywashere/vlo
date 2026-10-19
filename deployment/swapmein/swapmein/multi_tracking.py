@@ -32,14 +32,15 @@ def style_targets(targets: list[dict]):
     return result
 
 
-def selected_tracks(archive: Path, metadata: dict, targets: list[dict]):
+def selected_tracks(archive: Path, metadata: dict, targets: list[dict], *, allow_unmatched: bool = False):
     result = []
     for target in style_targets(targets):
         specific = {**metadata, "anchor": target["anchor"]}
         width, height, _, anchor_frame, _ = _metadata(specific)
         with _maps(archive, specific) as read:
             label = _pixel_label(read, anchor_frame, target["anchor"], width, height)
-        if label == 0:
+        if label == 0 and not (allow_unmatched and metadata.get("allow_unmatched_anchor")
+                               and metadata.get("review_all_scenes")):
             raise PublicError(f"The tap for {target.get('name', 'a selected person')} missed the person. Select a point inside their body.",
                               code="tracking_background")
         result.append({**target, "selected_label": label})
@@ -48,6 +49,9 @@ def selected_tracks(archive: Path, metadata: dict, targets: list[dict]):
 
 def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], output: Path):
     """Remap chosen SAM IDs to stable person slots, rejecting ambiguous overlap."""
+    if any(type(target.get("selected_label")) is not int or not 1 <= target["selected_label"] <= 65535
+           for target in targets):
+        raise PublicError("Review each unmatched person before building the guide.", code="tracking_review_invalid")
     width, height, frames, _, _ = _metadata(metadata)
     temporary = output.with_name(output.name + ".partial")
     coverage = []
@@ -75,7 +79,8 @@ def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], out
 
 
 def analyze(archive: Path, metadata: dict, targets: list[dict] | None = None):
-    targets = selected_tracks(archive, metadata, targets if targets is not None else metadata.get("targets"))
+    targets = selected_tracks(archive, metadata, targets if targets is not None else metadata.get("targets"),
+        allow_unmatched=bool(metadata.get("allow_unmatched_anchor")))
     segments, plans = [], []
     for index, target in enumerate(targets):
         plan = analyze_tracking(archive, {**metadata, "anchor": target["anchor"]}, target["selected_label"])
@@ -84,8 +89,12 @@ def analyze(archive: Path, metadata: dict, targets: list[dict] | None = None):
                          "target_id": target["id"], "target_name": target.get("name", f"Person {index + 1}"),
                          "reference_index": target["reference_index"], "color": target["color"]}
                         for segment in plan["segments"])
-    return {"version": 2, "targets": targets, "plans": plans, "segments": segments,
-            "review_required": any(segment["needs_review"] for segment in segments)}
+    result = {"version": 2, "targets": targets, "plans": plans, "segments": segments,
+              "review_required": any(segment["needs_review"] for segment in segments)}
+    if any(plan["plan"].get("unresolved_anchor") for plan in plans):
+        result.update(unresolved_anchor=True,
+            detected_people_available=any(plan["plan"].get("detected_people_available", True) for plan in plans))
+    return result
 
 
 def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], output: Path):

@@ -160,7 +160,7 @@ describe("visible Create controls while an account job is saved", () => {
 
     await user.click(screen.getByRole("button", { name: "Library" }));
     expect(await screen.findByText("Saved first swap")).toBeInTheDocument();
-    const labels = { queued: "In queue", preparing: "Preparing", tracking_review: "Needs review", ready: "Ready to generate", generating: "Generating", finalizing: "Finishing", completed: "Ready", failed: "Needs attention" };
+    const labels = { queued: "In queue", preparing: "Preparing", tracking_review: "Needs attention", ready: "Ready to generate", generating: "Generating", finalizing: "Finishing", completed: "Ready", failed: "Failed" };
     expect(screen.getByText(labels[status], {exact: true})).toBeInTheDocument();
   });
 

@@ -57,8 +57,11 @@ compositor would leave a worker rejecting version 2 input.
 The gateway normalizes the selected source at a 768-pixel short-side ceiling,
 preserving smaller picture dimensions, and retains its 24 fps preparation
 contract. GPU `operation: "depth"` receives that working-resolution video.
-The gateway makes a separate colored-depth copy bounded by 854×480 for GPU
-`operation: "sam"`, preserving every prepared frame. SAM labels are resized
+The gateway makes a separate original-RGB copy bounded by 854×480 for GPU
+`operation: "sam"`, preserving every prepared frame. This copy comes from the
+normalized source, not the depth output. No worker image/model change is needed:
+the existing standalone SAM operation detects people in the supplied RGB frames.
+SAM labels are resized
 back to the working dimensions with nearest-neighbor interpolation in the
 gateway. The existing combined `operation: "both"` remains for saved version 1
 jobs; do not migrate queued jobs or their saved media in place.

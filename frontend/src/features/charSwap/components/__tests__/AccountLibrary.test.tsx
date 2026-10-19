@@ -55,6 +55,7 @@ describe("private account library", () => {
         id: "b".repeat(32),
         status: "preparing",
         title: "Preparing clip",
+        easy_mode: false,
       },
       {
         ...job,
@@ -85,6 +86,8 @@ describe("private account library", () => {
       screen.queryByText(/Once the upload is confirmed/),
     ).not.toBeInTheDocument();
     expect(within(current).getByText("Preparing clip")).toBeInTheDocument();
+    expect(within(current).getByText(/Processing scenes. Come back to choose people/)).toBeVisible();
+    expect(within(current).getByText("Needs attention")).toBeVisible();
     expect(
       within(current).getByRole("button", { name: "Check scene matches" }),
     ).toBeInTheDocument();
@@ -102,6 +105,18 @@ describe("private account library", () => {
     expect(
       screen.queryByText("No jobs processing right now."),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps masking off when resuming manual scene selections from Library", async () => {
+    const user = userEvent.setup();
+    vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "tracking_review", mask_style: "none",
+      source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
+      tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+        seek_time: 1, needs_review: true, reason: "scene_selection"}],
+    }]);
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    expect(await screen.findByText(/Masking stays off; your positions and timestamps/)).toBeVisible();
   });
 
   it("requires explicit paid approval and re-entered key before generation; closing clears it", async () => {

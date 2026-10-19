@@ -38,8 +38,10 @@ Enhanced version 2 preparation follows this sequence:
 1. Normalize the trimmed source at its working dimensions and 24 fps.
 2. Call the existing GPU `/benchmark` with `operation: "depth"` on that working
    video, retaining full working-dimension Depth Anything output.
-3. Make a separate SAM copy of the colored depth video, bounded by 854×480 with
-   the same frame count/timeline. Call `/benchmark` with `operation: "sam"`.
+3. Make a separate SAM copy of the normalized **original RGB video**, bounded
+   by 854×480 with the same frame count/timeline. Call `/benchmark` with
+   `operation: "sam"`. SAM detects people in this RGB copy, independently of
+   Depth Anything; depth imagery is used only for the later masked composition.
 4. Validate the categorical label archive and scale labels back to working
    dimensions with **nearest-neighbor** interpolation. Integer tracking labels
    must never be blended as RGB pixels.
@@ -98,14 +100,19 @@ queues rendering when preparation is safely ready. It follows the originally
 chosen SAM IDs across the clip; it does not verify cross-cut identity. Multiple
 selected tracks may require turning Easy off if the IDs conflict.
 
-Non-Easy enhanced mode partitions the clip at cuts, label gaps and abrupt mask
-changes. These are review heuristics, not identity-confidence scores. For each
-selected person, the healthy anchor section can be retained; flagged sections
-show still frames with a translucent detected-person preview and the assigned
-reference. The user chooses that person or **Not visible here**. Two targets
-cannot be assigned the same person in one scene. Group mode requires no
-individual scene matching. Enhanced off identifies each selected person using
-its normalized coordinates and clip-relative timestamp in the provider prompt.
+Easy mode and enhanced masking are independent. With Easy off, the walkthrough
+shows a **Check scenes** step with scene thumbnails and per-person reference
+assignments. Enhanced mode shows detected-person overlays; masking off uses the
+original-looking clip and saves scene-specific positions, clip-relative times
+and absences for the provider prompt. The user chooses each person or **Not in
+this scene**. Two replacements cannot share the same detected person in one
+scene. Group mode requires no individual scene matching.
+
+The initial person picker accepts taps only after its displayed video frame has
+settled. An initial unmatched tap in manual enhanced mode requires correction in
+scene review before generation; it does not silently select a nearby person.
+Scene review can only choose people SAM detected. If it did not detect the
+person, another frame or a new setup with masking off may be needed.
 
 Reviewed labels are rebuilt by the CPU compositor using saved depth and audio;
 there is no additional SAM inference or paid generation at that step. After

@@ -64,6 +64,18 @@ def test_easy_mode_rejects_two_references_assigned_to_the_same_sam_track(tmp_pat
     assert not output.exists() and not output.with_name("mapped.zip.partial").exists()
 
 
+def test_unresolved_manual_target_cannot_be_composited_as_a_background_mask(tmp_path):
+    archive, metadata = fixture(tmp_path)
+    metadata.update(allow_unmatched_anchor=True, review_all_scenes=True)
+    metadata["targets"][0]["anchor"].update(x=.03, y=.03)
+    tracks = selected_tracks(archive, metadata, metadata["targets"], allow_unmatched=True)
+    assert tracks[0]["selected_label"] == 0
+    output = tmp_path / "background.zip"
+    with pytest.raises(PublicError, match="unmatched person"):
+        build_selected_masks(archive, metadata, tracks, output)
+    assert not output.exists()
+
+
 def test_review_rejects_collision_and_keeps_original_archive_intact(tmp_path):
     archive, metadata = fixture(tmp_path)
     original = archive.read_bytes()
