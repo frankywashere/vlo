@@ -279,14 +279,14 @@ def test_busy_capacity_reports_lease_wait_but_recovery_does_not_promise_a_retry(
         assert error.value.code == "preparation_recovery" and error.value.retry_after is None
 
 
-@pytest.mark.parametrize("units", ["7", "20"])
+@pytest.mark.parametrize("units", ["7", "20", "50"])
 def test_spend_cap_checks_project_service_currency_fraction_and_state(units):
     budget = {"budgetFilter": {"projects": ["projects/634011479314"], "services": ["services/152E-C115-5142"]},
               "spendCap": {"outputState": "CONFIGURED"},
               "amount": {"specifiedAmount": {"currencyCode": "CAD", "units": units}}}
     assert valid_spend_cap({"budgets": [budget]}, "634011479314")
     for change in [
-        {"amount": {"specifiedAmount": {"currencyCode": "CAD", "units": "20", "nanos": 1}}},
+        {"amount": {"specifiedAmount": {"currencyCode": "CAD", "units": "50", "nanos": 1}}},
         {"amount": {"specifiedAmount": {"currencyCode": "CAD", "units": "0"}}},
         {"amount": {"specifiedAmount": {"currencyCode": "USD", "units": "7"}}},
         {"spendCap": {"outputState": "DISABLED"}},
