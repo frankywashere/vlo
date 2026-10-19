@@ -32,13 +32,13 @@ describe("truthful preparation status at final review", () => {
   it("keeps generation settings editable before manual preparation", () => {
     useCharSwapStore.getState().setEasyMode(false);
     render(<ReviewStep {...properties()} />);
-    expect(screen.getByRole("switch", {name: "Review scene changes manually"})).toBeEnabled();
+    expect(screen.getByRole("switch", {name: "Easy Mode"})).toBeEnabled();
     expect(screen.getByRole("switch", {name: "Enhanced person masking"})).toBeEnabled();
     expect(screen.queryByRole("region", {name: "Prepared settings"})).not.toBeInTheDocument();
   });
   it("keeps the initial Easy-mode generation options editable", () => {
     render(<ReviewStep {...properties()} />);
-    expect(screen.getByRole("switch", {name: "Review scene changes manually"})).toBeEnabled();
+    expect(screen.getByRole("switch", {name: "Easy Mode"})).toBeEnabled();
     expect(screen.getByRole("switch", {name: "Enhanced person masking"})).toBeEnabled();
   });
   it("does not claim tracking completed before an Easy-mode job has been submitted", () => {

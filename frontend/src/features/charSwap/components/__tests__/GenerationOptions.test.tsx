@@ -19,7 +19,8 @@ it("changes preparation options at final review without losing the person's refe
   const user = userEvent.setup();
   const invalidate = vi.fn();
   render(<GenerationOptions onChange={invalidate} />);
-  await user.click(screen.getByRole("switch", { name: "Review scene changes manually" }));
+  expect(screen.getByRole("switch", { name: "Easy Mode" })).toBeChecked();
+  await user.click(screen.getByRole("switch", { name: "Easy Mode" }));
   const state = useCharSwapStore.getState();
   expect(state.easyMode).toBe(false);
   expect(state.step).toBe("review");
@@ -32,7 +33,7 @@ it("changes preparation options at final review without losing the person's refe
 it.each(["manual-first", "masking-first"])("keeps scene review and masking independent: %s", async (order) => {
   const user = userEvent.setup();
   render(<GenerationOptions />);
-  const manual = screen.getByRole("switch", { name: "Review scene changes manually" });
+  const manual = screen.getByRole("switch", { name: "Easy Mode" });
   const masking = screen.getByRole("switch", { name: "Enhanced person masking" });
   if (order === "manual-first") {
     await user.click(manual);
@@ -43,7 +44,7 @@ it.each(["manual-first", "masking-first"])("keeps scene review and masking indep
     await user.click(manual);
   }
   expect(manual).toBeEnabled();
-  expect(manual).toBeChecked();
+  expect(manual).not.toBeChecked();
   expect(masking).toBeEnabled();
   expect(masking).not.toBeChecked();
   expect(useCharSwapStore.getState().easyMode).toBe(false);
@@ -55,7 +56,7 @@ it.each(["manual-first", "masking-first"])("keeps scene review and masking indep
 
 it("locks both options while preparation is busy", () => {
   render(<GenerationOptions disabled />);
-  expect(screen.getByRole("switch", { name: "Review scene changes manually" })).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Easy Mode" })).toBeDisabled();
   expect(screen.getByRole("switch", { name: "Enhanced person masking" })).toBeDisabled();
 });
 
