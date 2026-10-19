@@ -174,7 +174,7 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
         Tap the person in each box below. Leave it blank if they’re not there.
       </Typography>
       {!enhancedMasking && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Masking stays off. Your selections tell the model who to replace.</Typography>}
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Submit starts generation automatically.{enhancedMasking ? " Your saved settings handle any missing masks. Your other selections stay saved." : " Your scene choices guide the replacement."}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Submit starts generation automatically.</Typography>
       {trackingUrl && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
         onChange={(_event, checked) => setShowDetected(checked)} />} />}
     </Box>

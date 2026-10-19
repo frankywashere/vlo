@@ -374,8 +374,13 @@ class Pipeline:
                 emit("guide_media_verified", job_id=job_id, **verified)
         guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
             f"outputs/{job_id}/guide-reviewed-{uuid.uuid4().hex}.mp4")
+        auto_submit = bool(not job.get("mask_recovery_conflicts")
+            and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
+            and job.get("generation_after_review_revision") is not None
+            and job.get("generation_after_review_revision") == job.get("tracking_applied_revision"))
         self.update_job(job_id, status="ready", guide_uri=guide_uri,
-            message=("Your guide is ready. "
+            review_generation_queued=auto_submit,
+            message=("Your scene matches are applied. Generation is queued." if auto_submit else "Your guide is ready. "
                 + (f"{job['coordinate_fallback_sections']} selections use position and time because SAM found no mask. " if job.get("coordinate_fallback_sections") else "")
                 + "Review the masked preview, then approve it to start rendering."),
             tracking_reviewed=True, review_required=True, mask_style="depth_multi" if job.get("target_styles") else "depth",
@@ -386,12 +391,7 @@ class Pipeline:
             section_count=len(job["tracking_plan"]["segments"]))
         if job.get("mask_recovery_conflicts"):
             self.update_job(job_id, message="Your selections are saved, but recovered masks overlap another assigned person. Review the guide before generating. No generation was submitted.")
-        elif ((not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
-                and job.get("generation_after_review_revision") is not None
-                and job.get("generation_after_review_revision")
-                == job.get("tracking_applied_revision")):
-            self.update_job(job_id, review_generation_queued=True,
-                message="Your scene matches are applied. Generation is queued.")
+        elif auto_submit:
             try:
                 self.cloud.enqueue("generate", job_id, task_token=job["tracking_task_token"])
             except Exception as error:

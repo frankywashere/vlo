@@ -31,7 +31,7 @@ def mask_bytes(recovered=False):
 
 @pytest.mark.parametrize("outcome", ["recovered", "coordinate_fallback", "conflict", "invalid"])
 def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconflicting_generation(monkeypatch, outcome):
-    requests, enqueued, invocations = [], [], []
+    requests, enqueued, invocations, ready_snapshots = [], [], [], []
     anchor = {"x": .75, "y": .5, "time": 2.5}
     targets = [{"id": "left", "anchor": {"x": .25, "y": .5, "time": 1}, "reference_index": 0},
                {"id": "right", "anchor": anchor, "reference_index": 1}]
@@ -53,6 +53,7 @@ def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconfl
         data = copy.deepcopy(job)
         def update(self, path, mutation):
             self.data = mutation(copy.deepcopy(self.data))
+            if self.data.get("status") == "ready": ready_snapshots.append(copy.deepcopy(self.data))
             return copy.deepcopy(self.data)
     class Cloud:
         objects = {job["normalized_uri"]: b"original-rgb", job["reviewed_masks_uri"]: mask_bytes()}
@@ -111,3 +112,5 @@ def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconfl
     assert saved["coordinate_fallback_sections"] == (0 if outcome == "recovered" else 1)
     assert len(enqueued) == (0 if outcome == "conflict" else 1)
     assert saved.get("review_generation_queued", False) == (outcome != "conflict")
+    if outcome != "conflict":
+        assert ready_snapshots and all(snapshot["review_generation_queued"] for snapshot in ready_snapshots)
