@@ -322,7 +322,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     try {
       const access = await ensureSession(controller.signal, true);
       const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal,
-        {enabled: active.mask_style !== "none", key: apiKey, generateAfterReview: true});
+        {enabled: active.mask_style !== "none" || active.settings_used?.face_mesh === true, key: apiKey, generateAfterReview: true});
       if (controller.signal.aborted || epoch.current !== version) return false;
       preparationStartedAt.current = Date.now();
       setPreparationElapsedSeconds(0);
