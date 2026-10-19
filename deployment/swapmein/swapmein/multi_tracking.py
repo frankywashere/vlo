@@ -148,6 +148,7 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
                                 "Review both selections in this scene, or mark a person not visible. If the detection is wrong, try another frame.",
                                 code="tracking_target_conflict")
                             error.tracking_diagnostics = {"frame": frame, "time": frame / FPS,
+                                "target_index": index, "conflicting_target_index": other_index,
                                 "target_id": expected["targets"][index]["id"],
                                 "conflicting_target_id": expected["targets"][other_index]["id"],
                                 "selected_label": assignment["selected_label"],

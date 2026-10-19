@@ -107,6 +107,16 @@ async def public_error(_request, error):
     segment_id = getattr(error, "segment_id", None)
     if error.code in {"tracking_background", "tracking_collision", "tracking_target_conflict"} and isinstance(segment_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", segment_id):
         content["segment_id"] = segment_id
+    details = getattr(error, "tracking_diagnostics", None)
+    if error.code in {"tracking_background", "tracking_target_conflict"} and isinstance(details, dict):
+        # Keep public error context numeric and bounded; never echo vendor text.
+        public_details = {}
+        for key, maximum in (("frame", 359), ("target_index", 4), ("conflicting_target_index", 4)):
+            value = details.get(key)
+            if type(value) is int and 0 <= value <= maximum:
+                public_details[key] = value
+        if public_details:
+            content["tracking_details"] = public_details
     headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
     return JSONResponse(content, status_code=error.status_code, headers=headers)
 

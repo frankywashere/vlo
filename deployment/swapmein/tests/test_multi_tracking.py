@@ -105,3 +105,28 @@ def test_review_requires_all_people_and_refuses_tampered_target_plans(tmp_path):
     plan["targets"][0]["reference_index"] = 4
     with pytest.raises(PublicError, match="does not match"):
         resolve_multi_tracking(archive, metadata, plan, [], tmp_path / "tampered.zip")
+
+
+def test_reused_sam_id_across_cuts_can_belong_to_different_replacements(tmp_path):
+    archive, metadata = fixture(tmp_path)
+    # Both shots have the same mask geometry/ID but depict different people.
+    # Without a camera-cut boundary, motion heuristics cannot separate them.
+    frame = np.zeros((32, 64), np.uint16)
+    frame[4:28, 4:26] = 11
+    with zipfile.ZipFile(archive, "w") as output:
+        for index in range(96):
+            image = BytesIO()
+            Image.fromarray(frame).save(image, "PNG")
+            output.writestr(f"labels/labels_{index:05d}.png", image.getvalue())
+    metadata.update(review_all_scenes=True)
+    metadata["targets"][1]["anchor"] = {"x": .2, "y": .5, "time": 2.5, "frame": 60}
+    plan = analyze_multi_tracking(archive, metadata)
+    choices = []
+    for section in plan["segments"]:
+        in_first_shot = section["end_frame"] <= 48
+        present = (section["target_id"] == "left") == in_first_shot
+        choices.append({"segment_id": section["id"], "absent": not present,
+            "anchor": {"x": .2, "y": .5, "time": .5 if in_first_shot else 2.5} if present else None})
+    result = resolve_multi_tracking(archive, metadata, plan, choices, tmp_path / "reviewed.zip")
+    assert len(result["coverage"]) == 96 and all(result["coverage"])
+    assert {item["selected_label"] for item in result["assignments"] if not item["absent"]} == {11}

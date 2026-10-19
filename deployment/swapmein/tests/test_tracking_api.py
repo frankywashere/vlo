@@ -363,6 +363,7 @@ def test_review_diagnostics_correlate_selections_and_rejection_without_media_or_
     monkeypatch.setattr(gateway, "resolve_tracking", reject)
     response = client.post(review_endpoint(job_id), headers=headers, json=review_body())
     assert response.status_code == 400
+    assert response.json()["tracking_details"] == {"frame": 24}
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
     attempt = next(item for item in events if item["event"] == "tracking_review_attempt")
     rejected = next(item for item in events if item["event"] == "tracking_review_rejected")

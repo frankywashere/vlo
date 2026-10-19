@@ -207,3 +207,12 @@ it("accepts an exact 15-second live setup at a fractional start while rejecting 
  expect(()=>validateLiveSetup(state)).not.toThrow();
  expect(()=>validateLiveSetup({...state,trim:[1.1,16.101]})).toThrow(/whole-number duration/);
 });
+
+
+it("uses bounded structured conflict details without exposing upstream error text", async () => {
+  requests.mockResolvedValue(new Response(JSON.stringify({code: "tracking_target_conflict", message: "unsafe upstream text",
+    segment_id: "t1-segment-002", tracking_details: {frame: 15, target_index: 1, conflicting_target_index: 0}}), {status: 400}));
+  await expect(resolveLiveTracking("job-1", "session", 1, [], new AbortController().signal)).rejects.toMatchObject({
+    segmentId: "t1-segment-002", message: expect.stringContaining("SAM matched Person 2 and Person 1 to the same detected track at 0.63s"),
+  });
+});

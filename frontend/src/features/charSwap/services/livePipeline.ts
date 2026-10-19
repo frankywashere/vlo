@@ -232,7 +232,20 @@ function capacityMessage(value: unknown): string | null {
     tracking_target_conflict: "Two replacements are assigned to the same person in this scene. Choose the correct person for each replacement, or mark one not in this scene.",
     tracking_review_invalid: "This scene review has changed. Refresh the review before applying your matches again.",
   };
-  const message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
+  let message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
+  const details = isRecord(value.tracking_details) ? value.tracking_details : null;
+  const frame = details?.frame;
+  const validFrame = typeof frame === "number" && Number.isInteger(frame) && frame >= 0 && frame < 360;
+  if (validFrame && value.code === "tracking_background") {
+    message = `No person mask was detected at the selected point at ${(frame / 24).toFixed(2)}s. Try inside the detected body, or use Show another frame.`;
+  }
+  const target = details?.target_index;
+  const other = details?.conflicting_target_index;
+  if (validFrame && value.code === "tracking_target_conflict"
+    && typeof target === "number" && Number.isInteger(target) && target >= 0 && target < MAX_TARGET_PEOPLE
+    && typeof other === "number" && Number.isInteger(other) && other >= 0 && other < MAX_TARGET_PEOPLE && other !== target) {
+    message = `SAM matched Person ${target + 1} and Person ${other + 1} to the same detected track at ${(frame / 24).toFixed(2)}s. Review both selections in this scene, or mark a person not visible. If the detection is wrong, try another frame.`;
+  }
   if (!message) return null;
   const seconds = value.retry_after;
   const reset = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && seconds <= 32 * 86400
