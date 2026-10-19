@@ -32,7 +32,7 @@ describe("still-frame scene tracking review", () => {
     const props = properties();
     props.segments[1] = {...props.segments[1], thumbnail_url: "https://storage.googleapis.com/test/scene.jpg"} as typeof props.segments[number];
     render(<SceneTrackingReview {...props} enhancedMasking={false} />);
-    const navigation = screen.getByRole("navigation", {name: "Sections to check"});
+    const navigation = screen.getByRole("navigation", {name: "Scenes to check"});
     expect(navigation.querySelector("img")).toHaveAttribute("src", "https://storage.googleapis.com/test/scene.jpg");
     expect(screen.getByText(/Masking stays off/)).toBeInTheDocument();
     expect(screen.queryByRole("switch", {name: "Show detected people"})).not.toBeInTheDocument();
@@ -48,7 +48,8 @@ describe("still-frame scene tracking review", () => {
     expect(screen.getByAltText("Person 1 replacement: Bear")).toBeInTheDocument();
     loadedFrame();
     fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
-    expect(screen.getByRole("heading", {name: "Section 2 of 2 · Person 2"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Next: Person 2"}));
+    expect(screen.getByRole("heading", {name: "Scene 1 of 1 · Person 2"})).toBeInTheDocument();
     expect(screen.getByAltText("Person 2 replacement: Cat")).toBeInTheDocument();
     loadedFrame();
     fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
@@ -57,7 +58,7 @@ describe("still-frame scene tracking review", () => {
       {segment_id: "person-0-cut", absent: true, anchor: null},
       expect.objectContaining({segment_id: "person-1-cut", absent: false}),
     ]);
-    fireEvent.click(screen.getByRole("button", {name: "Person 1, Section 1, checked"}));
+    fireEvent.click(screen.getByRole("button", {name: "Person 1"}));
     expect(screen.getByText("Person 1 is not in this scene. This changes only their replacement.")).toBeInTheDocument();
   });
   it("shows one masked still without playback or scrubbing controls, and toggles to the same original frame", () => {
@@ -77,29 +78,30 @@ describe("still-frame scene tracking review", () => {
     expect(video).toHaveAttribute("src", props.sourceUrl);
     expect(video.currentTime).toBe(selectedTime);
     expect(screen.getByRole("button", {name: "Not in this scene"})).toBeEnabled();
-    expect(screen.getByText("0 of 2 sections checked")).toBeInTheDocument();
+    expect(screen.getByText("0 of 2 matches checked")).toBeInTheDocument();
     fireEvent.click(toggle);
     expect(loadedFrame().currentTime).toBe(selectedTime);
   });
 
-  it("automatically advances after selecting a person or marking them absent, then applies exact frame choices", () => {
+  it("waits for explicit navigation after selecting a person or marking them absent, then applies exact frame choices", () => {
     const props = properties();
     render(<SceneTrackingReview {...props} />);
     loadedFrame();
     const frameTime = reviewFrameTime(Math.floor(props.segments[1].seek_time * 24));
     fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
-    expect(screen.getByRole("heading", {name: "Section 2 of 2"})).toHaveFocus();
-    expect(screen.getByText("1 of 2 sections checked")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Next scene"}));
+    expect(screen.getByRole("heading", {name: "Scene 2 of 2"})).toHaveFocus();
+    expect(screen.getByText("1 of 2 matches checked")).toBeInTheDocument();
     loadedFrame();
     fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
-    expect(screen.getByText("2 of 2 sections checked")).toBeInTheDocument();
-    expect(screen.getByText(/All sections checked. Apply your matches/)).toBeInTheDocument();
+    expect(screen.getByText("2 of 2 matches checked")).toBeInTheDocument();
+    expect(screen.getByText(/All scenes checked. Apply your matches/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: "Apply matches"}));
     expect(props.onApply).toHaveBeenCalledWith([
       {segment_id: "cut", absent: false, anchor: {x: 0.5, y: 0.5, time: frameTime}},
       {segment_id: "gap", absent: true, anchor: null},
     ]);
-    fireEvent.click(screen.getByRole("button", {name: "Section 1, checked"}));
+    fireEvent.click(screen.getByRole("button", {name: "Scene 1, checked"}));
     loadedFrame();
     expect(screen.getByLabelText("Selected person marker")).toBeInTheDocument();
   });
@@ -117,7 +119,7 @@ describe("still-frame scene tracking review", () => {
       expect(video.currentTime).toBeLessThan(3);
     }
     expect(document.querySelector("video")!.currentTime).toBe(first);
-    expect(screen.getByText("0 of 2 sections checked")).toBeInTheDocument();
+    expect(screen.getByText("0 of 2 matches checked")).toBeInTheDocument();
     expect(props.onApply).not.toHaveBeenCalled();
   });
 
@@ -127,11 +129,12 @@ describe("still-frame scene tracking review", () => {
     fireEvent.click(screen.getByRole("button", {name: "Show another frame"}));
     const frameTime = loadedFrame().currentTime;
     fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
+    fireEvent.click(screen.getByRole("button", {name: "Next scene"}));
     loadedFrame();
     fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
-    fireEvent.click(screen.getByRole("button", {name: "Section 1, checked"}));
+    fireEvent.click(screen.getByRole("button", {name: "Scene 1, checked"}));
     expect(loadedFrame().currentTime).toBe(frameTime);
-    fireEvent.click(screen.getByRole("button", {name: "Section 1, checked"}));
+    fireEvent.click(screen.getByRole("button", {name: "Scene 1, checked"}));
     expect(screen.getByRole("button", {name: "Not in this scene"})).toBeEnabled();
     fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
     fireEvent.click(screen.getByRole("button", {name: "Apply matches"}));
@@ -143,7 +146,7 @@ describe("still-frame scene tracking review", () => {
     const {rerender} = render(<SceneTrackingReview {...props} />);
     expect(screen.getByRole("button", {name: "Not in this scene"})).toBeDisabled();
     fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
-    expect(screen.getByText("0 of 2 sections checked")).toBeInTheDocument();
+    expect(screen.getByText("0 of 2 matches checked")).toBeInTheDocument();
     fireEvent.error(document.querySelector("video")!);
     fireEvent.click(screen.getByRole("button", {name: "Refresh preview"}));
     expect(props.onRefresh).toHaveBeenCalledOnce();
@@ -152,7 +155,7 @@ describe("still-frame scene tracking review", () => {
     rerender(<SceneTrackingReview {...props} busy />);
     expect(screen.getByRole("button", {name: "Show another frame"})).toBeDisabled();
     expect(screen.getByRole("button", {name: "Not in this scene"})).toBeDisabled();
-    expect(screen.getByRole("button", {name: /Section 2, needs checking/})).toBeDisabled();
+    expect(screen.getByRole("button", {name: /Scene 2, needs checking/})).toBeDisabled();
   });
 
   it("returns to a rejected section while preserving all saved choices", () => {
@@ -160,11 +163,12 @@ describe("still-frame scene tracking review", () => {
     const {rerender} = render(<SceneTrackingReview {...props} />);
     loadedFrame();
     fireEvent.click(screen.getByRole("button", {name: "Not in this scene"}));
-    expect(screen.getByRole("heading", {name: "Section 2 of 2"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Next scene"}));
+    expect(screen.getByRole("heading", {name: "Scene 2 of 2"})).toBeInTheDocument();
     rerender(<SceneTrackingReview {...props} errorSegmentId="cut" />);
-    expect(screen.getByRole("heading", {name: "Section 1 of 2"})).toHaveFocus();
+    expect(screen.getByRole("heading", {name: "Scene 1 of 2"})).toHaveFocus();
     expect(screen.getByText(/That selection missed a detected person/)).toBeInTheDocument();
-    expect(screen.getByText("1 of 2 sections checked")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 matches checked")).toBeInTheDocument();
   });
 
   it("restores saved matches and shows the stored chosen frame after an interrupted rebuild", () => {
@@ -173,7 +177,7 @@ describe("still-frame scene tracking review", () => {
       {segment_id: "cut", absent: false, anchor: {x: 0.5, y: 0.4, time: 2.1}},
       {segment_id: "gap", absent: true, anchor: null},
     ]} />);
-    expect(screen.getByText("2 of 2 sections checked")).toBeInTheDocument();
+    expect(screen.getByText("2 of 2 matches checked")).toBeInTheDocument();
     expect(screen.getByText(/Guide preparation did not finish/)).toBeInTheDocument();
     expect(loadedFrame().currentTime).toBe(reviewFrameTime(Math.floor(2.1 * 24)));
     expect(screen.getByLabelText("Selected person marker")).toBeInTheDocument();

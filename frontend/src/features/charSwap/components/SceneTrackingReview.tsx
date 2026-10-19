@@ -19,6 +19,7 @@ import type {
 } from "../services/livePipeline";
 import { formatTime } from "../utils/videoGeometry";
 import { reviewFrameNumbers } from "../utils/trackingReviewFrames";
+import { sceneReviewGroups } from "../utils/sceneReviewGroups";
 import { PersonBadge } from "./PersonBadge";
 import { SceneReviewFrame } from "./SceneReviewFrame";
 import { PANEL } from "./stepStyles";
@@ -71,7 +72,8 @@ export function SceneTrackingReview({
   onApply,
   onRefresh,
 }: SceneTrackingReviewProps) {
-  const sections = segments.filter((segment) => segment.needs_review);
+  const scenes = sceneReviewGroups(segments, (targets.length ? targets : [fallbackTarget]).map((person) => person.id));
+  const sections = scenes.flatMap((scene) => scene.sections);
   const [navigation, setNavigation] = useState<{
     index: number;
     acknowledgedError: string | null;
@@ -121,6 +123,9 @@ export function SceneTrackingReview({
     ?? (active.target_id ? {...fallbackTarget, id: active.target_id, name: active.target_name ?? fallbackTarget.name} : fallbackTarget);
   const reference = references.find((assignment) => assignment.targetId === target.id)?.asset;
   const multiplePeople = targets.length > 1;
+  const sceneIndex = scenes.findIndex((scene) => scene.sections.some((section) => section.id === active.id));
+  const scene = scenes[sceneIndex];
+  const personChecks = scene.sections.filter((section) => (section.target_id ?? fallbackTarget.id) === target.id);
 
   const choice = choices[active.id];
   const frameNumbers = reviewFrameNumbers(active, choice?.anchor?.time);
@@ -131,11 +136,17 @@ export function SceneTrackingReview({
   const frameIndex = frameNumbers.indexOf(frame);
   const showingDetectedPeople = Boolean(trackingUrl) && !showOriginal;
   const previewUrl = showingDetectedPeople ? trackingUrl! : sourceUrl;
-  const frameIdentity = `${active.id}:${previewUrl}:${frame}`;
+  const imageUrl = frame === Math.floor(active.seek_time * 24 + 1e-7)
+    ? showingDetectedPeople ? active.tracking_thumbnail_url : active.thumbnail_url : undefined;
+  const frameIdentity = `${active.id}:${previewUrl}:${frame}:${imageUrl ?? ""}`;
   const ready = readyFrame === frameIdentity;
   const failed = failedFrame === frameIdentity;
   const completed = sections.filter((section) => choices[section.id]).length;
   const allChosen = completed === sections.length;
+  const next = sections[activeIndex + 1];
+  const nextInScene = next && scene.sections.some((section) => section.id === next.id);
+  const nextName = next?.target_name ?? targets.find((person) => person.id === next?.target_id)?.name ?? fallbackTarget.name;
+  const nextLabel = nextInScene ? nextName === target.name ? "Next check" : `Next: ${nextName}` : "Next scene";
   const selectedPoint =
     choice?.anchor && Math.floor(choice.anchor.time * 24 + 1e-7) === frame
       ? choice.anchor
@@ -144,36 +155,14 @@ export function SceneTrackingReview({
   function choose(next: TrackingReviewChoice) {
     const updated = { ...choices, [next.segment_id]: next };
     setChoices(updated);
-    const later = sections.findIndex(
-      (section, index) => index > activeIndex && !updated[section.id],
-    );
-    const nextIndex =
-      later >= 0
-        ? later
-        : sections.findIndex((section) => !updated[section.id]);
-    if (nextIndex >= 0) {
-      setNavigation({
-        index: nextIndex,
-        acknowledgedError: errorSegmentId ?? null,
-      });
-      setAnnouncement(`Choice saved. Section ${nextIndex + 1} is next.`);
-    } else {
-      setNavigation({
-        index: activeIndex,
-        acknowledgedError: errorSegmentId ?? null,
-      });
-      setAnnouncement(
-        "All sections checked. You can apply your matches or revisit any section.",
-      );
-    }
+    setNavigation({index: activeIndex, acknowledgedError: errorSegmentId ?? null});
+    setAnnouncement(next.absent ? `${target.name} marked not visible.` : `${target.name} selected. You can change the point before continuing.`);
   }
 
   return (
     <Stack spacing={2.5}>
       <Alert severity="info" role="note">
-        {message ??
-          "Tap your person in each image, or choose Not in this scene."}{" "}
-        Generation has not started.
+        {message ?? "Choose each person in the scene, then continue to the next scene."}
       </Alert>
       <Box sx={PANEL}>
         <Stack
@@ -193,7 +182,7 @@ export function SceneTrackingReview({
           </Stack>}
           <Box sx={{ minWidth: { sm: 160 } }}>
             <Typography variant="body2" sx={{ mb: 1 }} aria-live="polite">
-              {completed} of {sections.length} sections checked
+              {completed} of {sections.length} matches checked
             </Typography>
             <LinearProgress
               variant="determinate"
@@ -205,18 +194,22 @@ export function SceneTrackingReview({
       </Box>
       <Box
         component="nav"
-        aria-label="Sections to check"
+        aria-label="Scenes to check"
         sx={{ display: "flex", gap: 1, overflowX: "auto", pb: 0.5 }}
       >
-        {sections.map((section, index) => (
+        {scenes.map((item, index) => {
+          const checked = item.sections.every((section) => choices[section.id]);
+          const first = item.sections.find((section) => !choices[section.id]) ?? item.sections[0];
+          const thumbnail = item.sections.find((section) => section.thumbnail_url)?.thumbnail_url;
+          return (
           <ButtonBase
-            key={section.id}
+            key={item.id}
             disabled={busy}
-            aria-current={index === activeIndex ? "step" : undefined}
-            aria-label={`${multiplePeople ? `${section.target_name ?? targets.find((person) => person.id === section.target_id)?.name ?? "Person"}, ` : ""}Section ${index + 1}${choices[section.id] ? ", checked" : ", needs checking"}`}
+            aria-current={index === sceneIndex ? "step" : undefined}
+            aria-label={`Scene ${index + 1}, ${checked ? "checked" : "needs checking"}`}
             onClick={() =>
               setNavigation({
-                index,
+                index: sections.findIndex((section) => section.id === first.id),
                 acknowledgedError: errorSegmentId ?? null,
               })
             }
@@ -230,22 +223,22 @@ export function SceneTrackingReview({
               overflow: "hidden",
               minHeight: 44,
               bgcolor:
-                index === activeIndex ? "action.selected" : "background.paper",
-              color: index === activeIndex ? "primary.main" : "text.secondary",
+                index === sceneIndex ? "action.selected" : "background.paper",
+              color: index === sceneIndex ? "primary.main" : "text.secondary",
               border: "1px solid",
               borderColor:
-                index === activeIndex ? "primary.main" : "transparent",
+                index === sceneIndex ? "primary.main" : "divider",
             }}
           >
-            {section.thumbnail_url ? <Box component="img" src={section.thumbnail_url} loading="lazy" alt=""
-              sx={{ width: "100%", height: 80, objectFit: "contain", bgcolor: "#0d0f12" }} />
+            {thumbnail ? <Box component="img" src={thumbnail} loading="lazy" alt=""
+              sx={{ width: "100%", height: 94, objectFit: "contain", bgcolor: "#0d0f12" }} />
               : <Box sx={{ height: 60, display: "grid", placeItems: "center", bgcolor: "action.hover" }}><Typography variant="caption">Scene {index + 1}</Typography></Box>}
             <Stack direction="row" spacing={0.5} alignItems="center" sx={{ p: 1 }}>
-              {choices[section.id] && <CheckRounded sx={{ fontSize: 16 }} />}
-              <Typography variant="caption">{multiplePeople ? `${section.target_name ?? "Person"} · ` : ""}{formatTime(section.start)}–{formatTime(section.end)}</Typography>
+              {checked && <CheckRounded sx={{ fontSize: 16 }} />}
+              <Typography variant="caption">Scene {index + 1} · {formatTime(item.start)}–{formatTime(item.end)}</Typography>
             </Stack>
           </ButtonBase>
-        ))}
+        );})}
       </Box>
       <Typography
         role="status"
@@ -254,7 +247,7 @@ export function SceneTrackingReview({
         sx={{ minHeight: 20 }}
       >
         {announcement ||
-          "Tap a person to save and move to the next unchecked section."}
+          "Select a person, then use Next to continue."}
       </Typography>
       <Box sx={PANEL}>
         <Typography
@@ -264,9 +257,23 @@ export function SceneTrackingReview({
           ref={sectionHeading}
           sx={{ outline: "none", scrollMarginTop: 20 }}
         >
-          Section {activeIndex + 1} of {sections.length}
+          Scene {sceneIndex + 1} of {scenes.length}
           {multiplePeople && ` · ${target.name}`}
         </Typography>
+        {multiplePeople && <Stack component="nav" aria-label="People in this scene" direction="row" spacing={1} sx={{mt: 2, flexWrap: "wrap", gap: 1}}>
+          {targets.map((person) => {
+            const checks = scene.sections.filter((section) => section.target_id === person.id);
+            if (!checks.length) return null;
+            const first = checks.find((section) => !choices[section.id]) ?? checks[0];
+            return <Button key={person.id} disabled={busy} aria-pressed={person.id === target.id}
+              variant={person.id === target.id ? "contained" : "outlined"}
+              startIcon={checks.every((section) => choices[section.id]) ? <CheckRounded /> : undefined}
+              onClick={() => setNavigation({index: sections.findIndex((section) => section.id === first.id), acknowledgedError: errorSegmentId ?? null})}>{person.name}</Button>;
+          })}
+        </Stack>}
+        {personChecks.length > 1 && <Typography variant="body2" sx={{mt: 1}}>
+          Tracking check {personChecks.findIndex((section) => section.id === active.id) + 1} of {personChecks.length} for {target.name} in this scene.
+        </Typography>}
         <Typography
           color="text.secondary"
           variant="body2"
@@ -308,6 +315,7 @@ export function SceneTrackingReview({
         <SceneReviewFrame
           key={frameIdentity}
           url={previewUrl}
+          imageUrl={imageUrl}
           frame={frame}
           width={width}
           height={height}
@@ -366,6 +374,8 @@ export function SceneTrackingReview({
           >
             Not in this scene
           </Button>
+          {next && <Button variant="contained" disabled={busy || !choice || failed}
+            onClick={() => {setNavigation({index: activeIndex + 1, acknowledgedError: errorSegmentId ?? null}); setAnnouncement("");}}>{nextLabel}</Button>}
         </Stack>
         {failed && (
           <Button sx={{ mt: 1 }} onClick={onRefresh}>
@@ -375,8 +385,7 @@ export function SceneTrackingReview({
       </Box>
       {allChosen && (
         <Alert severity="success">
-          All sections checked. Apply your matches to {enhancedMasking ? "rebuild the guide" : "save your scene selections"}, or tap
-          a checked section to change it.
+          All scenes checked. Apply your matches, or revisit a scene to make changes.
         </Alert>
       )}
       <Typography variant="body2" color="text.secondary">

@@ -203,6 +203,7 @@ export function CharSwapWalkthrough({
   const manualPreparation = live && !easyMode && step !== "generation" && Boolean(
     pipeline.preparationProgress || ["queued", "preparing"].includes(pipeline.job?.status ?? ""),
   );
+  const sceneReviewActive = live && step === "matches" && pipeline.job?.status === "tracking_review";
   const displayedPreparation = pipeline.preparationProgress ?? (manualPreparation ? {
     phase: pipeline.job?.status === "queued" ? "queued" as const : "preparing" as const,
     message: pipeline.job?.message ?? "Preparing the scenes for your review…",
@@ -433,7 +434,7 @@ export function CharSwapWalkthrough({
           : canGoTo(!easyMode && item === "matches" && !pipeline.job ? "review" : item)}
         onVisit={(item) => visit(!easyMode && item === "matches" && !pipeline.job ? "review" : item)} />
       {step !== "generation" && renderCanContinueInLibrary && (
-        <Alert severity="success" sx={{ mb: 2 }} action={manualPreparation ? undefined : <Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
+        <Alert severity="success" sx={{ mb: 2 }} action={manualPreparation || sceneReviewActive ? undefined : <Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
           {!easyMode && !replaceAllPeople && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
             ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
             : "Your upload is saved. You can safely close this tab and see progress in your Library."}
@@ -481,7 +482,7 @@ export function CharSwapWalkthrough({
                     : step === "review" && !easyMode && !trackingReady ? "Prepare your clip, then confirm your people in each scene before generating." : STEP_INFO[step].description}
                 </Typography>
               </Box>
-              {clip && (
+              {clip && !sceneReviewActive && (
                 <Button
                   size="small"
                   disabled={Boolean(locked && !renderCanContinueInLibrary)}
@@ -563,6 +564,7 @@ export function CharSwapWalkthrough({
             {step === "references" && (
               <ReferencesStep
                 demo={demo}
+                cleanupEnabled={live && pipeline.referenceCleanupAvailable}
                 pendingIds={assets.pendingReferences}
                 onImport={(id, file) => {
                   if (file.size > 5 * 1024 * 1024) {
@@ -673,7 +675,7 @@ export function CharSwapWalkthrough({
               />
             )}
           </Box>}
-          {step !== "generation" && !manualPreparation && (
+          {step !== "generation" && !manualPreparation && !sceneReviewActive && (
             <Box
               component="footer"
               sx={{

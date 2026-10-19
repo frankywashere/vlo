@@ -19,10 +19,10 @@ const STATUS_LABELS: Record<AccountJob["status"], string> = {
   queued: "In queue",
   preparing: "Preparing",
   tracking_review: "Needs attention",
-  ready: "Ready to generate",
+  ready: "Waiting for approval",
   generating: "Generating",
   finalizing: "Finishing",
-  completed: "Ready",
+  completed: "Complete",
   failed: "Failed",
   expired: "Expired",
   submission_unknown: "Checking submission",
@@ -31,9 +31,10 @@ interface GenerationCardProps {
   job: AccountJob;
   onOpen: () => void;
   onRemove: () => void;
+  removing?: boolean;
 }
 
-export function GenerationCard({ job, onOpen, onRemove }: GenerationCardProps) {
+export function GenerationCard({ job, onOpen, onRemove, removing = false }: GenerationCardProps) {
   const download = useVideoDownload();
   const [previewFailed, setPreviewFailed] = useState(false);
   const running = isGenerationRunning(job);
@@ -237,10 +238,11 @@ export function GenerationCard({ job, onOpen, onRemove }: GenerationCardProps) {
             <Button
               color="inherit"
               size="small"
+              disabled={removing}
               onClick={onRemove}
               sx={{ px: 0, minWidth: 0, color: "text.secondary" }}
             >
-              Remove
+              {removing ? "Removing…" : "Remove"}
             </Button>
           )}
         </Stack>

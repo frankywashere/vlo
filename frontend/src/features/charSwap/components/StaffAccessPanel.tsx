@@ -6,7 +6,7 @@ import type { StaffAccess, StaffPermission } from "../services/commerce";
 const OPTIONS: [StaffPermission, string][] = [
   ["pricing", "Edit prices and credit packs"], ["grant_credits", "Grant user credits"],
   ["manage_staff", "Manage staff permissions"], ["service_controls", "Change payment and generation switches"],
-  ["pipeline_settings", "Change audio processing settings"], ["provider_key", "Replace the system API key"],
+  ["pipeline_settings", "Change audio and preparation routing settings"], ["provider_key", "Replace system and Replicate API keys"],
   ["api_key_access", "Enable personal API-key access for users"],
 ];
 

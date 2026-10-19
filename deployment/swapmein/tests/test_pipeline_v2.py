@@ -63,7 +63,7 @@ def image_at(archive_bytes, index=24):
 
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
-            background_tap=False, no_people=False):
+            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -109,7 +109,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         labels = image_at(masks.read_bytes())
         assert labels.shape == (checked["height"], checked["width"])
         previews.append(set(np.unique(labels)))
-        output.write_bytes(b"selection-preview")
+        shutil.copyfile(source, output)  # Keep the mocked preview decodable for exact still extraction.
     monkeypatch.setattr("swapmein.pipeline.create_selection_preview", selection_preview)
     originals = []
     def original_guide(source, vocals, output, checked):
@@ -120,7 +120,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
     class Records:
         def __init__(self):
             self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/upload.bin",
-                               "setup": options, "audio_processing": audio_processing},
+                               "setup": options, "audio_processing": audio_processing,
+                               "preparation_provider": preparation_provider},
                 "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
         def read(self, key):
             return copy.deepcopy(self.data.get(key)), 1
@@ -131,7 +132,12 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         shutdown_verified = True
         def __init__(self):
             self.calls, self.enqueued, self.copies, self.uploads = [], [], [], []
+            self.cap_checks = 0
             self.objects = {"gs://app/upload.bin": media["working"].read_bytes()}
+        def check_cap(self):
+            self.cap_checks += 1
+            if not spending_protected:
+                raise PublicError("Google processing spending protection could not be verified.", 503)
         def enqueue(self, kind, queued_id):
             self.enqueued.append((kind, queued_id))
         def download(self, uri, destination, *_):
@@ -168,8 +174,93 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                 return {}
             yield invoke
     records, cloud = Records(), Cloud()
+    cloud.replicate_calls = []
+    class HostedPreparation:
+        def __init__(self, saved_records, saved_cloud, job):
+            assert enhanced and saved_records is records and saved_cloud is cloud
+            assert job["preparation_provider"] == "replicate"
+        def prepare(self, root, checked, sam_metadata, source_uri, sam_uri, remaining):
+            assert cloud.objects[source_uri] == media["working"].read_bytes()
+            assert cloud.objects[sam_uri] == media["sam"].read_bytes()
+            assert cloud.objects[sam_uri] != media["depth"].read_bytes()
+            assert checked["frames"] == sam_metadata["frames"] == 96
+            cloud.replicate_calls.append((source_uri, sam_uri))
+            return {"depth_uri": cloud.worker_output({}, "hosted-depth", "depth.mp4"),
+                    "masks_uri": cloud.worker_output({}, "hosted-sam", "masks.zip")}
+    monkeypatch.setattr("swapmein.pipeline.ReplicatePreparation", HostedPreparation)
     Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud).prepare(job_id)
     return records.data[path], cloud, sam_inputs, previews, originals
+
+
+@pytest.mark.parametrize("easy", [False, True])
+@pytest.mark.parametrize("enhanced", [False, True])
+@pytest.mark.parametrize("selection", ["single", "multi", "all"])
+@pytest.mark.parametrize("audio_processing", [False, True])
+def test_replicate_routing_preserves_each_mode_without_starting_our_gpu(monkeypatch, media, easy, enhanced, selection, audio_processing):
+    job, cloud, sam_inputs, previews, originals = harness(monkeypatch, media, easy=easy,
+        enhanced=enhanced, selection=selection, audio_processing=audio_processing, preparation_provider="replicate")
+    review = not easy and selection != "all"
+    assert job["status"] == ("tracking_review" if review else "ready"), job.get("message")
+    assert job["preparation_provider"] == "replicate"
+    assert not [kind for kind, _, _ in cloud.calls if kind == "gpu"]
+    assert len(cloud.replicate_calls) == (1 if enhanced else 0)
+    assert cloud.cap_checks == (1 if enhanced else 0)
+    assert sam_inputs == (["normalized.mp4"] if enhanced else [])
+    assert cloud.enqueued == ([("generate", job["id"])] if easy else [])
+    assert sum(endpoint == "/benchmark" for _, endpoint, _ in cloud.calls) == (1 if audio_processing else 0)
+    if not enhanced:
+        assert not job["tracking_performed"] and not previews
+        return
+    assert previews and job["tracking_performed"]
+    compose = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]
+    assert len(compose) == (0 if review else 1)
+    if review:
+        assert job["tracking_depth_uri"] in cloud.objects and job["tracking_masks_uri"] in cloud.objects
+        assert job["tracking_vocals_uri"] in cloud.objects
+        assert set(np.unique(image_at(cloud.objects[job["tracking_masks_uri"]]))) == {0, 7, 40000}
+    else:
+        pixels = set(np.unique(image_at(cloud.objects[compose[0]["masks_uri"]])))
+        assert pixels == ({0, 1, 2} if selection == "multi" else {0, 1} if selection == "all" else {0, 7, 40000})
+        assert compose[0]["selected_label"] == (7 if selection == "single" else 1)
+        assert ("target_styles" in compose[0]) is (selection == "multi")
+    if selection == "all":
+        assert job["all_people_detection"] and "tracking_plan" not in job
+
+
+def test_replicate_preflight_rejects_unprotected_composition_before_paying_for_inference(monkeypatch, media):
+    job, cloud, sam_inputs, _, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+        selection="single", audio_processing=False, preparation_provider="replicate", spending_protected=False)
+    assert job["status"] == "failed" and "spending protection" in job["message"]
+    assert not cloud.replicate_calls and not cloud.calls and not sam_inputs
+
+
+@pytest.mark.parametrize("selection", ["single", "multi"])
+def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_prediction(monkeypatch, media, tmp_path, selection):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=False, enhanced=True,
+        selection=selection, audio_processing=False, preparation_provider="replicate")
+    archive, output = tmp_path / "raw.zip", tmp_path / "reviewed.zip"
+    archive.write_bytes(cloud.objects[job["tracking_masks_uri"]])
+    choices = [{"segment_id": section["id"], "absent": False,
+        "anchor": {"x": .75 if section.get("target_id") == "person-2" else .25,
+                   "y": .5, "time": section["seek_time"]}}
+        for section in job["tracking_plan"]["segments"] if section["needs_review"]]
+    resolver = resolve_multi_tracking if selection == "multi" else resolve_tracking
+    resolved = resolver(archive, job["tracking_metadata"], job["tracking_plan"], choices, output)
+    uri = cloud.upload("workers", "reviewed.zip", output, "application/zip")
+    job.update(status="preparing", reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"], tracking_applied_revision=1)
+    class Records:
+        data = copy.deepcopy(job)
+        def update(self, path, mutation):
+            self.data = mutation(copy.deepcopy(self.data))
+            return copy.deepcopy(self.data)
+    records = Records()
+    pipeline = Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud)
+    pipeline.rebuild_reviewed_guide(job, lambda: 60)
+    assert records.data["status"] == "ready" and records.data["tracking_reviewed"]
+    assert len(cloud.replicate_calls) == 1 and all(kind != "gpu" for kind, _, _ in cloud.calls)
+    compose = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]
+    assert len(compose) == 1 and compose[0]["masks_uri"] == uri
+    assert compose[0]["depth_uri"] == job["tracking_depth_uri"]
 
 
 @pytest.mark.parametrize("easy", [False, True])

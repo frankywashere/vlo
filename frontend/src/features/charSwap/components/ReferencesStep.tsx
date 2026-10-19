@@ -18,11 +18,13 @@ import type { DemoManifest } from "../services/demo";
 import { PersonBadge } from "./PersonBadge";
 import { ReferenceUpload } from "./ReferenceUpload";
 import { PANEL } from "./stepStyles";
+import { ReferenceBackground } from "./ReferenceBackground";
 
 interface ReferencesStepProps {
   demo: DemoManifest | null;
   onImport: (id: string, file: File) => void;
   pendingIds: string[];
+  cleanupEnabled?: boolean;
 }
 
 interface ReferenceCardProps extends ReferencesStepProps {
@@ -42,6 +44,7 @@ function ReferenceCard({
   onImport,
   assignReference,
   clearReference,
+  cleanupEnabled,
 }: ReferenceCardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const pending = pendingIds.includes(person.id);
@@ -125,6 +128,7 @@ function ReferenceCard({
               </IconButton>
             )}
           </Stack>
+          {cleanupEnabled && reference && <ReferenceBackground targetId={person.id} reference={reference} />}
           {demo && (
             <Button
               size="small"
@@ -134,9 +138,9 @@ function ReferenceCard({
               Use sample teddy bear
             </Button>
           )}
-          {references.some((item) => item.id !== reference?.id) && (
+          {references.some((item) => item.id !== reference?.id && !item.cleanup?.pending) && (
             <Stack direction="row" flexWrap="wrap" gap={1}>
-              {references.filter((item) => item.id !== reference?.id).map((item) => (
+              {references.filter((item) => item.id !== reference?.id && !item.cleanup?.pending).map((item) => (
                 <Button
                   key={item.id}
                   size="small"
@@ -170,6 +174,7 @@ export function ReferencesStep({
   demo,
   onImport,
   pendingIds,
+  cleanupEnabled = false,
 }: ReferencesStepProps) {
   const { targets, references, assignments, assignReference, clearReference } =
     useCharSwapStore(
@@ -196,6 +201,7 @@ export function ReferencesStep({
           references={references}
           demo={demo}
           pendingIds={pendingIds}
+          cleanupEnabled={cleanupEnabled}
           onImport={onImport}
           assignReference={assignReference}
           clearReference={clearReference}

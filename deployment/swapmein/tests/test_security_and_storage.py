@@ -11,6 +11,42 @@ from swapmein.errors import PublicError
 from swapmein.security import (check_key_binding, check_owner, check_session, digest,
                                validate_media_url, verify_task_identity)
 from swapmein.storage import Records, check_preparation_capacity, claim_job, release_preparation, reserve_preparation
+from swapmein.storage import account_review_wait
+
+
+def test_review_time_survives_updates_multiple_reviews_and_completion():
+    job = {"status": "preparing", "created_at": 100}
+    job = account_review_wait(job, {**job, "status": "tracking_review"}, 200)
+    assert job["review_paused_at"] == 200
+    job = account_review_wait(job, {**job, "updated_at": 250}, 250)
+    assert job["review_paused_at"] == 200
+    job = account_review_wait(job, {**job, "status": "queued"}, 300)
+    assert job["review_wait_seconds"] == 100 and "review_paused_at" not in job
+    job = account_review_wait(job, {**job, "status": "ready"}, 320)
+    job = account_review_wait(job, {**job, "status": "generating"}, 350)
+    assert job["review_wait_seconds"] == 130 and "review_paused_at" not in job
+    job = account_review_wait(job, {**job, "status": "completed"}, 400)
+    assert job["review_wait_seconds"] == 130
+
+
+def test_older_waiting_jobs_start_pause_from_saved_transition():
+    job = {"status": "tracking_review", "updated_at": 200}
+    paused = account_review_wait(job, {**job, "updated_at": 250}, 250)
+    assert paused["review_paused_at"] == 200
+    resumed = account_review_wait(paused, {**paused, "status": "generating"}, 300)
+    assert resumed["review_wait_seconds"] == 100
+
+
+def test_job_updates_persist_review_accounting_but_other_records_are_unchanged(monkeypatch):
+    records = Records("app", client=SimpleNamespace(bucket=lambda _: object()))
+    monkeypatch.setattr("swapmein.storage.time.time", lambda: 250)
+    monkeypatch.setattr(records, "read", lambda _: ({"status": "preparing"}, 1))
+    written = []
+    monkeypatch.setattr(records, "write", lambda *args: written.append(args))
+    saved = records.update("jobs/proof.json", lambda current: {**current, "status": "tracking_review"})
+    assert saved["review_paused_at"] == 250 and written[-1][1] == saved
+    saved = records.update("control/proof.json", lambda _: {"status": "ready"})
+    assert saved == {"status": "ready"}
 
 
 def test_record_listing_reads_only_one_bounded_gcs_page():

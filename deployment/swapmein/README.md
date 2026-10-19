@@ -6,6 +6,9 @@ providers. Ordinary customers use RecastFX credits and a server-managed provider
 credential. Only accounts explicitly authorized by an owner see personal API-key
 controls. reAPI and ToAPIs adapters remain supported.
 
+For the optional hosted SAM/depth route, see the
+[preparation routing and reference-cleanup runbook](PREPARATION_ROUTING.md).
+
 This runbook describes the source implementation, including the version 2
 preparation and multi-person changes. **It is not evidence that a particular
 revision has been deployed.** Verify the release report, immutable service images,

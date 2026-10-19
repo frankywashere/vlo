@@ -117,6 +117,36 @@ describe("private account library", () => {
     render(<AccountLibrary onCreate={vi.fn()} />);
     await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
     expect(await screen.findByText(/Masking stays off; your positions and timestamps/)).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", {name: "Check scene matches", level: 1})).toBeVisible();
+    await user.click(screen.getAllByRole("button", {name: "Back to Library"})[0]);
+    expect(await screen.findByRole("region", {name: "Your generations"})).toBeVisible();
+  });
+
+  it("shows pending removal, blocks duplicates, and removes locally without another list request", async () => {
+    let finish!: (value: object) => void;
+    vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "completed", output_url: "https://storage.googleapis.com/output.mp4"}]);
+    vi.mocked(setJobHidden).mockImplementation(() => new Promise(resolve => {finish = resolve;}));
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Remove"}));
+    expect(screen.getByRole("button", {name: "Removing…"})).toBeDisabled();
+    expect(setJobHidden).toHaveBeenCalledTimes(1);
+    finish({});
+    expect(await screen.findByText("Removed from your library.")).toBeVisible();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(loadAccountJobs).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a clip visible and re-enables Remove when saving fails", async () => {
+    vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "failed"}]);
+    vi.mocked(setJobHidden).mockRejectedValue(new Error("Could not save removal"));
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Remove"}));
+    expect(await screen.findByText("Could not save removal")).toBeVisible();
+    expect(screen.getByRole("button", {name: "Remove"})).toBeEnabled();
+    expect(screen.getByRole("article")).toBeVisible();
   });
 
   it("requires explicit paid approval and re-entered key before generation; closing clears it", async () => {

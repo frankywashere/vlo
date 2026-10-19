@@ -31,6 +31,7 @@ class Settings:
     shutdown_service_account: str = "proof-shutdown@charswap-franky-20261013.iam.gserviceaccount.com"
     gpu_url: str = ""
     audio_url: str = ""
+    reference_cleanup_url: str = ""
     allowed_origins: tuple[str, ...] = ()
     require_account: bool = False
     # The calendar-month allowance accommodates 100 attempts on all 31 days.
@@ -58,6 +59,7 @@ class Settings:
             shutdown_service_account=os.getenv("SHUTDOWN_SERVICE_ACCOUNT", cls.shutdown_service_account),
             gpu_url=os.getenv("GPU_URL", "").rstrip("/"),
             audio_url=os.getenv("AUDIO_URL", "").rstrip("/"),
+            reference_cleanup_url=os.getenv("REFERENCE_CLEANUP_URL", "").rstrip("/"),
             allowed_origins=tuple(x.strip() for x in os.getenv("ALLOWED_ORIGINS", "").split(",") if x.strip()),
             require_account=os.getenv("REQUIRE_ACCOUNT", "false").lower() == "true",
             monthly_preparations=positive_integer_env("MONTHLY_PREPARATIONS", cls.monthly_preparations),

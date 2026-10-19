@@ -16,6 +16,7 @@ export interface LivePipelineConfig {
   delivery: "native" | "480p";
   beta: "single-person" | "multi-person";
   credits_available?: boolean;
+  reference_cleanup_available?: boolean;
 }
 
 export type LiveJobStatus =
@@ -87,6 +88,8 @@ export interface LivePipelineJob {
   scene_cut_count?: number;
   mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
+  review_wait_seconds?: number;
+  review_paused_at?: number;
   provider_checked_at?: number;
   provider_state?: "queued" | "pending" | "processing" | "running" | "generating" | "unknown";
   estimated_cost_usd?: number;
@@ -104,6 +107,8 @@ export interface SelectionTarget {
 
 export interface TrackingReviewSegment {
   thumbnail_url?: string;
+  tracking_thumbnail_url?: string;
+  scene_index?: number;
   id: string;
   start_frame: number;
   end_frame: number;
@@ -375,6 +380,8 @@ function readJob(value: unknown): LivePipelineJob {
     "estimated_cost_usd",
     "actual_provider_credits",
     "generation_started_at",
+    "review_wait_seconds",
+    "review_paused_at",
     "provider_checked_at",
     "generation_credits",
     "app_credits_charged",
@@ -405,13 +412,16 @@ function readJob(value: unknown): LivePipelineJob {
         Math.abs(segment.start - segment.start_frame / 24) > 1e-6 || Math.abs(segment.end - segment.end_frame / 24) > 1e-6 ||
         (segment.selected_label !== undefined && segment.selected_label !== null && (typeof segment.selected_label !== "number" || !Number.isSafeInteger(segment.selected_label) || segment.selected_label < 1))
         || (segment.target_id !== undefined && (typeof segment.target_id !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(segment.target_id)))
-        || (segment.target_name !== undefined && (typeof segment.target_name !== "string" || segment.target_name.length > 40));
+        || (segment.target_name !== undefined && (typeof segment.target_name !== "string" || segment.target_name.length > 40))
+        || (segment.scene_index !== undefined && (typeof segment.scene_index !== "number" || !Number.isSafeInteger(segment.scene_index) || segment.scene_index < 0 || segment.scene_index >= 360));
     })) throw new LivePipelineError("The service returned an unreadable scene review. Refresh the job before continuing.");
     job.tracking_segments = (segments as TrackingReviewSegment[]).map((segment) => ({
       id: segment.id, start_frame: segment.start_frame, end_frame: segment.end_frame,
       start: segment.start, end: segment.end, seek_time: segment.seek_time,
       reason: segment.reason, needs_review: segment.needs_review,
       ...(typeof segment.thumbnail_url === "string" && isSafeMediaUrl(segment.thumbnail_url) ? {thumbnail_url: segment.thumbnail_url} : {}),
+      ...(typeof segment.tracking_thumbnail_url === "string" && isSafeMediaUrl(segment.tracking_thumbnail_url) ? {tracking_thumbnail_url: segment.tracking_thumbnail_url} : {}),
+      ...(segment.scene_index !== undefined ? {scene_index: segment.scene_index} : {}),
       ...(segment.selected_label !== undefined ? {selected_label: segment.selected_label} : {}),
       ...(segment.target_id !== undefined ? {target_id: segment.target_id} : {}),
       ...(segment.target_name !== undefined ? {target_name: segment.target_name} : {}),
@@ -473,6 +483,7 @@ export async function getLiveConfig(
     delivery: value.delivery,
     beta: value.beta,
     credits_available: value.credits_available === true,
+    reference_cleanup_available: value.reference_cleanup_available === true,
   };
 }
 

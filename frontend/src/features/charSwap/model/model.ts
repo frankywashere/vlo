@@ -31,6 +31,13 @@ export interface ReferenceAsset {
   id: string;
   name: string;
   url: string;
+  cleanup?: {
+    originalUrl: string;
+    cleanedUrl?: string;
+    mode: "original" | "clean";
+    pending?: boolean;
+    error?: string;
+  };
 }
 
 export interface MatchCandidate {
@@ -323,6 +330,9 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       ) {
         return state.replaceAllPeople ? "Add one replacement image for everyone." : "Add a replacement image for each selected person.";
       }
+      if (state.targets.some((target) => state.references.some((reference) =>
+        reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" && reference.cleanup.pending)))
+        return "Wait for background cleanup, or choose Original to continue now.";
       return null;
     case "matches":
     case "review":

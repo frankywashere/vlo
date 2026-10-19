@@ -12,6 +12,28 @@ from .config import Settings
 from .errors import PublicError
 
 
+def account_review_wait(current: dict | None, updated: dict, now: float) -> dict:
+    """Persist review pauses so elapsed time survives tab closes and repeated reviews."""
+    current = current or {}
+    waiting = {"tracking_review", "ready"}
+    paused_at = current.get("review_paused_at")
+    if paused_at is None and current.get("status") in waiting:
+        # Jobs created before pause accounting use the last saved review transition.
+        paused_at = current.get("updated_at", now)
+    total = current.get("review_wait_seconds", 0)
+    if updated.get("status") in waiting:
+        return {**updated, "review_wait_seconds": total,
+                "review_paused_at": paused_at if paused_at is not None else now}
+    if paused_at is not None:
+        total += max(0, now - paused_at)
+    if total or "review_wait_seconds" in current:
+        updated = {**updated, "review_wait_seconds": total}
+    if "review_paused_at" in updated:
+        updated = {**updated}
+        updated.pop("review_paused_at")
+    return updated
+
+
 class Records:
     def __init__(self, bucket_name: str, client=None):
         self.client = client or storage.Client()
@@ -46,6 +68,8 @@ class Records:
             try:
                 current, generation = self.read(path)
                 updated = mutation(current)
+                if path.startswith("jobs/") and isinstance(updated, dict):
+                    updated = account_review_wait(current, updated, time.time())
                 self.write(path, updated, generation)
                 return updated
             except PreconditionFailed:

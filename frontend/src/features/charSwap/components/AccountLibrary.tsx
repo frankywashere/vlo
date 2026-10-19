@@ -5,8 +5,6 @@ import {
   Button,
   CircularProgress,
   Dialog,
-  DialogActions,
-  DialogContent,
   DialogTitle,
   LinearProgress,
   IconButton,
@@ -54,6 +52,10 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const [error, setError] = useState<string | null>(null);
   const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountJob | null>(null);
+  const [reviewPage, setReviewPage] = useState(false);
+  const [visibilityPending, setVisibilityPending] = useState<string[]>([]);
+  const visibilityRequests = useRef(new Set<string>());
+  const hiddenJobs = useRef(new Set<string>());
   const [key, setKey] = useState("");
   const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
   useEffect(() => {
@@ -83,7 +85,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
       if (mounted.current) {
         // Renew links well before their one-hour expiry without restarting a
         // playing video on every status refresh.
-        const result = received.map((job) => {
+        const result = received.filter((job) => !hiddenJobs.current.has(job.id)).map((job) => {
           const previous = mediaCache.current.get(job.id);
           const next = { ...job };
           const now = Date.now();
@@ -190,6 +192,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     if (busy) return;
     setAutoCheck(false);
     setSelected(null);
+    setReviewPage(false);
     setKey("");
     setError(null);
     setTrackingErrorSegmentId(null);
@@ -244,11 +247,17 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   }, [autoCheck, busy, key, selected?.status, selected?.access_mode, act]);
 
   async function hide(job: AccountJob, hidden: boolean) {
+    if (visibilityRequests.current.has(job.id)) return;
+    visibilityRequests.current.add(job.id);
+    setVisibilityPending([...visibilityRequests.current]);
     try {
       await setJobHidden(job.id, hidden);
       if (!mounted.current) return;
+      if (hidden) hiddenJobs.current.add(job.id);
+      else hiddenJobs.current.delete(job.id);
+      setJobs((current) => hidden ? current.filter((item) => item.id !== job.id)
+        : [job, ...current.filter((item) => item.id !== job.id)].sort((a, b) => b.created_at - a.created_at));
       setRemoved(hidden ? job : null);
-      await refresh();
     } catch (cause) {
       if (mounted.current)
         setError(
@@ -256,12 +265,209 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             ? cause.message
             : "This change could not be saved.",
         );
+    } finally {
+      visibilityRequests.current.delete(job.id);
+      if (mounted.current) setVisibilityPending([...visibilityRequests.current]);
     }
   }
   const selectedTargets = selected?.selection_targets?.map((target, index) => ({ ...target,
     color: target.color ?? TARGET_COLORS[index % TARGET_COLORS.length] })) ?? [];
   const selectedReferences = selected?.reference_urls ?? (selected?.reference_url ? [selected.reference_url] : []);
   const processingCount = jobs.filter(isGenerationRunning).length;
+  const details = (<>
+        <Box sx={{px: reviewPage ? 0 : 3, pb: reviewPage ? 0 : 2}}>
+          <Stack spacing={2}>
+            <Typography>{selected?.message}</Typography>
+            {checkingRecovery && <LinearProgress aria-label="Checking saved files" />}
+            {recovery && <Alert severity={recovery.action === "support" ? "warning" : "info"}>
+              {recovery.message}
+              {recovery.action === "retry" && <>
+                <br />{recovery.source_url ? "Your source clip is available." : "Your source clip has expired; upload it again."}
+                <br />{(recovery.reference_urls ?? []).filter(Boolean).length} reference images available. Missing references will be marked for upload.
+                <br />{recovery.credits_charged ? `${recovery.credits_charged} credits charged; ${recovery.credits_returned ?? 0} credits returned.` : "No generation credits were charged."}
+              </>}
+            </Alert>}
+            {selected && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used} /></>}
+            {selected?.guide_url && !selected.easy_mode && (
+              <Box
+                component="video"
+                controls
+                playsInline
+                src={selected.guide_url}
+                aria-label="Prepared guide"
+                sx={{ width: "100%", maxHeight: 420, bgcolor: "#211e1d" }}
+              />
+            )}
+            {selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
+              {selectedTargets.map((target) => <Stack key={target.id} spacing={0.5} sx={{borderLeft: `3px solid ${target.color}`, pl: 1}}>
+                <Typography fontWeight={600}>{target.name}</Typography>
+                {selectedReferences[target.reference_index] && <Box component="img" src={selectedReferences[target.reference_index]}
+                  alt={`${target.name} replacement reference`} sx={{width: 112, height: 112, objectFit: "contain"}} />}
+              </Stack>)}
+            </Stack> : selected?.reference_url && (
+              <Box
+                component="img"
+                src={selected.reference_url}
+                alt="Replacement reference"
+                sx={{ maxWidth: 160, maxHeight: 160, objectFit: "contain" }}
+              />
+            )}
+            {selected?.status === "ready" && (
+              <Alert severity="info">
+                {selected.easy_mode
+                  ? "Easy mode has prepared your clip. Continuing starts a paid generation"
+                  : "Review the guide and reference. Approving below starts a paid generation"}{" "}
+                using your{" "}
+                {selected.access_mode === "credits"
+                  ? "recastfx credits"
+                  : apiKeyAllowed
+                    ? `${selected.provider} balance`
+                    : "account balance"}
+                {selected.estimated_cost_usd !== undefined
+                  ? ` (estimated US$${selected.estimated_cost_usd.toFixed(2)})`
+                  : ""}
+                .
+              </Alert>
+            )}
+            {apiKeyAllowed &&
+              selected?.access_mode !== "credits" &&
+              selected &&
+              ["ready", "generating", "tracking_review"].includes(
+                selected.status,
+              ) && (
+                <TextField
+                  label={`${selected.provider ?? "reAPI"} API key`}
+                  type="password"
+                  value={key}
+                  onChange={(event) => setKey(event.target.value)}
+                  autoComplete="off"
+                  helperText="Use the same key as this job. Kept only while this page is open."
+                  disabled={busy}
+                />
+              )}
+            {selected?.status === "submission_unknown" && (
+              <Alert severity="warning">
+                The provider may have received this request. Check your provider
+                task history before starting another generation. This job will
+                not be resubmitted automatically.
+              </Alert>
+            )}
+            {selected?.status === "tracking_review" &&
+              selected.source_preview_url && (
+                <SceneTrackingReview
+                  enhancedMasking={selected.mask_style !== "none"}
+                  sourceUrl={selected.source_preview_url}
+                  trackingUrl={selected.tracking_url}
+                  segments={selected.tracking_segments ?? []}
+                  target={{
+                    id: "selected",
+                    name: "Selected person",
+                    color: "#06b6d4",
+                    anchor: { x: 0.5, y: 0.5, time: 0 },
+                  }}
+                  targets={selectedTargets}
+                  references={selectedTargets.map((target) => ({targetId: target.id,
+                    asset: selectedReferences[target.reference_index] ? {id: `reference-${target.reference_index}`,
+                      name: `Reference ${target.reference_index + 1}`, url: selectedReferences[target.reference_index]} : undefined}))}
+                  duration={selected.duration ?? 0}
+                  width={selected.width ?? 854}
+                  height={selected.height ?? 480}
+                  busy={
+                    busy ||
+                    (selected.access_mode !== "credits" &&
+                      (!apiKeyAllowed || !key.trim()))
+                  }
+                  initialChoices={selected.tracking_choices}
+                  errorSegmentId={trackingErrorSegmentId}
+                  errorMessage={error}
+                  onRefresh={() => void refresh()}
+                  onApply={async (choices) => {
+                    setBusy(true);
+                    setError(null);
+                    setTrackingErrorSegmentId(null);
+                    controller.current = new AbortController();
+                    try {
+                      const session = await resumeAccountJob(selected.id, key);
+                      const result = await resolveLiveTracking(
+                        selected.id,
+                        session.token,
+                        selected.tracking_revision ?? 0,
+                        choices,
+                        controller.current.signal,
+                      );
+                      if (mounted.current) {
+                        setSelected({ ...selected, ...result });
+                        await refresh();
+                      }
+                      return true;
+                    } catch (cause) {
+                      if (cause instanceof Error && "segmentId" in cause && typeof cause.segmentId === "string"
+                          && selected.tracking_segments?.some((segment) => segment.id === cause.segmentId))
+                        setTrackingErrorSegmentId(cause.segmentId);
+                      if (mounted.current)
+                        setError(
+                          cause instanceof Error
+                            ? cause.message
+                            : "Scene matches could not be saved.",
+                        );
+                      return false;
+                    } finally {
+                      if (mounted.current) setBusy(false);
+                    }
+                  }}
+                />
+              )}
+            {busy && <LinearProgress aria-label="Updating job" />}
+            {error && <Alert severity="error">{error}</Alert>}
+          </Stack>
+        </Box>
+        <Stack direction="row" spacing={1} sx={{mt: 3, p: reviewPage ? 0 : 1, justifyContent: "flex-end", flexWrap: "wrap"}}>
+          <Button disabled={busy} onClick={close}>
+            {reviewPage ? "Back to Library" : "Close"}
+          </Button>
+          {recovery && (recovery.action === "save" || recovery.action === "retry" && onRetry) && (
+            <Button variant="contained" disabled={busy || checkingRecovery || retryDisabled} onClick={() => void recoverJob()}>
+              {recovery.action === "save" ? "Retry saving video" : recovery.source_url && recovery.reference_urls?.every(Boolean)
+                ? "Review and retry" : "Upload files to retry"}
+            </Button>
+          )}
+          {selected?.status === "generating" && (
+            <Button
+              disabled={
+                busy ||
+                (selected.access_mode !== "credits" &&
+                  (!apiKeyAllowed || !key.trim()))
+              }
+              onClick={() => void act(false)}
+            >
+              Refresh status
+            </Button>
+          )}
+          {selected?.status === "ready" && (
+            <Button
+              variant="contained"
+              disabled={
+                busy ||
+                (selected.access_mode !== "credits" &&
+                  (!apiKeyAllowed || !key.trim()))
+              }
+              onClick={() => void act(true)}
+            >
+              {selected.easy_mode
+                ? "Continue generation"
+                : "Approve and generate"}
+            </Button>
+          )}
+        </Stack>
+  </>);
+  if (reviewPage && selected) return (
+    <Box component="main" sx={{maxWidth: 1120, mx: "auto", px: {xs: 2, md: 5}, py: 4}}>
+      <Button onClick={close} disabled={busy} sx={{mb: 2}}>Back to Library</Button>
+      <Typography component="h1" variant="h3" sx={{mb: 1}}>{selected.status === "tracking_review" ? "Check scene matches" : selected.status === "ready" ? "Review prepared clip" : "Your recast"}</Typography>
+      <Typography color="text.secondary" sx={{mb: 3}}>{selected.title}</Typography>
+      {details}
+    </Box>
+  );
   return (
     <Box
       component="main"
@@ -354,7 +560,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
         <Alert
           severity="success"
           action={
-            <Button onClick={() => void hide(removed, false)}>Undo</Button>
+            <Button disabled={visibilityPending.includes(removed.id)} onClick={() => void hide(removed, false)}>Undo</Button>
           }
           sx={{ mb: 2 }}
         >
@@ -401,9 +607,11 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
               job={job}
               onOpen={() => {
                 setKey("");
+                setReviewPage(job.status === "tracking_review");
                 setSelected(job);
                 setError(null);
               }}
+              removing={visibilityPending.includes(job.id)}
               onRemove={() => void hide(job, true)}
             />
           ))}
@@ -411,190 +619,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
       )}
       <Dialog open={!!selected} onClose={close} maxWidth="md" fullWidth>
         <DialogTitle>{selected?.title}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2}>
-            <Typography>{selected?.message}</Typography>
-            {checkingRecovery && <LinearProgress aria-label="Checking saved files" />}
-            {recovery && <Alert severity={recovery.action === "support" ? "warning" : "info"}>
-              {recovery.message}
-              {recovery.action === "retry" && <>
-                <br />{recovery.source_url ? "Your source clip is available." : "Your source clip has expired; upload it again."}
-                <br />{(recovery.reference_urls ?? []).filter(Boolean).length} reference images available. Missing references will be marked for upload.
-                <br />{recovery.credits_charged ? `${recovery.credits_charged} credits charged; ${recovery.credits_returned ?? 0} credits returned.` : "No generation credits were charged."}
-              </>}
-            </Alert>}
-            {selected && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used} /></>}
-            {selected?.guide_url && !selected.easy_mode && (
-              <Box
-                component="video"
-                controls
-                playsInline
-                src={selected.guide_url}
-                aria-label="Prepared guide"
-                sx={{ width: "100%", maxHeight: 420, bgcolor: "#211e1d" }}
-              />
-            )}
-            {selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
-              {selectedTargets.map((target) => <Stack key={target.id} spacing={0.5} sx={{borderLeft: `3px solid ${target.color}`, pl: 1}}>
-                <Typography fontWeight={600}>{target.name}</Typography>
-                {selectedReferences[target.reference_index] && <Box component="img" src={selectedReferences[target.reference_index]}
-                  alt={`${target.name} replacement reference`} sx={{width: 112, height: 112, objectFit: "contain"}} />}
-              </Stack>)}
-            </Stack> : selected?.reference_url && (
-              <Box
-                component="img"
-                src={selected.reference_url}
-                alt="Replacement reference"
-                sx={{ maxWidth: 160, maxHeight: 160, objectFit: "contain" }}
-              />
-            )}
-            {selected?.status === "ready" && (
-              <Alert severity="info">
-                {selected.easy_mode
-                  ? "Easy mode has prepared your clip. Continuing starts a paid generation"
-                  : "Review the guide and reference. Approving below starts a paid generation"}{" "}
-                using your{" "}
-                {selected.access_mode === "credits"
-                  ? "recastfx credits"
-                  : apiKeyAllowed
-                    ? `${selected.provider} balance`
-                    : "account balance"}
-                {selected.estimated_cost_usd !== undefined
-                  ? ` (estimated US$${selected.estimated_cost_usd.toFixed(2)})`
-                  : ""}
-                .
-              </Alert>
-            )}
-            {apiKeyAllowed &&
-              selected?.access_mode !== "credits" &&
-              selected &&
-              ["ready", "generating", "tracking_review"].includes(
-                selected.status,
-              ) && (
-                <TextField
-                  label={`${selected.provider ?? "reAPI"} API key`}
-                  type="password"
-                  value={key}
-                  onChange={(event) => setKey(event.target.value)}
-                  autoComplete="off"
-                  helperText="Use the same key as this job. Kept only while this dialog is open."
-                  disabled={busy}
-                />
-              )}
-            {selected?.status === "submission_unknown" && (
-              <Alert severity="warning">
-                The provider may have received this request. Check your provider
-                task history before starting another generation. This job will
-                not be resubmitted automatically.
-              </Alert>
-            )}
-            {selected?.status === "tracking_review" &&
-              selected.source_preview_url && (
-                <SceneTrackingReview
-                  enhancedMasking={selected.mask_style !== "none"}
-                  sourceUrl={selected.source_preview_url}
-                  trackingUrl={selected.tracking_url}
-                  segments={selected.tracking_segments ?? []}
-                  target={{
-                    id: "selected",
-                    name: "Selected person",
-                    color: "#06b6d4",
-                    anchor: { x: 0.5, y: 0.5, time: 0 },
-                  }}
-                  targets={selectedTargets}
-                  references={selectedTargets.map((target) => ({targetId: target.id,
-                    asset: selectedReferences[target.reference_index] ? {id: `reference-${target.reference_index}`,
-                      name: `Reference ${target.reference_index + 1}`, url: selectedReferences[target.reference_index]} : undefined}))}
-                  duration={selected.duration ?? 0}
-                  width={selected.width ?? 854}
-                  height={selected.height ?? 480}
-                  busy={
-                    busy ||
-                    (selected.access_mode !== "credits" &&
-                      (!apiKeyAllowed || !key.trim()))
-                  }
-                  initialChoices={selected.tracking_choices}
-                  errorSegmentId={trackingErrorSegmentId}
-                  errorMessage={error}
-                  onRefresh={() => void refresh()}
-                  onApply={async (choices) => {
-                    setBusy(true);
-                    setError(null);
-                    setTrackingErrorSegmentId(null);
-                    controller.current = new AbortController();
-                    try {
-                      const session = await resumeAccountJob(selected.id, key);
-                      const result = await resolveLiveTracking(
-                        selected.id,
-                        session.token,
-                        selected.tracking_revision ?? 0,
-                        choices,
-                        controller.current.signal,
-                      );
-                      if (mounted.current) {
-                        setSelected({ ...selected, ...result });
-                        await refresh();
-                      }
-                      return true;
-                    } catch (cause) {
-                      if (cause instanceof Error && "segmentId" in cause && typeof cause.segmentId === "string"
-                          && selected.tracking_segments?.some((segment) => segment.id === cause.segmentId))
-                        setTrackingErrorSegmentId(cause.segmentId);
-                      if (mounted.current)
-                        setError(
-                          cause instanceof Error
-                            ? cause.message
-                            : "Scene matches could not be saved.",
-                        );
-                      return false;
-                    } finally {
-                      if (mounted.current) setBusy(false);
-                    }
-                  }}
-                />
-              )}
-            {busy && <LinearProgress aria-label="Updating job" />}
-            {error && <Alert severity="error">{error}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button disabled={busy} onClick={close}>
-            Close
-          </Button>
-          {recovery && (recovery.action === "save" || recovery.action === "retry" && onRetry) && (
-            <Button variant="contained" disabled={busy || checkingRecovery || retryDisabled} onClick={() => void recoverJob()}>
-              {recovery.action === "save" ? "Retry saving video" : recovery.source_url && recovery.reference_urls?.every(Boolean)
-                ? "Review and retry" : "Upload files to retry"}
-            </Button>
-          )}
-          {selected?.status === "generating" && (
-            <Button
-              disabled={
-                busy ||
-                (selected.access_mode !== "credits" &&
-                  (!apiKeyAllowed || !key.trim()))
-              }
-              onClick={() => void act(false)}
-            >
-              Refresh status
-            </Button>
-          )}
-          {selected?.status === "ready" && (
-            <Button
-              variant="contained"
-              disabled={
-                busy ||
-                (selected.access_mode !== "credits" &&
-                  (!apiKeyAllowed || !key.trim()))
-              }
-              onClick={() => void act(true)}
-            >
-              {selected.easy_mode
-                ? "Continue generation"
-                : "Approve and generate"}
-            </Button>
-          )}
-        </DialogActions>
+        {details}
       </Dialog>
     </Box>
   );

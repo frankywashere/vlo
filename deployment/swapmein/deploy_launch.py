@@ -20,21 +20,23 @@ ORIGINAL_ORIGINS = [f"https://{deploy.PROJECT}.web.app", f"https://{deploy.PROJE
 RENDER_QUEUE = "recastfx-renders"
 JOB_KEY_SECRET = "recastfx-job-key"
 PROVIDER_KEY_SECRET = "recastfx-provider-key"
+REPLICATE_KEY_SECRET = "recastfx-replicate-key"
 
 
 def ensure_private_provider_secret():
-    existing = deploy.gcloud("secrets", "describe", PROVIDER_KEY_SECRET, optional=True)
-    if not existing:
-        deploy.gcloud("secrets", "create", PROVIDER_KEY_SECRET, "--replication-policy=automatic")
-    for role in ("roles/secretmanager.secretAccessor", "roles/secretmanager.secretVersionAdder"):
-        deploy.gcloud("secrets", "add-iam-policy-binding", PROVIDER_KEY_SECRET,
-                      "--member=" + deploy.MEMBER, "--role=" + role)
+    for secret in (PROVIDER_KEY_SECRET, REPLICATE_KEY_SECRET):
+        existing = deploy.gcloud("secrets", "describe", secret, optional=True)
+        if not existing:
+            deploy.gcloud("secrets", "create", secret, "--replication-policy=automatic")
+        for role in ("roles/secretmanager.secretAccessor", "roles/secretmanager.secretVersionAdder"):
+            deploy.gcloud("secrets", "add-iam-policy-binding", secret,
+                          "--member=" + deploy.MEMBER, "--role=" + role)
 
 
 def runtime_settings(current: dict, live_account: str | None = None):
     env = current.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])
     values = {item["name"]: item["value"] for item in env
-              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID", "COMMERCE_OWNER_EMAILS"} and "value" in item}
+              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID", "COMMERCE_OWNER_EMAILS", "REFERENCE_CLEANUP_URL", "REPLICATE_SECRET_NAME"} and "value" in item}
     bindings = {}
     for item in env:
         ref = item.get("valueFrom", {}).get("secretKeyRef")
@@ -105,6 +107,8 @@ def main():
         "COMMERCE_OWNER_EMAILS": "frank@whipsnapfilms.com",
         "RECASTFX_CHECKOUT_RETURN_ORIGIN": "https://recastfx.com",
         "REAPI_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{PROVIDER_KEY_SECRET}",
+        "REFERENCE_CLEANUP_URL": "https://reference-cleanup-63lqoskl5q-uk.a.run.app",
+        "REPLICATE_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{REPLICATE_KEY_SECRET}",
         **runtime_env,
     }
     project = deploy.gcloud("projects", "describe", deploy.PROJECT)

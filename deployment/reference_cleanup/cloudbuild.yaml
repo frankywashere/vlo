@@ -1,0 +1,10 @@
+steps:
+- name: gcr.io/cloud-builders/docker
+  args: ['build', '-t', '${_IMAGE}', '.']
+images: ['${_IMAGE}']
+substitutions:
+  _IMAGE: us-east4-docker.pkg.dev/charswap-franky-20261013/proof/reference-cleanup:v1
+timeout: 900s
+options:
+  logging: GCS_ONLY
+logsBucket: gs://charswap-franky-20261013-proof/build-logs

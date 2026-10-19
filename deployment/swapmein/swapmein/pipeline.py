@@ -18,6 +18,7 @@ from .tracking import analyze_tracking, analyze_multi_tracking, merge_all_people
 from .tracking_preview import create_selection_preview
 from .accounts import archive_completed, LIBRARY_SECONDS
 from .cleanup import cleanup_completed_media
+from .replicate_preparation import ReplicatePreparation
 
 
 class Pipeline:
@@ -113,25 +114,44 @@ class Pipeline:
                     self.update_job(job_id, message="Preparing depth guidance and detecting all people." if options.replace_all_people
                                     else "Preparing depth guidance and tracking the selected person.")
                     sam_run = "sm-sam-" + job_id
-                    with self.cloud.worker("gpu") as invoke:
-                        if options.preparation_version >= 2:
-                            depth_run = "sm-depth-" + job_id
-                            depth_result = invoke("/benchmark", {"input_uri": source_uri, "run_id": depth_run, "operation": "depth"}, remaining())
-                            depth_uri = self.cloud.worker_output(depth_result, depth_run, "depth.mp4")
-                            sam_input = root / "sam-input.mp4"
-                            # Detect people in the same RGB footage the user selected.
-                            # Depth stays at guide resolution for the later compositor.
-                            sam_metadata = sam_input_video(normalized, sam_input)
-                            sam_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "sam-input.mp4", sam_input, "video/mp4")
-                            result = invoke("/benchmark", {"input_uri": sam_uri, "run_id": sam_run, "operation": "sam"}, remaining())
-                            emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
-                                 height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
-                                 source="normalized_rgb")
-                        else:
-                            result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both"}, remaining())
-                            depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
-                    masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
-                    preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
+                    if job.get("preparation_provider", "workers") == "replicate":
+                        # Composition still uses our CPU worker. Do not pay for
+                        # external masks/depth if its spending guard is unavailable.
+                        self.cloud.check_cap()
+                        # Instantiate (and validate credentials) before creating
+                        # any paid prediction. Masking-off never enters here.
+                        hosted = ReplicatePreparation(self.records, self.cloud, job)
+                        sam_input = root / "sam-input.mp4"
+                        sam_metadata = sam_input_video(normalized, sam_input)
+                        sam_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "sam-input.mp4", sam_input, "video/mp4")
+                        prepared = hosted.prepare(root, metadata, sam_metadata, source_uri, sam_uri, remaining)
+                        depth_uri, masks_uri = prepared["depth_uri"], prepared["masks_uri"]
+                        preview_uri = None
+                        emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
+                             height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
+                             source="normalized_rgb", preparation_provider="replicate")
+                    elif job.get("preparation_provider", "workers") == "workers":
+                        with self.cloud.worker("gpu") as invoke:
+                            if options.preparation_version >= 2:
+                                depth_run = "sm-depth-" + job_id
+                                depth_result = invoke("/benchmark", {"input_uri": source_uri, "run_id": depth_run, "operation": "depth"}, remaining())
+                                depth_uri = self.cloud.worker_output(depth_result, depth_run, "depth.mp4")
+                                sam_input = root / "sam-input.mp4"
+                                # Detect people in the same RGB footage the user selected.
+                                # Depth stays at guide resolution for the later compositor.
+                                sam_metadata = sam_input_video(normalized, sam_input)
+                                sam_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "sam-input.mp4", sam_input, "video/mp4")
+                                result = invoke("/benchmark", {"input_uri": sam_uri, "run_id": sam_run, "operation": "sam"}, remaining())
+                                emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
+                                     height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
+                                     source="normalized_rgb")
+                            else:
+                                result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both"}, remaining())
+                                depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
+                        masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
+                        preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
+                    else:
+                        raise PublicError("This job's preparation provider is unavailable.", 503)
                     masks = root / "masks.zip"
                     self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
                     if options.preparation_version >= 2:
@@ -179,7 +199,7 @@ class Pipeline:
                          selected_label=label, replace_all_people=options.replace_all_people,
                          missing_frames=sum(count == 0 for count in coverage), target_count=len(targets) or 1)
                     tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
-                    if plan and plan["review_required"]:
+                    if (plan and plan["review_required"]) or preview_uri is None:
                         selection_preview = root / "selection-preview.mp4"
                         create_selection_preview(normalized, masks, selection_preview, metadata)
                         preview = self.cloud.upload(self.settings.app_bucket,
@@ -416,7 +436,16 @@ class Pipeline:
         previews = scene_thumbnails(source, root / "scene-thumbnails", frames)
         uris = {str(frame): self.cloud.upload(self.settings.app_bucket,
             f"outputs/{job_id}/scenes/{frame}.jpg", image, "image/jpeg") for frame, image in previews.items()}
-        self.update_job(job_id, scene_thumbnail_uris=uris)
+        # The still picker needs the exact same mask pixels as its video preview,
+        # without requiring mobile Safari to seek/decode a video on first load.
+        tracking_source = root / "selection-preview.mp4"
+        tracking_uris = {}
+        if tracking_source.is_file():
+            tracking_previews = scene_thumbnails(tracking_source, root / "scene-mask-thumbnails", frames)
+            tracking_uris = {str(frame): self.cloud.upload(self.settings.app_bucket,
+                f"outputs/{job_id}/scenes-masked/{frame}.jpg", image, "image/jpeg")
+                for frame, image in tracking_previews.items()}
+        self.update_job(job_id, scene_thumbnail_uris=uris, scene_mask_thumbnail_uris=tracking_uris)
 
     def ensure_library_poster(self, job, source=None):
         if not job.get("account_id") or job.get("thumbnail_uri"):

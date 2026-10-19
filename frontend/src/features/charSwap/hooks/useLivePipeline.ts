@@ -30,6 +30,7 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "generating", "finalizin
 const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
+  referenceCleanupAvailable?: boolean;
   enabled: boolean;
   creditsAvailable: boolean;
   job: LivePipelineJob | null;
@@ -437,6 +438,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   return {
     enabled,
     creditsAvailable: config?.credits_available === true,
+    referenceCleanupAvailable: config?.reference_cleanup_available === true,
     preparationProgress,
     preparationElapsedSeconds,
     job,
