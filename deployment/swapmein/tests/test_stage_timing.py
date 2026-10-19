@@ -39,3 +39,17 @@ def test_browser_timings_accept_only_bounded_coarse_fields_and_remain_separate_f
     assert f"accounts/{'b' * 64}/diagnostics-limit.json" not in records.data
     timings = [json.loads(line) for line in capsys.readouterr().out.splitlines() if json.loads(line)["event"] == "client_stage_finished"]
     assert len(timings) == 120 and all(t["timing_basis"] == "client_reported" for t in timings)
+
+
+@pytest.mark.parametrize("category,error_type", [("library_timeout", "TimeoutError"), ("library_aborted", "AbortError"),
+    ("library_network", "TypeError"), ("library_http", "Unknown"), ("library_response", "SyntaxError"), ("library_auth", "TypeError")])
+def test_library_failure_diagnostics_are_accepted_and_scrubbed(api, monkeypatch, capsys, category, error_type):
+    import swapmein.app as gateway
+    client, _, _, _ = api
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: {"account_id": "b" * 64})
+    body = {"category": category, "error_type": error_type}
+    assert client.post("/api/diagnostics", json=body).status_code == 202
+    assert client.post("/api/diagnostics", json={**body, "message": "private"}).status_code == 422
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert any(record.get("category") == category and record.get("error_type") == error_type for record in records)
+    assert not any("private" in json.dumps(record) for record in records)

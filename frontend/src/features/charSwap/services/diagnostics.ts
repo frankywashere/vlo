@@ -1,7 +1,7 @@
 import { accountToken } from "./accountContext";
 
-type ErrorCategory = "runtime" | "unhandled_rejection" | "react" | "commerce_request" | "pipeline_request";
-const ERROR_TYPES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError"]);
+type ErrorCategory = "runtime" | "unhandled_rejection" | "react" | "commerce_request" | "pipeline_request" | "library_timeout" | "library_aborted" | "library_network" | "library_http" | "library_response" | "library_auth";
+const ERROR_TYPES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError"]);
 let minute = 0;
 let count = 0;
 
@@ -12,7 +12,8 @@ export function reportClientError(category: ErrorCategory, error?: unknown, http
   if (minute !== now) { minute = now; count = 0; }
   if (count >= 10) return;
   count += 1;
-  const errorType = error instanceof Error && ERROR_TYPES.has(error.name) ? error.name : "Unknown";
+  const name = error !== null && typeof error === "object" && "name" in error && typeof error.name === "string" ? error.name : "";
+  const errorType = ERROR_TYPES.has(name) ? name : "Unknown";
   void (async () => {
     const token = await accountToken();
     if (!token) return;
@@ -36,7 +37,7 @@ export function installErrorReporting() {
 }
 
 
-export type ClientStage = "cleanup_queue" | "cleanup_model_load" | "cleanup_model_prefetch" | "cleanup_inference" | "upload_source" | "upload_reference" | "upload_confirmation";
+export type ClientStage = "cleanup_queue" | "cleanup_model_load" | "cleanup_model_prefetch" | "cleanup_inference" | "upload_source" | "upload_reference" | "upload_confirmation" | "library_request";
 let timingMinute = 0;
 let timingCount = 0;
 

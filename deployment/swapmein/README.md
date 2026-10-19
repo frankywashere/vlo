@@ -51,6 +51,10 @@ never award additional credits. The reward is for opting into the watermark, not
   per-photo queue/inference and source/reference upload/confirmation timings. It does not send
   photos, URLs, filenames, error messages, keys or device details. These values are client-reported,
   often before a job exists, and correlate by account rather than proving server/GPU timings.
+- Library diagnostics distinguish request timeout, browser abort, network, HTTP, malformed response,
+  and authentication failures. Raw browser messages are replaced with controlled retry guidance.
+  `library_request` client timings measure the authenticated Library API request; error messages,
+  filenames, request paths and credentials are excluded from these diagnostic payloads.
 - Durations are seconds. Nested timers overlap: do not add all events together. A start without
   an end can identify an interrupted process. Error details use the existing redacted logger.
 

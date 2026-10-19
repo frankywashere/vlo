@@ -369,8 +369,8 @@ class CreditGrant(BaseModel):
 
 class ClientDiagnostic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request"]
-    error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "Unknown"] = "Unknown"
+    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_auth"]
+    error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError", "Unknown"] = "Unknown"
     http_status: int | None = Field(default=None, ge=400, le=599)
     job_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
@@ -397,7 +397,7 @@ def client_diagnostic(body: ClientDiagnostic, x_firebase_token: str | None = Hea
 
 class ClientTiming(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-    stage: Literal["cleanup_queue", "cleanup_model_load", "cleanup_model_prefetch", "cleanup_inference", "upload_source", "upload_reference", "upload_confirmation"]
+    stage: Literal["cleanup_queue", "cleanup_model_load", "cleanup_model_prefetch", "cleanup_inference", "upload_source", "upload_reference", "upload_confirmation", "library_request"]
     elapsed_seconds: float = Field(ge=0, le=86400)
     outcome: Literal["returned", "raised"]
 

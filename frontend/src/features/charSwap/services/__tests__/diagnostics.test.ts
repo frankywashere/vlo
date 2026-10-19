@@ -42,3 +42,12 @@ it("times failed stages without exposing image data or exception messages", asyn
   expect(JSON.parse(request!.body as string)).toEqual({stage: "cleanup_inference", outcome: "raised", elapsed_seconds: expect.any(Number)});
   expect(request!.body).not.toContain("private");
 });
+
+it("records Library aborts by type without sending Safari's message or private URLs", async () => {
+  const {reportClientError} = await import("../diagnostics");
+  reportClientError("library_aborted", new DOMException("Fetch is aborted at https://private-photo", "AbortError"));
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  const [, request] = vi.mocked(fetch).mock.calls[0];
+  expect(JSON.parse(request!.body as string)).toEqual({category: "library_aborted", error_type: "AbortError"});
+  expect(request!.body).not.toContain("private-photo");
+});
