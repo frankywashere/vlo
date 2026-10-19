@@ -43,7 +43,7 @@ describe("character-first scrolling scene review", () => {
     const props = properties();
     render(<SceneTrackingReview {...props} />);
     select();
-    fireEvent.click(screen.getByRole("button", {name: "Submit"}));
+    fireEvent.click(screen.getByRole("button", {name: "Submit and generate"}));
     await waitFor(() => expect(props.onApply).toHaveBeenCalledWith([
       {segment_id: "cut", absent: false, anchor: {x: .5, y: .5, time: reviewFrameTime(36)}},
       {segment_id: "gap", absent: true, anchor: null},
@@ -68,7 +68,7 @@ describe("character-first scrolling scene review", () => {
     fireEvent.click(screen.getByRole("button", {name: "Previous character"}));
     expect(screen.getByText("Selected. Tap again to change the person.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {name: "Next character"}));
-    fireEvent.click(screen.getByRole("button", {name: "Submit"}));
+    fireEvent.click(screen.getByRole("button", {name: "Submit and generate"}));
     await waitFor(() => expect(props.onApply).toHaveBeenCalledOnce());
     const choices = props.onApply.mock.calls[0][0];
     expect(choices).toHaveLength(4);
@@ -80,7 +80,7 @@ describe("character-first scrolling scene review", () => {
     select();
     fireEvent.click(screen.getByRole("button", {name: "Clear selection"}));
     expect(screen.queryByLabelText("Selected person marker")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", {name: "Submit"}));
+    fireEvent.click(screen.getByRole("button", {name: "Submit and generate"}));
     await waitFor(() => expect(props.onApply).toHaveBeenCalledWith(props.segments.slice(1).map((section) => ({segment_id: section.id, absent: true, anchor: null}))));
   });
   it("keeps detected people optional and switches every scene to the same frame of its overlay", () => {
@@ -124,7 +124,7 @@ describe("character-first scrolling scene review", () => {
   });
   it("disables changes while a review is being submitted", () => {
     render(<SceneTrackingReview {...properties()} busy />);
-    expect(screen.getByRole("button", {name: "Submit"})).toBeDisabled();
+    expect(screen.getByRole("button", {name: "Submit and generate"})).toBeDisabled();
     for (const button of screen.getAllByRole("button", {name: "Show another frame"})) expect(button).toBeDisabled();
   });
   it("preserves saved selections and absence when reopened", async () => {
@@ -132,7 +132,7 @@ describe("character-first scrolling scene review", () => {
     const choices = [{segment_id: "cut", absent: false, anchor: {x: .3, y: .4, time: reviewFrameTime(42)}},
       {segment_id: "gap", absent: true, anchor: null}];
     render(<SceneTrackingReview {...props} initialChoices={choices} />);
-    fireEvent.click(screen.getByRole("button", {name: "Submit"}));
+    fireEvent.click(screen.getByRole("button", {name: "Submit and generate"}));
     await waitFor(() => expect(props.onApply).toHaveBeenCalledWith(choices));
   });
   it("does not keep offscreen video decoders mounted on mobile", () => {

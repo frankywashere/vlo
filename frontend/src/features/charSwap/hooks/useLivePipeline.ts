@@ -320,7 +320,8 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     setTrackingErrorSegmentId(null);
     try {
       const access = await ensureSession(controller.signal, true);
-      const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal);
+      const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal,
+        {enabled: active.mask_style !== "none", key: apiKey, generateAfterReview: true});
       if (controller.signal.aborted || epoch.current !== version) return false;
       preparationStartedAt.current = Date.now();
       setPreparationElapsedSeconds(0);

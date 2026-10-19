@@ -16,6 +16,7 @@ import numpy as np
 from PIL import Image
 
 from .errors import PublicError
+from .diagnostics import timed
 
 
 FPS = 24
@@ -24,6 +25,7 @@ MAX_SEGMENTS = 60
 MAX_FRAME_BYTES = 8_000_000
 
 
+@timed("merge_all_people_masks")
 def merge_all_people_masks(archive: Path, output: Path, metadata: dict, *, detection_summary: dict | None = None):
     """Union every non-background SAM label per frame into the compose label 1.
 
@@ -210,6 +212,7 @@ def _compact(segments):
     return segments
 
 
+@timed("analyze_tracking")
 def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict:
     """Partition frames into confirmed-anchor and user-review sections."""
     width, height, frames, anchor_frame, cuts = _metadata(metadata)
@@ -243,11 +246,22 @@ def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict
                 boundaries[index] = "tracking_reappeared" if after[0] else "missing_mask"
             elif _jump(before, after, width, height):
                 boundaries[index] = "tracking_jump"
-        ordered = [*sorted(boundaries), end]
-        for first, last in zip(ordered, ordered[1:]):
-            reason = boundaries[first] if statistics[first][0] else "missing_mask"
-            segments.append({"start_frame": first, "end_frame": last, "reason": reason,
-                             "scene": scene, "merged": False})
+        if metadata.get("review_shots_only") is True and metadata.get("review_all_scenes") is True:
+            # New manual jobs use real camera cuts as review boundaries. Keep
+            # track-loss/jump evidence internal instead of asking for near-
+            # duplicate selections a few frames apart. The flag is saved with
+            # metadata so older in-progress plans retain their original bounds.
+            segments.append({"start_frame": start, "end_frame": end,
+                "reason": boundaries[start] if statistics[start][0] else "missing_mask",
+                "scene": scene, "merged": False,
+                "tracking_events": [{"frame": frame, "reason": reason}
+                    for frame, reason in sorted(boundaries.items()) if frame != start]})
+        else:
+            ordered = [*sorted(boundaries), end]
+            for first, last in zip(ordered, ordered[1:]):
+                reason = boundaries[first] if statistics[first][0] else "missing_mask"
+                segments.append({"start_frame": first, "end_frame": last, "reason": reason,
+                                 "scene": scene, "merged": False})
     segments = _compact(segments)
     result = []
     for index, segment in enumerate(segments):
@@ -259,7 +273,8 @@ def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict
         result.append({"id": f"segment-{index:03d}", "start_frame": start, "end_frame": end,
                        "start": start / FPS, "end": end / FPS, "seek_time": seek_frame / FPS,
                        "reason": segment["reason"], "needs_review": not healthy_anchor,
-                       "selected_label": selected_label if contains_anchor else None})
+                       "selected_label": selected_label if contains_anchor else None,
+                       **({"tracking_events": segment["tracking_events"]} if "tracking_events" in segment else {})})
     plan = {"version": 1, "segments": result,
             "review_required": any(segment["needs_review"] for segment in result)}
     if unresolved:
@@ -271,6 +286,7 @@ def _selection_error(message="The tracking review does not match this clip. Chec
     return PublicError(message, code="tracking_review_invalid")
 
 
+@timed("resolve_tracking")
 def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[dict], output: Path) -> dict:
     """Apply explicit segment selections to a binary, complete mask archive."""
     width, height, frames, anchor_frame, _ = _metadata(metadata)
@@ -379,11 +395,13 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                 pass
 
 
+@timed("analyze_multi_tracking")
 def analyze_multi_tracking(archive: Path, metadata: dict, targets: list[dict] | None = None):
     from .multi_tracking import analyze
     return analyze(archive, metadata, targets)
 
 
+@timed("resolve_multi_tracking")
 def resolve_multi_tracking(archive: Path, metadata: dict, plan: dict, choices: list[dict], output: Path):
     from .multi_tracking import resolve
     return resolve(archive, metadata, plan, choices, output)

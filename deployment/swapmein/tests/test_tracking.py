@@ -369,3 +369,46 @@ def test_coordinate_only_review_is_valid_but_all_absent_still_fails(tmp_path):
     assert not any(result["coverage"]) and all(a["coordinate_fallback"] for a in result["assignments"])
     with pytest.raises(PublicError, match="at least one"):
         resolve_tracking(path, info, plan, [choose(section, absent=True) for section in plan["segments"]], tmp_path / "absent.zip")
+
+
+
+def test_shot_review_hides_one_frame_tracking_flicker_but_retains_internal_evidence(tmp_path):
+    arrays = [person(), person(), person(x=45), person(), np.zeros((64, 64), dtype=np.uint16),
+              person(), person(x=45), person(), person(9), person(9), person(9), person(9)]
+    archive = masks(tmp_path / "raw.zip", arrays)
+    old_info = {**metadata(12, cuts=[8]), "review_all_scenes": True}
+    old_plan = analyze_tracking(archive, old_info, 2)
+    assert len(old_plan["segments"]) > 2
+    info = {**old_info, "review_shots_only": True}
+    plan = analyze_tracking(archive, info, 2)
+    assert [(s["start_frame"], s["end_frame"]) for s in plan["segments"]] == [(0, 8), (8, 12)]
+    assert len(plan["segments"][0]["tracking_events"]) >= 4
+    assert all(s["needs_review"] for s in plan["segments"])
+    choices = [choose(plan["segments"][0]), choose(plan["segments"][1])]
+    result = resolve_tracking(archive, info, plan, choices, tmp_path / "reviewed.zip")
+    assert [a["selected_label"] for a in result["assignments"]] == [2, 9]
+    assert result["coverage"][4] == 0  # Missing SAM pixels are not invented or borrowed from someone else.
+    assert result["coverage"][-4:] == [144] * 4
+    assert analyze_tracking(archive, old_info, 2) == old_plan  # Existing jobs keep their saved plan.
+
+
+def test_shot_review_cannot_be_enabled_by_tampering_with_a_saved_fragment_plan(tmp_path):
+    archive = masks(tmp_path / "raw.zip", [person(), person(), person(x=45), person()] * 2)
+    info = {**metadata(), "review_all_scenes": True}
+    new_plan = analyze_tracking(archive, {**info, "review_shots_only": True}, 2)
+    with pytest.raises(PublicError):
+        resolve_tracking(archive, info, new_plan, [choose(new_plan["segments"][0])], tmp_path / "bad.zip")
+
+
+def test_shot_review_missing_selected_mask_keeps_coordinate_fallback(tmp_path):
+    archive = masks(tmp_path / "raw.zip", [person()] * 8)
+    info = {**metadata(), "review_all_scenes": True, "review_shots_only": True,
+            "allow_unmatched_anchor": True, "allow_coordinate_fallback": True}
+    info["anchor"] = {**info["anchor"], "x": .9, "y": .1}
+    plan = analyze_tracking(archive, info, 0)
+    assert len(plan["segments"]) == 1
+    choice = choose(plan["segments"][0], x=.9, y=.1)
+    result = resolve_tracking(archive, info, plan, [choice], tmp_path / "reviewed.zip")
+    assert result["assignments"][0]["coordinate_fallback"]
+    assert result["assignments"][0]["fallback_anchor"] == choice["anchor"]
+    assert not any(result["coverage"])

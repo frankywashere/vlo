@@ -5,12 +5,14 @@ interface PersonBadgeProps {
   person: TargetPerson;
   subtitle?: string;
   compact?: boolean;
+  imageSize?: number;
   stackedOnMobile?: boolean;
 }
 export function PersonBadge({
   person,
   subtitle,
   compact,
+  imageSize,
   stackedOnMobile,
 }: PersonBadgeProps) {
   return (
@@ -25,8 +27,9 @@ export function PersonBadge({
         src={person.thumbnail}
         alt={person.name}
         sx={{
-          width: compact ? 38 : 56,
-          height: compact ? 38 : 56,
+          width: imageSize ?? (compact ? 38 : 56),
+          height: imageSize ?? (compact ? 38 : 56),
+          flexShrink: 0,
           border: `2px solid ${person.color}`,
           bgcolor: `${person.color}22`,
           color: person.color,

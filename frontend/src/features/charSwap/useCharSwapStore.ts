@@ -41,6 +41,8 @@ interface CharSwapStore extends WalkthroughState {
   error: string | null;
   setReplaceAllPeople: (enabled: boolean) => void;
   setEasyMode: (enabled: boolean) => void;
+  setSubmitWithoutAudio: (enabled: boolean) => void;
+  setAddWatermark: (enabled: boolean) => void;
   setEnhancedCharacterMasking: (enabled: boolean) => void;
   loadClip: (clip: ClipAsset) => void;
   changeTrim: (trim: [number, number]) => void;
@@ -67,6 +69,16 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     const updated = setReplaceAllPeople(state, enabled);
     return updated === state ? state : {...updated,
       selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null};
+  }),
+  setAddWatermark: (enabled) => set((state) => enabled === (state.addWatermark ?? false) ? state : {
+    addWatermark: enabled, selectionVersion: state.selectionVersion + 1,
+    trackingReady: false, issues: [], decisions: {},
+    step: ["matches", "generation"].includes(state.step) ? "review" : state.step,
+  }),
+  setSubmitWithoutAudio: (enabled) => set((state) => enabled === (state.submitWithoutAudio ?? false) ? state : {
+    submitWithoutAudio: enabled, selectionVersion: state.selectionVersion + 1,
+    trackingReady: false, issues: [], decisions: {},
+    step: ["matches", "generation"].includes(state.step) ? "review" : state.step,
   }),
   setEasyMode: (enabled) =>
     set((state) =>

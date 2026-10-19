@@ -17,7 +17,7 @@ from google.protobuf import duration_pb2, timestamp_pb2
 
 from .config import Settings
 from .errors import PublicError
-from .diagnostics import emit
+from .diagnostics import emit, timed, timed_stage
 from .security import validate_media_url
 
 
@@ -57,6 +57,7 @@ class Cloud:
         self.shutdown_tasks = []
         self.job_id = None
 
+    @timed("enqueue", job_arg="job_id")
     def enqueue(self, kind: str, job_id: str, *, task_token: str | None = None, delay_seconds: int = 0):
         settings = self.settings
         queue = settings.render_task_queue if kind in {"generate", "poll-provider"} else settings.task_queue
@@ -94,10 +95,12 @@ class Cloud:
             raise PublicError("Invalid stored asset.", 500)
         return self.storage.bucket(bucket).blob(key)
 
+    @timed("upload")
     def upload(self, bucket: str, key: str, path: Path, content_type: str):
         self.blob(bucket, key).upload_from_filename(str(path), content_type=content_type, if_generation_match=0)
         return f"gs://{bucket}/{key}"
 
+    @timed("download")
     def download(self, uri: str, path: Path, maximum: int = 100 * 1024 * 1024):
         bucket, key = self.split_uri(uri)
         blob = self.blob(bucket, key)
@@ -114,6 +117,7 @@ class Cloud:
             raise PublicError("Unexpected asset bucket.", 500)
         return bucket, key
 
+    @timed("copy")
     def copy(self, uri: str, bucket: str, key: str):
         source_bucket, source_key = self.split_uri(uri)
         source = self.blob(source_bucket, source_key)
@@ -159,6 +163,7 @@ class Cloud:
         if blob.size != size:
             raise PublicError("The uploaded file size does not match. Upload the clip and reference again.", 409)
 
+    @timed("check_cap")
     def check_cap(self):
         url = f"https://billingbudgets.googleapis.com/v1/billingAccounts/{self.settings.billing_account}/budgets"
         response = self.http.get(url, params={"scope": "projects/" + self.settings.project_number},
@@ -213,6 +218,7 @@ class Cloud:
                     and int(scaling.get("manualInstanceCount", 0)) == count):
                 return
 
+    @timed("backup_shutdown")
     def _backup_shutdown(self, service: str):
         deadline = datetime.now(timezone.utc) + timedelta(minutes=15)
         queue = self.tasks.queue_path(self.settings.project, self.settings.region, "proof-shutdown")
@@ -250,23 +256,38 @@ class Cloud:
         backup = self._backup_shutdown(service)
         worker_url = self.settings.gpu_url if service == "gpu" else self.settings.audio_url
         try:
-            self._scale(service, 1)
+            with timed_stage("worker_startup", job_id=self.job_id, worker=service):
+                self._scale(service, 1)
             emit("worker_started", job_id=self.job_id, worker=service)
-            token = id_token.fetch_id_token(Request(), worker_url)
+            with timed_stage("worker_authentication", job_id=self.job_id, worker=service):
+                token = id_token.fetch_id_token(Request(), worker_url)
             headers = {"Authorization": "Bearer " + token}
-            response = self.http.get(worker_url + "/health", headers=headers, timeout=120)
+            with timed_stage("worker_health_ready", job_id=self.job_id, worker=service):
+                response = self.http.get(worker_url + "/health", headers=headers, timeout=120)
+                response.raise_for_status()
             response.raise_for_status()
             if service == "gpu" and response.json().get("cuda") is not True:
                 raise PublicError("The GPU worker was not ready.", 503)
             def invoke(endpoint: str, body: dict, timeout: float = 600):
-                response = self.http.post(worker_url + endpoint, json=body, headers=headers, timeout=min(600, timeout))
-                if not response.is_success:
-                    raise PublicError("A private processing worker failed. Try a clearer continuous clip.", 502)
-                return response.json()
+                operation = body.get("operation") if body.get("operation") in {"depth", "sam", "both"} else None
+                stage = {"/compose": "guide_composition", "/recover-masks": "sam_recovery"}.get(endpoint, "worker_inference")
+                with timed_stage(stage, job_id=self.job_id, worker=service, operation=operation):
+                    response = self.http.post(worker_url + endpoint, json=body, headers=headers, timeout=min(600, timeout))
+                    if not response.is_success:
+                        raise PublicError("A private processing worker failed. Try a clearer continuous clip.", 502)
+                    result = response.json()
+                    metrics = result.get("metrics", {})
+                    if isinstance(metrics, dict):
+                        for name, value in metrics.items():
+                            if re.fullmatch(r"[a-z_]{1,64}_seconds", name) and type(value) in (int, float) and 0 <= value < 86400:
+                                emit("worker_stage_metric", job_id=self.job_id, worker=service, operation=operation,
+                                     metric=name, elapsed_seconds=value)
+                    return result
             yield invoke
         finally:
             try:
-                self._scale(service, 0)
+                with timed_stage("worker_shutdown", job_id=self.job_id, worker=service):
+                    self._scale(service, 0)
             except Exception as error:
                 emit("worker_shutdown_failed", error=error, job_id=self.job_id, worker=service)
                 self.shutdown_verified = False
@@ -289,6 +310,7 @@ class Cloud:
             raise PublicError("The processing worker omitted a required output.", 502)
         return expected
 
+    @timed("download_provider")
     def download_provider(self, url: str, path: Path):
         # Every redirect is checked; provider account credentials are never sent to media hosts.
         for _ in range(4):

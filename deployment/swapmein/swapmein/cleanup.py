@@ -5,10 +5,11 @@ import time
 from google.api_core.exceptions import NotFound
 
 from .accounts import index_path
-from .diagnostics import emit
+from .diagnostics import emit, timed
 from .errors import PublicError
 
 
+@timed("temporary_media_cleanup", job_arg="job_id")
 def cleanup_completed_media(settings, records, cloud, job_id):
     if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
         raise PublicError("Invalid cleanup job identifier.", 400)

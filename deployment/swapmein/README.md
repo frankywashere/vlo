@@ -16,6 +16,63 @@ traffic and Firebase bundle before reporting a rollout complete. The older
 [pipeline overview](../../docs/charswap-walkthrough.md) contains historical proofs;
 use the contracts below for these changes.
 
+## Watermark rewards
+
+Credit-funded accounts can opt into a lower-right RecastFX watermark at generation review.
+The offer defaults to visible with a 25-credit bonus. Admin → Watermark rewards controls
+its visibility and whole-credit amount through a revision-checked, pricing-permission endpoint.
+Hiding the offer prevents new opt-ins, including requests from stale browsers. Existing
+upload tickets/jobs retain the amount promised by the server; the client supplies only a
+quote to validate, never an authoritative reward. BYOK jobs do not earn account-credit rewards.
+
+CPU export overlays a Pillow-rendered badge in the existing FFmpeg encoding pass, with
+both original-audio restoration and returned-audio paths supported. There is no extra AI render.
+The bonus is applied only after the finished watermarked file and Library entry are saved,
+and only for a successfully charged generation. The wallet receipt `watermark:<job_id>`
+prevents duplicate rewards on task retries or operator re-exports. Failed exports and downloads
+never award additional credits. The reward is for opting into the watermark, not proof of sharing.
+
+## Stage timing logs
+
+- `stage_started` / `stage_finished`: unique attempt and parent attempt IDs, job correlation,
+  monotonic `elapsed_seconds`, and `outcome` of `returned` or `raised`. Returned means the
+  function returned, not that the job succeeded; use the durable job transition for that.
+- Coverage includes normalization, cut detection, SAM input, mask analysis/selection, scene
+  thumbnails, transfers, budget checks, backup registration, worker scale/startup, readiness,
+  authentication, depth/SAM/audio/composition requests, shutdown, missing-mask recovery,
+  reviewed guide rebuilding, provider submission/polling, silent remux, export, poster,
+  Library saving and temporary cleanup. Worker-returned numeric timing metrics are logged too.
+- `job_stage_transition` logs committed phase changes, including failed stages, with wall-clock
+  durations preserved across progress updates and instances. Human scene review and approval
+  waits are labelled separately. Unknown historical start times remain null.
+- `stage_wait_observed` records queue intervals and observed provider generation time. Provider
+  time includes status-polling lag and must not be presented as the vendor's exact inference time.
+- `client_stage_finished` records coarse, authenticated browser-reported model prefetch/load,
+  per-photo queue/inference and source/reference upload/confirmation timings. It does not send
+  photos, URLs, filenames, error messages, keys or device details. These values are client-reported,
+  often before a job exists, and correlate by account rather than proving server/GPU timings.
+- Library diagnostics distinguish request timeout, browser abort, network, HTTP, malformed response,
+  and authentication failures. Raw browser messages are replaced with controlled retry guidance.
+  `library_request` client timings measure the authenticated Library API request; error messages,
+  filenames, request paths and credentials are excluded from these diagnostic payloads.
+- Durations are seconds. Nested timers overlap: do not add all events together. A start without
+  an end can identify an interrupted process. Error details use the existing redacted logger.
+
+## Silent provider input
+
+“Submit without audio” is an opt-in, per-job generation option (`setup.submit_without_audio`, default false).
+It applies to Easy/manual review and masked/unmasked flows. Preparation skips vocal separation/pitch processing
+for these jobs. The shared submission path uses CPU FFmpeg stream-copy to create and verify an audio-free
+MP4, cached against the exact guide URI; the audible preview and original upload remain unchanged.
+The provider prompt describes a silent reference and requests unchanged visual timing.
+
+Export discards provider audio and restores the original upload's selected soundtrack window at
+`setup.trim[0]`, including when Admin audio processing is off. Missing source audio blocks submission;
+normal export validation checks soundtrack length, video duration and native generated dimensions.
+Retries retain the option, and the Library settings record it. Silent scratch files use the existing
+job-owned cleanup prefix. No new GPU service is involved. Local media tests verify bit-identical video
+packets after stripping, nonzero soundtrack trim, and restored audio; they do not establish provider lip-sync quality.
+
 ## Preparation and selection
 
 - Clips are 4–15 seconds with a whole-second **duration**. Start/end positions and
@@ -497,3 +554,26 @@ Credit sessions require the current minimum four-second price; all credit-funded
 preparation requires the full selected-duration balance. Preflight checks do not
 charge or reserve credits; the existing durable generation claim still governs
 charging. Existing owner emails and secret bindings are preserved on deployment.
+
+
+### Manual scene-review handoff
+
+The scene-review POST saves the owned, revision-bound choices and generation approval,
+then queues preparation without downloading or rewriting mask media in that request.
+The response skips re-signing review thumbnails; Library navigation unlocks after the
+save acknowledgement rather than waiting for a Library refresh. The background task
+validates masks, optionally recovers missing selections under the job's pinned admin
+setting, composes the guide, and queues an approved generation. Background validation
+failures restore scene review with the saved choices and affected section; no provider
+submission occurs. Queue retries remain bound to the task token and review revision.
+
+MiniMax H3 prompts retain all scene assignments. Only prompts exceeding the limit after audio instructions use compact scene
+instructions; prompts that already fit retain their existing wording. All are checked against the [reAPI H3 documented 7,000-character prompt limit](https://reapi.ai/docs/minimax-h3)
+before a provider submission or credit charge. No scene assignments are truncated.
+New manual jobs pin `review_shots_only` in their saved tracking metadata. Each
+character gets one review section per detected camera shot; brief track-loss and
+jump events are retained privately in the plan, rather than becoming extra cards.
+Each shot uses its own selected mask label; no cross-cut identity matching is
+inferred. Existing jobs without the flag keep their original saved sections so
+old choices are never silently remapped. Mask quality and missing pixels still
+follow the existing coordinate fallback / optional SAM recovery behavior.

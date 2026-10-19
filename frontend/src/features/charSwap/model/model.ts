@@ -64,6 +64,9 @@ export interface MatchDecision {
 export interface WalkthroughState {
   replaceAllPeople?: boolean;
   easyMode?: boolean;
+  submitWithoutAudio?: boolean;
+  addWatermark?: boolean;
+  watermarkBonusQuote?: number;
   enhancedCharacterMasking?: boolean;
   clip: ClipAsset | null;
   trim: [number, number];
@@ -90,6 +93,8 @@ export function createInitialState(): WalkthroughState {
   return {
     replaceAllPeople: false,
     easyMode: true,
+    submitWithoutAudio: false,
+    addWatermark: false,
     enhancedCharacterMasking: true,
     clip: null,
     trim: [0, 0],

@@ -32,7 +32,6 @@ interface ReferencesStepProps {
 interface ReferenceCardProps extends ReferencesStepProps {
   person: TargetPerson;
   reference?: ReferenceAsset;
-  references: ReferenceAsset[];
   assignReference: (id: string, reference: ReferenceAsset) => void;
   clearReference: (id: string) => void;
 }
@@ -40,7 +39,6 @@ interface ReferenceCardProps extends ReferencesStepProps {
 function ReferenceCard({
   person,
   reference,
-  references,
   demo,
   pendingIds,
   onImport,
@@ -55,7 +53,7 @@ function ReferenceCard({
   return (
     <Box role="group" aria-label={`Reference upload area for ${person.name}`} {...dropHandlers}
       sx={{ ...PANEL, borderLeft: `3px solid ${person.color}`, outline:dragging?"2px dashed":"none",outlineColor:"primary.main",outlineOffset:3 }}>
-      <PersonBadge person={person} subtitle={person.id === ALL_PEOPLE_TARGET_ID ? "One reference for everyone in every scene" : "Original person"} />
+      <PersonBadge person={person} imageSize={160} stackedOnMobile subtitle={person.id === ALL_PEOPLE_TARGET_ID ? "One reference for everyone in every scene" : "Original person"} />
       <Divider sx={{ my: 2 }} />
       <Box
         sx={{
@@ -144,21 +142,6 @@ function ReferenceCard({
               Use sample teddy bear
             </Button>
           )}
-          {references.some((item) => item.id !== reference?.id && !item.cleanup?.pending) && (
-            <Stack direction="row" flexWrap="wrap" gap={1}>
-              {references.filter((item) => item.id !== reference?.id && !item.cleanup?.pending).map((item) => (
-                <Button
-                  key={item.id}
-                  size="small"
-                  variant="outlined"
-                  disabled={pending}
-                  onClick={() => assignReference(person.id, item)}
-                >
-                  Use {item.name}
-                </Button>
-              ))}
-            </Stack>
-          )}
         </Stack>
       </Box>
       {reference && (
@@ -205,7 +188,6 @@ export function ReferencesStep({
           reference={references.find(
             (item) => item.id === assignments[person.id],
           )}
-          references={references}
           demo={demo}
           pendingIds={pendingIds}
           cleanupEnabled={cleanupEnabled}

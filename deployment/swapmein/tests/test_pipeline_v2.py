@@ -235,7 +235,8 @@ def test_replicate_preflight_rejects_unprotected_composition_before_paying_for_i
 
 
 @pytest.mark.parametrize("selection", ["single", "multi"])
-def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_prediction(monkeypatch, media, tmp_path, selection):
+@pytest.mark.parametrize("approve", [False, True])
+def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_prediction(monkeypatch, media, tmp_path, selection, approve):
     job, cloud, _, _, _ = harness(monkeypatch, media, easy=False, enhanced=True,
         selection=selection, audio_processing=False, preparation_provider="replicate")
     archive, output = tmp_path / "raw.zip", tmp_path / "reviewed.zip"
@@ -247,7 +248,9 @@ def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_predi
     resolver = resolve_multi_tracking if selection == "multi" else resolve_tracking
     resolved = resolver(archive, job["tracking_metadata"], job["tracking_plan"], choices, output)
     uri = cloud.upload("workers", "reviewed.zip", output, "application/zip")
-    job.update(status="preparing", reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"], tracking_applied_revision=1)
+    job.update(status="preparing", reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"], tracking_applied_revision=1,
+        generation_after_review_revision=1 if approve else None, tracking_task_token="a"*32)
+    cloud.enqueue = lambda kind, job_id, **kwargs: cloud.enqueued.append((kind, job_id))
     class Records:
         data = copy.deepcopy(job)
         def update(self, path, mutation):
@@ -257,6 +260,7 @@ def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_predi
     pipeline = Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud)
     pipeline.rebuild_reviewed_guide(job, lambda: 60)
     assert records.data["status"] == "ready" and records.data["tracking_reviewed"]
+    assert cloud.enqueued == ([("generate", job["id"])] if approve else [])
     assert len(cloud.replicate_calls) == 1 and all(kind != "gpu" for kind, _, _ in cloud.calls)
     compose = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]
     assert len(compose) == 1 and compose[0]["masks_uri"] == uri

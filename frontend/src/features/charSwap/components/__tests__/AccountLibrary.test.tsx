@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
+  act,
   render,
   screen,
   waitFor,
@@ -15,7 +16,7 @@ import {
   loadJobRecovery,
   retrySavingVideo,
 } from "../../services/accounts";
-import { generateLiveJob, pollLiveProvider } from "../../services/livePipeline";
+import { generateLiveJob, pollLiveProvider, resolveLiveTracking } from "../../services/livePipeline";
 vi.mock("../../services/commerce", () => ({
   loadAccountAccess: async () => ({ api_key_enabled: true, role: null }),
 }));
@@ -285,4 +286,69 @@ it("keeps the Library scene review free of the old warning, filename and full re
   expect(screen.getByAltText("Person 1 replacement: Reference 1")).toBeVisible();
   expect(screen.getByRole("img", {name: "Person 1"})).toBeVisible();
   expect(screen.getByText(/Tap the person in each box below/)).toBeVisible();
+});
+
+it("shows refresh feedback while preserving the visible Library cards", async () => {
+  const user = userEvent.setup();
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([job]);
+  render(<AccountLibrary onCreate={() => {}} />);
+  await screen.findByText("My clip");
+  let finish: ((jobs: typeof job[]) => void) | undefined;
+  vi.mocked(loadAccountJobs).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await user.click(screen.getByRole("button", {name: "Refresh library"}));
+  expect(screen.getByRole("button", {name: "Refresh library"})).toBeDisabled();
+  expect(screen.getByLabelText("Refreshing library")).toBeVisible();
+  expect(screen.getByText("My clip")).toBeVisible();
+  finish?.([job]);
+  await waitFor(() => expect(screen.getByRole("button", {name: "Refresh library"})).toBeEnabled());
+  expect(screen.queryByLabelText("Refreshing library")).not.toBeInTheDocument();
+});
+
+it("identifies the post-selection guide rebuild without asking users to select scenes again", async () => {
+  vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "preparing", easy_mode: false, processing_stage: "guide_rebuild"}]);
+  render(<AccountLibrary onCreate={() => {}} />);
+  expect(await screen.findByText("Building your guide")).toBeVisible();
+  expect(screen.getByText(/masks and depth already prepared/)).toBeVisible();
+  expect(screen.queryByText(/Come back to choose people/)).not.toBeInTheDocument();
+});
+
+
+it.each([false, true])("shows saved choices as processing immediately, with an older refresh pending: %s", async (olderRefresh) => {
+  const review = {...job, status: "tracking_review" as const, access_mode: "credits" as const,
+    source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
+    tracking_revision: 1, tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+      seek_time: 1, needs_review: true, reason: "scene_selection"}]};
+  let finishOlder: ((jobs: typeof review[]) => void) | undefined;
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([review]);
+  if (olderRefresh) vi.mocked(loadAccountJobs).mockImplementationOnce(() => new Promise(resolve => {finishOlder = resolve;}));
+  vi.mocked(loadAccountJobs).mockImplementation(() => new Promise(() => {}));
+  vi.mocked(resumeAccountJob).mockResolvedValue({token: "session", expires_at: 2000000});
+  vi.mocked(resolveLiveTracking).mockResolvedValue({id: review.id, status: "queued", processing_stage: "guide_rebuild",
+    message: "Your scene choices are saved. You can leave this page while we apply them."});
+  const user = userEvent.setup();
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await screen.findByRole("button", {name: "Check scene matches"});
+  if (olderRefresh) await user.click(screen.getByRole("button", {name: "Refresh library"}));
+  await user.click(screen.getByRole("button", {name: "Check scene matches"}));
+  await user.click(screen.getByRole("button", {name: "Submit and generate"}));
+  await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getAllByRole("button", {name: "Back to Library"})[0]).toBeEnabled());
+  await user.click(screen.getAllByRole("button", {name: "Back to Library"})[0]);
+  expect(await screen.findByRole("region", {name: "Your generations"})).toBeVisible();
+  if (finishOlder) await act(async () => {finishOlder?.([review]);});
+  expect(screen.queryByText("Needs attention")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: "Check scene matches"})).not.toBeInTheDocument();
+  expect(screen.getByText("Building your guide")).toBeVisible();
+});
+
+it("shows the saved background validation error when Library reopens scene review", async () => {
+  vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "tracking_review", mask_style: "none",
+    tracking_review_error: true, tracking_error_segment_id: "s0", message: "Choose the matching person again.",
+    source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
+    tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+      seek_time: 1, needs_review: true, reason: "scene_selection"}]}]);
+  const user = userEvent.setup();
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+  expect(await screen.findByText("Choose the matching person again.")).toBeVisible();
 });

@@ -1,4 +1,4 @@
-"""Owned, revision-bound tracking corrections never submit paid generations."""
+"""Owned scene choices save before media work; background resolution gates generation."""
 import copy
 import json
 import re
@@ -8,6 +8,8 @@ from zipfile import ZipFile
 import pytest
 
 import swapmein.app as gateway
+import swapmein.tracking as tracking
+from swapmein.pipeline import Pipeline
 from swapmein.errors import PublicError
 from test_api import api, authenticated, ready_job
 
@@ -65,8 +67,13 @@ def tracking_review(api, monkeypatch):
     monkeypatch.setattr(cloud, "download", download)
     monkeypatch.setattr(cloud, "upload", upload)
     monkeypatch.setattr(cloud, "enqueue", enqueue)
-    monkeypatch.setattr(gateway, "resolve_tracking", resolve)
+    monkeypatch.setattr(tracking, "resolve_tracking", resolve)
     return client, records, cloud, provider, headers, job_id, calls
+
+
+def resolve_saved(records, cloud, job_id):
+    job = records.data[f"jobs/{job_id}.json"]
+    return Pipeline(gateway.settings, records, cloud).resolve_saved_review(copy.deepcopy(job))
 
 
 def review_endpoint(job_id):
@@ -83,6 +90,8 @@ def test_tracking_review_accepts_owner_token_without_a_provider_key(tracking_rev
         headers={"Authorization": headers["Authorization"]}, json=review_body())
     assert response.status_code in {200, 202}
     assert response.json()["status"] == "queued"
+    assert not calls["downloads"] and not calls["resolved"] and not calls["uploads"]
+    resolve_saved(records, cloud, job_id)
     saved = records.data[f"jobs/{job_id}.json"]
     assert saved["tracking_applied_revision"] == 1
     assert saved["reviewed_masks_uri"].startswith(f"gs://{gateway.settings.worker_bucket}/")
@@ -131,15 +140,16 @@ def test_background_tap_retains_review_and_its_recoverable_error_code(tracking_r
         error = PublicError("That tap missed a detected person.", 400, code="tracking_background")
         error.segment_id = "segment-000"
         raise error
-    monkeypatch.setattr(gateway, "resolve_tracking", missed_person)
+    monkeypatch.setattr(tracking, "resolve_tracking", missed_person)
     before = copy.deepcopy(records.data[f"jobs/{job_id}.json"])
     response = client.post(review_endpoint(job_id), headers=headers, json=review_body())
-    assert response.status_code == 400
-    assert response.json()["code"] == "tracking_background"
-    assert response.json()["segment_id"] == "segment-000"
-    assert records.data[f"jobs/{job_id}.json"] == before
-    assert "control/preparation.json" not in records.data
-    assert not cloud.enqueued and not provider.submissions
+    assert response.status_code == 202
+    with pytest.raises(PublicError) as rejected:
+        resolve_saved(records, cloud, job_id)
+    assert rejected.value.code == "tracking_background"
+    assert rejected.value.segment_id == "segment-000"
+    assert records.data[f"jobs/{job_id}.json"]["tracking_choices"] == [selected_choice()]
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
 
 
 def test_tracking_review_can_mark_the_person_absent_for_a_scene(tracking_review):
@@ -148,6 +158,7 @@ def test_tracking_review_can_mark_the_person_absent_for_a_scene(tracking_review)
     response = client.post(review_endpoint(job_id), headers=headers, json=review_body([choice]))
     assert response.status_code in {200, 202}
     assert response.json()["status"] == "queued"
+    resolve_saved(records, cloud, job_id)
     assert calls["resolved"][0][0]["absent"] is True
     assert calls["resolved"][0][0].get("anchor") is None
     assert records.data[f"jobs/{job_id}.json"]["tracking_applied_revision"] == 1
@@ -165,7 +176,7 @@ def test_repeated_applied_review_cannot_enqueue_or_charge_twice(tracking_review)
     assert second.status_code in {200, 202}
     assert second.json()["status"] == "queued"
     assert records.data[f"jobs/{job_id}.json"] == saved
-    assert len(calls["resolved"]) == len(calls["uploads"]) == 1
+    assert not calls["resolved"] and not calls["uploads"]
     assert cloud.enqueued == [("prepare", job_id)]
     assert calls["task_tokens"] == [saved["tracking_task_token"]]
     assert not provider.submissions
@@ -179,7 +190,7 @@ def test_new_review_revision_cannot_modify_an_already_queued_rebuild(tracking_re
     assert response.status_code in {400, 409}
     assert response.json()["code"] == "tracking_review_invalid"
     assert records.data[f"jobs/{job_id}.json"] == saved
-    assert len(calls["resolved"]) == 1
+    assert not calls["resolved"]
     assert cloud.enqueued == [("prepare", job_id)]
     assert not provider.submissions
 
@@ -229,21 +240,22 @@ def test_lost_queue_confirmation_retains_the_saved_review_without_requeueing(tra
         assert response.json()["status"] == "queued"
     assert enqueue_attempts == [("prepare", job_id,
         records.data[f"jobs/{job_id}.json"]["tracking_task_token"])]
-    assert len(calls["resolved"]) == len(calls["uploads"]) == 1
+    assert not calls["resolved"] and not calls["uploads"]
     assert records.data["control/preparation.json"]["active"]["job_id"] == job_id
     assert not provider.submissions
 
 
-def test_failed_review_upload_releases_capacity_and_keeps_the_review_editable(tracking_review, monkeypatch):
+def test_failed_background_review_upload_retains_saved_choices(tracking_review, monkeypatch):
     client, records, cloud, provider, headers, job_id, _ = tracking_review
     def failed_upload(*_args):
         raise OSError("Storage unavailable.")
     monkeypatch.setattr(cloud, "upload", failed_upload)
     response = client.post(review_endpoint(job_id), headers=headers, json=review_body())
-    assert response.status_code == 503
-    assert records.data[f"jobs/{job_id}.json"]["status"] == "tracking_review"
-    assert not records.data["control/preparation.json"].get("active")
-    assert not cloud.enqueued and not provider.submissions
+    assert response.status_code == 202
+    with pytest.raises(OSError):
+        resolve_saved(records, cloud, job_id)
+    assert records.data[f"jobs/{job_id}.json"]["tracking_resolution_pending"]
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
 
 
 def test_generation_waits_until_tracking_review_and_rebuild_finish(tracking_review):
@@ -313,6 +325,7 @@ def test_multi_person_review_dispatches_its_saved_plan_and_retains_target_sectio
                {"segment_id": "t1-segment-000", "absent": True}]
     response = client.post(review_endpoint(job_id), headers=headers, json=review_body(choices))
     assert response.status_code == 202
+    resolve_saved(records, cloud, job_id)
     assert dispatched == [(2, [{**choices[0]}, {**choices[1], "anchor": None}])]
     assert [section["target_id"] for section in response.json()["tracking_segments"]] == ["left", "right"]
     assert not calls["resolved"] and not provider.submissions
@@ -333,10 +346,12 @@ def test_multi_person_review_error_returns_the_specific_target_scene(tracking_re
     monkeypatch.setattr(tracking, "resolve_multi_tracking", reject)
     response = client.post(review_endpoint(job_id), headers=headers,
         json=review_body([{**selected_choice(), "segment_id": "t1-segment-000"}]))
-    assert response.status_code == 400
-    assert response.json()["segment_id"] == "t1-segment-000"
-    assert response.json()["code"] == code
-    assert job["status"] == "tracking_review" and not cloud.enqueued and not provider.submissions
+    assert response.status_code == 202
+    with pytest.raises(PublicError) as rejected:
+        resolve_saved(records, cloud, job_id)
+    assert rejected.value.segment_id == "t1-segment-000"
+    assert rejected.value.code == code
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
 
 
 def test_unresolved_anchor_is_publicly_null_without_mutating_the_private_review_plan(tracking_review):
@@ -360,29 +375,35 @@ def test_review_diagnostics_correlate_selections_and_rejection_without_media_or_
         error.segment_id = "segment-000"
         error.tracking_diagnostics = {"frame": 24, "selected_label": 0, "detected_labels": [8]}
         raise error
-    monkeypatch.setattr(gateway, "resolve_tracking", reject)
+    monkeypatch.setattr(tracking, "resolve_tracking", reject)
     response = client.post(review_endpoint(job_id), headers=headers, json=review_body())
-    assert response.status_code == 400
-    assert response.json()["tracking_details"] == {"frame": 24}
+    assert response.status_code == 202
+    monkeypatch.setattr(cloud, "shutdown_verified", True, raising=False)
+    monkeypatch.setattr(Pipeline, "rebuild_reviewed_guide", lambda self, job, remaining: self.resolve_saved_review(job))
+    Pipeline(gateway.settings, records, cloud).prepare(job_id, records.data[f"jobs/{job_id}.json"]["tracking_task_token"])
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
     attempt = next(item for item in events if item["event"] == "tracking_review_attempt")
     rejected = next(item for item in events if item["event"] == "tracking_review_rejected")
     assert attempt["job_id"] == rejected["job_id"] == job_id
     assert attempt["attempt_id"] == rejected["attempt_id"]
     assert attempt["revision"] == rejected["revision"] == 1
-    assert attempt["selections"] == [selected_choice()]
     assert rejected["segment_id"] == "segment-000"
     assert rejected["selection_diagnostics"]["detected_labels"] == [8]
     logged = json.dumps([attempt, rejected])
     assert headers["Authorization"] not in logged and "gs://" not in logged
-    assert "source-preview" not in logged and "tracking-masks" not in logged
-    assert records.data[f"jobs/{job_id}.json"]["status"] == "tracking_review"
-    assert not cloud.enqueued and not provider.submissions
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["status"] == "tracking_review" and saved["tracking_choices"] == [selected_choice()]
+    assert saved["generation_after_review_revision"] is None
+    assert not records.data["control/preparation.json"].get("active")
+    public = client.get(f"/api/jobs/{job_id}", headers=headers).json()
+    assert public["tracking_review_error"] and public["tracking_error_segment_id"] == "segment-000"
+    assert not provider.submissions
 
 
-def test_successful_review_logs_resolved_labels_before_queuing(tracking_review, capsys):
-    client, _, _, _, headers, job_id, _ = tracking_review
+def test_successful_background_review_logs_resolved_labels(tracking_review, capsys):
+    client, records, cloud, _, headers, job_id, _ = tracking_review
     assert client.post(review_endpoint(job_id), headers=headers, json=review_body()).status_code == 202
+    resolve_saved(records, cloud, job_id)
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
     attempt = next(item for item in events if item["event"] == "tracking_review_attempt")
     validated = next(item for item in events if item["event"] == "tracking_review_validated")
@@ -406,7 +427,7 @@ def test_missing_mask_review_queues_coordinates_without_starting_generation(trac
     client, records, cloud, provider, headers, job_id, _ = tracking_review
     job = records.data[f"jobs/{job_id}.json"]
     job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
-    original = gateway.resolve_tracking
+    original = tracking.resolve_tracking
     def coordinate_result(archive, metadata, plan, choices, output):
         assert metadata["allow_coordinate_fallback"] is True
         result = original(archive, metadata, plan, choices, output)
@@ -414,12 +435,141 @@ def test_missing_mask_review_queues_coordinates_without_starting_generation(trac
         result["assignments"] = [{"segment_id": "segment-000", "start_frame": 0, "end_frame": 120,
             "selected_label": None, "absent": False, "coordinate_fallback": True, "fallback_anchor": choices[0]["anchor"]}]
         return result
-    monkeypatch.setattr(gateway, "resolve_tracking", coordinate_result)
+    monkeypatch.setattr(tracking, "resolve_tracking", coordinate_result)
     response = client.post(review_endpoint(job_id), headers=headers, json=review_body())
     assert response.status_code == 202
+    resolve_saved(records, cloud, job_id)
     saved = records.data[f"jobs/{job_id}.json"]
     assert saved["coordinate_fallback_sections"] == 1
     scene = saved["normalized_targets"][0]["scenes"][0]
     assert scene["coordinate_fallback"] and not scene["absent"]
     assert scene["anchor"] == selected_choice()["anchor"]
     assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_recovery_approval_is_saved_for_exact_review_revision_without_submitting_yet(tracking_review, monkeypatch, approved):
+    from cryptography.fernet import Fernet
+    from swapmein.security import digest
+    from swapmein.job_key import recover_key
+    client, records, cloud, provider, headers, job_id, calls = tracking_review
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]), retry_missing_masks_with_sam=True)
+    job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
+    original = tracking.resolve_tracking
+    def missing(archive, metadata, plan, choices, output):
+        result = original(archive, metadata, plan, choices, output)
+        result["coverage"] = [0] * 120
+        result["assignments"] = [{"segment_id": "segment-000", "start_frame": 0, "end_frame": 120,
+            "selected_label": None, "absent": False, "coordinate_fallback": True, "fallback_anchor": choices[0]["anchor"]}]
+        return result
+    monkeypatch.setattr(tracking, "resolve_tracking", missing)
+    body = {**review_body(), "recover_missing_masks": True, "generate_after_recovery": approved}
+    response = client.post(review_endpoint(job_id), headers=headers, json=body)
+    assert response.status_code == 202
+    resolve_saved(records, cloud, job_id)
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["recover_missing_masks"] and not saved["mask_recovery_completed"]
+    assert saved["generation_after_review_revision"] == (1 if approved else None)
+    if approved:
+        assert recover_key(saved) == headers["X-Reapi-Key"]
+    assert client.post(review_endpoint(job_id), headers=headers, json=body).status_code == 202
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
+
+
+@pytest.mark.parametrize("sam_mode", [False, True])
+def test_saved_admin_mode_controls_missing_mask_recovery_and_both_modes_approve_generation(tracking_review, monkeypatch, sam_mode):
+    from cryptography.fernet import Fernet
+    from swapmein.security import digest
+    client, records, cloud, provider, headers, job_id, _ = tracking_review
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]), retry_missing_masks_with_sam=sam_mode)
+    job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
+    # A global toggle after job creation must not switch this job's path.
+    records.data["control/pipeline-settings.json"] = {"revision": 4, "retry_missing_masks_with_sam": not sam_mode}
+    original = tracking.resolve_tracking
+    def missing(archive, metadata, plan, choices, output):
+        result = original(archive, metadata, plan, choices, output)
+        result["assignments"] = [{"segment_id": "segment-000", "start_frame": 0, "end_frame": 120,
+            "selected_label": None, "absent": False, "coordinate_fallback": True, "fallback_anchor": choices[0]["anchor"]}]
+        return result
+    monkeypatch.setattr(tracking, "resolve_tracking", missing)
+    response = client.post(review_endpoint(job_id), headers=headers, json={**review_body(),
+        "recover_missing_masks": True, "generate_after_review": True})
+    assert response.status_code == 202, response.text
+    resolve_saved(records, cloud, job_id)
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["recover_missing_masks"] is sam_mode
+    assert saved["generation_after_review_revision"] == 1
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
+
+
+@pytest.mark.parametrize("generate", [False, True])
+def test_saved_review_background_task_composes_then_queues_only_approved_generation(tracking_review, monkeypatch, generate):
+    from contextlib import contextmanager
+    from cryptography.fernet import Fernet
+    from swapmein.security import digest
+    client, records, cloud, provider, headers, job_id, calls = tracking_review
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]))
+    @contextmanager
+    def worker(kind):
+        assert kind == "audio"  # Mask validation/composition needs no GPU.
+        def compose(endpoint, payload, remaining):
+            assert endpoint == "/compose" and "reviewed-masks-" in payload["masks_uri"]
+            assert calls["resolved"] == [[selected_choice()]]
+            assert not provider.submissions
+            return {}
+        yield compose
+    monkeypatch.setattr(cloud, "worker", worker, raising=False)
+    monkeypatch.setattr(cloud, "shutdown_verified", True, raising=False)
+    monkeypatch.setattr(cloud, "worker_output", lambda *_: "gs://worker/composed.mp4", raising=False)
+    monkeypatch.setattr(cloud, "copy", lambda uri, bucket, key: f"gs://{bucket}/{key}", raising=False)
+    response = client.post(review_endpoint(job_id), headers=headers,
+        json={**review_body(), "generate_after_review": generate})
+    assert response.status_code == 202
+    assert not calls["resolved"] and not calls["downloads"] and not calls["uploads"]
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["tracking_choices"] == [selected_choice()]
+    assert "saved" in response.json()["message"]
+    token = saved["tracking_task_token"]
+    Pipeline(gateway.settings, records, cloud).prepare(job_id, token)
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["status"] == "ready" and saved["tracking_reviewed"]
+    assert saved["review_generation_queued"] is generate
+    assert cloud.enqueued == [("prepare", job_id)] + ([("generate", job_id)] if generate else [])
+    assert not provider.submissions and not records.data["control/preparation.json"].get("active")
+    Pipeline(gateway.settings, records, cloud).prepare(job_id, token)
+    assert len(calls["resolved"]) == 1  # A repeated task never composes/submits twice.
+
+
+def test_background_storage_failure_returns_to_saved_review_and_releases_capacity(tracking_review, monkeypatch):
+    client, records, cloud, provider, headers, job_id, calls = tracking_review
+    assert client.post(review_endpoint(job_id), headers=headers, json=review_body()).status_code == 202
+    monkeypatch.setattr(cloud, "download", lambda *_: (_ for _ in ()).throw(OSError("storage unavailable")))
+    monkeypatch.setattr(cloud, "shutdown_verified", True, raising=False)
+    saved = records.data[f"jobs/{job_id}.json"]
+    Pipeline(gateway.settings, records, cloud).prepare(job_id, saved["tracking_task_token"])
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["status"] == "tracking_review" and saved["tracking_review_error"]
+    assert saved["tracking_choices"] == [selected_choice()] and saved["generation_after_review_revision"] is None
+    assert not records.data["control/preparation.json"].get("active") and not provider.submissions
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).json()["tracking_review_error"]
+
+
+def test_recovery_only_approval_does_not_generate_when_no_recovery_was_needed(tracking_review, monkeypatch):
+    from cryptography.fernet import Fernet
+    from swapmein.security import digest
+    client, records, cloud, provider, headers, job_id, _ = tracking_review
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    records.data[f"jobs/{job_id}.json"].update(access_mode="api-key",
+        key_fingerprint=digest(headers["X-Reapi-Key"]), retry_missing_masks_with_sam=True)
+    response = client.post(review_endpoint(job_id), headers=headers, json={**review_body(),
+        "recover_missing_masks": True, "generate_after_recovery": True})
+    assert response.status_code == 202
+    saved = resolve_saved(records, cloud, job_id)
+    assert not saved["recover_missing_masks"] and saved["generation_after_review_revision"] is None
+    assert not provider.submissions

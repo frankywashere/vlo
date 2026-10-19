@@ -49,6 +49,9 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const [checkingRecovery, setCheckingRecovery] = useState(false);
   const [jobs, setJobs] = useState<AccountJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshCount = useRef(0);
+  const savedReviewVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountJob | null>(null);
@@ -80,9 +83,12 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   );
   const controller = useRef<AbortController | null>(null);
   const refresh = useCallback(async () => {
+    const reviewVersion = savedReviewVersion.current;
+    refreshCount.current += 1;
+    setRefreshing(true);
     try {
       const received = await loadAccountJobs();
-      if (mounted.current) {
+      if (mounted.current && reviewVersion === savedReviewVersion.current) {
         // Renew links well before their one-hour expiry without restarting a
         // playing video on every status refresh.
         const result = received.filter((job) => !hiddenJobs.current.has(job.id)).map((job) => {
@@ -138,7 +144,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             : "The library could not be loaded.",
         );
     } finally {
-      if (mounted.current) setLoading(false);
+      refreshCount.current -= 1;
+      if (mounted.current) { setLoading(false); setRefreshing(refreshCount.current > 0); }
     }
   }, []);
   useEffect(() => {
@@ -379,8 +386,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                       (!apiKeyAllowed || !key.trim()))
                   }
                   initialChoices={selected.tracking_choices}
-                  errorSegmentId={trackingErrorSegmentId}
-                  errorMessage={error}
+                  errorSegmentId={trackingErrorSegmentId ?? selected.tracking_error_segment_id}
+                  errorMessage={error ?? (selected.tracking_review_error ? selected.message : undefined)}
                   onRefresh={() => void refresh()}
                   onApply={async (choices) => {
                     setBusy(true);
@@ -395,10 +402,15 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                         selected.tracking_revision ?? 0,
                         choices,
                         controller.current.signal,
+                        {enabled: selected.mask_style !== "none", key, generateAfterReview: true},
                       );
                       if (mounted.current) {
+                        // Publish the saved state to the list before navigation;
+                        // discard refreshes started before this acknowledgement.
+                        savedReviewVersion.current += 1;
+                        setJobs((current) => current.map((job) => job.id === selected.id ? {...job, ...result} : job));
                         setSelected({ ...selected, ...result });
-                        await refresh();
+                        void refresh();
                       }
                       return true;
                     } catch (cause) {
@@ -530,15 +542,16 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             <span>
               <IconButton
                 aria-label="Refresh library"
+                aria-busy={refreshing}
                 onClick={() => void refresh()}
-                disabled={loading}
+                disabled={loading || refreshing}
                 sx={{
                   border: "1px solid",
                   borderColor: "divider",
                   color: "text.secondary",
                 }}
               >
-                <RefreshRounded fontSize="small" />
+                {refreshing ? <CircularProgress size={18} aria-label="Refreshing library" /> : <RefreshRounded fontSize="small" />}
               </IconButton>
             </span>
           </Tooltip>

@@ -1,3 +1,5 @@
+import { UploadSavedNotice } from "./UploadSavedNotice";
+import { processingStageCopy } from "../utils/processingStage";
 import { useEffect, useRef } from "react";
 import {
   Alert,
@@ -45,13 +47,11 @@ export function GenerationPage({
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
-  const { clip, trim, references, easyMode, replaceAllPeople } = useCharSwapStore(
+  const { clip, trim, references } = useCharSwapStore(
     useShallow((state) => ({
       clip: state.clip,
       trim: state.trim,
       references: state.references,
-      easyMode: state.easyMode ?? true,
-      replaceAllPeople: state.replaceAllPeople,
     })),
   );
   const download = useVideoDownload();
@@ -67,7 +67,8 @@ export function GenerationPage({
       : job?.status === "generating" || unknown
         ? 1
         : 0;
-  const title = complete
+  const stageCopy = processingStageCopy(job);
+  const title = stageCopy?.title ?? (complete
     ? "Your recast is ready."
     : unknown
       ? "Checking your submission"
@@ -81,7 +82,7 @@ export function GenerationPage({
               ? "Your recast is in line"
               : job
                 ? "Preparing your clip"
-                : "Uploading your clip";
+                : "Uploading your clip");
   return (
     <Box>
       <Stack
@@ -100,15 +101,12 @@ export function GenerationPage({
           >
             {title}
           </Typography>
-          <Typography color="text.secondary" sx={{ mt: 1 }}>
-            {complete
-              ? "Watch it, save it, and make another."
-              : uploadSaved
-                ? !easyMode && !replaceAllPeople && ["queued", "preparing"].includes(job?.status ?? "")
-                  ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
-                  : "Your upload is saved. You can safely close this tab and see progress in your Library."
-                : "Keep this tab open until your upload is confirmed."}
-          </Typography>
+          {uploadSaved && !complete && !stageCopy ? <UploadSavedNotice /> : (
+            <Typography color="text.secondary" sx={{ mt: 1 }}>
+              {complete ? "Watch it, save it, and make another."
+                : stageCopy ? stageCopy.detail : "Keep this tab open until your upload is confirmed."}
+            </Typography>
+          )}
         </Box>
         {job?.created_at && (
           <JobElapsedTime

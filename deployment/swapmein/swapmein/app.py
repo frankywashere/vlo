@@ -23,16 +23,16 @@ from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
-from .media import Anchor, Setup, normalize_reference
+from .media import Anchor, Setup, normalize_reference, strip_audio
 from .pipeline import Pipeline
+from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .pipeline_settings import pipeline_settings, save_pipeline_settings
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
 from .storage import (Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation,
                       check_queue_capacity, reserve_queued_preparation, claim_queued_slot)
-from .tracking import resolve_tracking
-from .diagnostics import emit, provider_billing
+from .diagnostics import emit, provider_billing, timed, timed_stage, wait_timing
 from .accounts import lookup_credit_recipient, registered_accounts, verify_account, bind_job, archive_completed, index_path
 from .job_settings import settings_used
 from .commerce import (credit_grant_history, grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
@@ -209,9 +209,11 @@ def owned_job(job_id: str, authorization: str | None):
     return check_owner(job, owner), session
 
 
-def view(job: dict):
+def view(job: dict, *, review_thumbnails: bool = True):
     _, cloud, _ = services()
     status = job["status"]
+    if status == "ready" and job.get("review_generation_queued"):
+        status = "queued"
     if status == "finishing":
         status = "finalizing"
     if status == "submitting":
@@ -226,6 +228,13 @@ def view(job: dict):
               "access_mode": "credits" if credits_mode else "api-key",
               "settings_used": settings_used(job),
               "replace_all_people": bool(job.get("setup", {}).get("replace_all_people", False))}
+    if job.get("status") == "ready" and job.get("review_generation_queued"):
+        result["processing_stage"] = "generation_queue"
+    elif status in {"queued", "preparing"} and job.get("preparation_kind") == "tracking_rebuild":
+        result["processing_stage"] = ("mask_recovery" if job.get("recover_missing_masks")
+            and not job.get("mask_recovery_completed") else "guide_rebuild")
+    elif status == "ready" and job.get("tracking_reviewed") and job.get("mask_style") != "none":
+        result["processing_stage"] = "guide_review"
     if not credits_mode:
         result["provider"] = job.get("provider", "reAPI")
     targets = job.get("normalized_targets") or job.get("setup", {}).get("targets")
@@ -240,7 +249,7 @@ def view(job: dict):
             anchor = target.get("anchor", {})
             frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
             thumbnail = job.get("scene_thumbnail_uris", {}).get(str(frame))
-            if thumbnail:
+            if thumbnail and review_thumbnails:
                 public_target["thumbnail_url"] = cloud.signed_url(thumbnail)
             result["selection_targets"].append(public_target)
     reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
@@ -258,7 +267,7 @@ def view(job: dict):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing"]:
+    for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing", "watermark_applied", "watermark_bonus_awarded"]:
         if field in job:
             result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
@@ -281,14 +290,19 @@ def view(job: dict):
                 preview["selected_label"] = None
             frame = str(math.floor(section["seek_time"] * 24 + 1e-7))
             uri = job.get("scene_thumbnail_uris", {}).get(frame)
-            if uri:
+            if uri and review_thumbnails:
                 preview["thumbnail_url"] = cloud.signed_url(uri)
             tracking_uri = job.get("scene_mask_thumbnail_uris", {}).get(frame)
-            if tracking_uri:
+            if tracking_uri and review_thumbnails:
                 preview["tracking_thumbnail_url"] = cloud.signed_url(tracking_uri)
             result["tracking_segments"].append(preview)
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]
+        if job.get("tracking_review_error"):
+            result["tracking_review_error"] = True
+            segment_id = job.get("tracking_error_segment_id")
+            if isinstance(segment_id, str) and segment_id in {section["id"] for section in job["tracking_plan"].get("segments", [])}:
+                result["tracking_error_segment_id"] = segment_id
     if job.get("normalized_uri") and temporary_media_available:
         result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
     if credits_mode and job.get("app_credits_charged") is not None:
@@ -359,8 +373,8 @@ class CreditGrant(BaseModel):
 
 class ClientDiagnostic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request"]
-    error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "Unknown"] = "Unknown"
+    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_auth"]
+    error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError", "Unknown"] = "Unknown"
     http_status: int | None = Field(default=None, ge=400, le=599)
     job_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
@@ -382,6 +396,28 @@ def client_diagnostic(body: ClientDiagnostic, x_firebase_token: str | None = Hea
         if not job or job.get("account_id") != account["account_id"]:
             raise PublicError("Clip not found.", 404)
     emit("frontend_error", severity="ERROR", account_id=account["account_id"], **body.model_dump())
+    return {"received": True}
+
+
+class ClientTiming(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    stage: Literal["cleanup_queue", "cleanup_model_load", "cleanup_model_prefetch", "cleanup_inference", "upload_source", "upload_reference", "upload_confirmation", "library_request"]
+    elapsed_seconds: float = Field(ge=0, le=86400)
+    outcome: Literal["returned", "raised"]
+
+
+@app.post("/api/diagnostics/timing", status_code=202)
+def client_timing(body: ClientTiming, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    minute = int(time.time() // 60)
+    def reserve(current):
+        count = current.get("count", 0) if current and current.get("minute") == minute else 0
+        if count >= 120:
+            raise PublicError("Timing diagnostic limit reached.", 429)
+        return {"minute": minute, "count": count + 1}
+    records.update(f"accounts/{account['account_id']}/timing-limit.json", reserve)
+    emit("client_stage_finished", account_id=account["account_id"], timing_basis="client_reported", **body.model_dump())
     return {"received": True}
 
 
@@ -495,7 +531,21 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records)}
+    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records), "watermark": watermark_settings(records)}
+
+
+class WatermarkSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: int = Field(ge=0)
+    enabled: bool
+    bonus_credits: int = Field(ge=0, le=100000)
+
+
+@app.post("/api/commerce/admin/watermark")
+def update_watermark_settings(body: WatermarkSettingsUpdate, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return save_watermark_settings(records, actor, body.revision, body.enabled, body.bonus_credits)
 
 
 class PipelineSettingsUpdate(BaseModel):
@@ -503,13 +553,15 @@ class PipelineSettingsUpdate(BaseModel):
     revision: int = Field(ge=0)
     audio_processing: bool | None = None
     preparation_provider: Literal["workers", "replicate"] | None = None
+    retry_missing_masks_with_sam: bool | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
 def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str | None = Header(default=None)):
     actor = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider)
+    return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
+                                  body.retry_missing_masks_with_sam)
 
 
 @app.post("/api/commerce/admin/features")
@@ -694,6 +746,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
     validate_reference_mapping(options, 1)
     check_generation_funding(records, options, active_session)
+    watermark_offer = watermark_snapshot(records, options, active_session)
     job_id = uuid.uuid4().hex
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.auto_generate and active_session.get("access_mode") == "api-key" else None)
@@ -705,9 +758,12 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, raw_reference, image = root / "source.bin", root / "reference.bin", root / "reference.jpg"
-            await save_upload(clip, source, LEGACY_SOURCE_BYTES)
-            await save_upload(reference, raw_reference, MAX_REFERENCE_BYTES)
-            reference_details = await run_in_threadpool(normalize_reference, raw_reference, image)
+            with timed_stage("receive_source_upload", job_id=job_id):
+                await save_upload(clip, source, LEGACY_SOURCE_BYTES)
+            with timed_stage("receive_reference_upload", job_id=job_id):
+                await save_upload(reference, raw_reference, MAX_REFERENCE_BYTES)
+            with timed_stage("reference_normalization", job_id=job_id):
+                reference_details = await run_in_threadpool(normalize_reference, raw_reference, image)
             emit("reference_normalized", job_id=job_id, reference_index=0, **(reference_details or {}))
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
@@ -717,6 +773,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "source_uri": source_uri, "reference_uri": reference_uri, "reference_uris": [reference_uri],
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"],
+               "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
+               **watermark_offer,
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
@@ -809,6 +867,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
     check_generation_funding(records, options.setup, active_session)
+    watermark_offer = watermark_snapshot(records, options.setup, active_session)
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.setup.auto_generate and active_session.get("access_mode") == "api-key" else None)
     # Bound abandoned upload storage separately; no preparation slot or worker is
@@ -828,6 +887,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "raw_reference_uri": reference_uris[0], "raw_reference_uris": reference_uris,
         "source_bytes": options.source_bytes, "reference_bytes": options.reference_bytes,
         "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
+        **watermark_offer,
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
         "title": options.title,
@@ -887,7 +947,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                 image = Path(temporary) / f"reference-{index}.jpg"
                 cloud.download(uri, raw_reference, MAX_REFERENCE_BYTES)
                 try:
-                    reference_details = normalize_reference(raw_reference, image)
+                    with timed_stage("reference_normalization", job_id=job_id, reference_index=index):
+                        reference_details = normalize_reference(raw_reference, image)
                 except PublicError as error:
                     error.reference_index = index
                     raise
@@ -907,6 +968,9 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"],
+               "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
+               **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
+                  if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
@@ -988,18 +1052,23 @@ class TrackingReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1, le=100, strict=True)
     choices: list[TrackingChoice] = Field(min_length=1, max_length=300)
+    recover_missing_masks: bool = False
+    generate_after_recovery: bool = False
+    generate_after_review: bool = False
 
 
 @app.post("/api/jobs/{job_id}/tracking-review", status_code=202)
+@timed("scene_review_apply", job_arg="job_id")
 def apply_tracking_review(job_id: str, review: TrackingReview,
-                          authorization: str | None = Header(default=None)):
-    job, _ = owned_job(job_id, authorization)
+                          authorization: str | None = Header(default=None),
+                          x_reapi_key: str | None = Header(default=None)):
+    job, active_session = owned_job(job_id, authorization)
     records, cloud, _ = services()
     invalid = "These tracking sections have changed. Refresh the review before applying matches."
     if job["status"] != "tracking_review":
         if (job.get("tracking_applied_revision") == review.revision
                 and job["status"] in {"matching", "queued", "preparing", "ready", "generating", "finalizing", "finishing", "completed"}):
-            return view(job)  # A lost reply cannot create another task or charge.
+            return view(job, review_thumbnails=False)  # A lost reply cannot create another task or charge.
         raise PublicError(invalid, 409, code="tracking_review_invalid")
     plan = job.get("tracking_plan", {})
     expected = {section["id"] for section in plan.get("segments", []) if section["needs_review"]}
@@ -1007,21 +1076,45 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     if (review.revision != job.get("tracking_revision") or not expected
             or len(supplied) != len(expected) or set(supplied) != expected):
         raise PublicError(invalid, 400, code="tracking_review_invalid")
+    def approved_review_key():
+        if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
+            raise PublicError("This clip needs its original access method.", 403)
+        key = key_for_session(active_session, x_reapi_key)
+        return (protect_key(job_id, key) if active_session.get("access_mode", "api-key") == "api-key"
+                else job.get("auto_key_ciphertext"))
     if plan.get("version") == 3:
         from .scene_selection import resolve
         choices = [choice.model_dump() for choice in review.choices]
         targets = resolve(job["tracking_metadata"], plan, choices)
+        auto_key = approved_review_key() if review.generate_after_review else job.get("auto_key_ciphertext")
+        task_token = uuid.uuid4().hex
         def apply_scene_choices(current):
             if current.get("tracking_revision") != review.revision or current.get("status") != "tracking_review":
                 raise PublicError(invalid, 409, code="tracking_review_invalid")
             return {**current, "status": "ready", "normalized_targets": targets,
                 "tracking_applied_revision": review.revision, "tracking_reviewed": True,
+                "generation_after_review_revision": review.revision if review.generate_after_review else None,
+                "recover_missing_masks": False, "review_generation_queued": review.generate_after_review,
+                "tracking_task_token": task_token, "auto_key_ciphertext": auto_key,
                 "tracking_choices": choices, "message": "Scene selections saved. Review your clip before generating.",
                 "updated_at": time.time()}
         job = records.update(f"jobs/{job_id}.json", apply_scene_choices)
         emit("scene_selections_applied", job_id=job_id, section_count=len(choices),
              absent_sections=sum(choice["absent"] for choice in choices))
-        return view(job)
+        if review.generate_after_review:
+            try:
+                cloud.enqueue("generate", job_id, task_token=task_token)
+            except Exception as error:
+                emit("review_generation_queue_failed", job_id=job_id, error=error)
+                job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "review_generation_queued": False,
+                    "message": "Your choices are saved, but automatic generation could not be queued. Continue from your Library."}
+                    if current.get("status") == "ready" else current)
+            else:
+                job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "message": "Your scene choices are saved. Generation is queued."}
+                    if current.get("status") == "ready" else current)
+        return view(job, review_thumbnails=False)
     current, _ = records.read("control/preparation.json")
     check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
     reserved = claimed = queued = False
@@ -1032,44 +1125,40 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
          revision=review.revision, plan_version=plan.get("version"),
          selections=[{"segment_id": choice["segment_id"], "absent": choice["absent"],
              "anchor": choice["anchor"]} for choice in choices])
+    # Save the small, owned selection list before any mask archive I/O. The
+    # authenticated preparation task resolves masks after the browser can leave.
+    sections = {section["id"]: section for section in plan.get("segments", [])}
+    for choice in choices:
+        anchor = choice["anchor"]
+        section = sections[choice["segment_id"]]
+        if anchor is not None and not section["start"] <= anchor["time"] < section["end"]:
+            raise PublicError(invalid, 400, code="tracking_review_invalid")
+    auto_submit = bool(review.generate_after_review or (review.recover_missing_masks
+        and review.generate_after_recovery and job.get("retry_missing_masks_with_sam") is True))
+    auto_key = approved_review_key() if auto_submit else job.get("auto_key_ciphertext")
     try:
-        with tempfile.TemporaryDirectory() as temporary:
-            archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
-            cloud.download(job["tracking_masks_uri"], archive, 80 * 1024 * 1024)
-            choices = [choice.model_dump() for choice in review.choices]
-            # Resolve real masks and retain unmatched taps as position instructions
-            # before claiming compute or changing the job.
-            review_metadata = {**job["tracking_metadata"], "allow_coordinate_fallback": True}
-            if plan.get("version") == 2:
-                from .tracking import resolve_multi_tracking
-                resolved = resolve_multi_tracking(archive, review_metadata, plan, choices, reviewed)
-            else:
-                resolved = resolve_tracking(archive, review_metadata, plan, choices, reviewed)
-            from .scene_selection import reviewed_mask_targets
-            fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
-            reviewed_targets = (reviewed_mask_targets(review_metadata, plan, choices, resolved["assignments"])
-                if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
-            emit("tracking_review_validated", job_id=job_id, attempt_id=attempt_id,
-                 revision=review.revision, assignments=resolved["assignments"])
-            records.update("control/preparation.json", lambda current: reserve_preparation(
-                current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
-            reserved = True
-            task_token = uuid.uuid4().hex
-            def claim(current):
-                if current.get("tracking_revision") != review.revision:
-                    raise PublicError(invalid, 409, code="tracking_review_invalid")
-                return {**claim_job(current, {"tracking_review"}, "matching"),
-                    "tracking_applied_revision": review.revision, "tracking_task_token": task_token}
-            records.update(f"jobs/{job_id}.json", claim)
-            claimed = True
-            uri = cloud.upload(settings.worker_bucket,
-                f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
-        job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
-            "status": "queued", "preparation_kind": "tracking_rebuild", "reviewed_masks_uri": uri,
-            "reviewed_coverage": resolved["coverage"], "tracking_assignments": resolved["assignments"],
-            "normalized_targets": reviewed_targets, "coordinate_fallback_sections": fallback_count,
-            "tracking_choices": choices,
-            "message": "Your matches are saved. The corrected guide is queued.", "updated_at": time.time()})
+        records.update("control/preparation.json", lambda current: reserve_preparation(
+            current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+        reserved = True
+        task_token = uuid.uuid4().hex
+        def claim(current):
+            if current.get("tracking_revision") != review.revision:
+                raise PublicError(invalid, 409, code="tracking_review_invalid")
+            return {**claim_job(current, {"tracking_review"}, "queued"),
+                "tracking_applied_revision": review.revision, "tracking_task_token": task_token,
+                "preparation_queued_at": time.time(), "preparation_kind": "tracking_rebuild",
+                "tracking_resolution_pending": True, "tracking_review_error": False, "tracking_error_segment_id": None,
+                "tracking_review_attempt_id": attempt_id,
+                "tracking_recovery_requested": review.recover_missing_masks,
+                "generation_requires_recovery": not review.generate_after_review,
+                "recover_missing_masks": False, "mask_recovery_completed": False, "mask_recovery_conflicts": 0,
+                "review_generation_queued": False,
+                "generation_after_review_revision": review.revision if auto_submit else None,
+                "auto_key_ciphertext": auto_key, "tracking_choices": choices,
+                "message": "Your scene choices are saved. You can leave this page while we apply them.",
+                "updated_at": time.time()}
+        job = records.update(f"jobs/{job_id}.json", claim)
+        claimed = True
         queued = True
         try:
             cloud.enqueue("prepare", job_id, task_token=task_token)
@@ -1079,7 +1168,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             } if current["status"] == "queued" else current)
         emit("tracking_matches_applied", job_id=job_id, section_count=len(choices),
             absent_sections=sum(choice["absent"] for choice in choices))
-        return view(job)
+        return view(job, review_thumbnails=False)
     except Exception as error:
         if claimed and not queued:
             records.update(f"jobs/{job_id}.json", lambda current: {**current,
@@ -1172,7 +1261,7 @@ def export_recoverable(job, cloud):
         return False
     if job.get("temporary_media_cleanup_started_at") or not cloud.asset_exists(job["normalized_uri"]):
         return False
-    return not job.get("audio_processing", True) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
+    return not (job.get("audio_processing", True) or job.get("setup", {}).get("submit_without_audio", False)) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
 
 
 @app.get("/api/account/jobs/{job_id}/recovery")
@@ -1294,6 +1383,7 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     return submit_generation(job_id, job, active_session, key)
 
 
+@timed("generation_submission", job_arg="job_id")
 def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     if job["status"] != "ready":
         # Idempotent response after any completed/claimed submission; never POST again.
@@ -1305,7 +1395,26 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True, **job["setup"]})
     reference_uris = job.get("reference_uris") or [job["reference_uri"]]
     validate_reference_mapping(options, len(reference_uris))
-    image_urls, video_url = [cloud.signed_url(uri) for uri in reference_uris], cloud.signed_url(job["guide_uri"])
+    submission_uri = job["guide_uri"]
+    if options.submit_without_audio:
+        if not job.get("source_uri") or not cloud.asset_exists(job["source_uri"]):
+            raise PublicError("The original soundtrack is unavailable. Upload the source again before generating.", 409)
+        # Cache against the exact guide version; reviewed guides must never reuse a stale silent input.
+        cached = job.get("silent_submission") or {}
+        if cached.get("guide_uri") == submission_uri and cloud.asset_exists(cached.get("uri", "")):
+            submission_uri = cached["uri"]
+        else:
+            with tempfile.TemporaryDirectory() as temporary:
+                source, silent = Path(temporary) / "guide.mp4", Path(temporary) / "silent.mp4"
+                cloud.download(submission_uri, source)
+                strip_audio(source, silent)
+                silent_uri = cloud.upload(settings.app_bucket,
+                    f"outputs/{job_id}/silent-{uuid.uuid4().hex}.mp4", silent, "video/mp4")
+            records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                "silent_submission": {"guide_uri": submission_uri, "uri": silent_uri}})
+            submission_uri = silent_uri
+            emit("silent_generation_input_prepared", job_id=job_id)
+    image_urls, video_url = [cloud.signed_url(uri) for uri in reference_uris], cloud.signed_url(submission_uri)
     anchor = options.anchor.model_dump() if options.anchor else None
     if anchor:
         anchor["time"] -= options.trim[0]
@@ -1319,7 +1428,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         raise PublicError("This clip's person assignments have changed. Prepare it again before generating.", 409)
     payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
         job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
-        replace_all_people=options.replace_all_people, targets=targets)
+        replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio)
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)
@@ -1352,7 +1461,8 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
                            if current["status"] == "submitting" else current)
             raise
     try:
-        task_id = provider.submit(key, payload, job_id=job_id)
+        with timed_stage("provider_submit_request", job_id=job_id):
+            task_id = provider.submit(key, payload, job_id=job_id)
     except PublicError as error:
         status = "submission_unknown" if error.status_code >= 500 else "failed"
         if credits_mode and status == "failed":
@@ -1395,6 +1505,7 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
     return provider_status(job_id, job, key)
 
 
+@timed("provider_poll", job_arg="job_id")
 def provider_status(job_id: str, job: dict, key: str):
     if job["status"] != "generating" or not job.get("provider_task"):
         return view(job)
@@ -1440,6 +1551,7 @@ def provider_status(job_id: str, job: dict, key: str):
             "provider_state": state, "provider_checked_at": time.time()}
             if current["status"] == "generating" else current)
         return view(checked)
+    wait_timing("provider_generation_observed", job.get("generation_started_at"), job_id=job_id)
     emit("provider_generation_completed", job_id=job_id, provider=job.get("provider", "reAPI"), **billing)
     try:
         output_url = body["output"]["video_urls"][0]
@@ -1448,7 +1560,7 @@ def provider_status(job_id: str, job: dict, key: str):
         raise PublicError("The provider did not return a usable result link.", 502) from None
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
-            **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url,
+            **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url, "export_queued_at": time.time(),
             "auto_key_ciphertext": None,
             "actual_credits": billing["provider_credits"],
             "message": "Restoring the original soundtrack and preserving the generated resolution."})
@@ -1498,9 +1610,14 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     internal_pipeline(task, authorization)
     records, _, _ = services()
     job, _ = records.read(f"jobs/{task.job_id}.json")
-    if not job or job.get("status") != "ready" or not job.get("setup", {}).get("auto_generate"):
+    if not job or job.get("status") != "ready":
         return {"ok": True}
-    if job.get("access_mode") not in {"credits", "api-key"} or not job.get("setup", {}).get("easy_mode"):
+    reviewed_submission = bool(job.get("generation_after_review_revision")
+        and job.get("generation_after_review_revision") == job.get("tracking_applied_revision")
+        and job.get("tracking_reviewed")
+        and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed")))
+    easy_auto = bool(job.get("setup", {}).get("auto_generate") and job.get("setup", {}).get("easy_mode"))
+    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_submission):
         return {"ok": True}
     try:
         key = (key_for_session({"access_mode": "credits"}, None)
@@ -1509,6 +1626,7 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     except PublicError as error:
         emit("automatic_generation_failed", error=error, job_id=task.job_id)
         records.update(f"jobs/{task.job_id}.json", lambda current: {**current,
+            "review_generation_queued": False,
             "message": "Preparation is ready, but generation needs attention. Open this job in your Library to continue."}
             if current.get("status") == "ready" else current)
     return {"ok": True}

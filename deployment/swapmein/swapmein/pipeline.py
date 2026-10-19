@@ -8,7 +8,7 @@ import uuid
 from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
-from .diagnostics import emit
+from .diagnostics import emit, timed, wait_timing
 from .limits import MAX_SOURCE_BYTES
 from .media import Setup, create_poster, finish, normalize, original_guide, sam_input_video, select_label, validate_guide_media
 from .mask_geometry import resize_label_archive
@@ -18,6 +18,7 @@ from .tracking import analyze_tracking, analyze_multi_tracking, merge_all_people
 from .tracking_preview import create_selection_preview
 from .accounts import archive_completed, LIBRARY_SECONDS
 from .cleanup import cleanup_completed_media
+from .watermark import award_watermark_bonus
 from .replicate_preparation import ReplicatePreparation
 
 
@@ -31,6 +32,7 @@ class Pipeline:
             emit("job_status_changed", job_id=job_id, status=fields["status"])
         return updated
 
+    @timed("preparation_task", job_arg="job_id")
     def prepare(self, job_id: str, task_token: str | None = None):
         current, _ = self.records.read(f"jobs/{job_id}.json")
         if not current or current.get("tracking_task_token") != task_token:
@@ -62,6 +64,7 @@ class Pipeline:
             if error.status_code in {404, 409}:
                 return  # Retries never reactivate workers for a claimed task.
             raise
+        wait_timing("preparation_queue", job.get("preparation_queued_at", job.get("created_at")), job_id=job_id)
         started = time.monotonic()
         deadline = started + 1200
         def remaining():
@@ -90,6 +93,7 @@ class Pipeline:
                 metadata["anchor"].setdefault("time", metadata["anchor"].get("frame", 0) / 24)
                 if not options.easy_mode:
                     metadata["review_all_scenes"] = True
+                    metadata["review_shots_only"] = True
                     if options.preparation_version >= 2:
                         metadata["allow_unmatched_anchor"] = True
                 targets = style_targets(metadata["targets"]) if metadata.get("targets") else []
@@ -207,7 +211,7 @@ class Pipeline:
                     else:
                         preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
                 # Existing jobs without a snapshot retain their original audio behavior.
-                audio_processing = job.get("audio_processing", True)
+                audio_processing = job.get("audio_processing", True) and not options.submit_without_audio
                 self.update_job(job_id, message="Preparing vocals and the generation guide." if audio_processing
                                 else "Preparing the generation guide with your source audio.")
                 emit("preparation_audio_mode", job_id=job_id, audio_processing=audio_processing)
@@ -329,12 +333,22 @@ class Pipeline:
                         self.update_job(job_id, message="Preparation is ready, but automatic submission could not be confirmed. Open this job in your Library to continue; do not create another swap.")
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
+            if job.get("preparation_kind") == "tracking_rebuild":
+                emit("tracking_review_rejected", job_id=job_id, error=error,
+                    attempt_id=job.get("tracking_review_attempt_id"), revision=job.get("tracking_applied_revision"),
+                    public_code=error.code, segment_id=getattr(error, "segment_id", None),
+                    selection_diagnostics=getattr(error, "tracking_diagnostics", None))
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
-                auto_key_ciphertext=None, message=error.message)
+                auto_key_ciphertext=None, generation_after_review_revision=None,
+                tracking_review_error=job.get("preparation_kind") == "tracking_rebuild",
+                tracking_error_segment_id=getattr(error, "segment_id", None), message=error.message)
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
-                auto_key_ciphertext=None, message="Preparation failed. No provider generation was submitted.")
+                auto_key_ciphertext=None, generation_after_review_revision=None,
+                tracking_review_error=job.get("preparation_kind") == "tracking_rebuild", tracking_error_segment_id=None,
+                message="Your choices are saved, but applying them failed. Review and submit them again; no generation was submitted."
+                    if job.get("preparation_kind") == "tracking_rebuild" else "Preparation failed. No provider generation was submitted.")
         finally:
             emit("preparation_cleanup", job_id=job_id, shutdown_verified=self.cloud.shutdown_verified)
             if self.cloud.shutdown_verified:
@@ -349,11 +363,48 @@ class Pipeline:
                     return current
                 self.records.update("control/preparation.json", retain)
 
+    @timed("scene_review_resolution", job_arg="job")
+    def resolve_saved_review(self, job):
+        """Validate saved choices against masks in the durable background task."""
+        from .tracking import resolve_tracking, resolve_multi_tracking
+        from .scene_selection import reviewed_mask_targets
+        job_id = job["id"]
+        plan, choices = job["tracking_plan"], job["tracking_choices"]
+        metadata = {**job["tracking_metadata"], "allow_coordinate_fallback": True}
+        with tempfile.TemporaryDirectory() as temporary:
+            archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
+            self.cloud.download(job["tracking_masks_uri"], archive, 80 * 1024 * 1024)
+            resolver = resolve_multi_tracking if plan.get("version") == 2 else resolve_tracking
+            resolved = resolver(archive, metadata, plan, choices, reviewed)
+            fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
+            recover = bool(fallback_count and job.get("tracking_recovery_requested")
+                and job.get("retry_missing_masks_with_sam") is True)
+            targets = (reviewed_mask_targets(metadata, plan, choices, resolved["assignments"])
+                if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
+            uri = self.cloud.upload(self.settings.worker_bucket,
+                f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
+        saved = self.update_job(job_id, reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"],
+            tracking_assignments=resolved["assignments"], normalized_targets=targets,
+            coordinate_fallback_sections=fallback_count, recover_missing_masks=recover,
+            tracking_resolution_pending=False, generation_after_review_revision=(job.get("generation_after_review_revision")
+                if not job.get("generation_requires_recovery") or recover else None))
+        emit("tracking_review_validated", job_id=job_id, attempt_id=job.get("tracking_review_attempt_id"),
+            revision=job["tracking_applied_revision"], assignments=resolved["assignments"],
+            missing_mask_mode="sam" if job.get("retry_missing_masks_with_sam") is True else "coordinates",
+            recover_missing_masks=recover, generation_approved=saved.get("generation_after_review_revision") is not None)
+        return saved
+
+    @timed("reviewed_guide_rebuild", job_arg="job")
     def rebuild_reviewed_guide(self, job, remaining):
-        """Reuse SAM masks, depth and vocals; a user match never starts generation."""
+        """Reuse saved assets; optionally recover missing masks before approved generation."""
+        if job.get("tracking_resolution_pending"):
+            job = self.resolve_saved_review(job)
+        if job.get("recover_missing_masks") and not job.get("mask_recovery_completed"):
+            from .mask_recovery import recover_reviewed_masks
+            job = recover_reviewed_masks(self, job, remaining)
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
-        self.update_job(job_id, message="Applying your scene matches and rebuilding the guide.")
+        self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")
         with self.cloud.worker("audio") as invoke:
             payload = {"input_uri": job["normalized_uri"],
                 "masks_uri": job["reviewed_masks_uri"], "guide_audio_uri": job["tracking_vocals_uri"],
@@ -371,17 +422,34 @@ class Pipeline:
                 emit("guide_media_verified", job_id=job_id, **verified)
         guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
             f"outputs/{job_id}/guide-reviewed-{uuid.uuid4().hex}.mp4")
+        auto_submit = bool(not job.get("mask_recovery_conflicts")
+            and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
+            and job.get("generation_after_review_revision") is not None
+            and job.get("generation_after_review_revision") == job.get("tracking_applied_revision"))
         self.update_job(job_id, status="ready", guide_uri=guide_uri,
-            message=("Your scene matches have been applied. "
+            review_generation_queued=auto_submit,
+            message=("Your scene matches are applied. Generation is queued." if auto_submit else "Your guide is ready. "
                 + (f"{job['coordinate_fallback_sections']} selections use position and time because SAM found no mask. " if job.get("coordinate_fallback_sections") else "")
-                + "Review the complete guide before continuing."),
+                + "Review the masked preview, then approve it to start rendering."),
             tracking_reviewed=True, review_required=True, mask_style="depth_multi" if job.get("target_styles") else "depth",
             mask_frames=job["tracking_metadata"]["frames"],
             mask_coverage_min=min(job["reviewed_coverage"]),
             preparation_kind="initial", tracking_revision=job["tracking_applied_revision"] + 1)
         emit("tracking_guide_rebuilt", job_id=job_id,
             section_count=len(job["tracking_plan"]["segments"]))
+        if job.get("mask_recovery_conflicts"):
+            self.update_job(job_id, message="Your selections are saved, but recovered masks overlap another assigned person. Review the guide before generating. No generation was submitted.")
+        elif auto_submit:
+            try:
+                self.cloud.enqueue("generate", job_id, task_token=job["tracking_task_token"])
+            except Exception as error:
+                emit("review_generation_queue_failed", job_id=job_id, error=error)
+                self.records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "review_generation_queued": False,
+                    "message": "Your guide is ready, but automatic generation could not be queued. Continue from your Library."}
+                    if current.get("status") == "ready" else current)
 
+    @timed("export_task", job_arg="job_id")
     def finalize(self, job_id: str):
         def claim_export(current):
             if current and current.get("status") == "completed":
@@ -396,6 +464,7 @@ class Pipeline:
         if job["status"] == "completed":
             self.complete_library_delivery(job)
             return
+        wait_timing("export_queue", job.get("export_queued_at"), job_id=job_id)
         try:
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -403,19 +472,23 @@ class Pipeline:
                 self.cloud.download_provider(job["provider_output"], raw)
                 self.cloud.download(job["normalized_uri"], original)
                 audio_processing = job.get("audio_processing", True)
-                if audio_processing:
+                restore_audio = audio_processing or job.get("setup", {}).get("submit_without_audio", False)
+                if restore_audio:
                     self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
                     output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded,
-                                               audio_start=job["setup"]["trim"][0])
+                                               audio_start=job["setup"]["trim"][0],
+                                               **({"watermark": True} if job.get("setup", {}).get("add_watermark") else {}))
                 else:
-                    output_dimensions = finish(raw, original, output, job["duration"], restore_audio=False)
+                    output_dimensions = finish(raw, original, output, job["duration"], restore_audio=False,
+                        **({"watermark": True} if job.get("setup", {}).get("add_watermark") else {}))
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
-                completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if audio_processing
+                completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if restore_audio
                              else "Your video is ready at its generated resolution, with the returned audio."), output_uri=output_uri, thumbnail_uri=None,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
-                    width=output_dimensions["width"], height=output_dimensions["height"])
-                emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=audio_processing, width=output_dimensions["width"], height=output_dimensions["height"],
+                    width=output_dimensions["width"], height=output_dimensions["height"],
+                    watermark_applied=bool(job.get("setup", {}).get("add_watermark")))
+                emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=restore_audio, submit_without_audio=job.get("setup", {}).get("submit_without_audio", False), width=output_dimensions["width"], height=output_dimensions["height"],
                      **job.get("provider_billing", {}))
                 try:
                     completed = self.ensure_library_poster(completed, output)
@@ -432,6 +505,7 @@ class Pipeline:
             return
         self.complete_library_delivery(completed)
 
+    @timed("scene_thumbnails_save", job_arg="job_id")
     def save_scene_thumbnails(self, job_id, source, root, plan):
         from .media import scene_thumbnails
         frames = [math.floor(section["seek_time"] * 24 + 1e-7) for section in plan["segments"]]
@@ -449,6 +523,7 @@ class Pipeline:
                 for frame, image in tracking_previews.items()}
         self.update_job(job_id, scene_thumbnail_uris=uris, scene_mask_thumbnail_uris=tracking_uris)
 
+    @timed("library_poster", job_arg="job")
     def ensure_library_poster(self, job, source=None):
         if not job.get("account_id") or job.get("thumbnail_uri"):
             return job
@@ -465,12 +540,14 @@ class Pipeline:
             emit("library_poster_saved", job_id=job["id"])
             return updated
 
+    @timed("library_delivery", job_arg="job")
     def complete_library_delivery(self, job):
         # Errors here deliberately propagate to the existing Cloud Tasks retry.
         # The exported video remains completed: no regeneration or export repeats.
         try:
             job = self.ensure_library_poster(job)
             archive_completed(self.records, job)
+            award_watermark_bonus(self.records, job)
             emit("account_library_saved", job_id=job["id"])
         except Exception as error:
             emit("account_library_save_pending", error=error, job_id=job["id"])

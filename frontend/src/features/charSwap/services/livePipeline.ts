@@ -3,7 +3,7 @@ import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES, MAX_TARGET_PEOPLE, TARGET_COLORS
 import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
-import { reportClientError } from "./diagnostics";
+import { reportClientError, timeClientStage } from "./diagnostics";
 import { accountToken } from "./accountContext";
 import { isReferenceCleanupEndpoint } from "./referenceCleanup";
 
@@ -35,6 +35,9 @@ export type LiveJobStatus =
 
 export interface JobSettingsUsed {
   easy_mode?: boolean;
+  submit_without_audio?: boolean;
+  add_watermark?: boolean;
+  watermark_bonus_credits?: number;
   enhanced_masking?: boolean;
   audio_processing?: boolean;
   replace_all_people?: boolean;
@@ -53,6 +56,7 @@ export interface JobSettingsUsed {
 }
 
 export interface LivePipelineJob {
+  processing_stage?: "guide_rebuild" | "mask_recovery" | "generation_queue" | "guide_review";
   settings_used?: JobSettingsUsed;
   /** Browser-only: the upload finished but queue acknowledgement was lost. */
   upload_confirmation_pending?: boolean;
@@ -76,6 +80,8 @@ export interface LivePipelineJob {
   reference_url?: string;
   tracking_revision?: number;
   tracking_reviewed?: boolean;
+  tracking_review_error?: boolean;
+  tracking_error_segment_id?: string;
   tracking_choices?: TrackingReviewChoice[];
   guide_url?: string;
   output_url?: string;
@@ -87,6 +93,9 @@ export interface LivePipelineJob {
   tracking_continuous?: boolean;
   tracking_performed?: boolean;
   easy_mode?: boolean;
+  submit_without_audio?: boolean;
+  add_watermark?: boolean;
+  watermark_bonus_credits?: number;
   auto_generate?: boolean;
   scene_cut_count?: number;
   mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
@@ -328,7 +337,23 @@ function readJob(value: unknown): LivePipelineJob {
     id: value.id,
     status: value.status as LiveJobStatus,
   };
+  if (isRecord(value.settings_used)) {
+    const saved: JobSettingsUsed = {};
+    for (const field of ["easy_mode", "enhanced_masking", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
+      if (typeof value.settings_used[field] === "boolean") saved[field] = value.settings_used[field];
+    for (const field of ["watermark_bonus_credits", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps"] as const) {
+      const number = value.settings_used[field];
+      if (typeof number === "number" && Number.isFinite(number) && number >= 0) saved[field] = number;
+    }
+    for (const field of ["mask_style", "model", "requested_resolution"] as const)
+      if (typeof value.settings_used[field] === "string") saved[field] = value.settings_used[field].slice(0, 50);
+    const trim = value.settings_used.trim;
+    if (Array.isArray(trim) && trim.length === 2 && trim.every(number => typeof number === "number" && Number.isFinite(number) && number >= 0)) saved.trim = trim;
+    job.settings_used = saved;
+  }
   if (value.access_mode === "credits" || value.access_mode === "api-key") job.access_mode = value.access_mode;
+  if (["guide_rebuild", "mask_recovery", "generation_queue", "guide_review"].includes(String(value.processing_stage)))
+    job.processing_stage = value.processing_stage as LivePipelineJob["processing_stage"];
   if (["depth", "depth_multi", "cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
@@ -341,6 +366,9 @@ function readJob(value: unknown): LivePipelineJob {
   if (typeof value.tracking_continuous === "boolean")
     job.tracking_continuous = value.tracking_continuous;
   if (typeof value.tracking_reviewed === "boolean") job.tracking_reviewed = value.tracking_reviewed;
+  if (typeof value.tracking_review_error === "boolean") job.tracking_review_error = value.tracking_review_error;
+  if (typeof value.tracking_error_segment_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.tracking_error_segment_id))
+    job.tracking_error_segment_id = value.tracking_error_segment_id;
   if (
     typeof value.scene_cut_count === "number" &&
     Number.isInteger(value.scene_cut_count) &&
@@ -704,6 +732,8 @@ export async function createLiveJob(
           target_name: target.name,
           enhanced_character_masking: state.enhancedCharacterMasking ?? true,
           easy_mode: state.easyMode ?? true,
+          submit_without_audio: state.submitWithoutAudio ?? false,
+          ...(state.addWatermark ? {add_watermark: true, watermark_bonus_quote: state.watermarkBonusQuote} : {}),
           auto_generate: autoGenerate,
         },
       }),
@@ -714,6 +744,7 @@ export async function createLiveJob(
       !/^[a-zA-Z0-9_-]{1,128}$/.test(ticket.id)) {
     throw new LivePipelineError("The upload could not be started. Try again later.");
   }
+  const uploadJobId = ticket.id;
   const uploads = new AbortController();
   const abortUploads = () => uploads.abort();
   signal.addEventListener("abort", abortUploads, {once: true});
@@ -724,8 +755,8 @@ export async function createLiveJob(
       throw new LivePipelineError("The service did not prepare every reference upload. No generation was submitted.");
     onProgress?.({phase: "uploading", message: `Uploading your video and ${referenceFiles.length === 1 ? "reference" : `${referenceFiles.length} references`} to private storage…`});
     await Promise.all([
-      uploadAsset(ticket.source, sourceFile, uploads.signal),
-      ...referenceFiles.map((file, index) => uploadAsset(referenceTickets[index], file, uploads.signal)),
+      timeClientStage("upload_source", () => uploadAsset(ticket.source, sourceFile, uploads.signal)),
+      ...referenceFiles.map((file, index) => timeClientStage("upload_reference", () => uploadAsset(referenceTickets[index], file, uploads.signal))),
     ]);
   } catch (error) {
     uploads.abort();
@@ -735,11 +766,11 @@ export async function createLiveJob(
   }
   onProgress?.({phase: "confirming", message: "Verifying your uploads and queuing the scene check…"});
   try {
-    return readJob(await requestJson(
-      `/api/uploads/${encodeURIComponent(ticket.id)}/complete`,
+    return readJob(await timeClientStage("upload_confirmation", () => requestJson(
+      `/api/uploads/${encodeURIComponent(uploadJobId)}/complete`,
       { method: "POST", headers: sessionHeaders(token) },
       signal,
-    ));
+    )));
   } catch (error) {
     if (signal.aborted) throw error;
     if (error instanceof LivePipelineError && error.status !== null && error.status < 500) throw error;
@@ -770,11 +801,14 @@ export async function resolveLiveTracking(
   revision: number,
   choices: TrackingReviewChoice[],
   signal: AbortSignal,
+  recovery?: { enabled: boolean; key?: string; generateAfterReview?: boolean },
 ): Promise<LivePipelineJob> {
   return readJob(await requestJson(`/api/jobs/${encodeURIComponent(id)}/tracking-review`, {
     method: "POST",
-    headers: {...sessionHeaders(token), "Content-Type": "application/json"},
-    body: JSON.stringify({revision, choices}),
+    headers: {...sessionHeaders(token, recovery?.enabled || recovery?.generateAfterReview ? recovery?.key : undefined), "Content-Type": "application/json"},
+    body: JSON.stringify({revision, choices, ...(recovery?.enabled ? {
+      recover_missing_masks: true,
+    } : {}), ...(recovery?.generateAfterReview ? {generate_after_review: true} : {})}),
   }, signal));
 }
 

@@ -296,3 +296,11 @@ def test_spend_cap_checks_project_service_currency_fraction_and_state(units):
         variant = copy.deepcopy(budget)
         variant.update(change)
         assert not valid_spend_cap({"budgets": [variant]}, "634011479314")
+
+
+def test_approved_review_generation_queue_does_not_count_as_waiting_for_user():
+    job = {"status": "ready", "review_paused_at": 100, "review_wait_seconds": 20}
+    queued = account_review_wait(job, {**job, "review_generation_queued": True}, 110)
+    assert queued["review_wait_seconds"] == 30 and "review_paused_at" not in queued
+    running = account_review_wait(queued, {**queued, "status": "generating"}, 120)
+    assert running["review_wait_seconds"] == 30

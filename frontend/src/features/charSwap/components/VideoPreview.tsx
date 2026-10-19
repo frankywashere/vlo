@@ -46,6 +46,7 @@ export function VideoPreview({
     ? Math.min(maxPreviewHeight, 220)
     : maxPreviewHeight;
   const [start, end] = trim;
+  const lastFrameTime = Math.max(start, end - 1 / 24);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(trim[0]);
@@ -53,46 +54,55 @@ export function VideoPreview({
   const [failed, setFailed] = useState(false);
   const [frameReady, setFrameReady] = useState(false);
   const pendingSeek = useRef<number | null>(null);
+  const requestedTime = useRef(seekTo ?? trim[0]);
+  const scrubbing = useRef(false);
   const previewSource = useRef(clip.url);
   const [keyboardPoint, setKeyboardPoint] = useState({ x: 0.5, y: 0.5 });
   useEffect(() => {
-    const video = videoRef.current;
-    if (video) {
-      const next = seekTo ?? start;
-      const sourceChanged = previewSource.current !== clip.url;
-      previewSource.current = clip.url;
-      const settled = !sourceChanged && video.readyState >= 2 && !video.seeking && video.currentTime === next;
-      setFrameReady(settled);
-      pendingSeek.current = settled ? null : next;
-      video.pause();
-      if (!settled) video.currentTime = next;
-    }
+    const sourceChanged = previewSource.current !== clip.url;
+    previewSource.current = clip.url;
+    scrubbing.current = false;
+    seek(seekTo ?? start, sourceChanged);
   }, [clip.url, start, end, seekTo]);
 
-  function seek(next: number) {
-    const video = videoRef.current;
-    if (video) {
-      const settled = video.readyState >= 2 && !video.seeking && video.currentTime === next;
-      setFrameReady(settled);
-      pendingSeek.current = settled ? null : next;
-      video.pause();
-      if (!settled) video.currentTime = next;
-    }
+  function seek(position: number, sourceChanged = false) {
+    const next = Math.max(start, Math.min(lastFrameTime, position));
+    requestedTime.current = next;
     setTime(next);
+    const video = videoRef.current;
+    if (!video) return;
+    const settled = !sourceChanged && pendingSeek.current === null && video.readyState >= 2
+      && !video.seeking && Math.abs(video.currentTime - next) < 1 / 48;
+    pendingSeek.current = settled ? null : next;
+    setFrameReady(settled && !scrubbing.current);
+    video.pause();
+    if (!settled && (sourceChanged || Math.abs(video.currentTime - next) >= 1 / 48)) {
+      // Safari can defer/reject a seek until metadata arrives. Keep the intent
+      // and retry on load/seek events instead of reverting the controlled slider.
+      try { video.currentTime = next; } catch { /* The load events retry. */ }
+    }
   }
   function reportFrameReady() {
     const video = videoRef.current;
-    if (!video || video.seeking || video.readyState < 2 ||
-        video.currentTime < start || video.currentTime >= end ||
-        (pendingSeek.current !== null && Math.abs(video.currentTime - pendingSeek.current) > 1 / 48)) return;
+    if (!video || video.seeking || video.readyState < 2) return;
+    const target = pendingSeek.current ?? (video.paused ? requestedTime.current : null);
+    if (target !== null && Math.abs(video.currentTime - target) > 1 / 48) {
+      pendingSeek.current = target;
+      setFrameReady(false);
+      try { video.currentTime = target; } catch { /* Keep waiting for a load event. */ }
+      return;
+    }
+    if (video.currentTime < start || video.currentTime >= end) return;
+    // A seek may finish before touchend. Remember that decoded frame now;
+    // releasing at the same time will not necessarily emit another seeked.
     pendingSeek.current = null;
-    setFrameReady(true);
+    setFrameReady(!scrubbing.current);
   }
   function selectPoint(point: NormalizedPoint) {
     const video = videoRef.current;
     // currentTime changes before the browser has decoded the requested frame.
     // Never pair coordinates from the old visible image with the new time.
-    if (!video || !frameReady || video.seeking || video.readyState < 2 || failed ||
+    if (!video || !frameReady || pendingSeek.current !== null || scrubbing.current || video.seeking || video.readyState < 2 || failed ||
         video.currentTime < start || video.currentTime >= end) {
       setFrameReady(false);
       return;
@@ -141,12 +151,9 @@ export function VideoPreview({
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onLoadedMetadata={() => {
-              setFrameReady(false);
-              pendingSeek.current = seekTo ?? start;
-              if (videoRef.current)
-                videoRef.current.currentTime = seekTo ?? start;
               setFailed(false);
-              setTime(seekTo ?? start);
+              // Loading may finish after a drag: use the latest requested frame.
+              seek(requestedTime.current, true);
             }}
             onLoadedData={() => {
               setFailed(false);
@@ -163,10 +170,12 @@ export function VideoPreview({
             }}
             onTimeUpdate={() => {
               const video = videoRef.current;
-              if (!video) return;
-              if (video.currentTime >= trim[1]) {
-                seek(trim[0]);
+              if (!video || scrubbing.current || pendingSeek.current !== null || video.seeking || video.paused) return;
+              if (video.currentTime >= end) {
+                seek(start);
+                return;
               }
+              requestedTime.current = video.currentTime;
               setTime(video.currentTime);
             }}
             style={{
@@ -306,7 +315,7 @@ export function VideoPreview({
           onClick={() => {
             const video = videoRef.current;
             if (!video) return;
-            if (playing) video.pause();
+            if (playing) seek(video.currentTime);
             else
               void video.play().catch(() => {
                 setFailed(true);
@@ -324,12 +333,15 @@ export function VideoPreview({
         </Typography>
         <Slider
           aria-label="Preview position"
-          value={Math.max(trim[0], Math.min(trim[1], time))}
+          value={Math.max(start, Math.min(lastFrameTime, time))}
           min={trim[0]}
-          max={trim[1]}
+          max={lastFrameTime}
           step={1 / 24}
+          onPointerDownCapture={() => { scrubbing.current = true; }}
+          onPointerCancel={() => { scrubbing.current = false; seek(requestedTime.current); }}
           onChange={(_event, value) => seek(value as number)}
-          sx={{ mx: 1 }}
+          onChangeCommitted={(_event, value) => { scrubbing.current = false; seek(value as number); }}
+          sx={{ mx: 1, touchAction: "none" }}
         />
         <Typography
           variant="caption"

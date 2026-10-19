@@ -129,7 +129,8 @@ def ready_job(records, owner):
 
 
 @pytest.mark.parametrize("duration,quoted", [(5, None), (15, None), (5, 60)])
-def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch, duration, quoted):
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch, duration, quoted, reviewed):
     client, records, cloud, provider = api
     job_id = "b" * 32
     account_id = "c" * 64
@@ -144,6 +145,11 @@ def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monke
         "setup": {"trim": [0, duration], "anchor": {"x": .5, "y": .5, "time": 1},
                   "easy_mode": True, "auto_generate": True},
     }
+    if reviewed:
+        job = records.data[f"jobs/{job_id}.json"]
+        job["setup"].update(easy_mode=False, auto_generate=False)
+        job.update(tracking_reviewed=True, tracking_applied_revision=1, generation_after_review_revision=1,
+            review_generation_queued=True, recover_missing_masks=False)
     if quoted is not None:
         records.data[f"jobs/{job_id}.json"]["generation_credits"] = quoted
     submitted = client.post("/internal/generate", json={"job_id": job_id})
@@ -571,3 +577,37 @@ def test_new_overlay_guide_uses_cyan_prompt_without_changing_legacy_gray_jobs(ap
     assert response.status_code == 200
     assert 'translucent cyan' in provider.submissions[-1]['prompt']
     assert 'gray silhouette' not in provider.submissions[-1]['prompt']
+
+
+@pytest.mark.parametrize("completed,approved_revision", [(False, 2), (True, 1), (True, 2)])
+@pytest.mark.parametrize("recover_required", [False, True])
+def test_review_recovery_generation_requires_completed_matching_approval_and_submits_once(api, monkeypatch, completed, approved_revision, recover_required):
+    client, records, cloud, provider = api
+    headers, owner = authenticated(api)
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    monkeypatch.setattr(gateway, "internal_pipeline", lambda task, authorization: None)
+    job_id = ready_job(records, owner)
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]),
+        auto_key_ciphertext=protect_key(job_id, headers["X-Reapi-Key"]), tracking_reviewed=True,
+        tracking_applied_revision=2, generation_after_review_revision=approved_revision,
+        mask_recovery_completed=completed, recover_missing_masks=recover_required, review_generation_queued=True)
+    job["setup"].update(easy_mode=False, auto_generate=False)
+    assert gateway.view(job)["status"] == "queued"
+    assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
+    assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
+    assert len(provider.submissions) == (1 if approved_revision == 2 and (completed or not recover_required) else 0)
+
+
+@pytest.mark.parametrize("extra,stage", [
+    ({"status": "preparing", "preparation_kind": "tracking_rebuild"}, "guide_rebuild"),
+    ({"status": "queued", "preparation_kind": "tracking_rebuild", "recover_missing_masks": True}, "mask_recovery"),
+    ({"status": "preparing", "preparation_kind": "tracking_rebuild", "recover_missing_masks": True,
+      "mask_recovery_completed": True}, "guide_rebuild"),
+    ({"status": "ready", "tracking_reviewed": True, "mask_style": "depth"}, "guide_review"),
+    ({"status": "ready", "review_generation_queued": True}, "generation_queue"),
+    ({"status": "preparing"}, None),
+])
+def test_job_view_distinguishes_scene_detection_from_reviewed_guide_work(api, extra, stage):
+    job = {"id": "a"*32, **extra}
+    assert gateway.view(job).get("processing_stage") == stage

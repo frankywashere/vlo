@@ -1,3 +1,4 @@
+import { reportClientTiming, timeClientStage } from "./diagnostics";
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
 import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, CleanupSkippedError, UnsupportedCleanupError} from "./browserCleanupProtocol";
 import type {CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
@@ -62,7 +63,7 @@ function initialize() {
     markRunning(true);
     const epoch=generation;
     if (!prefetch) lastProgress = {phase:"loading",downloadMB:cpuCleanup() ? 176 : 99};
-    ready=(async()=>{
+    ready=timeClientStage("cleanup_model_load", async()=>{
       // Finish the download-only warmup before the worker requests the same file.
       if (cpuCleanup() && prefetch) await prefetch.catch(()=>undefined);
       if (generation!==epoch) throw abortError();
@@ -72,7 +73,7 @@ function initialize() {
       const loaded=waitFor(worker,reply=>reply.type==="ready"?true:undefined,cpuCleanup()?300_000:90_000);
       worker.postMessage({type:"initialize"} satisfies CleanupRequest);
       await loaded;
-    })();
+    });
   }
   return ready;
 }
@@ -83,7 +84,7 @@ export function warmReferenceCleanup(): void {
     supported();
     if (!cpuCleanup()) {void initialize().then(releaseLater,()=>undefined);return;}
     if (prefetch) return;
-    prefetch=(async()=>{
+    prefetch=timeClientStage("cleanup_model_prefetch", async()=>{
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),300_000);
       try {
         let cached:Response|undefined;
@@ -111,7 +112,7 @@ export function warmReferenceCleanup(): void {
         }
         if(length!==176_240_148)throw new Error("Incomplete model warmup");
       } finally {clearTimeout(timer);}
-    })();
+    });
     void prefetch.catch(()=>undefined);
   } catch { /* Unsupported devices keep Original. */ }
 }
@@ -119,7 +120,9 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
   onProgress?: (value: CleanupProgress) => void, shouldProcess: () => boolean = () => true): Promise<Blob> {
   if (signal.aborted) return Promise.reject(abortError());
   onProgress?.({phase:"queued"});
+  const queuedAt = performance.now();
   const task = queue.then(async () => {
+    reportClientTiming("cleanup_queue", (performance.now() - queuedAt) / 1000);
     if (!shouldProcess()) throw new CleanupSkippedError();
     if (signal.aborted) throw abortError();
     supported(); clearTimeout(idle);
@@ -132,7 +135,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
         const loading = initialize(); onProgress?.(lastProgress); await loading;
         if (signal.aborted) throw abortError();
         if (!shouldProcess()) throw new CleanupSkippedError();
-        // Only local draft blobs are read. No authenticated POST or cloud fallback.
+        // Photo pixels remain local; timing reports contain only stage names and durations.
         if (!url.startsWith("blob:")) throw new Error("Choose a local reference image to clean.");
         const response = await fetch(url,{signal});
         if (!response.ok) throw new Error("The original reference could not be read.");
@@ -143,7 +146,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
         const result = waitFor(worker, reply => reply.type === "result" && reply.id === id ? reply.image : undefined,cpuCleanup() ? 60_000 : 30_000);
         markRunning(true);
         worker.postMessage({type:"clean",id,image} satisfies CleanupRequest);
-        const cleaned = await result;
+        const cleaned = await timeClientStage("cleanup_inference", () => result);
         if (!(cleaned instanceof Blob) || cleaned.type !== "image/jpeg" || !cleaned.size || cleaned.size > 5*1024*1024)
           throw new Error("The cleaned reference could not be read. Use Original.");
         return cleaned;
