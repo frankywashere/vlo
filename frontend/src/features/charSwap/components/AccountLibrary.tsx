@@ -400,7 +400,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                         selected.tracking_revision ?? 0,
                         choices,
                         controller.current.signal,
-                        {enabled: selected.mask_style !== "none", key},
+                        {enabled: selected.mask_style !== "none", key, generateAfterReview: true},
                       );
                       if (mounted.current) {
                         setSelected({ ...selected, ...result });

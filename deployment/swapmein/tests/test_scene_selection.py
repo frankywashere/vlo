@@ -125,3 +125,30 @@ def test_coordinate_fallback_reaches_prompt_without_calling_it_an_absence():
     assert "use the stated position and timestamp" in prompt
     scene = next(scene for target in targets for scene in target["scenes"] if scene.get("coordinate_fallback"))
     assert not scene["absent"] and scene["anchor"] == present["anchor"]
+
+
+def test_scene_review_can_approve_generation_once_without_masking_or_another_preview(api, monkeypatch):
+    from cryptography.fernet import Fernet
+    from swapmein.security import digest
+    import swapmein.app as gateway
+    client, records, cloud, provider = api
+    headers, owner = authenticated(api)
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    monkeypatch.setattr(gateway, "internal_pipeline", lambda *args: None)
+    job_id = ready_job(records, owner)
+    metadata, plan, choices = setup_scene_review()
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(status="tracking_review", tracking_revision=1, tracking_metadata=metadata, tracking_plan=plan,
+        normalized_targets=plan["targets"], tracking_performed=False, mask_style="none", access_mode="api-key",
+        key_fingerprint=digest(headers["X-Reapi-Key"]), reference_uris=["gs://app/a.jpg", "gs://app/b.jpg"])
+    job["setup"].update(targets=plan["targets"], easy_mode=False, auto_generate=False, enhanced_character_masking=False)
+    body = {"revision": 1, "choices": choices, "generate_after_review": True}
+    for _ in range(2):
+        response = client.post(f"/api/jobs/{job_id}/tracking-review", headers=headers, json=body)
+        assert response.status_code == 202, response.text
+        assert response.json()["status"] == "queued"
+    assert cloud.enqueued == [("generate", job_id)]
+    assert not provider.submissions
+    for _ in range(2):
+        assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
+    assert len(provider.submissions) == 1

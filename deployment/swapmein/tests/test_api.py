@@ -574,7 +574,8 @@ def test_new_overlay_guide_uses_cyan_prompt_without_changing_legacy_gray_jobs(ap
 
 
 @pytest.mark.parametrize("completed,approved_revision", [(False, 2), (True, 1), (True, 2)])
-def test_review_recovery_generation_requires_completed_matching_approval_and_submits_once(api, monkeypatch, completed, approved_revision):
+@pytest.mark.parametrize("recover_required", [False, True])
+def test_review_recovery_generation_requires_completed_matching_approval_and_submits_once(api, monkeypatch, completed, approved_revision, recover_required):
     client, records, cloud, provider = api
     headers, owner = authenticated(api)
     monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
@@ -584,12 +585,12 @@ def test_review_recovery_generation_requires_completed_matching_approval_and_sub
     job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]),
         auto_key_ciphertext=protect_key(job_id, headers["X-Reapi-Key"]), tracking_reviewed=True,
         tracking_applied_revision=2, generation_after_review_revision=approved_revision,
-        mask_recovery_completed=completed, review_generation_queued=True)
+        mask_recovery_completed=completed, recover_missing_masks=recover_required, review_generation_queued=True)
     job["setup"].update(easy_mode=False, auto_generate=False)
     assert gateway.view(job)["status"] == "queued"
     assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
     assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
-    assert len(provider.submissions) == (1 if completed and approved_revision == 2 else 0)
+    assert len(provider.submissions) == (1 if approved_revision == 2 and (completed or not recover_required) else 0)
 
 
 @pytest.mark.parametrize("extra,stage", [

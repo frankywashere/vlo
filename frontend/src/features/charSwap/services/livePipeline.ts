@@ -773,14 +773,14 @@ export async function resolveLiveTracking(
   revision: number,
   choices: TrackingReviewChoice[],
   signal: AbortSignal,
-  recovery?: { enabled: boolean; key?: string },
+  recovery?: { enabled: boolean; key?: string; generateAfterReview?: boolean },
 ): Promise<LivePipelineJob> {
   return readJob(await requestJson(`/api/jobs/${encodeURIComponent(id)}/tracking-review`, {
     method: "POST",
-    headers: {...sessionHeaders(token, recovery?.enabled ? recovery.key : undefined), "Content-Type": "application/json"},
+    headers: {...sessionHeaders(token, recovery?.enabled || recovery?.generateAfterReview ? recovery?.key : undefined), "Content-Type": "application/json"},
     body: JSON.stringify({revision, choices, ...(recovery?.enabled ? {
-      recover_missing_masks: true, generate_after_recovery: true,
-    } : {})}),
+      recover_missing_masks: true,
+    } : {}), ...(recovery?.generateAfterReview ? {generate_after_review: true} : {})}),
   }, signal));
 }
 

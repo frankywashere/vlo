@@ -193,7 +193,7 @@ describe("live BYOK pipeline", () => {
     expect(calls("/api/jobs/job-1/tracking-review")).toHaveLength(1);
     const request = calls("/api/jobs/job-1/tracking-review")[0][1];
     expect(request?.headers).toEqual({Authorization: `Bearer ${SESSION_TOKEN}`, "X-Reapi-Key": USER_KEY, "Content-Type": "application/json"});
-    expect(JSON.parse(String(request?.body))).toEqual({revision: 2, choices: [choice], recover_missing_masks: true, generate_after_recovery: true});
+    expect(JSON.parse(String(request?.body))).toEqual({revision: 2, choices: [choice], recover_missing_masks: true, generate_after_review: true});
     expect(result.current.busy).toBe(true);
     expect(result.current.preparationProgress?.phase).toBe("queued");
     expect(calls("/api/uploads")).toHaveLength(1);

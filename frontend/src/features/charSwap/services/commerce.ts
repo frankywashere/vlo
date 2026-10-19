@@ -67,10 +67,11 @@ export interface PipelineSettings {
   revision: number;
   audio_processing: boolean;
   preparation_provider?: PreparationProvider;
+  retry_missing_masks_with_sam?: boolean;
   replicate_api_key_configured?: boolean;
 }
 
-export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "audio_processing" | "preparation_provider">>) {
+export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam">>) {
   return commerceRequest<PipelineSettings>("/api/commerce/admin/pipeline", settings);
 }
 

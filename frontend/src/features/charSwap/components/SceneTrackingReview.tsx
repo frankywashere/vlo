@@ -174,7 +174,7 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
         Tap the person in each box below. Leave it blank if they’re not there.
       </Typography>
       {!enhancedMasking && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Masking stays off. Your selections tell the model who to replace.</Typography>}
-      {enhancedMasking && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>If a mask is missing, Submit retries it and starts generation automatically. Your other selections stay saved.</Typography>}
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Submit starts generation automatically.{enhancedMasking ? " Your saved settings handle any missing masks. Your other selections stay saved." : " Your scene choices guide the replacement."}</Typography>
       {trackingUrl && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
         onChange={(_event, checked) => setShowDetected(checked)} />} />}
     </Box>
@@ -192,7 +192,7 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
     <Typography variant="body2" color="text.secondary">Untapped images will be saved as “not in this scene” for {person.name}.</Typography>
     <Stack direction="row" spacing={2} justifyContent="space-between">
       {activeIndex > 0 ? <Button disabled={locked} onClick={() => setNavigation({ index: activeIndex - 1, acknowledgedError: errorSegmentId ?? null })}>Previous character</Button> : <Box />}
-      <Button variant="contained" disabled={locked} onClick={() => void advance()}>{submitting ? "Submitting…" : last ? "Submit" : "Next character"}</Button>
+      <Button variant="contained" disabled={locked} onClick={() => void advance()}>{submitting ? "Submitting…" : last ? "Submit and generate" : "Next character"}</Button>
     </Stack>
   </Stack>;
 }

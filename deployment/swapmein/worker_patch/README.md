@@ -145,12 +145,15 @@ frame/audio alignment and guide-validation failures. These are preparation
 checks, not proof of a new generated replacement's quality. No deployment,
 cloud inference or paid generation is implied by this README update.
 
-## Point-prompted review recovery (not deployed)
+## Point-prompted review recovery
 
 `mask_recovery.py` adds private `/recover-masks` to the GPU bootstrap. The new
-client explicitly requests recovery and subsequent generation when submitting
-masked scene choices. Old clients, non-masking review and selections with no
-missing masks retain their existing approval flow. An unmatched tap is saved
+client explicitly approves generation when submitting scene choices, including
+non-masking review. The internal guide is built and queued for generation without
+another preview approval. Old clients that omit approval retain their existing
+flow. Admin Experimental selects coordinate fallback (default) or SAM retries
+for missing masks; each new job saves its mode, so toggling does not alter
+queued or running work. An unmatched tap is saved
 with its original normalized point and trimmed 24 fps frame, not reinterpreted
 against the untrimmed upload.
 
@@ -174,9 +177,9 @@ uses our point-prompt worker; it does not submit another Replicate prediction.
 
 `stage_gpu_recovery.py --output /absolute/path/to/empty-directory` creates a
 small deterministic source overlay and Cloud Build recipe against the last
-verified Iowa GPU digest. Staging itself performs no cloud operations. A future
-release needs the GPU overlay **before** the gateway/frontend changes, idle
-worker verification, and a bounded point-tracker inference test. In particular,
+verified Iowa GPU digest. Staging itself performs no cloud operations. A release
+needs the GPU overlay **before** the gateway/frontend changes, idle worker
+verification, and a bounded point-tracker inference test. In particular,
 the worker refuses to run if its retained checkpoint has missing point-tracker
 weights. Local mocked tests do not establish GPU compatibility, timing, mask
 quality or render quality. No image build, worker switch or paid validation is

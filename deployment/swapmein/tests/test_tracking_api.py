@@ -433,7 +433,7 @@ def test_recovery_approval_is_saved_for_exact_review_revision_without_submitting
     client, records, cloud, provider, headers, job_id, calls = tracking_review
     monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
     job = records.data[f"jobs/{job_id}.json"]
-    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]))
+    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]), retry_missing_masks_with_sam=True)
     job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
     original = gateway.resolve_tracking
     def missing(archive, metadata, plan, choices, output):
@@ -452,4 +452,31 @@ def test_recovery_approval_is_saved_for_exact_review_revision_without_submitting
     if approved:
         assert recover_key(saved) == headers["X-Reapi-Key"]
     assert client.post(review_endpoint(job_id), headers=headers, json=body).status_code == 202
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
+
+
+@pytest.mark.parametrize("sam_mode", [False, True])
+def test_saved_admin_mode_controls_missing_mask_recovery_and_both_modes_approve_generation(tracking_review, monkeypatch, sam_mode):
+    from cryptography.fernet import Fernet
+    from swapmein.security import digest
+    client, records, cloud, provider, headers, job_id, _ = tracking_review
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]), retry_missing_masks_with_sam=sam_mode)
+    job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
+    # A global toggle after job creation must not switch this job's path.
+    records.data["control/pipeline-settings.json"] = {"revision": 4, "retry_missing_masks_with_sam": not sam_mode}
+    original = gateway.resolve_tracking
+    def missing(archive, metadata, plan, choices, output):
+        result = original(archive, metadata, plan, choices, output)
+        result["assignments"] = [{"segment_id": "segment-000", "start_frame": 0, "end_frame": 120,
+            "selected_label": None, "absent": False, "coordinate_fallback": True, "fallback_anchor": choices[0]["anchor"]}]
+        return result
+    monkeypatch.setattr(gateway, "resolve_tracking", missing)
+    response = client.post(review_endpoint(job_id), headers=headers, json={**review_body(),
+        "recover_missing_masks": True, "generate_after_review": True})
+    assert response.status_code == 202, response.text
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["recover_missing_masks"] is sam_mode
+    assert saved["generation_after_review_revision"] == 1
     assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions

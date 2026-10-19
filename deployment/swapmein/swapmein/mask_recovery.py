@@ -3,6 +3,7 @@ import json
 import math
 from pathlib import Path
 import tempfile
+import time
 import uuid
 
 from .diagnostics import emit
@@ -27,6 +28,7 @@ def recovery_requests(job):
 
 
 def recover_reviewed_masks(pipeline, job, remaining):
+    started = time.monotonic()
     cloud, settings = pipeline.cloud, pipeline.settings
     requests = recovery_requests(job)
     if not requests:
@@ -72,7 +74,9 @@ def recover_reviewed_masks(pipeline, job, remaining):
         tracking_assignments=assignments, normalized_targets=targets,
         coordinate_fallback_sections=len(requests)-len(recovered), mask_recovery_completed=True,
         mask_recovery_report=items, mask_recovery_conflicts=conflicts,
+        mask_recovery_elapsed_seconds=round(time.monotonic() - started, 3),
         generation_after_review_revision=None if conflicts else job.get("generation_after_review_revision"))
     emit("mask_recovery_completed", job_id=job_id, recovered_sections=len(recovered),
-        coordinate_sections=len(requests)-len(recovered), conflicts=conflicts)
+        coordinate_sections=len(requests)-len(recovered), conflicts=conflicts,
+        elapsed_seconds=round(time.monotonic() - started, 3))
     return saved

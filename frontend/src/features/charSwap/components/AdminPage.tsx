@@ -101,6 +101,20 @@ export function AdminPage() {
           <Typography color="text.secondary">Off by default. When off, the source soundtrack is sent with the clip and the provider’s returned audio is kept. When on, vocals are separated and pitch-shifted before generation, then the original soundtrack is restored on export.</Typography>
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
+        <AdminSection title="Experimental"><Stack spacing={2}>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.retry_missing_masks_with_sam ?? false}
+            disabled={busy || !can("pipeline_settings")}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, retry_missing_masks_with_sam: enabled});
+                setAdmin({...admin, pipeline});
+                setMessage(`${enabled ? "SAM mask retries" : "Coordinate fallback"} selected for new jobs. Existing jobs keep their saved mode.`);
+              });
+            }} />} label="Retry missing masks with SAM" />
+          <Typography color="text.secondary">Off: use the selected position and timestamp. On: retry the missing mask with SAM, then use coordinates if it still cannot find a mask. Adds GPU processing time.</Typography>
+          <Typography variant="body2" color="text.secondary">Applies to new jobs only. Both modes continue to generation automatically after scene choices are submitted.</Typography>
+        </Stack></AdminSection>
         <AdminSection title="Preparation routing"><Stack spacing={2}>
           <Typography color="text.secondary">Choose where enhanced masking prepares person masks and depth. This applies to new jobs only. Queued and running jobs keep their saved provider; generation still uses the existing video provider.</Typography>
           <FormControl disabled={busy || !can("pipeline_settings")}>

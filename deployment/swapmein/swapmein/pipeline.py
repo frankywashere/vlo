@@ -386,7 +386,9 @@ class Pipeline:
             section_count=len(job["tracking_plan"]["segments"]))
         if job.get("mask_recovery_conflicts"):
             self.update_job(job_id, message="Your selections are saved, but recovered masks overlap another assigned person. Review the guide before generating. No generation was submitted.")
-        elif (job.get("mask_recovery_completed") and job.get("generation_after_review_revision")
+        elif ((not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
+                and job.get("generation_after_review_revision") is not None
+                and job.get("generation_after_review_revision")
                 == job.get("tracking_applied_revision")):
             self.update_job(job_id, review_generation_queued=True,
                 message="Your scene matches are applied. Generation is queued.")

@@ -17,11 +17,11 @@ def account_review_wait(current: dict | None, updated: dict, now: float) -> dict
     current = current or {}
     waiting = {"tracking_review", "ready"}
     paused_at = current.get("review_paused_at")
-    if paused_at is None and current.get("status") in waiting:
+    if paused_at is None and current.get("status") in waiting and not current.get("review_generation_queued"):
         # Jobs created before pause accounting use the last saved review transition.
         paused_at = current.get("updated_at", now)
     total = current.get("review_wait_seconds", 0)
-    if updated.get("status") in waiting:
+    if updated.get("status") in waiting and not updated.get("review_generation_queued"):
         return {**updated, "review_wait_seconds": total,
                 "review_paused_at": paused_at if paused_at is not None else now}
     if paused_at is not None:

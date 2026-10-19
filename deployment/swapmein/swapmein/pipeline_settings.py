@@ -16,11 +16,13 @@ def pipeline_settings(records):
     provider = current.get("preparation_provider", "workers")
     return {"revision": current.get("revision", 0),
             "audio_processing": current.get("audio_processing") is True,
+            "retry_missing_masks_with_sam": current.get("retry_missing_masks_with_sam") is True,
             "preparation_provider": provider if provider in {"workers", "replicate"} else "workers",
             "replicate_api_key_configured": replicate_key_ready()}
 
 
-def save_pipeline_settings(records, actor, revision, audio_processing=None, preparation_provider=None):
+def save_pipeline_settings(records, actor, revision, audio_processing=None, preparation_provider=None,
+                           retry_missing_masks_with_sam=None):
     require_permission(records, actor, "pipeline_settings")
     if preparation_provider is not None and preparation_provider not in {"workers", "replicate"}:
         raise PublicError("Choose a supported preparation provider.")
@@ -33,10 +35,13 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
             raise PublicError("Pipeline settings changed in another session. Reload before saving.", 409)
         return {"revision": revision + 1,
                 "audio_processing": current.get("audio_processing") is True if audio_processing is None else audio_processing,
+                "retry_missing_masks_with_sam": (current.get("retry_missing_masks_with_sam") is True
+                    if retry_missing_masks_with_sam is None else retry_missing_masks_with_sam),
                 "preparation_provider": preparation_provider or current.get("preparation_provider", "workers"),
                 "updated_at": time.time(), "updated_by": actor["email"]}
 
     saved = records.update(PATH, update)
     emit("admin_audio_processing_changed", actor_id=digest(actor["email"]),
-         revision=saved["revision"], audio_processing=saved["audio_processing"], preparation_provider=saved["preparation_provider"])
+         revision=saved["revision"], audio_processing=saved["audio_processing"], preparation_provider=saved["preparation_provider"],
+         retry_missing_masks_with_sam=saved["retry_missing_masks_with_sam"])
     return pipeline_settings(records)

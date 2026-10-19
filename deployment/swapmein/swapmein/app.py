@@ -512,13 +512,15 @@ class PipelineSettingsUpdate(BaseModel):
     revision: int = Field(ge=0)
     audio_processing: bool | None = None
     preparation_provider: Literal["workers", "replicate"] | None = None
+    retry_missing_masks_with_sam: bool | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
 def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str | None = Header(default=None)):
     actor = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider)
+    return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
+                                  body.retry_missing_masks_with_sam)
 
 
 @app.post("/api/commerce/admin/features")
@@ -726,6 +728,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "source_uri": source_uri, "reference_uri": reference_uri, "reference_uris": [reference_uri],
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"],
+               "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
@@ -916,6 +919,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"],
+               "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
@@ -999,6 +1003,7 @@ class TrackingReview(BaseModel):
     choices: list[TrackingChoice] = Field(min_length=1, max_length=300)
     recover_missing_masks: bool = False
     generate_after_recovery: bool = False
+    generate_after_review: bool = False
 
 
 @app.post("/api/jobs/{job_id}/tracking-review", status_code=202)
@@ -1019,20 +1024,44 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     if (review.revision != job.get("tracking_revision") or not expected
             or len(supplied) != len(expected) or set(supplied) != expected):
         raise PublicError(invalid, 400, code="tracking_review_invalid")
+    def approved_review_key():
+        if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
+            raise PublicError("This clip needs its original access method.", 403)
+        key = key_for_session(active_session, x_reapi_key)
+        return (protect_key(job_id, key) if active_session.get("access_mode", "api-key") == "api-key"
+                else job.get("auto_key_ciphertext"))
     if plan.get("version") == 3:
         from .scene_selection import resolve
         choices = [choice.model_dump() for choice in review.choices]
         targets = resolve(job["tracking_metadata"], plan, choices)
+        auto_key = approved_review_key() if review.generate_after_review else job.get("auto_key_ciphertext")
+        task_token = uuid.uuid4().hex
         def apply_scene_choices(current):
             if current.get("tracking_revision") != review.revision or current.get("status") != "tracking_review":
                 raise PublicError(invalid, 409, code="tracking_review_invalid")
             return {**current, "status": "ready", "normalized_targets": targets,
                 "tracking_applied_revision": review.revision, "tracking_reviewed": True,
+                "generation_after_review_revision": review.revision if review.generate_after_review else None,
+                "recover_missing_masks": False, "review_generation_queued": review.generate_after_review,
+                "tracking_task_token": task_token, "auto_key_ciphertext": auto_key,
                 "tracking_choices": choices, "message": "Scene selections saved. Review your clip before generating.",
                 "updated_at": time.time()}
         job = records.update(f"jobs/{job_id}.json", apply_scene_choices)
         emit("scene_selections_applied", job_id=job_id, section_count=len(choices),
              absent_sections=sum(choice["absent"] for choice in choices))
+        if review.generate_after_review:
+            try:
+                cloud.enqueue("generate", job_id, task_token=task_token)
+            except Exception as error:
+                emit("review_generation_queue_failed", job_id=job_id, error=error)
+                job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "review_generation_queued": False,
+                    "message": "Your choices are saved, but automatic generation could not be queued. Continue from your Library."}
+                    if current.get("status") == "ready" else current)
+            else:
+                job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "message": "Your scene choices are saved. Generation is queued."}
+                    if current.get("status") == "ready" else current)
         return view(job)
     current, _ = records.read("control/preparation.json")
     check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
@@ -1059,19 +1088,17 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                 resolved = resolve_tracking(archive, review_metadata, plan, choices, reviewed)
             from .scene_selection import reviewed_mask_targets
             fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
-            recover = bool(fallback_count and review.recover_missing_masks)
-            auto_recovery = bool(recover and review.generate_after_recovery)
+            recover = bool(fallback_count and review.recover_missing_masks and job.get("retry_missing_masks_with_sam") is True)
+            auto_submit = bool(review.generate_after_review or (recover and review.generate_after_recovery))
             auto_key = job.get("auto_key_ciphertext")
-            if auto_recovery:
-                if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
-                    raise PublicError("This clip needs its original access method.", 403)
-                key = key_for_session(active_session, x_reapi_key)
-                if active_session.get("access_mode", "api-key") == "api-key":
-                    auto_key = protect_key(job_id, key)
+            if auto_submit:
+                auto_key = approved_review_key()
             reviewed_targets = (reviewed_mask_targets(review_metadata, plan, choices, resolved["assignments"])
                 if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
             emit("tracking_review_validated", job_id=job_id, attempt_id=attempt_id,
-                 revision=review.revision, assignments=resolved["assignments"])
+                 revision=review.revision, assignments=resolved["assignments"],
+                 missing_mask_mode="sam" if job.get("retry_missing_masks_with_sam") is True else "coordinates",
+                 recover_missing_masks=recover, generation_approved=auto_submit)
             records.update("control/preparation.json", lambda current: reserve_preparation(
                 current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
             reserved = True
@@ -1091,7 +1118,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             "normalized_targets": reviewed_targets, "coordinate_fallback_sections": fallback_count,
             "recover_missing_masks": recover, "mask_recovery_completed": False, "mask_recovery_conflicts": 0,
             "review_generation_queued": False,
-            "generation_after_review_revision": review.revision if auto_recovery else None,
+            "generation_after_review_revision": review.revision if auto_submit else None,
             "auto_key_ciphertext": auto_key,
             "tracking_choices": choices,
             "message": "Your matches are saved. The corrected guide is queued.", "updated_at": time.time()})
@@ -1525,11 +1552,12 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     job, _ = records.read(f"jobs/{task.job_id}.json")
     if not job or job.get("status") != "ready":
         return {"ok": True}
-    reviewed_recovery = bool(job.get("generation_after_review_revision")
+    reviewed_submission = bool(job.get("generation_after_review_revision")
         and job.get("generation_after_review_revision") == job.get("tracking_applied_revision")
-        and job.get("tracking_reviewed") and job.get("mask_recovery_completed"))
+        and job.get("tracking_reviewed")
+        and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed")))
     easy_auto = bool(job.get("setup", {}).get("auto_generate") and job.get("setup", {}).get("easy_mode"))
-    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_recovery):
+    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_submission):
         return {"ok": True}
     try:
         key = (key_for_session({"access_mode": "credits"}, None)

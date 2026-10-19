@@ -219,8 +219,8 @@ it("uses bounded structured conflict details without exposing upstream error tex
 
 it("requests point recovery and subsequent generation explicitly, with a key only when needed", async () => {
   requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "queued"})));
-  await resolveLiveTracking("job-1", "session", 3, [], new AbortController().signal, {enabled: true, key: "private-test-key"});
+  await resolveLiveTracking("job-1", "session", 3, [], new AbortController().signal, {enabled: true, key: "private-test-key", generateAfterReview: true});
   expect(JSON.parse(String(requests.mock.calls[0][1]?.body))).toEqual({revision: 3, choices: [],
-    recover_missing_masks: true, generate_after_recovery: true});
+    recover_missing_masks: true, generate_after_review: true});
   expect(requests.mock.calls[0][1]?.headers).toMatchObject({"X-Reapi-Key": "private-test-key"});
 });
