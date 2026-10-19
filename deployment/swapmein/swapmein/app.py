@@ -212,6 +212,8 @@ def owned_job(job_id: str, authorization: str | None):
 def view(job: dict):
     _, cloud, _ = services()
     status = job["status"]
+    if status == "ready" and job.get("review_generation_queued"):
+        status = "queued"
     if status == "finishing":
         status = "finalizing"
     if status == "submitting":
@@ -988,12 +990,15 @@ class TrackingReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1, le=100, strict=True)
     choices: list[TrackingChoice] = Field(min_length=1, max_length=300)
+    recover_missing_masks: bool = False
+    generate_after_recovery: bool = False
 
 
 @app.post("/api/jobs/{job_id}/tracking-review", status_code=202)
 def apply_tracking_review(job_id: str, review: TrackingReview,
-                          authorization: str | None = Header(default=None)):
-    job, _ = owned_job(job_id, authorization)
+                          authorization: str | None = Header(default=None),
+                          x_reapi_key: str | None = Header(default=None)):
+    job, active_session = owned_job(job_id, authorization)
     records, cloud, _ = services()
     invalid = "These tracking sections have changed. Refresh the review before applying matches."
     if job["status"] != "tracking_review":
@@ -1047,6 +1052,15 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                 resolved = resolve_tracking(archive, review_metadata, plan, choices, reviewed)
             from .scene_selection import reviewed_mask_targets
             fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
+            recover = bool(fallback_count and review.recover_missing_masks)
+            auto_recovery = bool(recover and review.generate_after_recovery)
+            auto_key = job.get("auto_key_ciphertext")
+            if auto_recovery:
+                if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
+                    raise PublicError("This clip needs its original access method.", 403)
+                key = key_for_session(active_session, x_reapi_key)
+                if active_session.get("access_mode", "api-key") == "api-key":
+                    auto_key = protect_key(job_id, key)
             reviewed_targets = (reviewed_mask_targets(review_metadata, plan, choices, resolved["assignments"])
                 if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
             emit("tracking_review_validated", job_id=job_id, attempt_id=attempt_id,
@@ -1068,6 +1082,10 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             "status": "queued", "preparation_kind": "tracking_rebuild", "reviewed_masks_uri": uri,
             "reviewed_coverage": resolved["coverage"], "tracking_assignments": resolved["assignments"],
             "normalized_targets": reviewed_targets, "coordinate_fallback_sections": fallback_count,
+            "recover_missing_masks": recover, "mask_recovery_completed": False, "mask_recovery_conflicts": 0,
+            "review_generation_queued": False,
+            "generation_after_review_revision": review.revision if auto_recovery else None,
+            "auto_key_ciphertext": auto_key,
             "tracking_choices": choices,
             "message": "Your matches are saved. The corrected guide is queued.", "updated_at": time.time()})
         queued = True
@@ -1498,9 +1516,13 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     internal_pipeline(task, authorization)
     records, _, _ = services()
     job, _ = records.read(f"jobs/{task.job_id}.json")
-    if not job or job.get("status") != "ready" or not job.get("setup", {}).get("auto_generate"):
+    if not job or job.get("status") != "ready":
         return {"ok": True}
-    if job.get("access_mode") not in {"credits", "api-key"} or not job.get("setup", {}).get("easy_mode"):
+    reviewed_recovery = bool(job.get("generation_after_review_revision")
+        and job.get("generation_after_review_revision") == job.get("tracking_applied_revision")
+        and job.get("tracking_reviewed") and job.get("mask_recovery_completed"))
+    easy_auto = bool(job.get("setup", {}).get("auto_generate") and job.get("setup", {}).get("easy_mode"))
+    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_recovery):
         return {"ok": True}
     try:
         key = (key_for_session({"access_mode": "credits"}, None)
@@ -1509,6 +1531,7 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     except PublicError as error:
         emit("automatic_generation_failed", error=error, job_id=task.job_id)
         records.update(f"jobs/{task.job_id}.json", lambda current: {**current,
+            "review_generation_queued": False,
             "message": "Preparation is ready, but generation needs attention. Open this job in your Library to continue."}
             if current.get("status") == "ready" else current)
     return {"ok": True}

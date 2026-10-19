@@ -395,6 +395,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                         selected.tracking_revision ?? 0,
                         choices,
                         controller.current.signal,
+                        {enabled: selected.mask_style !== "none", key},
                       );
                       if (mounted.current) {
                         setSelected({ ...selected, ...result });

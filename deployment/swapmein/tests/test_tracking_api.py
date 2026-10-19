@@ -423,3 +423,33 @@ def test_missing_mask_review_queues_coordinates_without_starting_generation(trac
     assert scene["coordinate_fallback"] and not scene["absent"]
     assert scene["anchor"] == selected_choice()["anchor"]
     assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_recovery_approval_is_saved_for_exact_review_revision_without_submitting_yet(tracking_review, monkeypatch, approved):
+    from cryptography.fernet import Fernet
+    from swapmein.security import digest
+    from swapmein.job_key import recover_key
+    client, records, cloud, provider, headers, job_id, calls = tracking_review
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(access_mode="api-key", key_fingerprint=digest(headers["X-Reapi-Key"]))
+    job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
+    original = gateway.resolve_tracking
+    def missing(archive, metadata, plan, choices, output):
+        result = original(archive, metadata, plan, choices, output)
+        result["coverage"] = [0] * 120
+        result["assignments"] = [{"segment_id": "segment-000", "start_frame": 0, "end_frame": 120,
+            "selected_label": None, "absent": False, "coordinate_fallback": True, "fallback_anchor": choices[0]["anchor"]}]
+        return result
+    monkeypatch.setattr(gateway, "resolve_tracking", missing)
+    body = {**review_body(), "recover_missing_masks": True, "generate_after_recovery": approved}
+    response = client.post(review_endpoint(job_id), headers=headers, json=body)
+    assert response.status_code == 202
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["recover_missing_masks"] and not saved["mask_recovery_completed"]
+    assert saved["generation_after_review_revision"] == (1 if approved else None)
+    if approved:
+        assert recover_key(saved) == headers["X-Reapi-Key"]
+    assert client.post(review_endpoint(job_id), headers=headers, json=body).status_code == 202
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions

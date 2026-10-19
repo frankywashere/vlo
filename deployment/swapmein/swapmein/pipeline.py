@@ -350,7 +350,10 @@ class Pipeline:
                 self.records.update("control/preparation.json", retain)
 
     def rebuild_reviewed_guide(self, job, remaining):
-        """Reuse SAM masks, depth and vocals; a user match never starts generation."""
+        """Reuse saved assets; optionally recover missing masks before approved generation."""
+        if job.get("recover_missing_masks") and not job.get("mask_recovery_completed"):
+            from .mask_recovery import recover_reviewed_masks
+            job = recover_reviewed_masks(self, job, remaining)
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
         self.update_job(job_id, message="Applying your scene matches and rebuilding the guide.")
@@ -381,6 +384,20 @@ class Pipeline:
             preparation_kind="initial", tracking_revision=job["tracking_applied_revision"] + 1)
         emit("tracking_guide_rebuilt", job_id=job_id,
             section_count=len(job["tracking_plan"]["segments"]))
+        if job.get("mask_recovery_conflicts"):
+            self.update_job(job_id, message="Your selections are saved, but recovered masks overlap another assigned person. Review the guide before generating. No generation was submitted.")
+        elif (job.get("mask_recovery_completed") and job.get("generation_after_review_revision")
+                == job.get("tracking_applied_revision")):
+            self.update_job(job_id, review_generation_queued=True,
+                message="Your scene matches are applied. Generation is queued.")
+            try:
+                self.cloud.enqueue("generate", job_id, task_token=job["tracking_task_token"])
+            except Exception as error:
+                emit("review_generation_queue_failed", job_id=job_id, error=error)
+                self.records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "review_generation_queued": False,
+                    "message": "Your guide is ready, but automatic generation could not be queued. Continue from your Library."}
+                    if current.get("status") == "ready" else current)
 
     def finalize(self, job_id: str):
         def claim_export(current):

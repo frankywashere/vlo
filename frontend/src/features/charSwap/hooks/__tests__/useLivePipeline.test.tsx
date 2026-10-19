@@ -172,7 +172,7 @@ describe("live BYOK pipeline", () => {
     expect(saved.defaultPrevented).toBe(false);
   });
   it("pauses polling for scene review, validates complete choices, and resumes the same job without a paid submission", async () => {
-    const review = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 2, tracking_segments: [
+    const review = {id: "job-1", status: "tracking_review", mask_style: "depth", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 2, tracking_segments: [
       {id: "segment-001", start_frame: 48, end_frame: 120, start: 2, end: 5, seek_time: 3, reason: "scene_cut", needs_review: true},
     ]};
     requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? Promise.resolve(json(review))
@@ -192,8 +192,8 @@ describe("live BYOK pipeline", () => {
     await act(async () => {await result.current.resolveTracking([choice]);});
     expect(calls("/api/jobs/job-1/tracking-review")).toHaveLength(1);
     const request = calls("/api/jobs/job-1/tracking-review")[0][1];
-    expect(request?.headers).toEqual({Authorization: `Bearer ${SESSION_TOKEN}`, "Content-Type": "application/json"});
-    expect(JSON.parse(String(request?.body))).toEqual({revision: 2, choices: [choice]});
+    expect(request?.headers).toEqual({Authorization: `Bearer ${SESSION_TOKEN}`, "X-Reapi-Key": USER_KEY, "Content-Type": "application/json"});
+    expect(JSON.parse(String(request?.body))).toEqual({revision: 2, choices: [choice], recover_missing_masks: true, generate_after_recovery: true});
     expect(result.current.busy).toBe(true);
     expect(result.current.preparationProgress?.phase).toBe("queued");
     expect(calls("/api/uploads")).toHaveLength(1);

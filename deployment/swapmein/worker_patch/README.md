@@ -144,3 +144,43 @@ people, original background preservation, invalid/duplicate style rejection,
 frame/audio alignment and guide-validation failures. These are preparation
 checks, not proof of a new generated replacement's quality. No deployment,
 cloud inference or paid generation is implied by this README update.
+
+## Point-prompted review recovery (not deployed)
+
+`mask_recovery.py` adds private `/recover-masks` to the GPU bootstrap. The new
+client explicitly requests recovery and subsequent generation when submitting
+masked scene choices. Old clients, non-masking review and selections with no
+missing masks retain their existing approval flow. An unmatched tap is saved
+with its original normalized point and trimmed 24 fps frame, not reinterpreted
+against the untrimmed upload.
+
+The gateway retains all selected masks and sends only unmatched sections to
+SAM's point-prompted tracker. Each section gets fresh scene-local state; the
+tracker runs forward and backward from the tapped frame, stopping at that
+section's boundaries. Depth and audio are reused. Valid recovered masks are
+merged without overwriting another assigned person. Empty results retain the
+coordinate fallback. Any overlap with a different selected label stops automatic
+generation and leaves the saved selections available for review. It does not
+ask the user to repeat the whole matching process after successful recovery.
+
+The rebuilt guide queues generation only for the same explicitly approved
+review revision, after recovery and guide validation complete. Provider submits
+still use the existing atomic claim, credit debit and idempotent delivery path.
+API-key jobs encrypt the supplied key using the existing short-lived job-key
+mechanism; key expiry/queue failure leaves the ready guide in Library. Both
+Library and Create use this shared backend and the same client recovery request.
+If Replicate prepared the original assets, this optional recovery specifically
+uses our point-prompt worker; it does not submit another Replicate prediction.
+
+`stage_gpu_recovery.py --output /absolute/path/to/empty-directory` creates a
+small deterministic source overlay and Cloud Build recipe against the last
+verified Iowa GPU digest. Staging itself performs no cloud operations. A future
+release needs the GPU overlay **before** the gateway/frontend changes, idle
+worker verification, and a bounded point-tracker inference test. In particular,
+the worker refuses to run if its retained checkpoint has missing point-tracker
+weights. Local mocked tests do not establish GPU compatibility, timing, mask
+quality or render quality. No image build, worker switch or paid validation is
+authorized by this commit alone.
+
+References: [Transformers point tracker](https://huggingface.co/docs/transformers/model_doc/sam3_tracker_video)
+and [pinned 5.19 tracker implementation](https://github.com/huggingface/transformers/blob/v5.19.0/src/transformers/models/sam3_tracker_video/modeling_sam3_tracker_video.py).
