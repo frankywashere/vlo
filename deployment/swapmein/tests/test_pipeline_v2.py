@@ -159,7 +159,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
 def test_v2_keeps_high_resolution_depth_and_per_person_reference_mapping(monkeypatch, media, easy, enhanced, selection, audio_processing):
     job, cloud, sam_inputs, previews, originals = harness(monkeypatch, media, easy=easy,
         enhanced=enhanced, selection=selection, audio_processing=audio_processing)
-    needs_review = enhanced and not easy and selection != "all"
+    needs_review = not easy and selection != "all"
     assert job["status"] == ("tracking_review" if needs_review else "ready"), job.get("message")
     assert (job["width"], job["height"], job["preparation_version"]) == (960, 768, 2)
     gpu = [payload for kind, _, payload in cloud.calls if kind == "gpu"]

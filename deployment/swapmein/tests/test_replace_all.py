@@ -47,6 +47,22 @@ def test_union_includes_new_ids_after_cuts_and_keeps_empty_shots_empty(tmp_path)
         assert np.array_equal(np.array(Image.open(BytesIO(archive.read("labels/labels_00000.png")))), first)
 
 
+def test_everyone_logs_people_entering_after_the_opening_frame(tmp_path):
+    first = np.zeros((8, 8), np.uint16)
+    first[1:3, 1:3] = 2
+    later = first.copy()
+    later[4:7, 4:7] = 12
+    source, output = tmp_path / "sam.zip", tmp_path / "all.zip"
+    write_masks(source, [first, later, later])
+    summary = {}
+    merge_all_people_masks(source, output, {"width": 8, "height": 8, "frames": 3,
+        "scene_cuts": [1 / 24]}, detection_summary=summary)
+    assert summary == {"first_frame_people": 1, "max_people": 2, "frames_with_people": 3,
+        "frames_with_multiple_people": 2, "scene_people": [
+            {"start_frame": 0, "end_frame": 1, "max_people": 1},
+            {"start_frame": 1, "end_frame": 3, "max_people": 2}]}
+
+
 def test_empty_or_incomplete_detection_does_not_submit_a_misleading_guide(tmp_path):
     source, output = tmp_path / "sam.zip", tmp_path / "all.zip"
     metadata = {"width": 8, "height": 8, "frames": 2}

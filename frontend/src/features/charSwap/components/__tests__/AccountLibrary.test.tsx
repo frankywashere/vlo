@@ -166,8 +166,8 @@ describe("private account library", () => {
     const user = userEvent.setup();
     render(<AccountLibrary onCreate={() => {}} />);
     expect(
-      await screen.findByRole("link", { name: "Download video" }),
-    ).toHaveAttribute("href", complete.output_url);
+      await screen.findByRole("button", { name: "Download video" }),
+    ).toBeEnabled();
     expect(screen.getByLabelText(complete.title, {selector: "video"})).toHaveAttribute("poster", complete.thumbnail_url);
     await user.click(screen.getByText("Settings used"));
     expect(screen.getByText("Enhanced masking")).toBeVisible();

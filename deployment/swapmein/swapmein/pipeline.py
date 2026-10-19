@@ -1,5 +1,6 @@
 """Cloud-task orchestration of the existing, authenticated proof workers."""
 from pathlib import Path
+import math
 import tempfile
 import time
 import uuid
@@ -85,6 +86,9 @@ class Pipeline:
                 self.update_job(job_id, replace_all_people=options.replace_all_people)
                 normalization_started = time.monotonic()
                 metadata = normalize(source, normalized, options)
+                metadata["anchor"].setdefault("time", metadata["anchor"].get("frame", 0) / 24)
+                if not options.easy_mode:
+                    metadata["review_all_scenes"] = True
                 targets = style_targets(metadata["targets"]) if metadata.get("targets") else []
                 if targets:
                     metadata["targets"] = targets
@@ -134,12 +138,14 @@ class Pipeline:
                     raw_masks_uri = masks_uri
                     if options.replace_all_people:
                         combined = root / "all-people-masks.zip"
-                        coverage = merge_all_people_masks(masks, combined, metadata)
+                        detection_summary = {}
+                        coverage = merge_all_people_masks(masks, combined, metadata, detection_summary=detection_summary)
+                        self.update_job(job_id, all_people_detection=detection_summary)
                         masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "all-people-masks.zip",
                                                       combined, "application/zip")
                         label = 1  # The union's compose label, not a tracked identity.
                         emit("all_people_masks_prepared", job_id=job_id, frames=len(coverage),
-                             empty_frames=sum(count == 0 for count in coverage))
+                             empty_frames=sum(count == 0 for count in coverage), **detection_summary)
                     elif multi:
                         tracks = selected_tracks(masks, metadata, targets)
                         if not options.easy_mode:
@@ -203,6 +209,7 @@ class Pipeline:
                     emit("preparation_audio_skipped", job_id=job_id)
                 tracking_fields = {}
                 if plan:
+                    self.save_scene_thumbnails(job_id, normalized, root, plan)
                     tracking_fields = {"tracking_plan": plan, "tracking_metadata": metadata,
                         "tracking_masks_uri": raw_masks_uri, "tracking_depth_uri": depth_input,
                         "tracking_vocals_uri": vocals_input, "tracking_revision": 1,
@@ -254,6 +261,21 @@ class Pipeline:
                     message = "Preparation is complete. Continue generation here or reopen this job in your Library."
                 if options.auto_generate:
                     message = "Preparation is complete. Your generation is queued."
+                if not options.easy_mode and not options.enhanced_character_masking and not options.replace_all_people:
+                    from .scene_selection import analyze
+                    scene_targets = targets or [{"id": "person", "name": options.target_name,
+                        "anchor": metadata["anchor"], "reference_index": 0}]
+                    plan = analyze(metadata, scene_targets)
+                    self.save_scene_thumbnails(job_id, normalized, root, plan)
+                    self.update_job(job_id, status="tracking_review", guide_uri=guide_uri,
+                        normalized_anchor=metadata["anchor"], normalized_targets=scene_targets,
+                        tracking_plan=plan, tracking_metadata=metadata, tracking_revision=1,
+                        tracking_reviewed=False, tracking_performed=False, mask_style="none",
+                        tracking_uri=None, selected_label=None, mask_frames=0, tracking_continuous=False,
+                        scene_cut_count=len(metadata.get("scene_cuts", [])), review_required=True,
+                        message="Select each person in every scene, or mark them not visible. Masking is off; these choices guide the generation prompt.")
+                    emit("scene_selection_review_required", job_id=job_id, section_count=len(plan["segments"]))
+                    return
                 self.update_job(job_id, status="ready", message=message,
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
                     normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"].get("time", metadata["anchor"]["frame"] / 24)},
@@ -368,6 +390,14 @@ class Pipeline:
             self.update_job(job_id, status="failed", message="The generated video needs manual review and could not be exported.")
             return
         self.complete_library_delivery(completed)
+
+    def save_scene_thumbnails(self, job_id, source, root, plan):
+        from .media import scene_thumbnails
+        frames = [math.floor(section["seek_time"] * 24 + 1e-7) for section in plan["segments"]]
+        previews = scene_thumbnails(source, root / "scene-thumbnails", frames)
+        uris = {str(frame): self.cloud.upload(self.settings.app_bucket,
+            f"outputs/{job_id}/scenes/{frame}.jpg", image, "image/jpeg") for frame, image in previews.items()}
+        self.update_job(job_id, scene_thumbnail_uris=uris)
 
     def ensure_library_poster(self, job, source=None):
         if not job.get("account_id") or job.get("thumbnail_uri"):

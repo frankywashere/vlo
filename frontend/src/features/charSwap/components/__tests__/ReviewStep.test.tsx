@@ -40,7 +40,7 @@ describe("truthful preparation status at final review", () => {
     store.setEasyMode(easy);
     store.setEnhancedCharacterMasking(false);
     render(<ReviewStep {...properties()} />);
-    expect(screen.getByText(/no person tracking/)).toBeInTheDocument();
+    expect(screen.getByText(/Masking is off/)).toBeInTheDocument();
     expect(screen.queryByText(/Tracking checks completed|automatic tracking|Tracking guide prepared/)).not.toBeInTheDocument();
   });
 });

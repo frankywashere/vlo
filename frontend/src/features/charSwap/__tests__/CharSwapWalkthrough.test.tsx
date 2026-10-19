@@ -219,7 +219,7 @@ describe("CharSwap walkthrough", () => {
       within(navigation)
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Clip", "Person", "Character", "Generate"]);
+    ).toEqual(["Clip", "People", "Character", "Check scenes", "Generate"]);
     expect(screen.queryByText(/This clip needs/)).not.toBeInTheDocument();
     expect(
       screen.getByRole("status", { name: "Credit estimate" }),
@@ -236,7 +236,7 @@ describe("CharSwap walkthrough", () => {
     await user.click(screen.getByRole("button", { name: "Select person" }));
     expect(useCharSwapStore.getState().step).toBe("people");
     expect(
-      within(navigation).getByRole("button", { name: "Person" }),
+      within(navigation).getByRole("button", { name: "People" }),
     ).toHaveAttribute("aria-current", "step");
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(useCharSwapStore.getState().step).toBe("clip");

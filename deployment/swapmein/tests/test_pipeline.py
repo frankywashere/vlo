@@ -93,11 +93,12 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         destination.write_bytes(b"normalized-video-with-original-audio")
         return metadata
     monkeypatch.setattr("swapmein.pipeline.normalize", normalized)
+    monkeypatch.setattr(Pipeline, "save_scene_thumbnails", lambda *args: None)
     def selected(*_, require_continuous):
         assert enabled and not replace_all and require_continuous is False
         return 2, coverage
     monkeypatch.setattr("swapmein.pipeline.select_label", selected)
-    def merge(_archive, output, _metadata):
+    def merge(_archive, output, _metadata, **kwargs):
         assert replace_all and enabled
         output.write_bytes(b"all-people-union")
         return coverage
@@ -161,7 +162,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         records.data[path]["setup"]["auto_generate"] = True
     Pipeline(Settings(), records, cloud).prepare(job_id)
     assert cloud.enqueued == ([("generate", job_id)] if auto_generate else [])
-    assert records.data[path]["status"] == ("tracking_review" if enabled and needs_review else "ready")
+    assert records.data[path]["status"] == ("tracking_review" if enabled and needs_review or not enabled and easy is not True and not replace_all else "ready")
     assert records.data[path]["easy_mode"] is (easy is True)
     assert records.data[path]["selected_label"] == ((1 if replace_all else 2) if enabled else None)
     assert records.data[path]["tracking_performed"] is enabled
@@ -195,7 +196,7 @@ def test_prepare_honors_masking_choice_and_keeps_tracking_and_audio(monkeypatch,
         assert records.data[path]["tracking_uri"] is None
         assert records.data[path]["mask_frames"] == 0
         assert composed_original == ([] if audio_processing is False else [True])
-        assert ("Continue generation" if easy is True else "replace every person" if replace_all else "SAM tracking was skipped") in records.data[path]["message"]
+        assert ("Continue generation" if easy is True else "replace every person" if replace_all else "Select each person") in records.data[path]["message"]
 
 
 def test_reviewed_matches_rebuild_only_cpu_guide_and_ignore_stale_tasks(monkeypatch):

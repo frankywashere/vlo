@@ -55,14 +55,14 @@ export function ReviewStep({
   if (!clip) return null;
   const guideIdentity = String(job?.id) + ":" + String(job?.guide_url);
   const guide =
-    !easyMode && enhancedCharacterMasking && job?.status === "ready" && job.guide_url
+    !easyMode && job?.status === "ready" && job.guide_url
       ? job.guide_url
       : null;
   const enoughCredits =
     accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits;
   const needsPreparation = !job || ["failed", "completed"].includes(job.status);
   const canSubmit = enoughCredits && !busy && creditsAvailable && (
-    live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && (!enhancedCharacterMasking || trackingReady && playableGuide === guideIdentity))
+    live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && playableGuide === guideIdentity)
     : !easyMode && enhancedCharacterMasking && !trackingReady
   );
   return (
@@ -148,7 +148,7 @@ export function ReviewStep({
           </Stack>
         </Box>
         <Typography variant="body2" color="text.secondary" role="status">
-          {!enhancedCharacterMasking ? "Masking is off; no person tracking." : easyMode
+          {!enhancedCharacterMasking ? easyMode ? "Masking is off; your selections guide the model after submission." : "Masking is off; check each person's scene selections before generation." : easyMode
             ? !job || job.status === "failed" ? "Automatic preparation after submission."
               : ["queued", "preparing"].includes(job.status) ? "Automatic preparation in progress; no scene matching."
               : "Easy mode: automatic tracking, no scene matching."
@@ -375,7 +375,7 @@ export function ReviewStep({
             disabled={!canSubmit}
             onClick={onGenerate}
           >
-            {busy ? "Preparing…" : !easyMode && enhancedCharacterMasking && needsPreparation && !trackingReady ? "Prepare and review" : "Generate video"}
+            {busy ? "Preparing…" : !easyMode && needsPreparation && !trackingReady ? "Prepare and review" : "Generate video"}
           </Button>
           <Typography variant="caption" color="text.secondary">
             Your video will appear in your library.

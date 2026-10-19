@@ -16,7 +16,9 @@ export function useVideoDownload() {
       if (!response.ok) throw new Error("Download failed");
       const blob = await response.blob();
       if (controller.signal.aborted) return;
-      const url = URL.createObjectURL(blob);
+      // A file MIME type avoids handing MP4 blobs to the mobile video player.
+      const file = new Blob([blob], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(file);
       const link = document.createElement("a");
       link.href = url;
       link.download = "recastfx-video.mp4";

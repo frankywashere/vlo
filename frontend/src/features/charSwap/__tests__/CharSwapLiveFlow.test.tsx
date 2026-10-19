@@ -175,7 +175,7 @@ describe("explicit generation approval", () => {
       within(
         screen.getByRole("navigation", { name: "Replacement steps" }),
       ).getAllByRole("button"),
-    ).toHaveLength(4);
+    ).toHaveLength(5);
     expect(live.generate).not.toHaveBeenCalled();
   });
 
@@ -255,7 +255,7 @@ describe("explicit generation approval", () => {
     expect(live.generate).not.toHaveBeenCalled();
   });
 
-  it("skips mask review when masking is off and prepares only after final approval", async () => {
+  it("prepares a scene review without submitting a render when masking is off", async () => {
     const user = userEvent.setup();
     const store = useCharSwapStore.getState();
     store.setEnhancedCharacterMasking(false);
@@ -269,10 +269,11 @@ describe("explicit generation approval", () => {
     await user.click(screen.getByRole("button", { name: "Continue to generate" }));
     expect(live.prepare).not.toHaveBeenCalled();
     expect(live.generate).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Generate video" }));
+    await user.click(screen.getByRole("button", { name: "Prepare and review" }));
     expect(live.prepare).toHaveBeenCalledOnce();
     expect(live.prepare.mock.calls[0][1]).toBeUndefined();
-    expect(live.generate).toHaveBeenCalledOnce();
+    expect(live.generate).not.toHaveBeenCalled();
+    expect(useCharSwapStore.getState().step).toBe("matches");
   });
 
   it("requires a new explicit approval to prepare another clip after completion, using the current quote", async () => {
@@ -298,8 +299,8 @@ describe("explicit generation approval", () => {
     live.preparationProgress = {phase, message: "Confirming your upload is saved."};
     render(<CharSwapWalkthrough onLibrary={() => {}} />);
     expect(screen.getByRole("dialog", {name: "Keep this page open"})).toBeInTheDocument();
-    expect(screen.queryByText(/Your job is saved/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", {name: "Create another recast"})).not.toBeInTheDocument();
+    expect(screen.queryByText(/You can safely close this tab/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Start a new recast"})).not.toBeInTheDocument();
   });
 
   it("retains an uncertain submission without offering another generation", () => {
@@ -316,6 +317,38 @@ describe("explicit generation approval", () => {
       screen.queryByRole("button", { name: "Review setup" }),
     ).not.toBeInTheDocument();
     expect(live.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false].flatMap((easy) => [true, false].map((masking) => ({easy, masking}))))(
+    "offers Start a new recast during saved preparation: Easy=$easy masking=$masking", ({easy, masking}) => {
+      const store = useCharSwapStore.getState();
+      store.setEasyMode(easy);
+      store.setEnhancedCharacterMasking(masking);
+      store.visit("review");
+      live.job = {id: "saved-preparation", status: "preparing", easy_mode: easy};
+      live.busy = true;
+      live.preparationProgress = {phase: "preparing", message: "Preparing"};
+      render(<CharSwapWalkthrough onLibrary={() => {}} />);
+      expect(screen.getByText(/You can safely close this tab/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", {name: "Start a new recast"}));
+      expect(useCharSwapStore.getState().clip).toBeNull();
+      expect(live.generate).not.toHaveBeenCalled();
+      expect(live.job.status).toBe("preparing");
+    });
+
+  it("offers a fresh recast and explains Library recovery only after upload confirmation", () => {
+    const store = useCharSwapStore.getState();
+    store.setEasyMode(true);
+    store.visit("generation");
+    live.job = { id: "saved-upload", status: "preparing" };
+    live.busy = true;
+    render(<CharSwapWalkthrough onLibrary={() => {}} />);
+    expect(screen.getByText(/You can safely close this tab and see progress in your Library/)).toBeVisible();
+    expect(screen.queryByRole("button", {name: "Open your library"})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "Start a new recast"}));
+    expect(useCharSwapStore.getState().clip).toBeNull();
+    expect(live.generate).not.toHaveBeenCalled();
+    expect(live.job.status).toBe("preparing");
   });
 
   it.each(["generating", "finalizing"] as const)(
@@ -337,7 +370,7 @@ describe("explicit generation approval", () => {
         </>,
       );
       expect(
-        screen.getByRole("button", { name: "Create another recast" }),
+        screen.getByRole("button", { name: "Start a new recast" }),
       ).toBeInTheDocument();
       fireEvent.click(
         screen.getByRole("button", { name: "Create from header" }),
@@ -359,7 +392,7 @@ describe("explicit generation approval", () => {
       live.job = { id: "pending", status };
       live.busy = true;
       render(<CharSwapWalkthrough onLibrary={() => {}} />);
-      const button = screen.queryByRole("button", { name: "Create another recast" });
+      const button = screen.queryByRole("button", { name: "Start a new recast" });
       if (status === "generating") expect(button).not.toBeInTheDocument();
       else expect(button).toBeInTheDocument();
     },
@@ -377,7 +410,7 @@ describe("explicit generation approval", () => {
     live.busy = true;
     render(<CharSwapWalkthrough />);
     expect(
-      screen.queryByRole("button", { name: "Create another recast" }),
+      screen.queryByRole("button", { name: "Start a new recast" }),
     ).not.toBeInTheDocument();
   });
 });
