@@ -93,7 +93,7 @@ describe("private account library", () => {
       within(current).getByRole("button", { name: "Check scene matches" }),
     ).toBeInTheDocument();
     expect(
-      within(current).getAllByRole("button", { name: "View progress" })[0],
+      within(current).getAllByRole("button", { name: "View reference images" })[0],
     ).toBeInTheDocument();
     expect(within(current).getByText("Finished clip")).toBeInTheDocument();
     expect(screen.getByText("2 videos in progress")).toBeInTheDocument();
