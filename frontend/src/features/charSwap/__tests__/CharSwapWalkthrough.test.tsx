@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -247,4 +248,15 @@ describe("CharSwap walkthrough", () => {
       screen.queryByRole("button", { name: "Back" }),
     ).not.toBeInTheDocument();
   });
+});
+
+it("shows a clear wait at Continue and permits Original without waiting for cleanup",async()=>{
+  const store=useCharSwapStore.getState();store.loadClip(sample.clip);
+  store.selectTarget({id:"a",name:"Person A",color:"#75baff",anchor:{x:.5,y:.5,time:0}});
+  store.assignReference("a",{...sample.reference,cleanup:{originalUrl:sample.reference.url,mode:"clean",pending:true}});
+  store.visit("references");render(<CharSwapWalkthrough/>);
+  expect(screen.getByRole("button",{name:"Finishing cleanup…"})).toBeDisabled();
+  expect(screen.getByRole("progressbar")).toBeInTheDocument();
+  act(()=>useCharSwapStore.getState().assignReference("a",{...sample.reference,cleanup:{originalUrl:sample.reference.url,mode:"original",pending:true}}));
+  expect(screen.getByRole("button",{name:"Continue to generate"})).toBeEnabled();
 });

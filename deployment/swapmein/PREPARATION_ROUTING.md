@@ -99,6 +99,13 @@ It predicts alpha and composites the original RGB onto neutral gray; it does not
 generate a replacement face. First use downloads about 98.5 MB of model weights
 plus the local ONNX runtime. Cache Storage is optional, and browsers may evict it.
 
+iOS devices (including iPad desktop mode and third-party iOS browsers) are
+currently gated off before worker creation or model download: an iPhone 16 Safari
+trial reloaded the tab during model initialization, outside JavaScript error handling.
+A per-tab session marker also prevents automatic retries if another device reloads
+while model initialization or inference is in flight. This is a conservative safety
+gate, not a claim that every iOS device lacks WebGPU. Original remains usable.
+
 The runtime requires a secure context, WebGPU with shader-f16, module workers,
 OffscreenCanvas, and createImageBitmap. The actual graph must load and run too:
 API presence alone is not proof of support. Unsupported/GPU-memory failures retain
@@ -106,7 +113,8 @@ Original and show an unsupported-hardware message. There is no automatic cloud
 fallback or photo upload for cleanup. A failed download can be retried. Inference
 is serialized per tab, initialization is capped at 90 seconds, each inference at
 30 seconds, and the worker is terminated on active cancellation or after 60 seconds
-idle. Originals remain selectable during loading. Outputs are bounded to a 2048px
+idle. Originals remain selectable during loading. Continue shows a spinner while image
+opening or selected cleanup is pending; choosing Original permits continuation. Outputs are bounded to a 2048px
 long edge; the segmentation graph uses 512px input.
 
 `npm run build:swapmein` runs `prepare:browser-cleanup`, which verifies the pinned

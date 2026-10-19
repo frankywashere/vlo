@@ -1,3 +1,4 @@
+import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
 import {UnsupportedCleanupError} from "./browserCleanupProtocol";
 import type {CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
 
@@ -8,7 +9,12 @@ export function isReferenceCleanupEndpoint(value: unknown): value is string {
 let queue: Promise<void> = Promise.resolve();
 let worker: Worker | undefined;
 let ready: Promise<void> | undefined;
-let unsupported = false;
+const INTERRUPTED_KEY = "recastfx-cleanup-interrupted-v1";
+function interrupted() {try {return sessionStorage.getItem(INTERRUPTED_KEY) === "1";} catch {return false;}}
+function markRunning(running: boolean) {
+  try {if (running) sessionStorage.setItem(INTERRUPTED_KEY,"1"); else sessionStorage.removeItem(INTERRUPTED_KEY);} catch { /* Storage is optional. */ }
+}
+let unsupported = interrupted();
 let sequence = 0;
 const waiting = new Set<() => void>();
 let idle: ReturnType<typeof setTimeout> | undefined;
@@ -16,12 +22,12 @@ let progress: ((value: CleanupProgress) => void) | undefined;
 let lastProgress: CleanupProgress = {phase:"loading"};
 const abortError = () => new DOMException("Reference cleanup was canceled.","AbortError");
 function stop() {
-  clearTimeout(idle); worker?.terminate(); worker = undefined; ready = undefined;
+  markRunning(false); clearTimeout(idle); worker?.terminate(); worker = undefined; ready = undefined;
   for (const cancel of [...waiting]) cancel();
 }
 function releaseLater() {clearTimeout(idle); idle = setTimeout(stop, 60_000);}
 function supported() {
-  if (unsupported || !globalThis.isSecureContext || typeof Worker === "undefined" ||
+  if (unsupported || isIOSCleanupDevice(navigator.userAgent,navigator.platform,navigator.maxTouchPoints) || !globalThis.isSecureContext || typeof Worker === "undefined" ||
     !navigator.gpu || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function")
     throw new UnsupportedCleanupError();
 }
@@ -41,7 +47,7 @@ function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefine
         fail(reply.kind === "unsupported" ? new UnsupportedCleanupError() : new Error(reply.message)); return;
       }
       const value = match(reply);
-      if (value !== undefined) {finish(); resolve(value);}
+      if (value !== undefined) {markRunning(false); finish(); resolve(value);}
     }
     target.addEventListener("message",message); target.addEventListener("error",crash);
   });
@@ -49,9 +55,10 @@ function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefine
 function initialize() {
   supported(); clearTimeout(idle);
   if (!ready) {
+    markRunning(true);
     lastProgress = {phase:"loading"};
     try {worker = new Worker(new URL("../workers/referenceCleanup.worker.ts",import.meta.url),{type:"module"});}
-    catch {unsupported = true; throw new UnsupportedCleanupError();}
+    catch {markRunning(false); unsupported = true; throw new UnsupportedCleanupError();}
     ready = waitFor(worker, reply => reply.type === "ready" ? true : undefined,90_000).then(() => undefined);
     worker.postMessage({type:"initialize"} satisfies CleanupRequest);
   }
@@ -84,6 +91,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
         if (signal.aborted || !worker) throw abortError();
         const id = ++sequence;
         const result = waitFor(worker, reply => reply.type === "result" && reply.id === id ? reply.image : undefined,30_000);
+        markRunning(true);
         worker.postMessage({type:"clean",id,image} satisfies CleanupRequest);
         const cleaned = await result;
         if (!(cleaned instanceof Blob) || cleaned.type !== "image/jpeg" || !cleaned.size || cleaned.size > 5*1024*1024)

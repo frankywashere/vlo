@@ -12,6 +12,7 @@ import {
   Alert,
   Box,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -22,7 +23,7 @@ import {
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import { useCharSwapStore, STEPS } from "./useCharSwapStore";
-import { canContinue, canVisitStep, getStepBlocker } from "./model/model";
+import { canContinue, canVisitStep, getStepBlocker, hasPendingReferenceCleanup } from "./model/model";
 import type { Step } from "./model/model";
 import { loadDemo, sampleReviewIssues } from "./services/demo";
 import type { DemoManifest } from "./services/demo";
@@ -412,6 +413,8 @@ export function CharSwapWalkthrough({
     if (step === "matches" && item === "review" && !trackingReady) return false;
     return true;
   }
+  const referenceWaitLabel = step === "references" ? assets.pendingReferences.length > 0
+    ? "Opening image…" : hasPendingReferenceCleanup(state) ? "Finishing cleanup…" : null : null;
   const nextLabel = clipStep
     ? "Select person"
     : step === "people"
@@ -731,11 +734,12 @@ export function CharSwapWalkthrough({
                     <Button
                       variant="contained"
                       size="large"
-                      endIcon={<ArrowForwardRounded />}
+                      startIcon={referenceWaitLabel ? <CircularProgress size={16} color="inherit" /> : undefined}
+                      endIcon={referenceWaitLabel ? undefined : <ArrowForwardRounded />}
                       disabled={Boolean(continueDisabled)}
                       onClick={() => void continueFlow()}
                     >
-                      {nextLabel}
+                      {referenceWaitLabel ?? nextLabel}
                     </Button>
                   )}
                 </Stack>

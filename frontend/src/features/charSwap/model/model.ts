@@ -268,6 +268,11 @@ export function canContinue(state: WalkthroughState, step: Step): boolean {
   return getStepBlocker(state, step) === null;
 }
 
+export function hasPendingReferenceCleanup(state: WalkthroughState): boolean {
+  return state.targets.some(target => state.references.some(reference =>
+    reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" && reference.cleanup.pending));
+}
+
 export function getStepBlocker(
   state: WalkthroughState,
   step: Step,
@@ -331,8 +336,7 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       ) {
         return state.replaceAllPeople ? "Add one replacement image for everyone." : "Add a replacement image for each selected person.";
       }
-      if (state.targets.some((target) => state.references.some((reference) =>
-        reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" && reference.cleanup.pending)))
+      if (hasPendingReferenceCleanup(state))
         return "Wait for background cleanup, or choose Original to continue now.";
       return null;
     case "matches":

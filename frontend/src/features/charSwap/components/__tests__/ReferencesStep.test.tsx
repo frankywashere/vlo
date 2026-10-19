@@ -164,3 +164,16 @@ describe("reference image picker", () => {
     expect(otherPicker).toHaveBeenCalledOnce();
   });
 });
+
+it("drops onto the intended character including its image tile, and respects pending imports",()=>{
+  const onImport=vi.fn();const file=new File(["image"],"person.png",{type:"image/png"});
+  const view=render(<ReferencesStep demo={null} onImport={onImport} pendingIds={[]}/>);
+  const card=screen.getByRole("group",{name:"Reference upload area for Person B"});
+  const drag={files:[file],types:["Files"],dropEffect:"none"};
+  expect(fireEvent.dragOver(card,{dataTransfer:drag})).toBe(false);
+  expect(drag.dropEffect).toBe("copy");
+  fireEvent.drop(screen.getByRole("button",{name:"Upload reference image for Person B"}),{dataTransfer:drag});
+  expect(onImport).toHaveBeenCalledExactlyOnceWith("b",file);
+  view.rerender(<ReferencesStep demo={null} onImport={onImport} pendingIds={["b"]}/>);
+  fireEvent.drop(card,{dataTransfer:drag});expect(onImport).toHaveBeenCalledOnce();
+});

@@ -16,6 +16,7 @@ import { useCharSwapStore } from "../useCharSwapStore";
 import { ALL_PEOPLE_TARGET_ID, type ReferenceAsset, type TargetPerson } from "../model/model";
 import type { DemoManifest } from "../services/demo";
 import { PersonBadge } from "./PersonBadge";
+import { useFileDrop } from "../hooks/useFileDrop";
 import { ReferenceUpload } from "./ReferenceUpload";
 import { PANEL } from "./stepStyles";
 import { ReferenceBackground } from "./ReferenceBackground";
@@ -50,8 +51,10 @@ function ReferenceCard({
 }: ReferenceCardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const pending = pendingIds.includes(person.id);
+  const {dragging,dropHandlers} = useFileDrop(file => onImport(person.id,file),pending);
   return (
-    <Box sx={{ ...PANEL, borderLeft: `3px solid ${person.color}` }}>
+    <Box role="group" aria-label={`Reference upload area for ${person.name}`} {...dropHandlers}
+      sx={{ ...PANEL, borderLeft: `3px solid ${person.color}`, outline:dragging?"2px dashed":"none",outlineColor:"primary.main",outlineOffset:3 }}>
       <PersonBadge person={person} subtitle={person.id === ALL_PEOPLE_TARGET_ID ? "One reference for everyone in every scene" : "Original person"} />
       <Divider sx={{ my: 2 }} />
       <Box
@@ -95,6 +98,7 @@ function ReferenceCard({
             <Box
               component="img"
               src={reference.url}
+              draggable={false}
               alt={`${person.name} replacement: ${reference.name}`}
               sx={{ width: "100%", height: "100%", objectFit: "contain" }}
             />
@@ -109,7 +113,7 @@ function ReferenceCard({
             {reference ? reference.name : person.id === ALL_PEOPLE_TARGET_ID ? "Your replacement character" : `Who replaces ${person.name}?`}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Use one clear image showing the character’s face and look.
+            Drop an image here or upload one clear picture of the character.
           </Typography>
           <Stack direction="row" spacing={1}>
             <ReferenceUpload
