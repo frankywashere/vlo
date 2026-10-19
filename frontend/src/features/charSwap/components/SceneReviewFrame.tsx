@@ -29,13 +29,16 @@ export function SceneReviewFrame({ url, imageUrl, frame, width, height, disabled
   const time = reviewFrameTime(frame);
   useEffect(() => { readyCallback.current = onReadyChange; }, [onReadyChange]);
   useEffect(() => {
+    // Cached stills can finish before passive effects run. Don't start a new
+    // timeout after onLoad has already made the frame selectable.
+    if (ready) return;
     loadingTimer.current = globalThis.setTimeout(() => {
       setFailed(true);
       setReady(false);
       readyCallback.current(false);
     }, 20000);
     return () => {if (loadingTimer.current !== null) globalThis.clearTimeout(loadingTimer.current);};
-  }, [useImage]);
+  }, [useImage, ready]);
 
   function reportReady() {
     const video = videoRef.current;

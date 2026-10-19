@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useLayoutEffect, useRef } from "react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SceneReviewFrame } from "../SceneReviewFrame";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 const props = () => ({url: "https://storage.googleapis.com/test/source.mp4", frame: 36,
   width: 640, height: 480, disabled: false, onSelect: vi.fn(), onReadyChange: vi.fn()});
 
@@ -41,4 +42,23 @@ it("falls back on image failure, retries an early Safari seek, and rejects unset
   Object.defineProperty(video, "seeking", {configurable: true, value: false});
   fireEvent.keyDown(picker, {key: "Enter"});
   expect(p.onSelect).toHaveBeenCalledOnce();
+});
+
+function CachedStill() {
+  const element = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // Cached images can announce load before the component's passive timer effect.
+    element.current?.querySelector("img")?.dispatchEvent(new Event("load"));
+  }, []);
+  return <div ref={element}><SceneReviewFrame url="/source.mp4" imageUrl="/cached.jpg" frame={24}
+    width={640} height={480} disabled={false} onSelect={() => {}} onReadyChange={() => {}} /></div>;
+}
+
+
+it("does not time out an image that loaded before passive effects", () => {
+  vi.useFakeTimers();
+  render(<CachedStill />);
+  act(() => vi.advanceTimersByTime(21000));
+  expect(screen.queryByText(/This frame could not be loaded/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Select the person in this frame"})).toHaveAttribute("aria-disabled", "false");
 });
