@@ -61,6 +61,7 @@ export function ReviewStep({
   const enoughCredits =
     accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits;
   const needsPreparation = !job || ["failed", "completed"].includes(job.status);
+  const manualPreparationComplete = live && !easyMode && !!job && (job.status === "ready" || trackingReady);
   const canSubmit = enoughCredits && !busy && creditsAvailable && (
     live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && playableGuide === guideIdentity)
     : !easyMode && enhancedCharacterMasking && !trackingReady
@@ -162,7 +163,16 @@ export function ReviewStep({
         )}
       </Stack>
       <Stack spacing={2.5} sx={{ minWidth: 0 }}>
-        <GenerationOptions disabled={busy} onChange={onOptionsChange} />
+        {manualPreparationComplete ? (
+          <Stack component="section" aria-label="Prepared settings" spacing={1}
+            sx={{ p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: "5px", bgcolor: "background.paper" }}>
+            <Typography component="h2" variant="subtitle1" fontWeight={700}>Prepared settings</Typography>
+            <Typography variant="body2">Manual scene review: On</Typography>
+            <Typography variant="body2">
+              Enhanced person masking: {(job.settings_used?.enhanced_masking ?? enhancedCharacterMasking) ? "On" : "Off"}
+            </Typography>
+          </Stack>
+        ) : <GenerationOptions disabled={busy} onChange={onOptionsChange} />}
         {!!targets.length && (
           <Box
             component="section"

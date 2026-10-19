@@ -12,6 +12,7 @@ A built tag alone is not proof of deployment or successful inference.
 | --- | --- | --- | --- |
 | [cloudbuild.json](cloudbuild.json) | `app/app.py`, `app/composite.py`, **`app/common.py`**, complete pinned Pillow wheel under CPython 3.12 site-packages | audio `sha256:809458c2d9bd5d718df704763dfd6b402556c606c54df9e6ef5844c8d7ccf5ff` | `audio:multi-768-v2-pillow11-3` |
 | [cloudbuild.gpu.json](cloudbuild.gpu.json) | **`app/common.py`** | GPU `sha256:6b1bb4e7f1ac184f8a49831d26c89d06375e1b8d4fa8af8dce96482d49a259fd` | `gpu:working-768-v1` |
+| [cloudbuild.gpu-iowa.json](cloudbuild.gpu-iowa.json) | `app/bounded_gpu_mask_iou.py`, `app/serve_gpu.py` | last deployed GPU `sha256:68908ec486591296875fdbf414f4bdd743e36b88a549f7f4026f0a787645283d` | `gpu:bounded-sam-iowa-v1` |
 
 The GPU recipe expects `overlay_patch.tar`. The CPU recipe deliberately expects
 the different name `overlay_cpu_pillow_patch.tar`, preventing an old source-only
@@ -19,6 +20,28 @@ archive from being reused without the dependency. Stage each tar and its recipe
 separately; do not include source media, checkpoints, credentials or unrelated files. Both append
 recipes use the pinned `gcrane` builder and existing project registry/log bucket.
 The GPU layer deliberately retains its existing model code and dependencies.
+
+### Iowa GPU runtime
+
+`cloudbuild.gpu-iowa.json` appends only `app/bounded_gpu_mask_iou.py` and
+`app/serve_gpu.py` to the last deployed GPU digest. Stage those two files in
+`gpu_iowa_patch.tar`; no model or dependency download is needed. The private
+Iowa service starts with `python -u /app/serve_gpu.py`, RTX PRO 6000, 20 vCPU,
+80 GiB system RAM, maximum one instance and MANUAL zero when idle.
+
+The bootstrap verifies the complete installed Transformers `mask_iou` source
+fingerprint before accepting requests, then compares every mask pair in bounded
+blocks. It keeps the model, detector thresholds, people, resolution and frame
+timeline unchanged. CUDA profiling is disabled for the production helper.
+This reduces comparison scratch but does not bound the rest of SAM's memory.
+The same crowd clip still exhausted L4 memory in the tracking-memory encoder;
+the 96 GB worker must pass the complete timed RGB/depth test before cutover.
+The isolated Iowa proof completed all 360 frames of the failing 15-second,
+640×480/24 fps RGB clip: depth 11.8 seconds, complete SAM phase 128.7 seconds
+(98.8 seconds inference), peak CUDA allocation 27.55 GiB, 31 tracked objects,
+and four scene thumbnails. This verifies completion and memory headroom on
+that clip; it does not establish cross-cut identity continuity or a general
+mask-quality improvement.
 
 ### CPU dependency staging
 

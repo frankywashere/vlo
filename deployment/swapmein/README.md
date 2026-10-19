@@ -298,12 +298,12 @@ preconditions enforce admission under races.
 
 | Resource | Preserved configuration / purpose |
 | --- | --- |
-| Project / region | `charswap-franky-20261013`, `634011479314`, `us-east4` |
+| Project / regions | `charswap-franky-20261013`, `634011479314`; gateway/queues/audio `us-east4`, GPU `us-central1` (Iowa) |
 | RecastFX hosting / gateway | `recastfx-franky`, `recastfx.com`, `recastfx-api`; legacy `swapmein-api` is separate |
 | Preparation queue | `swapmein-jobs`, one concurrent dispatch / one per minute; preserve its pause and retry configuration |
 | Render queue | `recastfx-renders`, at most five concurrent dispatches / one per second; provider work/status checks, not GPU inference |
 | Backup queue | `proof-shutdown`; must be running; preserve rate/retry policy |
-| Worker services | Private `proof-gpu`, `proof-audio`, normally MANUAL instance count 0 |
+| Worker services | Private Iowa `proof-gpu`: RTX PRO 6000 96 GB, 20 vCPU/80 GiB RAM; Virginia `proof-audio`. Both normally MANUAL 0, max 1 |
 | Gateway | AUTO min 0/max 1, concurrency 4, 2 vCPU/2 GiB, timeout 1,800 seconds |
 | Private storage | `charswap-franky-20261013-app` and existing `charswap-franky-20261013-proof` |
 | Identities | `swapmein-gateway@...`, `proof-worker@...`, `proof-shutdown@...` in that project; derive/verify actual attached identities |
@@ -316,6 +316,12 @@ all attempts fit that cap.
 
 The gateway registers the existing backup shutdown before setting a worker to
 one. Its `finally` block restores/verifies MANUAL zero and cancels the backup.
+`GPU_REGION=us-central1` controls GPU scaling and backup-shutdown target URLs;
+`REGION=us-east4` still controls task queues, the gateway and audio scaling.
+The backup queue remains in Virginia and its scoped shutdown identity can patch
+the private Iowa worker. Do not change only `GPU_URL`: scaling and shutdown must
+refer to the same worker. Older deployments without `GPU_REGION` keep their
+existing single-region behavior.
 Worker calls are bounded to 600 seconds, aggregate preparation to 1,200 seconds,
 scaling checks to 120 seconds, task registration/deletion RPCs to 20 seconds with
 SDK retries disabled, and task dispatch to 1,800 seconds. Backup shutdown is

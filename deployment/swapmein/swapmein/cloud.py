@@ -173,7 +173,8 @@ class Cloud:
     def _admin_url(self, service: str):
         if service not in {"gpu", "audio"}:
             raise ValueError("Unknown worker")
-        return f"https://run.googleapis.com/v2/projects/{self.settings.project}/locations/{self.settings.region}/services/proof-{service}"
+        region = (self.settings.gpu_region or self.settings.region) if service == "gpu" else self.settings.region
+        return f"https://run.googleapis.com/v2/projects/{self.settings.project}/locations/{region}/services/proof-{service}"
 
     def _scale(self, service: str, count: int):
         headers = {"Authorization": "Bearer " + access_token()}

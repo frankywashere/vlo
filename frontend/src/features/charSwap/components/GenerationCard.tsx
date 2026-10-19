@@ -43,7 +43,7 @@ export function GenerationCard({ job, onOpen, onRemove }: GenerationCardProps) {
   const pulse = running || job.status === "tracking_review" || job.status === "ready";
   const pulseStyle = {
     "@keyframes jobStatusPulse": { "0%, 100%": { opacity: 1 }, "50%": { opacity: 0.45 } },
-    animation: "jobStatusPulse 2s ease-in-out infinite",
+    animation: "jobStatusPulse 0.8s ease-in-out infinite",
     "@media (prefers-reduced-motion: reduce)": { animation: "none" },
   };
   const manualPreparing = ["queued", "preparing"].includes(job.status) && job.easy_mode === false && !job.settings_used?.replace_all_people;

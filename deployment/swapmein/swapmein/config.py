@@ -18,6 +18,8 @@ class Settings:
     project: str = "charswap-franky-20261013"
     project_number: str = "634011479314"
     region: str = "us-east4"
+    # GPU placement can differ from the gateway, task queues and CPU audio worker.
+    gpu_region: str = ""
     billing_account: str = "016117-6FCD80-6EAC9D"
     app_bucket: str = ""
     worker_bucket: str = "charswap-franky-20261013-proof"
@@ -44,6 +46,7 @@ class Settings:
             project=os.getenv("GOOGLE_CLOUD_PROJECT", cls.project),
             project_number=os.getenv("PROJECT_NUMBER", cls.project_number),
             region=os.getenv("REGION", cls.region),
+            gpu_region=os.getenv("GPU_REGION", cls.gpu_region),
             billing_account=os.getenv("BILLING_ACCOUNT", cls.billing_account),
             app_bucket=os.getenv("APP_BUCKET", ""),
             worker_bucket=os.getenv("WORKER_BUCKET", cls.worker_bucket),

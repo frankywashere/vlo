@@ -105,7 +105,7 @@ export function GenerationPage({
               ? "Watch it, save it, and make another."
               : uploadSaved
                 ? !easyMode && !replaceAllPeople && ["queued", "preparing"].includes(job?.status ?? "")
-                  ? "Your upload is saved. We’re processing the scenes. You can close this tab and return to this clip in your Library to choose people in each scene when it says Needs attention."
+                  ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
                   : "Your upload is saved. You can safely close this tab and see progress in your Library."
                 : "Keep this tab open until your upload is confirmed."}
           </Typography>

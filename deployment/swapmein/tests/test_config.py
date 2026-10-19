@@ -3,6 +3,14 @@ import pytest
 from swapmein.config import Settings
 
 
+def test_gpu_region_can_move_without_relocating_gateway_and_queues(monkeypatch):
+    monkeypatch.setenv("REGION", "us-east4")
+    monkeypatch.setenv("GPU_REGION", "us-central1")
+    settings = Settings.from_env()
+    assert settings.region == "us-east4"
+    assert settings.gpu_region == "us-central1"
+
+
 @pytest.fixture
 def clean_preparation_env(monkeypatch):
     monkeypatch.delenv("DAILY_PREPARATIONS", raising=False)

@@ -200,6 +200,13 @@ export function CharSwapWalkthrough({
     && (pipeline.job.status !== "generating" || pipeline.job.generation_started_at !== undefined || pipeline.job.auto_generate)
     && ["queued", "preparing", "tracking_review", "ready", "generating", "finalizing", "completed", "failed"].includes(pipeline.job.status)
   );
+  const manualPreparation = live && !easyMode && step !== "generation" && Boolean(
+    pipeline.preparationProgress || ["queued", "preparing"].includes(pipeline.job?.status ?? ""),
+  );
+  const displayedPreparation = pipeline.preparationProgress ?? (manualPreparation ? {
+    phase: pipeline.job?.status === "queued" ? "queued" as const : "preparing" as const,
+    message: pipeline.job?.message ?? "Preparing the scenes for your review…",
+  } : null);
   const busy =
     locked || assets.busy || loadingDemo || assets.pendingReferences.length > 0;
   const state = {
@@ -422,13 +429,13 @@ export function CharSwapWalkthrough({
     >
       {pendingCreate && <Alert severity="info" sx={{ mb: 2 }}>Your new setup will open once the current upload or render submission is confirmed. Your saved job will remain in your Library.</Alert>}
       <CreationProgress step={step} manualReview={!easyMode} sceneReviewed={trackingReady}
-        canVisit={(item) => !easyMode && item === "review" && !trackingReady ? false
+        canVisit={(item) => manualPreparation ? false : !easyMode && item === "review" && !trackingReady ? false
           : canGoTo(!easyMode && item === "matches" && !pipeline.job ? "review" : item)}
         onVisit={(item) => visit(!easyMode && item === "matches" && !pipeline.job ? "review" : item)} />
       {step !== "generation" && renderCanContinueInLibrary && (
-        <Alert severity="success" sx={{ mb: 2 }} action={<Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
+        <Alert severity="success" sx={{ mb: 2 }} action={manualPreparation ? undefined : <Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
           {!easyMode && !replaceAllPeople && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
-            ? "Your upload is saved. We’re processing the scenes. You can close this tab and return to this clip in your Library to choose people in each scene when it says Needs attention."
+            ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
             : "Your upload is saved. You can safely close this tab and see progress in your Library."}
         </Alert>
       )}
@@ -445,7 +452,7 @@ export function CharSwapWalkthrough({
         />
       ) : (
         <>
-          {step !== "generation" && (
+          {step !== "generation" && !manualPreparation && (
             <Stack
               direction="row"
               alignItems="flex-start"
@@ -495,7 +502,7 @@ export function CharSwapWalkthrough({
               {error || pipeline.error}
             </Alert>
           )}
-          {step !== "generation" &&
+          {step !== "generation" && !manualPreparation &&
             clip &&
             ((!clipStep && !fullyFunded) || creditAccount.error) && (
               <Alert
@@ -510,16 +517,21 @@ export function CharSwapWalkthrough({
               </Alert>
             )}
           {retryNotice && <Alert severity="info" sx={{mb: 2}}>{retryNotice}</Alert>}
-          {(step !== "generation" || isUploadUnconfirmed(pipeline.preparationProgress)) && pipeline.preparationProgress && (
+          {(step !== "generation" || isUploadUnconfirmed(displayedPreparation)) && displayedPreparation && (
             <Box sx={{ mb: 2 }}>
+              {manualPreparation && <Typography component="h1" variant="h4" sx={{ mb: 2 }}>Preparing your clip</Typography>}
               <PreparationProgress
-                title="Preparing your clip"
-                progress={pipeline.preparationProgress}
+                title={manualPreparation ? "Processing scenes" : "Preparing your clip"}
+                progress={displayedPreparation}
                 elapsedSeconds={pipeline.preparationElapsedSeconds}
+                showSavedNotice={!manualPreparation}
               />
+              {manualPreparation && renderCanContinueInLibrary && <Button variant="outlined" sx={{ mt: 2 }} onClick={startNewSwap}>
+                Start a new recast while this processes
+              </Button>}
             </Box>
           )}
-          <Box
+          {!manualPreparation && <Box
             component="fieldset"
             disabled={Boolean(locked && step !== "generation")}
             sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}
@@ -660,8 +672,8 @@ export function CharSwapWalkthrough({
                 canCreateAnother={renderCanContinueInLibrary}
               />
             )}
-          </Box>
-          {step !== "generation" && (
+          </Box>}
+          {step !== "generation" && !manualPreparation && (
             <Box
               component="footer"
               sx={{
