@@ -18,6 +18,29 @@ function properties() {
 }
 
 describe("truthful preparation status at final review", () => {
+  it.each([false, true])("shows the prepared manual settings without editable switches (masking: %s)", (enhanced) => {
+    const store = useCharSwapStore.getState();
+    store.setEasyMode(false);
+    store.setEnhancedCharacterMasking(enhanced);
+    render(<ReviewStep {...properties()} trackingReady job={{id: "ready", status: "ready", easy_mode: false,
+      settings_used: {enhanced_masking: enhanced}}} />);
+    expect(screen.queryByRole("region", {name: "Generation options"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", {name: "Prepared settings"})).toBeInTheDocument();
+    expect(screen.getByText(`Enhanced person masking: ${enhanced ? "On" : "Off"}`)).toBeInTheDocument();
+  });
+  it("keeps generation settings editable before manual preparation", () => {
+    useCharSwapStore.getState().setEasyMode(false);
+    render(<ReviewStep {...properties()} />);
+    expect(screen.getByRole("switch", {name: "Review scene changes manually"})).toBeEnabled();
+    expect(screen.getByRole("switch", {name: "Enhanced person masking"})).toBeEnabled();
+    expect(screen.queryByRole("region", {name: "Prepared settings"})).not.toBeInTheDocument();
+  });
+  it("keeps the initial Easy-mode generation options editable", () => {
+    render(<ReviewStep {...properties()} />);
+    expect(screen.getByRole("switch", {name: "Review scene changes manually"})).toBeEnabled();
+    expect(screen.getByRole("switch", {name: "Enhanced person masking"})).toBeEnabled();
+  });
   it("does not claim tracking completed before an Easy-mode job has been submitted", () => {
     expect(useCharSwapStore.getState().trackingReady).toBe(false);
     render(<ReviewStep {...properties()} />);

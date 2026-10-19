@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 from .errors import PublicError
-from .tracking import _maps, _metadata, _pixel_label, analyze_tracking, resolve_tracking
+from .tracking import FPS, _maps, _metadata, _pixel_label, analyze_tracking, resolve_tracking
 
 TARGET_COLORS = [("#00dcff", "cyan"), ("#ff4fd8", "magenta"), ("#ffd166", "gold"),
                  ("#9be564", "lime green"), ("#ff8c42", "orange")]
@@ -32,14 +32,15 @@ def style_targets(targets: list[dict]):
     return result
 
 
-def selected_tracks(archive: Path, metadata: dict, targets: list[dict]):
+def selected_tracks(archive: Path, metadata: dict, targets: list[dict], *, allow_unmatched: bool = False):
     result = []
     for target in style_targets(targets):
         specific = {**metadata, "anchor": target["anchor"]}
         width, height, _, anchor_frame, _ = _metadata(specific)
         with _maps(archive, specific) as read:
             label = _pixel_label(read, anchor_frame, target["anchor"], width, height)
-        if label == 0:
+        if label == 0 and not (allow_unmatched and metadata.get("allow_unmatched_anchor")
+                               and metadata.get("review_all_scenes")):
             raise PublicError(f"The tap for {target.get('name', 'a selected person')} missed the person. Select a point inside their body.",
                               code="tracking_background")
         result.append({**target, "selected_label": label})
@@ -48,6 +49,9 @@ def selected_tracks(archive: Path, metadata: dict, targets: list[dict]):
 
 def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], output: Path):
     """Remap chosen SAM IDs to stable person slots, rejecting ambiguous overlap."""
+    if any(type(target.get("selected_label")) is not int or not 1 <= target["selected_label"] <= 65535
+           for target in targets):
+        raise PublicError("Review each unmatched person before building the guide.", code="tracking_review_invalid")
     width, height, frames, _, _ = _metadata(metadata)
     temporary = output.with_name(output.name + ".partial")
     coverage = []
@@ -75,7 +79,8 @@ def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], out
 
 
 def analyze(archive: Path, metadata: dict, targets: list[dict] | None = None):
-    targets = selected_tracks(archive, metadata, targets if targets is not None else metadata.get("targets"))
+    targets = selected_tracks(archive, metadata, targets if targets is not None else metadata.get("targets"),
+        allow_unmatched=bool(metadata.get("allow_unmatched_anchor")))
     segments, plans = [], []
     for index, target in enumerate(targets):
         plan = analyze_tracking(archive, {**metadata, "anchor": target["anchor"]}, target["selected_label"])
@@ -84,8 +89,12 @@ def analyze(archive: Path, metadata: dict, targets: list[dict] | None = None):
                          "target_id": target["id"], "target_name": target.get("name", f"Person {index + 1}"),
                          "reference_index": target["reference_index"], "color": target["color"]}
                         for segment in plan["segments"])
-    return {"version": 2, "targets": targets, "plans": plans, "segments": segments,
-            "review_required": any(segment["needs_review"] for segment in segments)}
+    result = {"version": 2, "targets": targets, "plans": plans, "segments": segments,
+              "review_required": any(segment["needs_review"] for segment in segments)}
+    if any(plan["plan"].get("unresolved_anchor") for plan in plans):
+        result.update(unresolved_anchor=True,
+            detected_people_available=any(plan["plan"].get("detected_people_available", True) for plan in plans))
+    return result
 
 
 def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], output: Path):
@@ -112,6 +121,8 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
                 except PublicError as error:
                     if getattr(error, "segment_id", None):
                         error.segment_id = prefix + error.segment_id
+                    if hasattr(error, "tracking_diagnostics"):
+                        error.tracking_diagnostics["target_id"] = target["id"]
                     raise
                 assignments.extend({**item, "segment_id": prefix + item["segment_id"],
                                     "target_id": target["id"], "reference_index": target["reference_index"]}
@@ -124,8 +135,27 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
                     for index, selected in enumerate(previews):
                         mask = np.asarray(Image.open(BytesIO(selected.read(name)))) > 0
                         if np.any(mask & (mapped > 0)):
-                            error = PublicError("The same person was assigned to two replacements in a scene. Give each person a different match, or mark one absent.",
-                                                code="tracking_target_conflict")
+                            overlap = mask & (mapped > 0)
+                            other_index = int(mapped[overlap][0]) - 1
+                            assignment = next(item for item in assignments
+                                if item["target_id"] == expected["targets"][index]["id"]
+                                and item["start_frame"] <= frame < item["end_frame"])
+                            other_assignment = next(item for item in assignments
+                                if item["target_id"] == expected["targets"][other_index]["id"]
+                                and item["start_frame"] <= frame < item["end_frame"])
+                            error = PublicError(
+                                f"SAM matched Person {index + 1} and Person {other_index + 1} to the same detected track at {frame / FPS:.2f}s. "
+                                "Review both selections in this scene, or mark a person not visible. If the detection is wrong, try another frame.",
+                                code="tracking_target_conflict")
+                            error.tracking_diagnostics = {"frame": frame, "time": frame / FPS,
+                                "target_index": index, "conflicting_target_index": other_index,
+                                "target_id": expected["targets"][index]["id"],
+                                "conflicting_target_id": expected["targets"][other_index]["id"],
+                                "selected_label": assignment["selected_label"],
+                                "conflicting_label": other_assignment["selected_label"],
+                                "conflicting_segment_id": other_assignment["segment_id"],
+                                "overlap_pixels": int(np.count_nonzero(overlap)),
+                                "mask_pixels": int(np.count_nonzero(mask)), "width": width, "height": height}
                             candidate = next((segment for segment in expected["segments"]
                                               if segment["target_id"] == expected["targets"][index]["id"]
                                               and segment["needs_review"]

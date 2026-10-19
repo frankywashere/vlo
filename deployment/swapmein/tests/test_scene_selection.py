@@ -77,3 +77,39 @@ def test_review_thumbnails_decode_exact_scene_frames_in_one_pass(tmp_path):
     first, second = [Image.open(path).getpixel((160, 120)) for path in previews.values()]
     assert first[0] > 200 and first[2] < 30
     assert second[2] > 200 and second[0] < 30
+
+
+def test_public_review_groups_scenes_and_exposes_matching_stills_without_mutating_plan(api):
+    client, records, cloud, provider = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    metadata, plan, choices = setup_scene_review()
+    saved = copy.deepcopy(plan)
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(status="tracking_review", tracking_revision=1, tracking_metadata=metadata, tracking_plan=plan,
+               scene_thumbnail_uris={str(int(section["seek_time"] * 24)): f"gs://app/original-{index}.jpg"
+                                     for index, section in enumerate(plan["segments"])},
+               scene_mask_thumbnail_uris={str(int(section["seek_time"] * 24)): f"gs://app/masked-{index}.jpg"
+                                          for index, section in enumerate(plan["segments"])})
+    response = client.get(f"/api/jobs/{job_id}", headers=headers)
+    assert response.status_code == 200, response.text
+    sections = response.json()["tracking_segments"]
+    assert [section["scene_index"] for section in sections] == [section["scene"] for section in plan["segments"]]
+    assert all("thumbnail_url" in section and "tracking_thumbnail_url" in section for section in sections)
+    assert plan == saved
+
+
+def test_library_character_picture_uses_the_original_selected_frame(api):
+    client, records, cloud, _ = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    metadata, plan, _ = setup_scene_review()
+    targets = copy.deepcopy(plan["targets"])
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(normalized_targets=targets, scene_thumbnail_uris={"12": "gs://app/original-left.jpg", "84": "gs://app/original-right.jpg"})
+    response = client.get(f"/api/jobs/{job_id}", headers=headers)
+    assert response.status_code == 200
+    public = response.json()["selection_targets"]
+    assert "original-left.jpg" in public[0]["thumbnail_url"]
+    assert "original-right.jpg" in public[1]["thumbnail_url"]
+    assert "thumbnail_url" not in targets[0]

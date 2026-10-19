@@ -6,6 +6,9 @@ providers. Ordinary customers use RecastFX credits and a server-managed provider
 credential. Only accounts explicitly authorized by an owner see personal API-key
 controls. reAPI and ToAPIs adapters remain supported.
 
+For the optional hosted SAM/depth route, see the
+[preparation routing and reference-cleanup runbook](PREPARATION_ROUTING.md).
+
 This runbook describes the source implementation, including the version 2
 preparation and multi-person changes. **It is not evidence that a particular
 revision has been deployed.** Verify the release report, immutable service images,
@@ -38,8 +41,10 @@ Enhanced version 2 preparation follows this sequence:
 1. Normalize the trimmed source at its working dimensions and 24 fps.
 2. Call the existing GPU `/benchmark` with `operation: "depth"` on that working
    video, retaining full working-dimension Depth Anything output.
-3. Make a separate SAM copy of the colored depth video, bounded by 854×480 with
-   the same frame count/timeline. Call `/benchmark` with `operation: "sam"`.
+3. Make a separate SAM copy of the normalized **original RGB video**, bounded
+   by 854×480 with the same frame count/timeline. Call `/benchmark` with
+   `operation: "sam"`. SAM detects people in this RGB copy, independently of
+   Depth Anything; depth imagery is used only for the later masked composition.
 4. Validate the categorical label archive and scale labels back to working
    dimensions with **nearest-neighbor** interpolation. Integer tracking labels
    must never be blended as RGB pixels.
@@ -98,14 +103,19 @@ queues rendering when preparation is safely ready. It follows the originally
 chosen SAM IDs across the clip; it does not verify cross-cut identity. Multiple
 selected tracks may require turning Easy off if the IDs conflict.
 
-Non-Easy enhanced mode partitions the clip at cuts, label gaps and abrupt mask
-changes. These are review heuristics, not identity-confidence scores. For each
-selected person, the healthy anchor section can be retained; flagged sections
-show still frames with a translucent detected-person preview and the assigned
-reference. The user chooses that person or **Not visible here**. Two targets
-cannot be assigned the same person in one scene. Group mode requires no
-individual scene matching. Enhanced off identifies each selected person using
-its normalized coordinates and clip-relative timestamp in the provider prompt.
+Easy mode and enhanced masking are independent. With Easy off, the walkthrough
+shows a **Check scenes** step with scene thumbnails and per-person reference
+assignments. Enhanced mode shows detected-person overlays; masking off uses the
+original-looking clip and saves scene-specific positions, clip-relative times
+and absences for the provider prompt. The user chooses each person or **Not in
+this scene**. Two replacements cannot share the same detected person in one
+scene. Group mode requires no individual scene matching.
+
+The initial person picker accepts taps only after its displayed video frame has
+settled. An initial unmatched tap in manual enhanced mode requires correction in
+scene review before generation; it does not silently select a nearby person.
+Scene review can only choose people SAM detected. If it did not detect the
+person, another frame or a new setup with masking off may be needed.
 
 Reviewed labels are rebuilt by the CPU compositor using saved depth and audio;
 there is no additional SAM inference or paid generation at that step. After
@@ -291,12 +301,12 @@ preconditions enforce admission under races.
 
 | Resource | Preserved configuration / purpose |
 | --- | --- |
-| Project / region | `charswap-franky-20261013`, `634011479314`, `us-east4` |
+| Project / regions | `charswap-franky-20261013`, `634011479314`; gateway/queues/audio `us-east4`, GPU `us-central1` (Iowa) |
 | RecastFX hosting / gateway | `recastfx-franky`, `recastfx.com`, `recastfx-api`; legacy `swapmein-api` is separate |
 | Preparation queue | `swapmein-jobs`, one concurrent dispatch / one per minute; preserve its pause and retry configuration |
 | Render queue | `recastfx-renders`, at most five concurrent dispatches / one per second; provider work/status checks, not GPU inference |
 | Backup queue | `proof-shutdown`; must be running; preserve rate/retry policy |
-| Worker services | Private `proof-gpu`, `proof-audio`, normally MANUAL instance count 0 |
+| Worker services | Private Iowa `proof-gpu`: RTX PRO 6000 96 GB, 20 vCPU/80 GiB RAM; Virginia `proof-audio`. Both normally MANUAL 0, max 1 |
 | Gateway | AUTO min 0/max 1, concurrency 4, 2 vCPU/2 GiB, timeout 1,800 seconds |
 | Private storage | `charswap-franky-20261013-app` and existing `charswap-franky-20261013-proof` |
 | Identities | `swapmein-gateway@...`, `proof-worker@...`, `proof-shutdown@...` in that project; derive/verify actual attached identities |
@@ -309,6 +319,12 @@ all attempts fit that cap.
 
 The gateway registers the existing backup shutdown before setting a worker to
 one. Its `finally` block restores/verifies MANUAL zero and cancels the backup.
+`GPU_REGION=us-central1` controls GPU scaling and backup-shutdown target URLs;
+`REGION=us-east4` still controls task queues, the gateway and audio scaling.
+The backup queue remains in Virginia and its scoped shutdown identity can patch
+the private Iowa worker. Do not change only `GPU_URL`: scaling and shutdown must
+refer to the same worker. Older deployments without `GPU_REGION` keep their
+existing single-region behavior.
 Worker calls are bounded to 600 seconds, aggregate preparation to 1,200 seconds,
 scaling checks to 120 seconds, task registration/deletion RPCs to 20 seconds with
 SDK retries disabled, and task dispatch to 1,800 seconds. Backup shutdown is

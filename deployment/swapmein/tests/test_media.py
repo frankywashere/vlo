@@ -323,3 +323,23 @@ def test_poster_extracts_one_bounded_frame_without_changing_video(tmp_path):
     with Image.open(poster) as image:
         assert image.format == "JPEG" and image.size == (640, 360)
     assert hashlib.sha256(source.read_bytes()).hexdigest() == checksum
+
+@pytest.mark.parametrize("trim", [(1.1, 16.1), (1.1, 5.1)])
+def test_whole_second_trim_boundaries_accept_float_subtraction_noise(trim):
+    assert options(trim=trim, anchor={"x": .5, "y": .5, "time": 2}).trim == trim
+
+
+def test_trim_boundary_rejects_a_real_overflow():
+    with pytest.raises(ValidationError):
+        options(trim=(1.1, 16.101), anchor={"x": .5, "y": .5, "time": 2})
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for cut detection")
+def test_letterboxed_camera_cuts_do_not_reuse_one_tracking_section(tmp_path):
+    from swapmein.media import detect_scene_cuts
+    source = tmp_path / "letterboxed.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:r=24:d=2",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=24:d=2", "-filter_complex",
+        "[0:v][1:v]concat=n=2:v=1:a=0,pad=480:360:80:60:black[v]", "-map", "[v]",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)], check=True)
+    assert detect_scene_cuts(source) == [2.0]

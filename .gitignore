@@ -90,3 +90,6 @@ firebase-debug.log
 deployment/swapmein/deploy-report.json
 
 deployment/swapmein/deploy-launch-report.json
+
+# Downloaded browser ML weights and runtime; regenerate with prepare:browser-cleanup
+frontend/public/charSwap-runtime/

@@ -17,6 +17,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .errors import PublicError
 
 
+def detect_scene_cuts(source: Path) -> list[float]:
+    """Find clip-local cuts, including letterboxed footage with muted changes."""
+    # The old 0.40 threshold missed real shot/reverse-shot cuts, allowing SAM
+    # IDs reused across shots to become conflicting person assignments.
+    cuts = run(["ffmpeg", "-hide_banner", "-loglevel", "info", "-protocol_whitelist", "file,pipe", "-i", str(source), "-an",
+                "-vf", "select='gt(scene,0.15)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
+    return [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
+
+
 def scene_thumbnails(source: Path, directory: Path, frames: list[int]) -> dict[int, Path]:
     """Decode bounded review thumbnails in one pass, including for mobile Safari."""
     frames = sorted(set(frames))
@@ -63,7 +72,8 @@ class Setup(BaseModel):
     @model_validator(mode="after")
     def validate_range(self):
         start, end = self.trim
-        duration = end - start
+        # Timestamp subtraction can put an exact 15-second trim above 15.
+        duration = round(end - start, 6)
         if (start < 0 or not 4 <= duration <= 15
                 or not math.isclose(duration, round(duration), abs_tol=0.01)):
             raise ValueError("Select 4–15 seconds, with a whole-second length.")
@@ -192,9 +202,7 @@ def normalize(source: Path, output: Path, setup: Setup):
     if int(normalized_video.get("nb_frames", 0)) != duration * 24:
         raise PublicError("The source does not contain every requested frame.")
     require_audio_duration(normalized, duration)
-    cuts = run(["ffmpeg", "-hide_banner", "-loglevel", "info", "-protocol_whitelist", "file,pipe", "-i", str(output), "-an",
-                "-vf", "select='gt(scene,0.40)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
-    scene_cuts = [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
+    scene_cuts = detect_scene_cuts(output)
     # Group mode needs no user tap. The normalized metadata still carries a
     # valid frame origin for media validation; it is never used to select an ID.
     def mapped_anchor(selection):

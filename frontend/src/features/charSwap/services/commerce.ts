@@ -61,13 +61,21 @@ export interface CreditAdmin {
   };
 }
 
+export type PreparationProvider = "workers" | "replicate";
+
 export interface PipelineSettings {
   revision: number;
   audio_processing: boolean;
+  preparation_provider?: PreparationProvider;
+  replicate_api_key_configured?: boolean;
 }
 
-export function savePipelineSettings(settings: PipelineSettings) {
+export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "audio_processing" | "preparation_provider">>) {
   return commerceRequest<PipelineSettings>("/api/commerce/admin/pipeline", settings);
+}
+
+export function saveReplicateApiKey(key: string) {
+  return commerceRequest<{configured: boolean}>("/api/commerce/admin/replicate-key", {key});
 }
 
 export interface CreditFeatures {

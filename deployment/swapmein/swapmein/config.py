@@ -18,6 +18,8 @@ class Settings:
     project: str = "charswap-franky-20261013"
     project_number: str = "634011479314"
     region: str = "us-east4"
+    # GPU placement can differ from the gateway, task queues and CPU audio worker.
+    gpu_region: str = ""
     billing_account: str = "016117-6FCD80-6EAC9D"
     app_bucket: str = ""
     worker_bucket: str = "charswap-franky-20261013-proof"
@@ -29,6 +31,7 @@ class Settings:
     shutdown_service_account: str = "proof-shutdown@charswap-franky-20261013.iam.gserviceaccount.com"
     gpu_url: str = ""
     audio_url: str = ""
+    reference_cleanup_url: str = ""
     allowed_origins: tuple[str, ...] = ()
     require_account: bool = False
     # The calendar-month allowance accommodates 100 attempts on all 31 days.
@@ -44,6 +47,7 @@ class Settings:
             project=os.getenv("GOOGLE_CLOUD_PROJECT", cls.project),
             project_number=os.getenv("PROJECT_NUMBER", cls.project_number),
             region=os.getenv("REGION", cls.region),
+            gpu_region=os.getenv("GPU_REGION", cls.gpu_region),
             billing_account=os.getenv("BILLING_ACCOUNT", cls.billing_account),
             app_bucket=os.getenv("APP_BUCKET", ""),
             worker_bucket=os.getenv("WORKER_BUCKET", cls.worker_bucket),
@@ -55,6 +59,7 @@ class Settings:
             shutdown_service_account=os.getenv("SHUTDOWN_SERVICE_ACCOUNT", cls.shutdown_service_account),
             gpu_url=os.getenv("GPU_URL", "").rstrip("/"),
             audio_url=os.getenv("AUDIO_URL", "").rstrip("/"),
+            reference_cleanup_url=os.getenv("REFERENCE_CLEANUP_URL", "").rstrip("/"),
             allowed_origins=tuple(x.strip() for x in os.getenv("ALLOWED_ORIGINS", "").split(",") if x.strip()),
             require_account=os.getenv("REQUIRE_ACCOUNT", "false").lower() == "true",
             monthly_preparations=positive_integer_env("MONTHLY_PREPARATIONS", cls.monthly_preparations),

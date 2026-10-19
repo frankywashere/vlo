@@ -213,17 +213,23 @@ def _compact(segments):
 def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict:
     """Partition frames into confirmed-anchor and user-review sections."""
     width, height, frames, anchor_frame, cuts = _metadata(metadata)
-    if not _integer(selected_label, 1, 65535):
+    unresolved = (selected_label == 0 and metadata.get("allow_unmatched_anchor") is True
+                  and metadata.get("review_all_scenes") is True)
+    if not _integer(selected_label, 0 if unresolved else 1, 65535):
         raise _invalid("The selected tracking label is invalid.")
     statistics = []
+    detected_people = False
     with _maps(archive, metadata) as read:
         if "x" in metadata["anchor"] and _pixel_label(read, anchor_frame, metadata["anchor"], width, height) != selected_label:
             raise _invalid("The selected tracking label does not match the original tap.")
         for index in range(frames):
-            ys, xs = np.nonzero(read(index) == selected_label)
+            labels = read(index)
+            detected_people = detected_people or bool(np.any(labels > 0))
+            # Zero is an unresolved selection, never a background-person mask.
+            ys, xs = np.nonzero(labels == selected_label) if not unresolved else (np.array([]), np.array([]))
             statistics.append((len(xs), float(xs.mean()) if len(xs) else 0,
                                float(ys.mean()) if len(ys) else 0))
-    if not statistics[anchor_frame][0]:
+    if not statistics[anchor_frame][0] and not unresolved:
         raise _invalid("The selected person is missing at the original tap.")
     scenes = [0, *cuts, frames]
     anchor_scene = next(index for index in range(len(scenes) - 1)
@@ -254,8 +260,11 @@ def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict
                        "start": start / FPS, "end": end / FPS, "seek_time": seek_frame / FPS,
                        "reason": segment["reason"], "needs_review": not healthy_anchor,
                        "selected_label": selected_label if contains_anchor else None})
-    return {"version": 1, "segments": result,
+    plan = {"version": 1, "segments": result,
             "review_required": any(segment["needs_review"] for segment in result)}
+    if unresolved:
+        plan.update(unresolved_anchor=True, detected_people_available=detected_people)
+    return plan
 
 
 def _selection_error(message="The tracking review does not match this clip. Check every flagged section."):
@@ -274,7 +283,8 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                        and _integer(segment.get("start_frame"), 0, frames - 1)
                        and _integer(segment.get("end_frame"), 1, frames)
                        and segment["start_frame"] <= anchor_frame < segment["end_frame"]]
-    if len(anchor_segments) != 1 or not _integer(anchor_segments[0].get("selected_label"), 1, 65535):
+    minimum_label = 0 if metadata.get("allow_unmatched_anchor") is True and metadata.get("review_all_scenes") is True else 1
+    if len(anchor_segments) != 1 or not _integer(anchor_segments[0].get("selected_label"), minimum_label, 65535):
         raise _selection_error()
     # Reanalysis makes the saved plan authoritative even if a client changes
     # segment bounds, review flags or an automatically retained label.
@@ -323,10 +333,17 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                         raise _selection_error(f"Choose a frame inside section {index + 1}.")
                     selected_label = _pixel_label(read, frame, anchor, width, height)
                     if selected_label == 0:
-                        error = PublicError(f"The tap in section {index + 1} missed the person. Tap inside their body.",
+                        error = PublicError(f"No person mask was detected at that point in section {index + 1} ({frame / FPS:.2f}s). Try inside the detected body, or use Show another frame.",
                                             code="tracking_background")
                         error.segment_id = segment["id"]
+                        labels = read(frame)
+                        error.tracking_diagnostics = {"frame": frame, "time": frame / FPS,
+                            "x": anchor["x"], "y": anchor["y"], "selected_label": 0,
+                            "detected_labels": [int(label) for label in np.unique(labels) if label][:100],
+                            "width": width, "height": height}
                         raise error
+                if not absent and not _integer(selected_label, 1, 65535):
+                    raise _selection_error("Select a detected person or mark this section absent.")
                 assignments.append({"segment_id": segment["id"], "start_frame": segment["start_frame"],
                                     "end_frame": segment["end_frame"],
                                     "selected_label": None if absent else selected_label, "absent": absent})

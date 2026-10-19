@@ -14,7 +14,7 @@ export function GenerationOptions({ disabled = false, onChange }: { disabled?: b
       <Typography component="h2" variant="subtitle1" fontWeight={700}>Generation options</Typography>
       <Box>
         <FormControlLabel sx={{ m: 0, width: "100%", justifyContent: "space-between" }} labelPlacement="start"
-          control={<Switch checked={manual} disabled={disabled || !enhanced} onChange={(_, value) => { onChange?.(); defaults.setEasyMode(!value); }}
+          control={<Switch checked={manual} disabled={disabled} onChange={(_, value) => { onChange?.(); defaults.setEasyMode(!value); }}
             slotProps={{ input: { role: "switch", "aria-describedby": "manual-review-help" } }} />}
           label={<Typography variant="body2" fontWeight={650}>Review scene changes manually</Typography>} />
         <Typography id="manual-review-help" variant="body2" color="text.secondary" sx={{ mt: .5 }}>
@@ -30,7 +30,7 @@ export function GenerationOptions({ disabled = false, onChange }: { disabled?: b
           Adds a visual guide when the person is hard to distinguish in the scene.
         </Typography>
       </Box>
-      {manual && enhanced && <Typography variant="caption" color="text.secondary">You’ll check scene matches before generation.</Typography>}
+      {manual && <Typography variant="caption" color="text.secondary">You’ll check scene matches before generation.</Typography>}
     </Stack>
   );
 }

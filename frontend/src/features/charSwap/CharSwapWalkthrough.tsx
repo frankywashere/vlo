@@ -1,3 +1,5 @@
+import { trimDuration } from "./utils/trimRange";
+import { warmReferenceCleanup } from "./services/referenceCleanup";
 import {
   useCallback,
   useEffect,
@@ -11,6 +13,7 @@ import {
   Alert,
   Box,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -21,7 +24,7 @@ import {
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import { useCharSwapStore, STEPS } from "./useCharSwapStore";
-import { canContinue, canVisitStep, getStepBlocker } from "./model/model";
+import { canContinue, canVisitStep, getStepBlocker, hasPendingReferenceCleanup, hasAssignedReferenceImages } from "./model/model";
 import type { Step } from "./model/model";
 import { loadDemo, sampleReviewIssues } from "./services/demo";
 import type { DemoManifest } from "./services/demo";
@@ -36,6 +39,8 @@ import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
 import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
 import { loadAccountAccess } from "./services/commerce";
 import { MAX_SOURCE_BYTES } from "./limits";
+import { ReferenceCleanupProvider } from "./components/ReferenceCleanupProvider";
+import { ReferenceCleanupWait } from "./components/ReferenceCleanupWait";
 import { CreationProgress } from "./components/CreationProgress";
 import { CreditGate } from "./components/CreditGate";
 import { PreparationProgress } from "./components/PreparationProgress";
@@ -161,6 +166,7 @@ export function CharSwapWalkthrough({
   const [provider, setProvider] = useState<"reAPI" | "ToAPIs">("reAPI");
   const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
   const [pendingCreate, setPendingCreate] = useState(false);
+  const [waitingForCleanup,setWaitingForCleanup]=useState(false);
   const { key: apiKey, hasKey, isSampleKey, saveKey, clearKey } = useApiKeyPreview();
   useEffect(() => {
     let active = true;
@@ -179,6 +185,7 @@ export function CharSwapWalkthrough({
   const creditAccount = credits ?? ownCredits;
   const secureSite = isSecureLiveOrigin();
   const live = pipeline.enabled && clip?.mode !== "demo";
+  useEffect(() => {if (live && clip && pipeline.referenceCleanupAvailable) warmReferenceCleanup();}, [live, clip?.id, pipeline.referenceCleanupAvailable]);
   const balance = creditAccount.wallet?.balance;
   const minimumCredits = creditsForDuration(4, creditAccount.catalog);
   const trimCredits = creditsForDuration(
@@ -200,6 +207,14 @@ export function CharSwapWalkthrough({
     && (pipeline.job.status !== "generating" || pipeline.job.generation_started_at !== undefined || pipeline.job.auto_generate)
     && ["queued", "preparing", "tracking_review", "ready", "generating", "finalizing", "completed", "failed"].includes(pipeline.job.status)
   );
+  const manualPreparation = live && !easyMode && step !== "generation" && Boolean(
+    pipeline.preparationProgress || ["queued", "preparing"].includes(pipeline.job?.status ?? ""),
+  );
+  const sceneReviewActive = live && step === "matches" && pipeline.job?.status === "tracking_review";
+  const displayedPreparation = pipeline.preparationProgress ?? (manualPreparation ? {
+    phase: pipeline.job?.status === "queued" ? "queued" as const : "preparing" as const,
+    message: pipeline.job?.message ?? "Preparing the scenes for your review…",
+  } : null);
   const busy =
     locked || assets.busy || loadingDemo || assets.pendingReferences.length > 0;
   const state = {
@@ -235,17 +250,25 @@ export function CharSwapWalkthrough({
     skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS
   ).filter((item) => item !== "trim");
   const current = flowSteps.indexOf(clipStep ? "clip" : step);
-  const selectedDuration = trim[1] - trim[0];
+  const selectedDuration = trimDuration(trim);
   const validLiveTrim =
     selectedDuration >= 4 &&
     selectedDuration <= 15 &&
     Math.abs(selectedDuration - Math.round(selectedDuration)) < 1e-6;
   const continueDisabled =
     busy ||
-    !canContinue(state, clipStep ? "trim" : step) ||
+    !(step === "references" ? canContinue(state,"people") && hasAssignedReferenceImages(state) : canContinue(state, clipStep ? "trim" : step)) ||
     (live && clipStep && !validLiveTrim) ||
     (step === "matches" && !trackingReady) ||
     !fullyFunded;
+  const cleanupPending=hasPendingReferenceCleanup(state);
+  const cleanupFailed=targets.some(target=>references.find(reference=>reference.id===assignments[target.id])?.cleanup?.error);
+  useEffect(()=>{
+    if (step!=="references" || !clip) {setWaitingForCleanup(false);return;}
+    if (waitingForCleanup && !cleanupPending && !cleanupFailed && !continueDisabled) {
+      setWaitingForCleanup(false);visit("review");
+    }
+  },[step,clip,waitingForCleanup,cleanupPending,cleanupFailed,continueDisabled,visit]);
   const referenceVersion = JSON.stringify(
     Object.entries(assignments).map(([target, id]) => [
       target,
@@ -262,6 +285,7 @@ export function CharSwapWalkthrough({
     resetPipeline();
     setResetDialog(false);
     setPendingCreate(false);
+    setWaitingForCleanup(false);
   }, [cancelPending, reset, resetPipeline]);
   useImperativeHandle(
     ref,
@@ -362,6 +386,7 @@ export function CharSwapWalkthrough({
       return;
     }
     if (step === "references") {
+      if (cleanupPending || cleanupFailed) {setWaitingForCleanup(true);return;}
       visit("review");
       return;
     }
@@ -402,6 +427,8 @@ export function CharSwapWalkthrough({
     if (step === "matches" && item === "review" && !trackingReady) return false;
     return true;
   }
+  const referenceWaitLabel = step === "references" ? assets.pendingReferences.length > 0
+    ? "Opening image…" : null : null;
   const nextLabel = clipStep
     ? "Select person"
     : step === "people"
@@ -410,6 +437,7 @@ export function CharSwapWalkthrough({
   const gate = !clip && !pipeline.job && !entryFunded;
 
   return (
+    <ReferenceCleanupProvider enabled={Boolean(live && pipeline.referenceCleanupAvailable)} endpoint={pipeline.referenceCleanupEndpoint}>
     <Box
       component="main"
       sx={{
@@ -422,12 +450,14 @@ export function CharSwapWalkthrough({
     >
       {pendingCreate && <Alert severity="info" sx={{ mb: 2 }}>Your new setup will open once the current upload or render submission is confirmed. Your saved job will remain in your Library.</Alert>}
       <CreationProgress step={step} manualReview={!easyMode} sceneReviewed={trackingReady}
-        canVisit={(item) => !easyMode && item === "review" && !trackingReady ? false
+        canVisit={(item) => manualPreparation ? false : !easyMode && item === "review" && !trackingReady ? false
           : canGoTo(!easyMode && item === "matches" && !pipeline.job ? "review" : item)}
         onVisit={(item) => visit(!easyMode && item === "matches" && !pipeline.job ? "review" : item)} />
       {step !== "generation" && renderCanContinueInLibrary && (
-        <Alert severity="success" sx={{ mb: 2 }} action={<Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
-          Your upload is saved. You can safely close this tab and see progress in your Library.
+        <Alert severity="success" sx={{ mb: 2 }} action={manualPreparation || sceneReviewActive ? undefined : <Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
+          {!easyMode && !replaceAllPeople && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
+            ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
+            : "Your upload is saved. You can safely close this tab and see progress in your Library."}
         </Alert>
       )}
       <ApiKeySettingsDialog apiKeyAllowed={apiKeyAllowed} open={apiSettingsOpen && apiKeyAllowed}
@@ -443,7 +473,7 @@ export function CharSwapWalkthrough({
         />
       ) : (
         <>
-          {step !== "generation" && (
+          {step !== "generation" && !manualPreparation && (
             <Stack
               direction="row"
               alignItems="flex-start"
@@ -459,7 +489,7 @@ export function CharSwapWalkthrough({
                   tabIndex={-1}
                   sx={{ outline: "none", fontSize: { xs: 28, md: 36 } }}
                 >
-                  {clipStep && clip
+                  {waitingForCleanup ? "Cleaning up your images" : clipStep && clip
                     ? "Choose your moment."
                     : step === "review" && !easyMode && !trackingReady ? "Prepare and check scenes" : STEP_INFO[step].title}
                 </Typography>
@@ -467,12 +497,12 @@ export function CharSwapWalkthrough({
                   color="text.secondary"
                   sx={{ mt: 0.75, fontSize: 15 }}
                 >
-                  {clipStep && clip
+                  {waitingForCleanup ? "Please wait. We’ll continue when your images are ready." : clipStep && clip
                     ? "Trim your clip. The estimate updates as you go."
                     : step === "review" && !easyMode && !trackingReady ? "Prepare your clip, then confirm your people in each scene before generating." : STEP_INFO[step].description}
                 </Typography>
               </Box>
-              {clip && (
+              {clip && !sceneReviewActive && (
                 <Button
                   size="small"
                   disabled={Boolean(locked && !renderCanContinueInLibrary)}
@@ -493,7 +523,7 @@ export function CharSwapWalkthrough({
               {error || pipeline.error}
             </Alert>
           )}
-          {step !== "generation" &&
+          {step !== "generation" && !manualPreparation &&
             clip &&
             ((!clipStep && !fullyFunded) || creditAccount.error) && (
               <Alert
@@ -508,16 +538,21 @@ export function CharSwapWalkthrough({
               </Alert>
             )}
           {retryNotice && <Alert severity="info" sx={{mb: 2}}>{retryNotice}</Alert>}
-          {(step !== "generation" || isUploadUnconfirmed(pipeline.preparationProgress)) && pipeline.preparationProgress && (
+          {(step !== "generation" || isUploadUnconfirmed(displayedPreparation)) && displayedPreparation && (
             <Box sx={{ mb: 2 }}>
+              {manualPreparation && <Typography component="h1" variant="h4" sx={{ mb: 2 }}>Preparing your clip</Typography>}
               <PreparationProgress
-                title="Preparing your clip"
-                progress={pipeline.preparationProgress}
+                title={manualPreparation ? "Processing scenes" : "Preparing your clip"}
+                progress={displayedPreparation}
                 elapsedSeconds={pipeline.preparationElapsedSeconds}
+                showSavedNotice={!manualPreparation}
               />
+              {manualPreparation && renderCanContinueInLibrary && <Button variant="outlined" sx={{ mt: 2 }} onClick={startNewSwap}>
+                Start a new recast while this processes
+              </Button>}
             </Box>
           )}
-          <Box
+          {!manualPreparation && <Box
             component="fieldset"
             disabled={Boolean(locked && step !== "generation")}
             sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}
@@ -546,9 +581,12 @@ export function CharSwapWalkthrough({
                 maxPeople={5}
               />
             )}
-            {step === "references" && (
+            {step === "references" && waitingForCleanup && <ReferenceCleanupWait targets={targets} references={references} assignments={assignments} onBack={()=>setWaitingForCleanup(false)}/> }
+            {step === "references" && !waitingForCleanup && (
               <ReferencesStep
                 demo={demo}
+                cleanupEnabled={live && pipeline.referenceCleanupAvailable}
+                cleanupEndpoint={pipeline.referenceCleanupEndpoint}
                 pendingIds={assets.pendingReferences}
                 onImport={(id, file) => {
                   if (file.size > 5 * 1024 * 1024) {
@@ -580,6 +618,7 @@ export function CharSwapWalkthrough({
                     height={pipeline.job.height ?? clip?.height ?? 480}
                     busy={pipeline.busy}
                     errorSegmentId={pipeline.trackingErrorSegmentId}
+                    errorMessage={pipeline.error}
                     message={pipeline.job.message}
                     initialChoices={pipeline.job.tracking_choices}
                     onApply={pipeline.resolveTracking}
@@ -658,8 +697,8 @@ export function CharSwapWalkthrough({
                 canCreateAnother={renderCanContinueInLibrary}
               />
             )}
-          </Box>
-          {step !== "generation" && (
+          </Box>}
+          {step !== "generation" && !manualPreparation && !sceneReviewActive && !waitingForCleanup && (
             <Box
               component="footer"
               sx={{
@@ -712,11 +751,12 @@ export function CharSwapWalkthrough({
                     <Button
                       variant="contained"
                       size="large"
-                      endIcon={<ArrowForwardRounded />}
+                      startIcon={referenceWaitLabel ? <CircularProgress size={16} color="inherit" /> : undefined}
+                      endIcon={referenceWaitLabel ? undefined : <ArrowForwardRounded />}
                       disabled={Boolean(continueDisabled)}
                       onClick={() => void continueFlow()}
                     >
-                      {nextLabel}
+                      {referenceWaitLabel ?? nextLabel}
                     </Button>
                   )}
                 </Stack>
@@ -746,5 +786,6 @@ export function CharSwapWalkthrough({
         </DialogActions>
       </Dialog>
     </Box>
+    </ReferenceCleanupProvider>
   );
 }

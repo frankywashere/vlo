@@ -1,5 +1,10 @@
 export type TrimRange = [number, number];
 
+// Match timestamp precision and remove subtraction noise at inclusive limits.
+export function trimDuration(range: TrimRange): number {
+  return Number((range[1]-range[0]).toFixed(6));
+}
+
 const roundTime = (value: number) => Number(value.toFixed(6));
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 

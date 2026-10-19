@@ -27,7 +27,7 @@ export function useLocalAssets() {
   useEffect(() => {
     const retained = new Set([
       clip?.url,
-      ...references.map((reference) => reference.url),
+      ...references.flatMap((reference) => [reference.url, reference.cleanup?.originalUrl, reference.cleanup?.cleanedUrl]),
     ]);
     // Retry drafts also own local copies downloaded from their saved inputs.
     for (const url of retained) if (url?.startsWith("blob:")) urls.current.add(url);

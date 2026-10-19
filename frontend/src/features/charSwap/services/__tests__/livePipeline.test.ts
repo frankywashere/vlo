@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getLiveJob, resolveLiveTracking } from "../livePipeline";
+import { getLiveJob, resolveLiveTracking, validateLiveSetup } from "../livePipeline";
 
 const requests = vi.fn<typeof fetch>();
 
@@ -96,6 +96,13 @@ const reviewSegment = {id: "segment-001", start_frame: 48, end_frame: 120, start
 const reviewJob = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 1, tracking_segments: [reviewSegment]};
 
 describe("scene tracking review contract", () => {
+  it("accepts an unresolved initial tap as a scene requiring a fresh selection", async () => {
+    const segment = {...reviewSegment, reason: "unmatched_anchor", selected_label: null};
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_segments: [segment]})));
+    const received = await getLiveJob("job-1", "session", new AbortController().signal);
+    expect(received.tracking_segments?.[0]).toEqual(segment);
+    expect(received.status).toBe("tracking_review");
+  });
   it("preserves the normalized source and review bounds without fabricating confidence or candidates", async () => {
     requests.mockResolvedValue(new Response(JSON.stringify(reviewJob)));
     expect(await getLiveJob("job-1", "session", new AbortController().signal)).toEqual(reviewJob);
@@ -190,5 +197,22 @@ describe("scene tracking review contract", () => {
     expect((await getLiveJob("job-1", "session", new AbortController().signal)).tracking_choices).toEqual(tracking_choices);
     requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_choices: [{...tracking_choices[0], anchor: {x: 0.5, y: 0.4, time: 5}}]})));
     await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/saved scene matches/);
+  });
+});
+
+it("accepts an exact 15-second live setup at a fractional start while rejecting real overflow",async()=>{
+ const {createInitialState}=await import("../../model/model");
+ const state={...createInitialState(),clip:{id:"clip",name:"source.mp4",url:"blob:source",duration:20,width:854,height:480,mode:"upload" as const},trim:[1.1,16.1] as [number,number],
+ targets:[{id:"a",name:"Person A",color:"red",anchor:{x:.5,y:.5,time:2}}],references:[{id:"r",name:"Photo",url:"blob:photo"}],assignments:{a:"r"}};
+ expect(()=>validateLiveSetup(state)).not.toThrow();
+ expect(()=>validateLiveSetup({...state,trim:[1.1,16.101]})).toThrow(/whole-number duration/);
+});
+
+
+it("uses bounded structured conflict details without exposing upstream error text", async () => {
+  requests.mockResolvedValue(new Response(JSON.stringify({code: "tracking_target_conflict", message: "unsafe upstream text",
+    segment_id: "t1-segment-002", tracking_details: {frame: 15, target_index: 1, conflicting_target_index: 0}}), {status: 400}));
+  await expect(resolveLiveTracking("job-1", "session", 1, [], new AbortController().signal)).rejects.toMatchObject({
+    segmentId: "t1-segment-002", message: expect.stringContaining("SAM matched Person 2 and Person 1 to the same detected track at 0.63s"),
   });
 });

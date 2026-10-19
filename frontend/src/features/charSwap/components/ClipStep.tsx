@@ -10,6 +10,7 @@ import UploadRounded from "@mui/icons-material/UploadRounded";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { DemoManifest } from "../services/demo";
 import { formatTime } from "../utils/videoGeometry";
+import { useFileDrop } from "../hooks/useFileDrop";
 import { TrimStep } from "./TrimStep";
 
 interface ClipStepProps {
@@ -33,11 +34,11 @@ export function ClipStep({
 }: ClipStepProps) {
   const clip = useCharSwapStore((state) => state.clip);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [dragging, setDragging] = useState(false);
   const [replacingClip, setReplacingClip] = useState(false);
   const locked = busy;
+  const {dragging,dropHandlers} = useFileDrop(file => {setReplacingClip(false);onImport(file);},locked);
   return (
-    <Stack spacing={3}>
+    <Stack spacing={3} {...dropHandlers} sx={{outline: dragging && clip ? "2px dashed" : "none", outlineColor:"primary.main",outlineOffset:6}}>
       <input
         ref={inputRef}
         type="file"
@@ -92,20 +93,6 @@ export function ClipStep({
           role="group"
           aria-label="Clip upload area"
           aria-disabled={locked}
-          onDragOver={(event) => {
-            event.preventDefault();
-            if (!locked) setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragging(false);
-            const file = event.dataTransfer.files[0];
-            if (file && !locked) {
-              setReplacingClip(false);
-              onImport(file);
-            }
-          }}
           sx={{
             minHeight: 190,
             border: "1px dashed",

@@ -5,7 +5,8 @@ import react from "@vitejs/plugin-react";
 // A public site build deliberately excludes ignored desktop demo media and VLO's editor.
 export default defineConfig({
   plugins: [react()],
-  publicDir: false,
+  publicDir: "public/charSwap-runtime",
+  worker: { format: "es" },
   // Account metadata stays useful in local previews with Firebase sign-in.
   preview: {
     proxy: {

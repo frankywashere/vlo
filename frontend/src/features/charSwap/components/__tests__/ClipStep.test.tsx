@@ -40,3 +40,12 @@ it("supports dropping a clip and blocks another import while busy", () => {
   });
   expect(onImport).toHaveBeenCalledOnce();
 });
+
+it("accepts a replacement drop over an already loaded clip",()=>{
+  useCharSwapStore.getState().loadClip({id:"clip",name:"old.mp4",url:"blob:old",duration:5,width:640,height:480,mode:"upload"});
+  const onImport=vi.fn();const file=new File(["video"],"new.mov",{type:"video/quicktime"});
+  render(<ClipStep demo={null} busy={false} onImport={onImport} onDemo={vi.fn()}/>);
+  const title=screen.getByText("old.mp4");const drag={files:[file],types:["Files"],dropEffect:"none"};
+  expect(fireEvent.dragOver(title,{dataTransfer:drag})).toBe(false);expect(drag.dropEffect).toBe("copy");
+  fireEvent.drop(title,{dataTransfer:drag});expect(onImport).toHaveBeenCalledExactlyOnceWith(file);
+});

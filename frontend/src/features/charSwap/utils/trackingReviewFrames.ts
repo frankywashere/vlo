@@ -14,7 +14,7 @@ export function reviewFrameNumbers(
   const span = last - start;
   const preferred = Number.isFinite(selectedTime) ? selectedTime! : section.seek_time;
   const candidates = [
-    clamp(Math.floor(preferred * FPS)),
+    clamp(Math.floor(preferred * FPS + 1e-7)),
     ...[0.25, 0.75, 0.125, 0.875].map((fraction) => clamp(start + Math.round(span * fraction))),
   ];
   // Short sections can collapse several alternatives onto the same frame.

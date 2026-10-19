@@ -28,6 +28,7 @@ PROJECT = "charswap-franky-20261013"
 PROJECT_NUMBER = "634011479314"
 ACCOUNT = "frankywashere@gmail.com"
 REGION = "us-east4"
+GPU_REGION = "us-central1"
 BILLING_ACCOUNT = "016117-6FCD80-6EAC9D"
 APP_BUCKET = PROJECT + "-app"
 WORKER_BUCKET = PROJECT + "-proof"
@@ -230,18 +231,19 @@ def verify_cap():
 def worker_details():
     details = {}
     for service in ("proof-gpu", "proof-audio"):
-        body = google_get(f"https://run.googleapis.com/v2/projects/{PROJECT}/locations/{REGION}/services/{service}")
+        region = GPU_REGION if service == "proof-gpu" else REGION
+        body = google_get(f"https://run.googleapis.com/v2/projects/{PROJECT}/locations/{region}/services/{service}")
         scaling = body.get("scaling", {})
         if scaling.get("scalingMode") != "MANUAL" or int(scaling.get("manualInstanceCount", 0)) != 0:
             raise SetupError(f"{service} is not at MANUAL 0. This script will not stop, start or reconfigure it.")
         template = body.get("template", {})
         if int(template.get("scaling", {}).get("maxInstanceCount", 0)) != 1:
             raise SetupError(f"{service} does not have its expected maximum of one instance.")
-        policy = gcloud("run", "services", "get-iam-policy", service, f"--region={REGION}")
+        policy = gcloud("run", "services", "get-iam-policy", service, f"--region={region}")
         if any(set(binding.get("members", [])) & {"allUsers", "allAuthenticatedUsers"}
                for binding in policy.get("bindings", [])):
             raise SetupError(f"{service} has a public IAM member. This script will not alter that policy automatically.")
-        url = gcloud("run", "services", "describe", service, f"--region={REGION}")["status"]["url"]
+        url = gcloud("run", "services", "describe", service, f"--region={region}")["status"]["url"]
         details[service] = {"url": url, "scaling": scaling, "template": template}
     return details
 
@@ -249,7 +251,8 @@ def worker_details():
 def verify_scaler_scope():
     required = {"run.services.get", "run.services.update"}
     for service in ("proof-gpu", "proof-audio"):
-        resource = f"//run.googleapis.com/projects/{PROJECT}/locations/{REGION}/services/{service}"
+        region = GPU_REGION if service == "proof-gpu" else REGION
+        resource = f"//run.googleapis.com/projects/{PROJECT}/locations/{region}/services/{service}"
         permissions = gcloud("iam", "list-testable-permissions", resource)
         supported = {item["name"] for item in permissions
                      if item.get("customRolesSupportLevel") != "NOT_SUPPORTED"}
@@ -354,8 +357,9 @@ def grant_runtime_roles(billing_viewer_fallback: bool, workers: dict):
     budget = ensure_role(BUDGET_ROLE, {"billing.resourcebudgets.read", "serviceusage.services.use"},
                          "SwapMeIn project budget reader")
     for service in ("proof-gpu", "proof-audio"):
+        region = GPU_REGION if service == "proof-gpu" else REGION
         for role in ("roles/run.invoker", scaler):
-            gcloud("run", "services", "add-iam-policy-binding", service, f"--region={REGION}",
+            gcloud("run", "services", "add-iam-policy-binding", service, f"--region={region}",
                    "--member=" + MEMBER, "--role=" + role)
     for queue in (QUEUE, "proof-shutdown"):
         gcloud("tasks", "queues", "add-iam-policy-binding", queue, f"--location={REGION}",
@@ -423,6 +427,7 @@ def deployment_env(workers: dict, origins: list[str], service_url: str) -> dict[
     return {
         "PROJECT_ID": PROJECT, "GOOGLE_CLOUD_PROJECT": PROJECT, "PROJECT_NUMBER": PROJECT_NUMBER,
         "REGION": REGION, "BILLING_ACCOUNT": BILLING_ACCOUNT,
+        "GPU_REGION": GPU_REGION,
         "APP_BUCKET": APP_BUCKET, "WORKER_BUCKET": WORKER_BUCKET,
         "GPU_URL": workers["proof-gpu"]["url"], "AUDIO_URL": workers["proof-audio"]["url"],
         "SERVICE_URL": service_url, "GATEWAY_SERVICE_ACCOUNT": GATEWAY,

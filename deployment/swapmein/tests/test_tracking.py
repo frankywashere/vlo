@@ -74,6 +74,42 @@ def test_manual_review_includes_anchor_scene_and_preserves_explicit_absence(tmp_
     assert result["coverage"] == [144] * 4 + [0] * 4 + [144] * 4
 
 
+def test_unresolved_manual_anchor_requires_new_matches_and_never_selects_background(tmp_path):
+    path = masks(tmp_path / "masks.zip", [person()] * 4 + [person(9)] * 4)
+    info = {**metadata(cuts=[4]), "review_all_scenes": True, "allow_unmatched_anchor": True}
+    info["anchor"] = {**info["anchor"], "x": .9, "y": .1}
+    plan = analyze_tracking(path, info, 0)
+    assert plan["unresolved_anchor"] and plan["detected_people_available"]
+    assert all(section["needs_review"] for section in plan["segments"])
+    with pytest.raises(PublicError, match="every flagged"):
+        resolve_tracking(path, info, plan, [], tmp_path / "incomplete.zip")
+    result = resolve_tracking(path, info, plan,
+        [choose(section, absent=index == 0) for index, section in enumerate(plan["segments"])], tmp_path / "reviewed.zip")
+    assert result["coverage"] == [0] * 4 + [144] * 4
+    assert [assignment["selected_label"] for assignment in result["assignments"]] == [None, 9]
+    frames = read_all(tmp_path / "reviewed.zip")
+    assert not frames[0].any() and frames[-1][25, 25] == 1 and frames[-1][0, 0] == 0
+
+
+@pytest.mark.parametrize("flags", [{}, {"review_all_scenes": True}, {"allow_unmatched_anchor": True}])
+def test_existing_saved_metadata_cannot_silently_accept_an_unresolved_anchor(tmp_path, flags):
+    path = masks(tmp_path / "masks.zip", [person()] * 8)
+    info = {**metadata(), **flags}
+    info["anchor"] = {**info["anchor"], "x": .9, "y": .1}
+    with pytest.raises(PublicError, match="selected tracking label is invalid"):
+        analyze_tracking(path, info, 0)
+
+
+def test_unresolved_plan_is_recomputed_and_cannot_skip_scene_choices(tmp_path):
+    path = masks(tmp_path / "masks.zip", [person()] * 8)
+    info = {**metadata(cuts=[4]), "review_all_scenes": True, "allow_unmatched_anchor": True}
+    info["anchor"] = {**info["anchor"], "x": .9, "y": .1}
+    plan = analyze_tracking(path, info, 0)
+    plan["segments"][0]["needs_review"] = False
+    with pytest.raises(PublicError):
+        resolve_tracking(path, info, plan, [choose(plan["segments"][1])], tmp_path / "tampered.zip")
+
+
 def test_each_cut_requires_confirmation_even_if_sam_reuses_the_same_label(tmp_path):
     path = masks(tmp_path / "masks.zip", [person()] * 12)
     info = metadata(12, cuts=[4, 8])
@@ -168,6 +204,10 @@ def test_background_tap_has_controlled_section_message_and_no_partial_output(tmp
     assert error.value.code == "tracking_background"
     assert error.value.segment_id == plan["segments"][1]["id"]
     assert "section 2" in error.value.message
+    details = error.value.tracking_diagnostics
+    assert details["selected_label"] == 0 and details["detected_labels"] == [2]
+    assert details["x"] == .9 and details["y"] == .9
+    assert details["frame"] == int(details["time"] * 24)
     assert not output.exists()
     assert not output.with_name("out.zip.partial").exists()
 

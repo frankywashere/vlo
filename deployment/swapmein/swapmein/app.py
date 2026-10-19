@@ -14,7 +14,7 @@ from typing import Literal
 from fastapi import Body, FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
@@ -40,6 +40,8 @@ from .commerce import (credit_grant_history, grant_credits, generation_credit_co
 from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 from .job_key import protect_key, recover_key
 from .provider_credentials import server_provider_key, save_server_provider_key
+from .preparation_credentials import save_server_replicate_key
+from .replicate_preparation import preparation_snapshot
 
 settings = Settings.from_env()
 app = FastAPI(title="recastfx character replacement", docs_url=None, redoc_url=None, openapi_url=None)
@@ -105,6 +107,16 @@ async def public_error(_request, error):
     segment_id = getattr(error, "segment_id", None)
     if error.code in {"tracking_background", "tracking_collision", "tracking_target_conflict"} and isinstance(segment_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", segment_id):
         content["segment_id"] = segment_id
+    details = getattr(error, "tracking_diagnostics", None)
+    if error.code in {"tracking_background", "tracking_target_conflict"} and isinstance(details, dict):
+        # Keep public error context numeric and bounded; never echo vendor text.
+        public_details = {}
+        for key, maximum in (("frame", 359), ("target_index", 4), ("conflicting_target_index", 4)):
+            value = details.get(key)
+            if type(value) is int and 0 <= value <= maximum:
+                public_details[key] = value
+        if public_details:
+            content["tracking_details"] = public_details
     headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
     return JSONResponse(content, status_code=error.status_code, headers=headers)
 
@@ -217,10 +229,20 @@ def view(job: dict):
     if not credits_mode:
         result["provider"] = job.get("provider", "reAPI")
     targets = job.get("normalized_targets") or job.get("setup", {}).get("targets")
+    if not targets and status == "tracking_review" and job.get("tracking_metadata", {}).get("anchor"):
+        targets = [{"id": "selected", "name": job.get("setup", {}).get("target_name") or "Person 1",
+                    "anchor": job["tracking_metadata"]["anchor"], "reference_index": 0}]
     if targets:
-        result["selection_targets"] = [{key: target[key] for key in
-            ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
-            for target in targets]
+        result["selection_targets"] = []
+        for target in targets:
+            public_target = {key: target[key] for key in
+                ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
+            anchor = target.get("anchor", {})
+            frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
+            thumbnail = job.get("scene_thumbnail_uris", {}).get(str(frame))
+            if thumbnail:
+                public_target["thumbnail_url"] = cloud.signed_url(thumbnail)
+            result["selection_targets"].append(public_target)
     reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
     temporary_media_available = not job.get("temporary_media_cleanup_started_at")
     if reference_uris and temporary_media_available:
@@ -236,20 +258,34 @@ def view(job: dict):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["created_at", "completed_at", "updated_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing"]:
+    for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing"]:
         if field in job:
-            result[field] = job[field]
+            result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
         if job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available):
             result[output] = cloud.signed_url(job[field])
     if job.get("tracking_plan") and temporary_media_available:
         result["tracking_segments"] = []
+        metadata = job.get("tracking_metadata", {})
+        cuts = sorted({round(cut * 24) for cut in metadata.get("scene_cuts", [])})
         for section in job["tracking_plan"]["segments"]:
             preview = {**section}
+            # Add presentation metadata only; saved plans and validation remain
+            # unchanged so already-prepared jobs can still be reviewed.
+            if "scene" in section:
+                preview["scene_index"] = section["scene"]
+            elif metadata.get("frames"):
+                preview["scene_index"] = sum(cut <= section["start_frame"] for cut in cuts)
+            # Zero is a private unresolved-anchor sentinel, never a person ID.
+            if preview.get("selected_label") == 0:
+                preview["selected_label"] = None
             frame = str(math.floor(section["seek_time"] * 24 + 1e-7))
             uri = job.get("scene_thumbnail_uris", {}).get(frame)
             if uri:
                 preview["thumbnail_url"] = cloud.signed_url(uri)
+            tracking_uri = job.get("scene_mask_thumbnail_uris", {}).get(frame)
+            if tracking_uri:
+                preview["tracking_thumbnail_url"] = cloud.signed_url(tracking_uri)
             result["tracking_segments"].append(preview)
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]
@@ -268,7 +304,38 @@ def config():
     return {"live": True, "providers": [] if settings.require_account else ["reAPI", "ToAPIs"],
             "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "multi-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
-            "accounts_required": settings.require_account, "credits_available": credit_ready}
+            "accounts_required": settings.require_account, "credits_available": credit_ready,
+            "reference_cleanup_available": bool(settings.reference_cleanup_url),
+            # A cold cleanup can exceed Firebase Hosting's 60-second proxy limit.
+            # This is our account-authenticated gateway, never the private worker.
+            "reference_cleanup_endpoint": settings.service_url + "/api/references/clean"
+                if settings.reference_cleanup_url and settings.service_url else None}
+
+
+@app.post("/api/references/clean")
+def clean_reference_image(reference: UploadFile = File(), x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    if not settings.reference_cleanup_url:
+        raise PublicError("Reference cleanup is unavailable. Keep the original image.", 503)
+    raw = reference.file.read(MAX_REFERENCE_BYTES + 1)
+    if not raw or len(raw) > MAX_REFERENCE_BYTES:
+        raise PublicError("Use a reference image smaller than 5 MB.", 413)
+    records, cloud, _ = services()
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    def reserve(current):
+        current = current if current and current.get("day") == day else {"day": day, "count": 0, "accounts": {}}
+        counts = current.get("accounts", {})
+        used = counts.get(account["account_id"], 0)
+        if current["count"] >= 500 or used >= 100:
+            raise PublicError("Today's reference cleanup limit has been reached. You can still use the original image.", 429)
+        return {**current, "count": current["count"] + 1, "accounts": {**counts, account["account_id"]: used + 1}}
+    with tempfile.TemporaryDirectory() as directory:
+        source, prepared = Path(directory) / "source", Path(directory) / "reference.jpg"
+        source.write_bytes(raw)
+        normalize_reference(source, prepared)
+        records.update("control/reference-cleanup.json", reserve)
+        cleaned = cloud.clean_reference(prepared.read_bytes())
+    return Response(cleaned, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/health")
@@ -434,14 +501,15 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
 class PipelineSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     revision: int = Field(ge=0)
-    audio_processing: bool
+    audio_processing: bool | None = None
+    preparation_provider: Literal["workers", "replicate"] | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
 def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str | None = Header(default=None)):
     actor = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return save_pipeline_settings(records, actor, body.revision, body.audio_processing)
+    return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider)
 
 
 @app.post("/api/commerce/admin/features")
@@ -456,6 +524,16 @@ def update_commerce_catalog(body: CatalogUpdate, x_firebase_token: str | None = 
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
     return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_generation, body.margin_model.model_dump() if body.margin_model else None)
+
+
+@app.post("/api/commerce/admin/replicate-key")
+def update_replicate_key(body: PrivateProviderKey, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_permission(records, actor, "provider_key")
+    save_server_replicate_key(body.key.strip())
+    emit("replicate_preparation_key_saved", actor_id=digest(actor["email"]))
+    return {"configured": True}
 
 
 @app.post("/api/commerce/admin/provider-key")
@@ -633,11 +711,13 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             emit("reference_normalized", job_id=job_id, reference_index=0, **(reference_details or {}))
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
+        defaults = pipeline_settings(records)
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
                "source_uri": source_uri, "reference_uri": reference_uri, "reference_uris": [reference_uri],
                "access_mode": active_session.get("access_mode", "api-key"),
-               "audio_processing": pipeline_settings(records)["audio_processing"]}
+               "audio_processing": defaults["audio_processing"],
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
@@ -821,11 +901,13 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
             if settings.require_account else reserve_preparation(
                 current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
         reserved = True
+        defaults = pipeline_settings(records)
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
-               "audio_processing": pipeline_settings(records)["audio_processing"]}
+               "audio_processing": defaults["audio_processing"],
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         if manifest.get("generation_credits") is not None:
@@ -943,6 +1025,13 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     current, _ = records.read("control/preparation.json")
     check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
     reserved = claimed = queued = False
+    attempt_id = uuid.uuid4().hex
+    choices = [choice.model_dump() for choice in review.choices]
+    # Only validated, owned scene choices: no media, signed URLs, names or keys.
+    emit("tracking_review_attempt", job_id=job_id, attempt_id=attempt_id,
+         revision=review.revision, plan_version=plan.get("version"),
+         selections=[{"segment_id": choice["segment_id"], "absent": choice["absent"],
+             "anchor": choice["anchor"]} for choice in choices])
     try:
         with tempfile.TemporaryDirectory() as temporary:
             archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
@@ -955,6 +1044,8 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                 resolved = resolve_multi_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
             else:
                 resolved = resolve_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
+            emit("tracking_review_validated", job_id=job_id, attempt_id=attempt_id,
+                 revision=review.revision, assignments=resolved["assignments"])
             records.update("control/preparation.json", lambda current: reserve_preparation(
                 current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
             reserved = True
@@ -991,8 +1082,12 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
         if reserved and not queued:
             records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
         if isinstance(error, PublicError):
+            emit("tracking_review_rejected", error=error, job_id=job_id, attempt_id=attempt_id,
+                 revision=review.revision, public_code=error.code,
+                 segment_id=getattr(error, "segment_id", None),
+                 selection_diagnostics=getattr(error, "tracking_diagnostics", None))
             raise
-        emit("tracking_review_failed", error=error, job_id=job_id)
+        emit("tracking_review_failed", error=error, job_id=job_id, attempt_id=attempt_id)
         raise PublicError("The matches could not be saved. Your tracking review is retained.", 503) from None
 
 
@@ -1036,6 +1131,7 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
         else:
             public = {"id": job_id, "access_mode": item.get("access_mode", "api-key"),
                       "settings_used": settings_used(item),
+                      "review_wait_seconds": item.get("review_wait_seconds", 0),
                       "status": item.get("status", "failed"), "message": "Preparation records have expired."}
             if item.get("selection_targets"):
                 public["selection_targets"] = item["selection_targets"]

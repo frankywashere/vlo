@@ -11,12 +11,14 @@ interface PreparationProgressProps {
   progress: PreparationProgressState;
   elapsedSeconds: number;
   title?: string;
+  showSavedNotice?: boolean;
 }
 
 export function PreparationProgress({
   progress,
   elapsedSeconds,
   title = "Checking all scenes",
+  showSavedNotice = true,
 }: PreparationProgressProps) {
   const uploadUnconfirmed = isUploadUnconfirmed(progress);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -37,9 +39,9 @@ export function PreparationProgress({
   const panel = (
     <Box ref={panelRef} sx={{ ...PANEL, borderColor: "divider", scrollMarginTop: 90 }}>
       <Stack spacing={1.5}>
-        {!uploadUnconfirmed && <Alert severity="success">
+        {!uploadUnconfirmed && showSavedNotice && <Alert severity="success">
           <Typography fontWeight={700}>Upload saved. You can close this page.</Typography>
-          Your job continues on the server. Find it in Current processing jobs in your Library.
+          Your job continues on the server. Find it in your Library.
         </Alert>}
         <Stack
           direction="row"

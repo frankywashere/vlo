@@ -123,8 +123,7 @@ describe("explicit generation approval", () => {
     });
     fireEvent.loadedMetadata(frame);
     fireEvent.seeked(frame);
-    await user.click(screen.getByRole("button", { name: "Not in this scene" }));
-    await user.click(screen.getByRole("button", { name: "Apply matches" }));
+    await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(live.resolveTracking).toHaveBeenCalledWith([
       { segment_id: "segment-001", absent: true, anchor: null },
     ]);
@@ -329,12 +328,59 @@ describe("explicit generation approval", () => {
       live.busy = true;
       live.preparationProgress = {phase: "preparing", message: "Preparing"};
       render(<CharSwapWalkthrough onLibrary={() => {}} />);
-      expect(screen.getByText(/You can safely close this tab/)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", {name: "Start a new recast"}));
+      expect(screen.getByText(easy ? /You can safely close this tab/ : /Return to your Library after processing to review each scene and choose who to replace/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", {name: easy ? "Start a new recast" : "Start a new recast while this processes"}));
       expect(useCharSwapStore.getState().clip).toBeNull();
       expect(live.generate).not.toHaveBeenCalled();
       expect(live.job.status).toBe("preparing");
     });
+
+  it.each([true, false].flatMap((masking) => (["queued", "preparing"] as const).flatMap((status) =>
+    [true, false].flatMap((withProgress) => (["review", "matches"] as const).map((step) => ({masking, status, withProgress, step}))))))(
+    "shows one clean manual preparation screen: masking=$masking status=$status progress=$withProgress step=$step",
+    ({masking, status, withProgress, step}) => {
+      const store = useCharSwapStore.getState();
+      store.setEnhancedCharacterMasking(masking);
+      store.visit(step);
+      live.job = {id: "saved-preparation", status, easy_mode: false};
+      live.busy = true;
+      live.preparationProgress = withProgress ? {phase: status, message: "Preparing scenes"} : null;
+      render(<CharSwapWalkthrough onLibrary={() => {}} />);
+      expect(screen.getByRole("heading", {name: "Preparing your clip"})).toBeVisible();
+      expect(screen.getAllByRole("button", {name: /Start a new recast/})).toHaveLength(1);
+      expect(screen.getByRole("button", {name: "Start a new recast while this processes"})).toBeEnabled();
+      expect(screen.queryByRole("heading", {name: "Check scene matches"})).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", {name: "Start over"})).not.toBeInTheDocument();
+      expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", {name: "Back"})).not.toBeInTheDocument();
+      expect(screen.queryByText("Upload saved. You can close this page.")).not.toBeInTheDocument();
+      expect(screen.getByText(/Your upload is saved. You can close this tab. Return to your Library after processing/)).toBeVisible();
+    });
+
+  it("keeps the new-recast action hidden until manual upload confirmation", () => {
+    live.job = {id: "pending", status: "queued", easy_mode: false, upload_confirmation_pending: true};
+    live.busy = true;
+    live.preparationProgress = {phase: "confirming", message: "Confirming upload"};
+    render(<CharSwapWalkthrough onLibrary={() => {}} />);
+    expect(screen.getByRole("dialog", {name: "Keep this page open"})).toBeVisible();
+    expect(screen.queryByRole("button", {name: /Start a new recast/})).not.toBeInTheDocument();
+  });
+
+  it("opens scene choices when manual preparation finishes", () => {
+    live.job = {id: "saved-preparation", status: "preparing", easy_mode: false};
+    live.preparationProgress = {phase: "preparing", message: "Preparing scenes"};
+    live.busy = true;
+    const view = render(<CharSwapWalkthrough onLibrary={() => {}} />);
+    live.job = {...live.job, status: "tracking_review", source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 5,
+      tracking_segments: [{id: "segment-000", start_frame: 0, end_frame: 120, start: 0, end: 5, seek_time: 1,
+        reason: "scene_cut", needs_review: true}]};
+    live.preparationProgress = null;
+    live.busy = false;
+    view.rerender(<CharSwapWalkthrough onLibrary={() => {}} />);
+    expect(screen.getByRole("heading", {name: "Check scene matches"})).toBeVisible();
+    expect(screen.getByRole("button", {name: "Submit"})).toBeVisible();
+    expect(screen.queryByRole("button", {name: "Start a new recast while this processes"})).not.toBeInTheDocument();
+  });
 
   it("offers a fresh recast and explains Library recovery only after upload confirmation", () => {
     const store = useCharSwapStore.getState();

@@ -16,13 +16,17 @@ import { useCharSwapStore } from "../useCharSwapStore";
 import { ALL_PEOPLE_TARGET_ID, type ReferenceAsset, type TargetPerson } from "../model/model";
 import type { DemoManifest } from "../services/demo";
 import { PersonBadge } from "./PersonBadge";
+import { useFileDrop } from "../hooks/useFileDrop";
 import { ReferenceUpload } from "./ReferenceUpload";
 import { PANEL } from "./stepStyles";
+import { ReferenceBackground } from "./ReferenceBackground";
 
 interface ReferencesStepProps {
   demo: DemoManifest | null;
   onImport: (id: string, file: File) => void;
   pendingIds: string[];
+  cleanupEnabled?: boolean;
+  cleanupEndpoint?: string;
 }
 
 interface ReferenceCardProps extends ReferencesStepProps {
@@ -42,11 +46,15 @@ function ReferenceCard({
   onImport,
   assignReference,
   clearReference,
+  cleanupEnabled,
+  cleanupEndpoint,
 }: ReferenceCardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const pending = pendingIds.includes(person.id);
+  const {dragging,dropHandlers} = useFileDrop(file => onImport(person.id,file),pending);
   return (
-    <Box sx={{ ...PANEL, borderLeft: `3px solid ${person.color}` }}>
+    <Box role="group" aria-label={`Reference upload area for ${person.name}`} {...dropHandlers}
+      sx={{ ...PANEL, borderLeft: `3px solid ${person.color}`, outline:dragging?"2px dashed":"none",outlineColor:"primary.main",outlineOffset:3 }}>
       <PersonBadge person={person} subtitle={person.id === ALL_PEOPLE_TARGET_ID ? "One reference for everyone in every scene" : "Original person"} />
       <Divider sx={{ my: 2 }} />
       <Box
@@ -90,6 +98,7 @@ function ReferenceCard({
             <Box
               component="img"
               src={reference.url}
+              draggable={false}
               alt={`${person.name} replacement: ${reference.name}`}
               sx={{ width: "100%", height: "100%", objectFit: "contain" }}
             />
@@ -104,7 +113,7 @@ function ReferenceCard({
             {reference ? reference.name : person.id === ALL_PEOPLE_TARGET_ID ? "Your replacement character" : `Who replaces ${person.name}?`}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Use one clear image showing the character’s face and look.
+            Drop an image here or upload one clear picture of the character.
           </Typography>
           <Stack direction="row" spacing={1}>
             <ReferenceUpload
@@ -125,6 +134,7 @@ function ReferenceCard({
               </IconButton>
             )}
           </Stack>
+          {cleanupEnabled && reference && <ReferenceBackground targetId={person.id} reference={reference} cleanupEndpoint={cleanupEndpoint} />}
           {demo && (
             <Button
               size="small"
@@ -134,9 +144,9 @@ function ReferenceCard({
               Use sample teddy bear
             </Button>
           )}
-          {references.some((item) => item.id !== reference?.id) && (
+          {references.some((item) => item.id !== reference?.id && !item.cleanup?.pending) && (
             <Stack direction="row" flexWrap="wrap" gap={1}>
-              {references.filter((item) => item.id !== reference?.id).map((item) => (
+              {references.filter((item) => item.id !== reference?.id && !item.cleanup?.pending).map((item) => (
                 <Button
                   key={item.id}
                   size="small"
@@ -170,6 +180,8 @@ export function ReferencesStep({
   demo,
   onImport,
   pendingIds,
+  cleanupEnabled = false,
+  cleanupEndpoint,
 }: ReferencesStepProps) {
   const { targets, references, assignments, assignReference, clearReference } =
     useCharSwapStore(
@@ -196,6 +208,8 @@ export function ReferencesStep({
           references={references}
           demo={demo}
           pendingIds={pendingIds}
+          cleanupEnabled={cleanupEnabled}
+          cleanupEndpoint={cleanupEndpoint}
           onImport={onImport}
           assignReference={assignReference}
           clearReference={clearReference}

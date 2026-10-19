@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveTrim, resizeTrim } from "../trimRange";
+import { moveTrim, resizeTrim, trimDuration } from "../trimRange";
 
 describe("trim gestures", () => {
   it("keeps a fifteen-second selection at both boundaries and restores it on the reverse drag", () => {
@@ -35,4 +35,10 @@ describe("trim gestures", () => {
     expect(moveTrim([0, 3.7], 10, 3.7)).toEqual([0, 3.7]);
     expect(resizeTrim([0, 3.7], "start", 2, 3.7)).toEqual([0, 3.7]);
   });
+});
+
+it("normalizes 15-second floating-point subtraction without accepting a longer trim",()=>{
+ expect(16.1-1.1).toBeGreaterThan(15);
+ expect(trimDuration(moveTrim([0,15],1.1,20))).toBe(15);
+ expect(trimDuration([1.1,16.101])).toBeGreaterThan(15);
 });

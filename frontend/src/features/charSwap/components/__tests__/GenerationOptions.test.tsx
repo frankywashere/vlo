@@ -29,13 +29,32 @@ it("changes preparation options at final review without losing the person's refe
   expect(invalidate).toHaveBeenCalledOnce();
 });
 
-it("disables manual scene review when masking is off, retaining its choice for re-enabling masking", async () => {
+it.each(["manual-first", "masking-first"])("keeps scene review and masking independent: %s", async (order) => {
   const user = userEvent.setup();
   render(<GenerationOptions />);
-  await user.click(screen.getByRole("switch", { name: "Review scene changes manually" }));
-  await user.click(screen.getByRole("switch", { name: "Enhanced person masking" }));
-  expect(screen.getByRole("switch", { name: "Review scene changes manually" })).toBeDisabled();
+  const manual = screen.getByRole("switch", { name: "Review scene changes manually" });
+  const masking = screen.getByRole("switch", { name: "Enhanced person masking" });
+  if (order === "manual-first") {
+    await user.click(manual);
+    await user.click(masking);
+  } else {
+    await user.click(masking);
+    expect(manual).toBeEnabled();
+    await user.click(manual);
+  }
+  expect(manual).toBeEnabled();
+  expect(manual).toBeChecked();
+  expect(masking).toBeEnabled();
+  expect(masking).not.toBeChecked();
+  expect(useCharSwapStore.getState().easyMode).toBe(false);
   expect(useCharSwapStore.getState().enhancedCharacterMasking).toBe(false);
-  await user.click(screen.getByRole("switch", { name: "Enhanced person masking" }));
-  expect(screen.getByRole("switch", { name: "Review scene changes manually" })).toBeChecked();
+  await user.click(manual);
+  expect(useCharSwapStore.getState().easyMode).toBe(true);
+  expect(masking).not.toBeChecked();
+});
+
+it("locks both options while preparation is busy", () => {
+  render(<GenerationOptions disabled />);
+  expect(screen.getByRole("switch", { name: "Review scene changes manually" })).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Enhanced person masking" })).toBeDisabled();
 });

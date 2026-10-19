@@ -64,6 +64,18 @@ def test_easy_mode_rejects_two_references_assigned_to_the_same_sam_track(tmp_pat
     assert not output.exists() and not output.with_name("mapped.zip.partial").exists()
 
 
+def test_unresolved_manual_target_cannot_be_composited_as_a_background_mask(tmp_path):
+    archive, metadata = fixture(tmp_path)
+    metadata.update(allow_unmatched_anchor=True, review_all_scenes=True)
+    metadata["targets"][0]["anchor"].update(x=.03, y=.03)
+    tracks = selected_tracks(archive, metadata, metadata["targets"], allow_unmatched=True)
+    assert tracks[0]["selected_label"] == 0
+    output = tmp_path / "background.zip"
+    with pytest.raises(PublicError, match="unmatched person"):
+        build_selected_masks(archive, metadata, tracks, output)
+    assert not output.exists()
+
+
 def test_review_rejects_collision_and_keeps_original_archive_intact(tmp_path):
     archive, metadata = fixture(tmp_path)
     original = archive.read_bytes()
@@ -76,6 +88,12 @@ def test_review_rejects_collision_and_keeps_original_archive_intact(tmp_path):
         resolve_multi_tracking(archive, metadata, plan, choices, output)
     assert error.value.code == "tracking_target_conflict"
     assert error.value.segment_id.startswith("t1-")
+    details = error.value.tracking_diagnostics
+    assert details["frame"] == 48
+    assert details["selected_label"] == details["conflicting_label"] == 22
+    assert details["target_id"] == "right" and details["conflicting_target_id"] == "left"
+    assert details["overlap_pixels"] == 24 * 22
+    assert "Person 2 and Person 1" in error.value.message and "2.00s" in error.value.message
     assert archive.read_bytes() == original and not output.exists()
 
 
@@ -87,3 +105,28 @@ def test_review_requires_all_people_and_refuses_tampered_target_plans(tmp_path):
     plan["targets"][0]["reference_index"] = 4
     with pytest.raises(PublicError, match="does not match"):
         resolve_multi_tracking(archive, metadata, plan, [], tmp_path / "tampered.zip")
+
+
+def test_reused_sam_id_across_cuts_can_belong_to_different_replacements(tmp_path):
+    archive, metadata = fixture(tmp_path)
+    # Both shots have the same mask geometry/ID but depict different people.
+    # Without a camera-cut boundary, motion heuristics cannot separate them.
+    frame = np.zeros((32, 64), np.uint16)
+    frame[4:28, 4:26] = 11
+    with zipfile.ZipFile(archive, "w") as output:
+        for index in range(96):
+            image = BytesIO()
+            Image.fromarray(frame).save(image, "PNG")
+            output.writestr(f"labels/labels_{index:05d}.png", image.getvalue())
+    metadata.update(review_all_scenes=True)
+    metadata["targets"][1]["anchor"] = {"x": .2, "y": .5, "time": 2.5, "frame": 60}
+    plan = analyze_multi_tracking(archive, metadata)
+    choices = []
+    for section in plan["segments"]:
+        in_first_shot = section["end_frame"] <= 48
+        present = (section["target_id"] == "left") == in_first_shot
+        choices.append({"segment_id": section["id"], "absent": not present,
+            "anchor": {"x": .2, "y": .5, "time": .5 if in_first_shot else 2.5} if present else None})
+    result = resolve_multi_tracking(archive, metadata, plan, choices, tmp_path / "reviewed.zip")
+    assert len(result["coverage"]) == 96 and all(result["coverage"])
+    assert {item["selected_label"] for item in result["assignments"] if not item["absent"]} == {11}

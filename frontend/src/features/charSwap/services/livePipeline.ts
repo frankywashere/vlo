@@ -1,9 +1,11 @@
+import { trimDuration } from "../utils/trimRange";
 import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES, MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 import { reportClientError } from "./diagnostics";
 import { accountToken } from "./accountContext";
+import { isReferenceCleanupEndpoint } from "./referenceCleanup";
 
 export type GenerationProvider = "reAPI" | "ToAPIs";
 export type GenerationAccessMode = "api-key" | "credits";
@@ -16,6 +18,8 @@ export interface LivePipelineConfig {
   delivery: "native" | "480p";
   beta: "single-person" | "multi-person";
   credits_available?: boolean;
+  reference_cleanup_available?: boolean;
+  reference_cleanup_endpoint?: string;
 }
 
 export type LiveJobStatus =
@@ -87,6 +91,8 @@ export interface LivePipelineJob {
   scene_cut_count?: number;
   mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
   generation_started_at?: number;
+  review_wait_seconds?: number;
+  review_paused_at?: number;
   provider_checked_at?: number;
   provider_state?: "queued" | "pending" | "processing" | "running" | "generating" | "unknown";
   estimated_cost_usd?: number;
@@ -94,6 +100,7 @@ export interface LivePipelineJob {
 }
 
 export interface SelectionTarget {
+  thumbnail_url?: string;
   id: string;
   name: string;
   anchor: { x: number; y: number; time: number };
@@ -104,6 +111,8 @@ export interface SelectionTarget {
 
 export interface TrackingReviewSegment {
   thumbnail_url?: string;
+  tracking_thumbnail_url?: string;
+  scene_index?: number;
   id: string;
   start_frame: number;
   end_frame: number;
@@ -224,7 +233,20 @@ function capacityMessage(value: unknown): string | null {
     tracking_target_conflict: "Two replacements are assigned to the same person in this scene. Choose the correct person for each replacement, or mark one not in this scene.",
     tracking_review_invalid: "This scene review has changed. Refresh the review before applying your matches again.",
   };
-  const message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
+  let message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
+  const details = isRecord(value.tracking_details) ? value.tracking_details : null;
+  const frame = details?.frame;
+  const validFrame = typeof frame === "number" && Number.isInteger(frame) && frame >= 0 && frame < 360;
+  if (validFrame && value.code === "tracking_background") {
+    message = `No person mask was detected at the selected point at ${(frame / 24).toFixed(2)}s. Try inside the detected body, or use Show another frame.`;
+  }
+  const target = details?.target_index;
+  const other = details?.conflicting_target_index;
+  if (validFrame && value.code === "tracking_target_conflict"
+    && typeof target === "number" && Number.isInteger(target) && target >= 0 && target < MAX_TARGET_PEOPLE
+    && typeof other === "number" && Number.isInteger(other) && other >= 0 && other < MAX_TARGET_PEOPLE && other !== target) {
+    message = `SAM matched Person ${target + 1} and Person ${other + 1} to the same detected track at ${(frame / 24).toFixed(2)}s. Review both selections in this scene, or mark a person not visible. If the detection is wrong, try another frame.`;
+  }
   if (!message) return null;
   const seconds = value.retry_after;
   const reset = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && seconds <= 32 * 86400
@@ -365,6 +387,7 @@ function readJob(value: unknown): LivePipelineJob {
       id: target.id, name: target.name, anchor: {...target.anchor}, reference_index: target.reference_index,
       color: typeof target.color === "string" && /^#[0-9a-f]{6}$/i.test(target.color) ? target.color : TARGET_COLORS[index],
       ...(typeof target.color_name === "string" ? {color_name: target.color_name.slice(0, 40)} : {}),
+      ...(typeof target.thumbnail_url === "string" && isSafeMediaUrl(target.thumbnail_url) ? {thumbnail_url: target.thumbnail_url} : {}),
     }));
   }
   for (const field of [
@@ -375,6 +398,8 @@ function readJob(value: unknown): LivePipelineJob {
     "estimated_cost_usd",
     "actual_provider_credits",
     "generation_started_at",
+    "review_wait_seconds",
+    "review_paused_at",
     "provider_checked_at",
     "generation_credits",
     "app_credits_charged",
@@ -405,13 +430,16 @@ function readJob(value: unknown): LivePipelineJob {
         Math.abs(segment.start - segment.start_frame / 24) > 1e-6 || Math.abs(segment.end - segment.end_frame / 24) > 1e-6 ||
         (segment.selected_label !== undefined && segment.selected_label !== null && (typeof segment.selected_label !== "number" || !Number.isSafeInteger(segment.selected_label) || segment.selected_label < 1))
         || (segment.target_id !== undefined && (typeof segment.target_id !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(segment.target_id)))
-        || (segment.target_name !== undefined && (typeof segment.target_name !== "string" || segment.target_name.length > 40));
+        || (segment.target_name !== undefined && (typeof segment.target_name !== "string" || segment.target_name.length > 40))
+        || (segment.scene_index !== undefined && (typeof segment.scene_index !== "number" || !Number.isSafeInteger(segment.scene_index) || segment.scene_index < 0 || segment.scene_index >= 360));
     })) throw new LivePipelineError("The service returned an unreadable scene review. Refresh the job before continuing.");
     job.tracking_segments = (segments as TrackingReviewSegment[]).map((segment) => ({
       id: segment.id, start_frame: segment.start_frame, end_frame: segment.end_frame,
       start: segment.start, end: segment.end, seek_time: segment.seek_time,
       reason: segment.reason, needs_review: segment.needs_review,
       ...(typeof segment.thumbnail_url === "string" && isSafeMediaUrl(segment.thumbnail_url) ? {thumbnail_url: segment.thumbnail_url} : {}),
+      ...(typeof segment.tracking_thumbnail_url === "string" && isSafeMediaUrl(segment.tracking_thumbnail_url) ? {tracking_thumbnail_url: segment.tracking_thumbnail_url} : {}),
+      ...(segment.scene_index !== undefined ? {scene_index: segment.scene_index} : {}),
       ...(segment.selected_label !== undefined ? {selected_label: segment.selected_label} : {}),
       ...(segment.target_id !== undefined ? {target_id: segment.target_id} : {}),
       ...(segment.target_name !== undefined ? {target_name: segment.target_name} : {}),
@@ -473,6 +501,9 @@ export async function getLiveConfig(
     delivery: value.delivery,
     beta: value.beta,
     credits_available: value.credits_available === true,
+    reference_cleanup_available: value.reference_cleanup_available === true,
+    ...(isReferenceCleanupEndpoint(value.reference_cleanup_endpoint)
+      ? {reference_cleanup_endpoint: value.reference_cleanup_endpoint} : {}),
   };
 }
 
@@ -519,13 +550,13 @@ export function validateLiveSetup(state: WalkthroughState) {
       || (state.replaceAllPeople && state.targets.length !== 1))
     throw new LivePipelineError("Choose up to five people, or Replace all people with one reference.");
   const [start, end] = state.trim;
-  const duration = end - start;
+  const duration = trimDuration(state.trim);
   if (
     !Number.isFinite(state.clip.duration) ||
     !Number.isFinite(start) ||
     !Number.isFinite(end) ||
     start < 0 ||
-    end > state.clip.duration ||
+    end > state.clip.duration + 1e-6 ||
     duration < 4 ||
     duration > 15 ||
     Math.abs(duration - Math.round(duration)) > 1e-6

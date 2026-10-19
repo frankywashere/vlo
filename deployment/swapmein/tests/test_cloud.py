@@ -375,17 +375,31 @@ def test_real_backup_task_shape_uses_shutdown_identity_and_zero_patch():
             captured.update(kwargs)
             return SimpleNamespace(name="created-backup")
     cloud = Cloud.__new__(Cloud)
-    cloud.settings = Settings()
+    cloud.settings = replace(Settings(), gpu_region="us-central1")
     cloud.tasks = CaptureTasks()
     cloud.shutdown_deadline = 0
     assert cloud._backup_shutdown("gpu") == "created-backup"
     task = captured["task"]
     assert captured["parent"].endswith("/queues/proof-shutdown")
+    assert "/locations/us-east4/queues/" in captured["parent"]
+    assert "/locations/us-central1/services/proof-gpu?" in task.http_request.url
     assert task.http_request.oauth_token.service_account_email == cloud.settings.shutdown_service_account
     assert json.loads(task.http_request.body)["scaling"] == {"scalingMode": "MANUAL", "manualInstanceCount": 0}
     assert 890 < (task.schedule_time - datetime.now(timezone.utc)).total_seconds() <= 900
     assert task.name.startswith(captured["parent"] + "/tasks/shutdown-gpu-")
     assert captured["retry"] is None and captured["timeout"] == 20
+
+
+@pytest.mark.parametrize("gpu_region,service,expected", [
+    ("us-central1", "gpu", "us-central1"),
+    ("us-central1", "audio", "us-east4"),
+    ("", "gpu", "us-east4"),
+])
+def test_worker_scaling_and_backup_target_the_configured_region(gpu_region, service, expected):
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), gpu_region=gpu_region)
+    assert cloud._admin_url(service) == (
+        f"https://run.googleapis.com/v2/projects/{cloud.settings.project}/locations/{expected}/services/proof-{service}")
 
 
 def test_backup_created_but_ack_lost_prevents_activation_and_blocks_the_lease():

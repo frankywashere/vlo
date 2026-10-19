@@ -1,3 +1,4 @@
+import { trimDuration } from "../utils/trimRange";
 import { MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 
 export type Step =
@@ -31,6 +32,14 @@ export interface ReferenceAsset {
   id: string;
   name: string;
   url: string;
+  cleanup?: {
+    originalUrl: string;
+    cleanedUrl?: string;
+    mode: "original" | "clean";
+    pending?: boolean;
+    error?: string;
+    unsupported?: boolean;
+  };
 }
 
 export interface MatchCandidate {
@@ -260,6 +269,15 @@ export function canContinue(state: WalkthroughState, step: Step): boolean {
   return getStepBlocker(state, step) === null;
 }
 
+export function hasAssignedReferenceImages(state: WalkthroughState): boolean {
+  return state.targets.every(target=>state.references.some(reference=>reference.id===state.assignments[target.id]&&Boolean(reference.url)));
+}
+
+export function hasPendingReferenceCleanup(state: WalkthroughState): boolean {
+  return state.targets.some(target => state.references.some(reference =>
+    reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" && reference.cleanup.pending));
+}
+
 export function getStepBlocker(
   state: WalkthroughState,
   step: Step,
@@ -292,9 +310,9 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
         !Number.isFinite(start) ||
         !Number.isFinite(end) ||
         start < 0 ||
-        end > state.clip.duration ||
-        end - start < MIN_CLIP_SECONDS ||
-        end - start > MAX_CLIP_SECONDS
+        end > state.clip.duration + 1e-6 ||
+        trimDuration(state.trim) < MIN_CLIP_SECONDS ||
+        trimDuration(state.trim) > MAX_CLIP_SECONDS
       ) {
         return "Choose a section between 1 and 15 seconds.";
       }
@@ -323,6 +341,8 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       ) {
         return state.replaceAllPeople ? "Add one replacement image for everyone." : "Add a replacement image for each selected person.";
       }
+      if (hasPendingReferenceCleanup(state))
+        return "Wait for background cleanup, or choose Original to continue now.";
       return null;
     case "matches":
     case "review":

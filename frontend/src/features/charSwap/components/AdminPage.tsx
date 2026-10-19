@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Container, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
-import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey } from "../services/commerce";
+import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
+import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey } from "../services/commerce";
 import { AdminSection } from "./AdminSection";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
@@ -20,6 +20,7 @@ export function AdminPage() {
   const permissions: StaffPermission[] = admin?.permissions ?? (admin?.role === "owner" ? ["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"] : admin?.role === "pricing_admin" ? ["pricing"] : []);
   const can = (permission: StaffPermission) => permissions.includes(permission);
   const [privateKey, setPrivateKey] = useState("");
+  const [replicateKey, setReplicateKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -99,6 +100,37 @@ export function AdminPage() {
             }} />} label="Enable audio processing" />
           <Typography color="text.secondary">Off by default. When off, the source soundtrack is sent with the clip and the provider’s returned audio is kept. When on, vocals are separated and pitch-shifted before generation, then the original soundtrack is restored on export.</Typography>
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
+        </Stack></AdminSection>
+        <AdminSection title="Preparation routing"><Stack spacing={2}>
+          <Typography color="text.secondary">Choose where enhanced masking prepares person masks and depth. This applies to new jobs only. Queued and running jobs keep their saved provider; generation still uses the existing video provider.</Typography>
+          <FormControl disabled={busy || !can("pipeline_settings")}>
+            <FormLabel id="preparation-provider-label">Preparation provider</FormLabel>
+            <RadioGroup aria-labelledby="preparation-provider-label" value={admin.pipeline?.preparation_provider ?? "workers"} onChange={(event) => {
+              const provider = event.target.value;
+              if ((provider !== "workers" && provider !== "replicate") || !can("pipeline_settings")) return;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({ revision: admin.pipeline?.revision ?? 0, preparation_provider: provider });
+                setAdmin({ ...admin, pipeline });
+                setMessage(`${provider === "replicate" ? "Replicate" : "Our workers"} selected for preparation of new jobs. Existing jobs keep their saved provider.`);
+              });
+            }}>
+              <FormControlLabel value="workers" control={<Radio />} label="Our workers" />
+              <FormControlLabel value="replicate" disabled={busy || !can("pipeline_settings") || !admin.pipeline?.replicate_api_key_configured} control={<Radio />} label="Replicate" />
+            </RadioGroup>
+          </FormControl>
+          <Typography variant="body2" color="text.secondary">Clips with enhanced masking off do not run SAM or depth through either provider. Audio processing is controlled separately.</Typography>
+          <Typography variant="body2" color="text.secondary">Replicate usage is billed separately to its API account.</Typography>
+          <Typography variant="body2">Replicate API key: {admin.pipeline?.replicate_api_key_configured ? "Configured" : "Not configured"}</Typography>
+          {!admin.pipeline?.replicate_api_key_configured && <Typography variant="body2" color="text.secondary">Save a Replicate API key before selecting Replicate.</Typography>}
+          <Box component="fieldset" disabled={busy || !can("provider_key")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
+            <TextField label="Replicate API key" type="password" value={replicateKey} onChange={(event) => setReplicateKey(event.target.value)} autoComplete="off" helperText="Stored securely on the server and never displayed. Requires API-key management permission." />
+            <Button variant="outlined" disabled={busy || !replicateKey.trim()} onClick={() => void run(async () => {
+              await saveReplicateApiKey(replicateKey.trim());
+              setReplicateKey("");
+              setAdmin(await loadCreditAdmin());
+              setMessage("Replicate API key saved securely. Select Replicate to route preparation for new jobs.");
+            })}>Save Replicate key</Button>
+          </Stack></Box>
         </Stack></AdminSection>
         <AdminSection title="Credit pricing"><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography color="text.secondary">All prices are in USD. One credit equals US$0.01. Generation pricing scales with clip length. Credit packs start at US$20.00.</Typography>

@@ -170,10 +170,25 @@ class Cloud:
         except Exception:
             raise PublicError("The Google processing spending protection could not be verified. Workers remain off.", 503) from None
 
+    def clean_reference(self, image: bytes) -> bytes:
+        url = self.settings.reference_cleanup_url
+        if not url:
+            raise PublicError("Reference cleanup is unavailable. Keep the original image.", 503)
+        self.check_cap()
+        token = id_token.fetch_id_token(Request(), url)
+        response = self.http.post(url + "/clean", content=image,
+            headers={"Authorization": "Bearer " + token, "Content-Type": "image/jpeg"}, timeout=240)
+        if not response.is_success:
+            raise PublicError("The background could not be cleaned. Keep the original image or try another photo.", 422 if response.status_code in {400, 413, 422} else 503)
+        if not response.headers.get("content-type", "").startswith("image/jpeg") or len(response.content) > 5 * 1024 * 1024:
+            raise PublicError("Reference cleanup returned an unreadable image. Keep the original.", 502)
+        return response.content
+
     def _admin_url(self, service: str):
         if service not in {"gpu", "audio"}:
             raise ValueError("Unknown worker")
-        return f"https://run.googleapis.com/v2/projects/{self.settings.project}/locations/{self.settings.region}/services/proof-{service}"
+        region = (self.settings.gpu_region or self.settings.region) if service == "gpu" else self.settings.region
+        return f"https://run.googleapis.com/v2/projects/{self.settings.project}/locations/{region}/services/proof-{service}"
 
     def _scale(self, service: str, count: int):
         headers = {"Authorization": "Bearer " + access_token()}

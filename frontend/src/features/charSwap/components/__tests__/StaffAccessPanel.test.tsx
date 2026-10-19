@@ -35,7 +35,7 @@ it("loads existing checkboxes and blocks changes for read-only staff", async () 
 });
 it("cannot grant permissions beyond the staff manager's own access", async () => {
   render(<StaffAccessPanel canManage grantable={["manage_staff"]} selectedEmail="helper@example.com" />);
-  expect(await screen.findByRole("checkbox", {name:"Replace the system API key"})).toBeDisabled();
+  expect(await screen.findByRole("checkbox", {name:"Replace system and Replicate API keys"})).toBeDisabled();
   expect(screen.getByRole("checkbox", {name:"Manage staff permissions"})).toBeEnabled();
 });
 
