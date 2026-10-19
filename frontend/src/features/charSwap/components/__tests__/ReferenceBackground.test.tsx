@@ -2,12 +2,12 @@ import {act,cleanup,render,screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {useCharSwapStore} from "../../useCharSwapStore";
-import {cleanReferenceBackground, retryInterruptedCleanup} from "../../services/referenceCleanup";
+import {cleanReferenceBackground} from "../../services/referenceCleanup";
 import {InterruptedCleanupError} from "../../services/browserCleanupProtocol";
 import {ReferenceBackground} from "../ReferenceBackground";
 import {ReferenceCleanupProvider} from "../ReferenceCleanupProvider";
 import {getStepBlocker} from "../../model/model";
-vi.mock("../../services/referenceCleanup",()=>({cleanReferenceBackground:vi.fn(),retryInterruptedCleanup:vi.fn()}));
+vi.mock("../../services/referenceCleanup",()=>({cleanReferenceBackground:vi.fn()}));
 function assigned(id="a"){const s=useCharSwapStore.getState();return s.references.find(r=>r.id===s.assignments[id])!;}
 function Card(){const reference=useCharSwapStore(s=>s.references.find(r=>r.id===s.assignments.a));return reference?<ReferenceBackground targetId="a" reference={reference}/>:null;}
 function Harness({show=true,endpoint}:{show?:boolean;endpoint?:string}){return <ReferenceCleanupProvider enabled endpoint={endpoint}>{show&&<Card/>}</ReferenceCleanupProvider>;}
@@ -77,14 +77,30 @@ it("keeps Original usable on unsupported hardware",async()=>{
 });
 
 
-it("offers Retry cleanup after an interrupted page and starts CPU cleanup only after that click",async()=>{
+it("uses Original after repeated interruptions without offering Retry or claiming unsupported hardware",async()=>{
  vi.mocked(cleanReferenceBackground).mockRejectedValueOnce(new InterruptedCleanupError());
- const user=userEvent.setup();render(<Harness/>);
- const retry=await screen.findByRole("button",{name:"Retry cleanup"});
- expect(retry).toBeEnabled();expect(assigned().cleanup?.unsupported).toBe(false);
- expect(cleanReferenceBackground).toHaveBeenCalledTimes(1);
- vi.mocked(cleanReferenceBackground).mockResolvedValueOnce(new Blob(["cleaned"],{type:"image/jpeg"}));
- await user.click(retry);
- expect(retryInterruptedCleanup).toHaveBeenCalledOnce();
+ render(<Harness/>);
+ expect(await screen.findByText(/Cleanup stopped repeatedly/)).toBeVisible();
+ expect(screen.queryByRole("button",{name:"Retry cleanup"})).not.toBeInTheDocument();
+ expect(screen.getByRole("button",{name:"Clean background"})).toBeDisabled();
+ expect(screen.getByRole("button",{name:"Original"})).toBeEnabled();
+ expect(assigned().cleanup?.unsupported).toBe(false);
+});
+it("adding the next character photo immediately does not cancel the first cleanup",async()=>{
+ const finishes:Array<(image:Blob)=>void>=[];
+ vi.mocked(cleanReferenceBackground).mockImplementation(()=>new Promise(resolve=>finishes.push(resolve)));
+ render(<Harness/>);
+ const firstSignal=vi.mocked(cleanReferenceBackground).mock.calls[0][1];
+ act(()=>{
+  useCharSwapStore.getState().selectTarget({id:"b",name:"Person B",color:"#75baff",anchor:{x:.5,y:.5,time:0}});
+  useCharSwapStore.getState().assignReference("b",{id:"photo-b",name:"Second photo",url:"blob:second"});
+ });
  expect(cleanReferenceBackground).toHaveBeenCalledTimes(2);
+ expect(firstSignal.aborted).toBe(false);
+ expect(assigned("a").cleanup?.originalUrl).toBe("blob:original");
+ expect(assigned("b").cleanup?.originalUrl).toBe("blob:second");
+ await act(async()=>{for(const finish of finishes)finish(new Blob(["cleaned"],{type:"image/jpeg"}));});
+ expect(assigned("a").cleanup?.pending).toBeFalsy();
+ expect(assigned("b").cleanup?.pending).toBeFalsy();
+ expect(firstSignal.aborted).toBe(false);
 });

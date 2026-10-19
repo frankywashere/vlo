@@ -13,14 +13,14 @@ class TestWorker extends EventTarget {
 const image=()=>new Blob(["photo"],{type:"image/jpeg"});
 async function settle(){for(let i=0;i<20;i++)await Promise.resolve();}
 beforeEach(()=>{
-  sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");
+  sessionStorage.removeItem("recastfx-cleanup-cpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");
   vi.resetModules();vi.useFakeTimers();TestWorker.all=[];
   vi.stubGlobal("Worker",TestWorker);vi.stubGlobal("isSecureContext",true);
   vi.stubGlobal("OffscreenCanvas",class {});vi.stubGlobal("createImageBitmap",vi.fn());
   Object.defineProperty(navigator,"gpu",{configurable:true,value:{}});
   vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:true,blob:async()=>image()}));
 });
-afterEach(()=>{sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();delete (navigator as unknown as {gpu?:unknown}).gpu;});
+afterEach(()=>{sessionStorage.removeItem("recastfx-cleanup-cpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();delete (navigator as unknown as {gpu?:unknown}).gpu;});
 it("rejects unsupported browsers before reading any photo or creating a worker",async()=>{
   Object.defineProperty(navigator,"gpu",{configurable:true,value:undefined});
   const {cleanReferenceBackground}=await import("../referenceCleanup");
@@ -116,13 +116,10 @@ it("allows iOS CPU cleanup without WebGPU, with a separate five-minute download 
   await vi.advanceTimersByTimeAsync(210_000);await rejected;
   expect(TestWorker.all[0].terminate).toHaveBeenCalledOnce();
 });
-it("offers an explicit retry for an interrupted CPU runtime without calling it unsupported",async()=>{
+it("automatically recovers a single interrupted CPU runtime without a retry button",async()=>{
   vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
   sessionStorage.setItem("recastfx-cleanup-cpu-interrupted-v1","1");
-  const {cleanReferenceBackground,retryInterruptedCleanup}=await import("../referenceCleanup");
-  await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"InterruptedCleanupError"});
-  expect(TestWorker.all).toHaveLength(0);
-  retryInterruptedCleanup();
+  const {cleanReferenceBackground}=await import("../referenceCleanup");
   const result=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
   const worker=TestWorker.all[0];expect(worker.url).toContain("litert-2.5.3-cpu");
   worker.reply({type:"ready"});await settle();
@@ -184,4 +181,51 @@ it("does not create an orphan worker if a photo is canceled during early downloa
  const read=vi.fn().mockResolvedValueOnce({done:false,value:{length:176240148}}).mockResolvedValueOnce({done:true});
  finish({ok:true,body:{getReader:()=>({read})}} as unknown as Response);
  await settle();await settle();expect(TestWorker.all).toHaveLength(0);
+});
+
+it("keeps rapid iPhone photo uploads serial and clears the running flag after both finish",async()=>{
+ vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ const a=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+ const b=cleanReferenceBackground("blob:b",new AbortController().signal);await settle();
+ const worker=TestWorker.all[0];expect(TestWorker.all).toHaveLength(1);
+ expect(sessionStorage.getItem("recastfx-cleanup-cpu-interrupted-v1")).toBe("1");
+ worker.reply({type:"ready"});await settle();
+ const first=worker.messages.at(-1)!;if(first.type!=="clean")throw Error("missing image");
+ expect(fetch).toHaveBeenCalledTimes(1);
+ worker.reply({type:"result",id:first.id,image:image()});await a;await settle();
+ const next=worker.messages.at(-1)!;if(next.type!=="clean")throw Error("missing image");
+ expect(next.id).not.toBe(first.id);expect(worker.terminate).not.toHaveBeenCalled();
+ worker.reply({type:"result",id:next.id,image:image()});await b;
+ expect(sessionStorage.getItem("recastfx-cleanup-cpu-interrupted-v1")).toBeNull();
+ expect(sessionStorage.getItem("recastfx-cleanup-cpu-recovery-v1")).toBeNull();
+});
+it("clears crash evidence when the browser leaves the page normally during initialization",async()=>{
+ vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ const result=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+ expect(sessionStorage.getItem("recastfx-cleanup-cpu-interrupted-v1")).toBe("1");
+ globalThis.dispatchEvent(new Event("pagehide"));
+ expect(sessionStorage.getItem("recastfx-cleanup-cpu-interrupted-v1")).toBeNull();
+ const worker=TestWorker.all[0];worker.reply({type:"ready"});await settle();
+ const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+ worker.reply({type:"result",id:request.id,image:image()});await result;
+});
+it("stops automatic recovery after repeated abnormal CPU reloads without calling hardware unsupported",async()=>{
+ vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+ sessionStorage.setItem("recastfx-cleanup-cpu-interrupted-v1","1");
+ sessionStorage.setItem("recastfx-cleanup-cpu-recovery-v1","1");
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"InterruptedCleanupError",message:expect.stringContaining("Use Original")});
+ expect(TestWorker.all).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();
+});
+it("does not classify an unexpected worker error as unsupported hardware",async()=>{
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ const a=cleanReferenceBackground("blob:a",new AbortController().signal);
+ const failed=expect(a).rejects.toThrow(/stopped unexpectedly/);await settle();
+ TestWorker.all[0].dispatchEvent(new Event("error"));await failed;
+ const b=cleanReferenceBackground("blob:b",new AbortController().signal);await settle();
+ const worker=TestWorker.all[1];worker.reply({type:"ready"});await settle();
+ const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+ worker.reply({type:"result",id:request.id,image:image()});await b;
 });

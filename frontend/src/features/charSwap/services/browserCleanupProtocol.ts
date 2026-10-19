@@ -20,5 +20,5 @@ export class CleanupSkippedError extends Error {
 }
 
 export class InterruptedCleanupError extends Error {
-  constructor() {super("Cleanup was interrupted when the page closed or reloaded. Tap Retry cleanup, or use Original.");this.name="InterruptedCleanupError";}
+  constructor() {super("Cleanup stopped repeatedly on this device. Use Original to continue.");this.name="InterruptedCleanupError";}
 }

@@ -1,7 +1,7 @@
 import {createContext, useCallback, useContext, useEffect, useRef, useState} from "react";
 import type {ReactNode} from "react";
 import {useCharSwapStore} from "../useCharSwapStore";
-import {cleanReferenceBackground, retryInterruptedCleanup} from "../services/referenceCleanup";
+import {cleanReferenceBackground} from "../services/referenceCleanup";
 import {CleanupSkippedError, InterruptedCleanupError, UnsupportedCleanupError} from "../services/browserCleanupProtocol";
 import type {CleanupProgress} from "../services/browserCleanupProtocol";
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
@@ -56,7 +56,6 @@ export function ReferenceCleanupProvider({enabled,endpoint,children}:{enabled:bo
   const choose=useCallback((targetId:string,mode:"original"|"clean")=>{
     const reference=current(targetId);if (!reference) return;
     const original=reference.cleanup?.originalUrl ?? reference.url;
-    if (mode==="clean" && reference.cleanup?.interrupted) retryInterruptedCleanup();
     if (mode==="clean" && !reference.cleanup?.cleanedUrl && !reference.cleanup?.pending) {prepare(targetId);return;}
     useCharSwapStore.getState().assignReference(targetId,{...reference,
       id:reference.cleanup?.pending?reference.id:createLocalId(),

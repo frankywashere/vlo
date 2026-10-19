@@ -11,7 +11,7 @@ export function ReferenceBackground({targetId,reference}:ReferenceBackgroundProp
     <ToggleButtonGroup exclusive size="small" value={reference.cleanup?.mode ?? "original"}
       aria-label="Reference background">
       <ToggleButton value="original" onClick={()=>draft.choose(targetId,"original")}>Original</ToggleButton>
-      <ToggleButton value="clean" onClick={()=>draft.choose(targetId,"clean")} disabled={reference.cleanup?.unsupported}>{reference.cleanup?.interrupted ? "Retry cleanup" : "Clean background"}</ToggleButton>
+      <ToggleButton value="clean" onClick={()=>draft.choose(targetId,"clean")} disabled={reference.cleanup?.unsupported || reference.cleanup?.interrupted}>Clean background</ToggleButton>
     </ToggleButtonGroup>
     {reference.cleanup?.mode==="clean" && (reference.cleanup.pending || reference.cleanup.cleanedUrl) && <Stack spacing={.5}>
       <CleanupProgressIndicator progress={progress} complete={!reference.cleanup.pending&&Boolean(reference.cleanup.cleanedUrl)}/>
