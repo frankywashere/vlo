@@ -3,7 +3,7 @@ import type { FaceMeshOptions } from "../services/livePipeline";
 import { useShallow } from "zustand/react/shallow";
 import { useCharSwapStore } from "../useCharSwapStore";
 
-export function GenerationOptions({ disabled = false, onChange, watermarkOffer, faceMeshOptions }: { disabled?: boolean; onChange?: () => void; watermarkOffer?: {bonusCredits: number}; faceMeshOptions?: FaceMeshOptions }) {
+export function GenerationOptions({ disabled = false, onChange, watermarkOffer, faceMeshOptions, isAdmin = false }: { disabled?: boolean; onChange?: () => void; watermarkOffer?: {bonusCredits: number}; faceMeshOptions?: FaceMeshOptions; isAdmin?: boolean }) {
   const defaults = useCharSwapStore(useShallow(state => ({
     faceMesh: state.faceMesh, setFaceMesh: state.setFaceMesh,
     easyMode: state.easyMode ?? true, enhanced: state.enhancedCharacterMasking ?? true,
@@ -16,9 +16,9 @@ export function GenerationOptions({ disabled = false, onChange, watermarkOffer, 
     <Stack component="section" aria-label="Generation options" spacing={2.5}
       sx={{ p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: "5px", bgcolor: "background.paper" }}>
       <Typography component="h2" variant="subtitle1" fontWeight={700}>Generation options</Typography>
-      {faceMeshOptions?.face_mesh_user_control && <Box>
+      {(isAdmin || faceMeshOptions?.face_mesh_user_control) && <Box>
         <FormControlLabel sx={{m: 0, width: "100%", justifyContent: "space-between"}} labelPlacement="start"
-          control={<Switch checked={defaults.faceMesh ?? (enhanced ? faceMeshOptions.face_mesh_masked_default : faceMeshOptions.face_mesh_unmasked_default)}
+          control={<Switch checked={defaults.faceMesh ?? (enhanced ? faceMeshOptions?.face_mesh_masked_default ?? true : faceMeshOptions?.face_mesh_unmasked_default ?? false)}
             disabled={disabled} onChange={(_, value) => {onChange?.(); defaults.setFaceMesh(value);}}
             slotProps={{input: {role: "switch", "aria-describedby": "face-mesh-help"}}} />}
           label={<Typography variant="body2" fontWeight={650}>Face mesh</Typography>} />

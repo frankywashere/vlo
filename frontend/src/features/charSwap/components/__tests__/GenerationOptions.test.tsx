@@ -102,3 +102,13 @@ it("hides face mesh unless offered and lets a run override either global default
   useCharSwapStore.getState().reset();
   expect(useCharSwapStore.getState().faceMesh).toBeUndefined();
 });
+
+it("always shows a working Face mesh switch for admins while public visibility is off", async () => {
+  const user=userEvent.setup();
+  render(<GenerationOptions isAdmin faceMeshOptions={{face_mesh_masked_default:true,face_mesh_unmasked_default:false,face_mesh_user_control:false}} />);
+  const mesh=screen.getByRole("switch",{name:"Face mesh"});
+  expect(mesh).toBeChecked();
+  await user.click(mesh);
+  expect(mesh).not.toBeChecked();
+  expect(useCharSwapStore.getState().faceMesh).toBe(false);
+});

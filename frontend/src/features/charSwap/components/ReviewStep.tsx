@@ -11,6 +11,7 @@ interface ReviewStepProps {
   accessMode?: "credits" | "api-key";
   watermarkOffer?: {bonusCredits: number};
   faceMeshOptions?: FaceMeshOptions;
+  isAdmin?: boolean;
   apiKeyAllowed?: boolean;
   hasKey?: boolean;
   provider?: "reAPI" | "ToAPIs";
@@ -29,7 +30,7 @@ interface ReviewStepProps {
 }
 
 export function ReviewStep({
-  faceMeshOptions, watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
+  isAdmin, faceMeshOptions, watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
   onApiSettings, onAccessModeChange, trackingReady = false, onOptionsChange,
   live = false,
   job = null,
@@ -176,7 +177,7 @@ export function ReviewStep({
               Enhanced person masking: {(job.settings_used?.enhanced_masking ?? enhancedCharacterMasking) ? "On" : "Off"}
             </Typography>
           </Stack>
-        ) : <GenerationOptions disabled={busy} onChange={onOptionsChange} watermarkOffer={watermarkOffer} faceMeshOptions={faceMeshOptions} />}
+        ) : <GenerationOptions disabled={busy} onChange={onOptionsChange} watermarkOffer={watermarkOffer} faceMeshOptions={faceMeshOptions} isAdmin={isAdmin} />}
         {!!targets.length && (
           <Box
             component="section"

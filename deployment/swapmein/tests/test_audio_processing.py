@@ -195,11 +195,16 @@ def test_new_job_pins_depth_setting_and_other_saves_preserve_it(api, monkeypatch
 @pytest.mark.parametrize("masked", [False, True])
 @pytest.mark.parametrize("visible", [False, True])
 @pytest.mark.parametrize("override", [False, True])
-def test_face_mesh_job_snapshot_honors_only_visible_user_overrides(api, direct, masked, visible, override):
+@pytest.mark.parametrize("is_admin", [False, True])
+def test_face_mesh_job_snapshot_honors_only_visible_user_overrides(api, monkeypatch, direct, masked, visible, override, is_admin):
     client, records, _, _=api
     records.data[PATH]={"revision":1,"face_mesh_masked_default":True,"face_mesh_unmasked_default":False,
                         "face_mesh_user_control":visible}
     headers,_=authenticated(api)
+    if is_admin:
+        monkeypatch.setenv("COMMERCE_OWNER_EMAILS","admin@example.com")
+        for path in records.data:
+            if path.startswith("sessions/"): records.data[path]["email"]="admin@example.com"
     request=upload_options()
     request['setup'].update(enhanced_character_masking=masked,face_mesh=override)
     if direct:
@@ -211,7 +216,7 @@ def test_face_mesh_job_snapshot_honors_only_visible_user_overrides(api, direct, 
             'reference':('ref.png',image.getvalue(),'image/png')},data={'setup':json.dumps(request['setup'])})
     assert response.status_code==202,response.text
     job=records.data[f"jobs/{response.json()['id']}.json"]
-    expected=override if visible else masked
+    expected=override if (visible or is_admin) else masked
     assert job['face_mesh'] is expected
     records.data[PATH]['face_mesh_masked_default']=False
     records.data[PATH]['face_mesh_user_control']=False

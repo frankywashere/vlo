@@ -376,7 +376,7 @@ class CreditGrant(BaseModel):
 
 class ClientDiagnostic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_auth"]
+    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_auth", "cleanup_previous_interruption", "cleanup_retry_after_interruption", "cleanup_cpu_unsupported", "cleanup_gpu_unsupported"]
     error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError", "Unknown"] = "Unknown"
     http_status: int | None = Field(default=None, ge=400, le=599)
     job_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
@@ -783,9 +783,9 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "audio_processing": defaults["audio_processing"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"],
-               **face_mesh_snapshot(defaults, options),
+               **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **watermark_offer,
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options)["face_mesh"])}
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"])}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
@@ -980,10 +980,10 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "audio_processing": defaults["audio_processing"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"],
-               **face_mesh_snapshot(defaults, options),
+               **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options)["face_mesh"])}
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"])}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         if manifest.get("generation_credits") is not None:

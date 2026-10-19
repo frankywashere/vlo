@@ -170,6 +170,7 @@ export function CharSwapWalkthrough({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const assets = useLocalAssets();
   const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [accessMode, setAccessMode] = useState<"credits" | "api-key">("credits");
   const [provider, setProvider] = useState<"reAPI" | "ToAPIs">("reAPI");
   const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
@@ -181,6 +182,7 @@ export function CharSwapWalkthrough({
     void loadAccountAccess().then(access => {
       if (!active) return;
       setApiKeyAllowed(access.api_key_enabled);
+      setIsAdmin(Boolean(access.role));
       if (access.api_key_enabled) setAccessMode("api-key");
     }).catch(() => { if (active) setApiKeyAllowed(false); });
     return () => { active = false; };
@@ -685,6 +687,7 @@ export function CharSwapWalkthrough({
                 busy={Boolean(locked)}
                 creditBalance={balance}
                 generationCredits={generationCredits}
+                isAdmin={isAdmin}
                 faceMeshOptions={pipeline.faceMeshOptions}
                 watermarkOffer={creditAccount.catalog?.watermark_enabled && accessMode === "credits" ? {bonusCredits: creditAccount.catalog.watermark_bonus_credits ?? 25} : undefined}
                 creditsAvailable={!live || accessMode === "api-key" || pipeline.creditsAvailable}

@@ -60,7 +60,7 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
     return pipeline_settings(records)
 
 
-def face_mesh_snapshot(defaults, setup):
+def face_mesh_snapshot(defaults, setup, *, is_admin=False):
     default = defaults["face_mesh_masked_default" if setup.enhanced_character_masking else "face_mesh_unmasked_default"]
     override = setup.face_mesh
-    return {"face_mesh": override if defaults["face_mesh_user_control"] and override is not None else default}
+    return {"face_mesh": override if (is_admin or defaults["face_mesh_user_control"]) and override is not None else default}

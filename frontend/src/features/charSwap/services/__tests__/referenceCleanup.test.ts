@@ -116,12 +116,18 @@ it("allows iOS CPU cleanup without WebGPU, with a separate five-minute download 
   await vi.advanceTimersByTimeAsync(210_000);await rejected;
   expect(TestWorker.all[0].terminate).toHaveBeenCalledOnce();
 });
-it("blocks a previously interrupted CPU runtime before downloading again",async()=>{
+it("offers an explicit retry for an interrupted CPU runtime without calling it unsupported",async()=>{
   vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
   sessionStorage.setItem("recastfx-cleanup-cpu-interrupted-v1","1");
-  const {cleanReferenceBackground}=await import("../referenceCleanup");
-  await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"UnsupportedCleanupError"});
+  const {cleanReferenceBackground,retryInterruptedCleanup}=await import("../referenceCleanup");
+  await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"InterruptedCleanupError"});
   expect(TestWorker.all).toHaveLength(0);
+  retryInterruptedCleanup();
+  const result=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+  const worker=TestWorker.all[0];expect(worker.url).toContain("litert-2.5.3-cpu");
+  worker.reply({type:"ready"});await settle();
+  const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+  worker.reply({type:"result",id:request.id,image:image()});await result;
 });
 
 it("skips an Original-selected queued photo without restarting the active model",async()=>{

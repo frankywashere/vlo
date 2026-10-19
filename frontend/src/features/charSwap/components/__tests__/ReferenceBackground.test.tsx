@@ -2,11 +2,12 @@ import {act,cleanup,render,screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {useCharSwapStore} from "../../useCharSwapStore";
-import {cleanReferenceBackground} from "../../services/referenceCleanup";
+import {cleanReferenceBackground, retryInterruptedCleanup} from "../../services/referenceCleanup";
+import {InterruptedCleanupError} from "../../services/browserCleanupProtocol";
 import {ReferenceBackground} from "../ReferenceBackground";
 import {ReferenceCleanupProvider} from "../ReferenceCleanupProvider";
 import {getStepBlocker} from "../../model/model";
-vi.mock("../../services/referenceCleanup",()=>({cleanReferenceBackground:vi.fn()}));
+vi.mock("../../services/referenceCleanup",()=>({cleanReferenceBackground:vi.fn(),retryInterruptedCleanup:vi.fn()}));
 function assigned(id="a"){const s=useCharSwapStore.getState();return s.references.find(r=>r.id===s.assignments[id])!;}
 function Card(){const reference=useCharSwapStore(s=>s.references.find(r=>r.id===s.assignments.a));return reference?<ReferenceBackground targetId="a" reference={reference}/>:null;}
 function Harness({show=true,endpoint}:{show?:boolean;endpoint?:string}){return <ReferenceCleanupProvider enabled endpoint={endpoint}>{show&&<Card/>}</ReferenceCleanupProvider>;}
@@ -73,4 +74,17 @@ it("keeps Original usable on unsupported hardware",async()=>{
  expect(await screen.findByText(/isn’t supported on your hardware/)).toBeVisible();
  expect(screen.getByRole("button",{name:"Clean background"})).toBeDisabled();
  expect(screen.getByRole("button",{name:"Original"})).toBeEnabled();
+});
+
+
+it("offers Retry cleanup after an interrupted page and starts CPU cleanup only after that click",async()=>{
+ vi.mocked(cleanReferenceBackground).mockRejectedValueOnce(new InterruptedCleanupError());
+ const user=userEvent.setup();render(<Harness/>);
+ const retry=await screen.findByRole("button",{name:"Retry cleanup"});
+ expect(retry).toBeEnabled();expect(assigned().cleanup?.unsupported).toBe(false);
+ expect(cleanReferenceBackground).toHaveBeenCalledTimes(1);
+ vi.mocked(cleanReferenceBackground).mockResolvedValueOnce(new Blob(["cleaned"],{type:"image/jpeg"}));
+ await user.click(retry);
+ expect(retryInterruptedCleanup).toHaveBeenCalledOnce();
+ expect(cleanReferenceBackground).toHaveBeenCalledTimes(2);
 });

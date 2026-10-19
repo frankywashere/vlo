@@ -1,6 +1,6 @@
-import { reportClientTiming, timeClientStage } from "./diagnostics";
+import { reportClientError, reportClientTiming, timeClientStage } from "./diagnostics";
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
-import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, CleanupSkippedError, UnsupportedCleanupError} from "./browserCleanupProtocol";
+import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, CleanupSkippedError, InterruptedCleanupError, UnsupportedCleanupError} from "./browserCleanupProtocol";
 import type {CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
 
 // Retained for older gateway configuration; photos are no longer sent there.
@@ -17,7 +17,8 @@ function interrupted() {try {return sessionStorage.getItem(INTERRUPTED_KEY) === 
 function markRunning(running: boolean) {
   try {if (running) sessionStorage.setItem(INTERRUPTED_KEY,"1"); else sessionStorage.removeItem(INTERRUPTED_KEY);} catch { /* Storage is optional. */ }
 }
-let unsupported = interrupted();
+let previousInterruption = interrupted();
+let unsupported = !cpuCleanup() && previousInterruption;
 let sequence = 0;
 let generation = 0;
 let prefetch: Promise<void> | undefined;
@@ -31,10 +32,19 @@ function stop() {
   for (const cancel of [...waiting]) cancel();
 }
 function releaseLater() {clearTimeout(idle); idle = setTimeout(stop, 60_000);}
+export function retryInterruptedCleanup(): void {
+  if (!cpuCleanup() || !previousInterruption) return;
+  stop(); previousInterruption = false;
+  reportClientError("cleanup_retry_after_interruption", undefined);
+}
 function supported() {
+  if (cpuCleanup() && previousInterruption) {
+    reportClientError("cleanup_previous_interruption", undefined);
+    throw new InterruptedCleanupError();
+  }
   if (unsupported || !globalThis.isSecureContext || typeof Worker === "undefined" ||
     (!cpuCleanup() && !navigator.gpu) || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function")
-    throw new UnsupportedCleanupError();
+    { reportClientError(cpuCleanup() ? "cleanup_cpu_unsupported" : "cleanup_gpu_unsupported", undefined); throw new UnsupportedCleanupError(); }
 }
 function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefined, timeout: number): Promise<T> {
   return new Promise((resolve,reject) => {

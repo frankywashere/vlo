@@ -39,6 +39,7 @@ export interface ReferenceAsset {
     pending?: boolean;
     error?: string;
     unsupported?: boolean;
+    interrupted?: boolean;
   };
 }
 

@@ -28,13 +28,14 @@ def face(x, y):
 @pytest.mark.parametrize('default', [False, True])
 @pytest.mark.parametrize('visible', [False, True])
 @pytest.mark.parametrize('override', [None, False, True])
-def test_face_mesh_default_or_visible_override(masked, default, visible, override):
+@pytest.mark.parametrize('is_admin', [False, True])
+def test_face_mesh_default_or_visible_override(masked, default, visible, override, is_admin):
     defaults={'face_mesh_masked_default':default if masked else not default,
               'face_mesh_unmasked_default':default if not masked else not default,
               'face_mesh_user_control':visible}
     setup=Setup(trim=[0,4], anchor={'x':.5,'y':.5,'time':0}, enhanced_character_masking=masked, face_mesh=override)
-    expected=override if visible and override is not None else default
-    assert face_mesh_snapshot(defaults,setup)=={'face_mesh':expected}
+    expected=override if (visible or is_admin) and override is not None else default
+    assert face_mesh_snapshot(defaults,setup,is_admin=is_admin)=={'face_mesh':expected}
 
 
 def test_association_rejects_background_and_incomplete_head_without_guessing():
