@@ -88,6 +88,12 @@ def test_review_rejects_collision_and_keeps_original_archive_intact(tmp_path):
         resolve_multi_tracking(archive, metadata, plan, choices, output)
     assert error.value.code == "tracking_target_conflict"
     assert error.value.segment_id.startswith("t1-")
+    details = error.value.tracking_diagnostics
+    assert details["frame"] == 48
+    assert details["selected_label"] == details["conflicting_label"] == 22
+    assert details["target_id"] == "right" and details["conflicting_target_id"] == "left"
+    assert details["overlap_pixels"] == 24 * 22
+    assert "Person 2 and Person 1" in error.value.message and "2.00s" in error.value.message
     assert archive.read_bytes() == original and not output.exists()
 
 

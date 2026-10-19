@@ -284,7 +284,7 @@ export function SceneTrackingReview({
         </Typography>
         {errorSegmentId === active.id && (
           <Alert severity="error" sx={{ mb: 2 }}>
-            {errorMessage || "That selection missed a detected person. Tap inside their mask, or use Show another frame."}
+            {errorMessage || "This scene needs another look. Review the selected person, or use Show another frame."}
           </Alert>
         )}
         <Stack

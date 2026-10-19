@@ -167,7 +167,7 @@ describe("still-frame scene tracking review", () => {
     expect(screen.getByRole("heading", {name: "Scene 2 of 2"})).toBeInTheDocument();
     rerender(<SceneTrackingReview {...props} errorSegmentId="cut" />);
     expect(screen.getByRole("heading", {name: "Scene 1 of 2"})).toHaveFocus();
-    expect(screen.getByText(/That selection missed a detected person/)).toBeInTheDocument();
+    expect(screen.getByText(/This scene needs another look/)).toBeInTheDocument();
     expect(screen.getByText("1 of 2 matches checked")).toBeInTheDocument();
   });
 
@@ -183,4 +183,12 @@ describe("still-frame scene tracking review", () => {
     expect(screen.getByLabelText("Selected person marker")).toBeInTheDocument();
     expect(screen.getByRole("button", {name: "Apply matches"})).toBeEnabled();
   });
+});
+
+
+it("shows the actual tracking conflict instead of blaming a missed tap", () => {
+  const message = "SAM matched Person 2 and Person 1 to the same detected track at 2.00s.";
+  render(<SceneTrackingReview {...properties()} errorSegmentId="cut" errorMessage={message} />);
+  expect(screen.getByRole("alert")).toHaveTextContent(message);
+  expect(screen.queryByText(/selection missed/)).not.toBeInTheDocument();
 });

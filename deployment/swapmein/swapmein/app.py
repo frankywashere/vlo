@@ -1005,6 +1005,13 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     current, _ = records.read("control/preparation.json")
     check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
     reserved = claimed = queued = False
+    attempt_id = uuid.uuid4().hex
+    choices = [choice.model_dump() for choice in review.choices]
+    # Only validated, owned scene choices: no media, signed URLs, names or keys.
+    emit("tracking_review_attempt", job_id=job_id, attempt_id=attempt_id,
+         revision=review.revision, plan_version=plan.get("version"),
+         selections=[{"segment_id": choice["segment_id"], "absent": choice["absent"],
+             "anchor": choice["anchor"]} for choice in choices])
     try:
         with tempfile.TemporaryDirectory() as temporary:
             archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
@@ -1017,6 +1024,8 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                 resolved = resolve_multi_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
             else:
                 resolved = resolve_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
+            emit("tracking_review_validated", job_id=job_id, attempt_id=attempt_id,
+                 revision=review.revision, assignments=resolved["assignments"])
             records.update("control/preparation.json", lambda current: reserve_preparation(
                 current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
             reserved = True
@@ -1053,8 +1062,12 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
         if reserved and not queued:
             records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
         if isinstance(error, PublicError):
+            emit("tracking_review_rejected", error=error, job_id=job_id, attempt_id=attempt_id,
+                 revision=review.revision, public_code=error.code,
+                 segment_id=getattr(error, "segment_id", None),
+                 selection_diagnostics=getattr(error, "tracking_diagnostics", None))
             raise
-        emit("tracking_review_failed", error=error, job_id=job_id)
+        emit("tracking_review_failed", error=error, job_id=job_id, attempt_id=attempt_id)
         raise PublicError("The matches could not be saved. Your tracking review is retained.", 503) from None
 
 

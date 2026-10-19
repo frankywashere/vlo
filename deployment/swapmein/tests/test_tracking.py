@@ -204,6 +204,10 @@ def test_background_tap_has_controlled_section_message_and_no_partial_output(tmp
     assert error.value.code == "tracking_background"
     assert error.value.segment_id == plan["segments"][1]["id"]
     assert "section 2" in error.value.message
+    details = error.value.tracking_diagnostics
+    assert details["selected_label"] == 0 and details["detected_labels"] == [2]
+    assert details["x"] == .9 and details["y"] == .9
+    assert details["frame"] == int(details["time"] * 24)
     assert not output.exists()
     assert not output.with_name("out.zip.partial").exists()
 

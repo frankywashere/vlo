@@ -351,3 +351,39 @@ def test_unresolved_anchor_is_publicly_null_without_mutating_the_private_review_
     assert response.json()["tracking_segments"][0]["selected_label"] is None
     assert records.data[f"jobs/{job_id}.json"] == before
     assert not cloud.enqueued and not provider.submissions
+
+
+def test_review_diagnostics_correlate_selections_and_rejection_without_media_or_credentials(tracking_review, monkeypatch, capsys):
+    client, records, cloud, provider, headers, job_id, _ = tracking_review
+    def reject(*args):
+        error = PublicError("No mask at that point.", code="tracking_background")
+        error.segment_id = "segment-000"
+        error.tracking_diagnostics = {"frame": 24, "selected_label": 0, "detected_labels": [8]}
+        raise error
+    monkeypatch.setattr(gateway, "resolve_tracking", reject)
+    response = client.post(review_endpoint(job_id), headers=headers, json=review_body())
+    assert response.status_code == 400
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    attempt = next(item for item in events if item["event"] == "tracking_review_attempt")
+    rejected = next(item for item in events if item["event"] == "tracking_review_rejected")
+    assert attempt["job_id"] == rejected["job_id"] == job_id
+    assert attempt["attempt_id"] == rejected["attempt_id"]
+    assert attempt["revision"] == rejected["revision"] == 1
+    assert attempt["selections"] == [selected_choice()]
+    assert rejected["segment_id"] == "segment-000"
+    assert rejected["selection_diagnostics"]["detected_labels"] == [8]
+    logged = json.dumps([attempt, rejected])
+    assert headers["Authorization"] not in logged and "gs://" not in logged
+    assert "source-preview" not in logged and "tracking-masks" not in logged
+    assert records.data[f"jobs/{job_id}.json"]["status"] == "tracking_review"
+    assert not cloud.enqueued and not provider.submissions
+
+
+def test_successful_review_logs_resolved_labels_before_queuing(tracking_review, capsys):
+    client, _, _, _, headers, job_id, _ = tracking_review
+    assert client.post(review_endpoint(job_id), headers=headers, json=review_body()).status_code == 202
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    attempt = next(item for item in events if item["event"] == "tracking_review_attempt")
+    validated = next(item for item in events if item["event"] == "tracking_review_validated")
+    assert validated["attempt_id"] == attempt["attempt_id"]
+    assert validated["assignments"][0]["segment_id"] == "segment-000"

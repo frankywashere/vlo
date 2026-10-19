@@ -333,9 +333,14 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                         raise _selection_error(f"Choose a frame inside section {index + 1}.")
                     selected_label = _pixel_label(read, frame, anchor, width, height)
                     if selected_label == 0:
-                        error = PublicError(f"The tap in section {index + 1} missed the person. Tap inside their body.",
+                        error = PublicError(f"No person mask was detected at that point in section {index + 1} ({frame / FPS:.2f}s). Try inside the detected body, or use Show another frame.",
                                             code="tracking_background")
                         error.segment_id = segment["id"]
+                        labels = read(frame)
+                        error.tracking_diagnostics = {"frame": frame, "time": frame / FPS,
+                            "x": anchor["x"], "y": anchor["y"], "selected_label": 0,
+                            "detected_labels": [int(label) for label in np.unique(labels) if label][:100],
+                            "width": width, "height": height}
                         raise error
                 if not absent and not _integer(selected_label, 1, 65535):
                     raise _selection_error("Select a detected person or mark this section absent.")
