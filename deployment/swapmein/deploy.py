@@ -211,7 +211,7 @@ def valid_cap(budget: dict) -> bool:
         and budget.get("spendCap", {}).get("outputState") == "CONFIGURED"
         and not budget.get("spendCap", {}).get("reconciling", False)
         and amount.get("currencyCode") == "CAD"
-        and Decimal(0) < value <= Decimal(20)
+        and Decimal(0) < value <= Decimal(50)
     )
 
 
@@ -220,11 +220,11 @@ def verify_cap():
     while True:
         body = google_get(f"https://billingbudgets.googleapis.com/v1/billingAccounts/{BILLING_ACCOUNT}/budgets?{urlencode(query)}")
         if any(valid_cap(budget) for budget in body.get("budgets", [])):
-            print("Verified configured CAD 20-or-lower monthly Cloud Run spend cap.", flush=True)
+            print("Verified configured CAD 50-or-lower monthly Cloud Run spend cap.", flush=True)
             return
         next_page = body.get("nextPageToken")
         if not next_page:
-            raise SetupError("No configured project-specific Cloud Run CAD 20-or-lower cap was found. Setup stopped.")
+            raise SetupError("No configured project-specific Cloud Run CAD 50-or-lower cap was found. Setup stopped.")
         query["pageToken"] = next_page
 
 

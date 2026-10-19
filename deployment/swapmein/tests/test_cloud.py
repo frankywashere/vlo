@@ -307,6 +307,39 @@ def test_bucket_setup_adds_scoped_direct_upload_cors_without_worker_bucket_chang
     assert "--cors-file=" + str(tmp_path / "app-cors.json") in changes[0]
 
 
+@pytest.mark.parametrize("count,ready_after,succeeds", [
+    (1, 180, True), (1, 304, False), (0, 124, False),
+])
+def test_scaling_allows_slow_start_but_keeps_start_and_shutdown_bounded(monkeypatch, count, ready_after, succeeds):
+    clock = [0]
+    monkeypatch.setattr("swapmein.cloud.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("swapmein.cloud.time.sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr("swapmein.cloud.access_token", lambda: "fake-token")
+    cloud = Cloud.__new__(Cloud)
+    cloud.settings = replace(Settings(), project="test-project", gpu_region="us-central1")
+
+    def respond(request):
+        if request.method == "PATCH":
+            assert json.loads(request.content)["scaling"]["manualInstanceCount"] == count
+            return httpx.Response(200, json={})
+        return httpx.Response(200, json={
+            "reconciling": clock[0] < ready_after,
+            "observedGeneration": 2, "generation": 2,
+            "terminalCondition": {"state": "CONDITION_SUCCEEDED"},
+            "scaling": {"scalingMode": "MANUAL", "manualInstanceCount": count},
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        cloud.http = client
+        if succeeds:
+            cloud._scale("gpu", count)
+            assert clock[0] == ready_after
+        else:
+            with pytest.raises(TimeoutError, match="Worker scaling did not finish"):
+                cloud._scale("gpu", count)
+            assert clock[0] <= (302 if count else 122)
+
+
 def test_worker_creates_backup_before_activation_and_stops_after_request_failure(monkeypatch):
     events = []
     cloud = Cloud.__new__(Cloud)

@@ -37,7 +37,7 @@ def valid_spend_cap(body: dict, project_number: str):
         if (budget.get("budgetFilter", {}).get("projects") == ["projects/" + project_number]
                 and budget.get("budgetFilter", {}).get("services") == ["services/152E-C115-5142"]
                 and budget.get("spendCap", {}).get("outputState") == "CONFIGURED"
-                and amount.get("currencyCode") == "CAD" and 0 < value <= 20):
+                and amount.get("currencyCode") == "CAD" and 0 < value <= 50):
             return True
     return False
 
@@ -202,7 +202,9 @@ class Cloud:
             json={"scaling": {"scalingMode": "MANUAL", "manualInstanceCount": count}}, headers=headers)
         response.raise_for_status()
         response.json()  # Validate the response before polling the scoped service.
-        deadline = time.monotonic() + 120
+        # Cold GPU startup can exceed two minutes. Keep shutdown bounded
+        # separately so a slow stop still leaves the backup task in charge.
+        deadline = time.monotonic() + (300 if count == 1 else 120)
         while True:
             if time.monotonic() > deadline:
                 raise TimeoutError("Worker scaling did not finish")
