@@ -1,3 +1,4 @@
+import { warmReferenceCleanup } from "./services/referenceCleanup";
 import {
   useCallback,
   useEffect,
@@ -179,6 +180,7 @@ export function CharSwapWalkthrough({
   const creditAccount = credits ?? ownCredits;
   const secureSite = isSecureLiveOrigin();
   const live = pipeline.enabled && clip?.mode !== "demo";
+  useEffect(() => {if (live && clip && pipeline.referenceCleanupAvailable) warmReferenceCleanup();}, [live, clip?.id, pipeline.referenceCleanupAvailable]);
   const balance = creditAccount.wallet?.balance;
   const minimumCredits = creditsForDuration(4, creditAccount.catalog);
   const trimCredits = creditsForDuration(

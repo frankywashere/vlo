@@ -54,5 +54,16 @@ it("passes the trusted configured gateway to the cleanup service",async()=>{
   vi.mocked(cleanReferenceBackground).mockResolvedValue(new Blob(["image"],{type:"image/jpeg"}));
   render(<ReferenceBackground targetId="a" reference={assigned()} cleanupEndpoint={endpoint}/>);
   await act(async()=>{});
-  expect(cleanReferenceBackground).toHaveBeenCalledWith("blob:original",expect.any(AbortSignal),endpoint);
+  expect(cleanReferenceBackground).toHaveBeenCalledWith("blob:original",expect.any(AbortSignal),endpoint,expect.any(Function));
+});
+
+it("keeps Original usable and disables cleanup on unsupported hardware",async()=>{
+  const {UnsupportedCleanupError}=await import("../../services/browserCleanupProtocol");
+  vi.mocked(cleanReferenceBackground).mockRejectedValue(new UnsupportedCleanupError());
+  render(<Harness/>);
+  expect(await screen.findByText(/isn’t supported on your hardware/)).toBeVisible();
+  expect(screen.getByRole("button",{name:"Clean background"})).toBeDisabled();
+  expect(screen.getByRole("button",{name:"Original"})).toBeEnabled();
+  expect(assigned().url).toBe("blob:original");
+  expect(getStepBlocker(useCharSwapStore.getState(),"references")).toBeNull();
 });

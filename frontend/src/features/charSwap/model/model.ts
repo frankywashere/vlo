@@ -37,6 +37,7 @@ export interface ReferenceAsset {
     mode: "original" | "clean";
     pending?: boolean;
     error?: string;
+    unsupported?: boolean;
   };
 }
 

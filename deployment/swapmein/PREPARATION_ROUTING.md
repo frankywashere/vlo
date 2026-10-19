@@ -89,7 +89,42 @@ on the Replicate account. Published model-page averages are not a quote for our
 Replicate compatibility, visual-quality, latency, or matched-cost proof has been
 run for this integration**.
 
-## Reference-image cleanup is separate
+## Browser reference cleanup (current client)
+
+Each character offers Original / Clean background. Cleanup runs locally in a module
+worker using the MIT-licensed [BiRefNet Lite 512 model](https://huggingface.co/studioludens/birefnet-lite-512),
+pinned to revision `962e67969ec6acec9c19fab76acee4f5e22e990c` and SHA-256
+`eff9216bb2f9d3f023d9c2b7196845a7485739ab1f231593633e4d2344ffc516`.
+It predicts alpha and composites the original RGB onto neutral gray; it does not
+generate a replacement face. First use downloads about 98.5 MB of model weights
+plus the local ONNX runtime. Cache Storage is optional, and browsers may evict it.
+
+The runtime requires a secure context, WebGPU with shader-f16, module workers,
+OffscreenCanvas, and createImageBitmap. The actual graph must load and run too:
+API presence alone is not proof of support. Unsupported/GPU-memory failures retain
+Original and show an unsupported-hardware message. There is no automatic cloud
+fallback or photo upload for cleanup. A failed download can be retried. Inference
+is serialized per tab, initialization is capped at 90 seconds, each inference at
+30 seconds, and the worker is terminated on active cancellation or after 60 seconds
+idle. Originals remain selectable during loading. Outputs are bounded to a 2048px
+long edge; the segmentation graph uses 512px input.
+
+`npm run build:swapmein` runs `prepare:browser-cleanup`, which verifies the pinned
+model and copies version-matched local runtime assets and licenses. Weights are
+ignored build inputs, not Git objects. Hosting serves only the dedicated runtime
+public directory. CSP permits same-origin workers and WASM compilation, without
+external model/script hosts or cross-origin isolation.
+
+On the tested Apple M5 Chrome browser the original benchmark measured about
+0.6–0.65 seconds warm processing, with 8.3 seconds first graph/model load and
+2.1 seconds first-image processing. These are device-specific observations, not
+phone coverage claims. Physical iPhone and Android verification remains outstanding.
+
+## Legacy CPU reference cleanup (older clients / rollback)
+
+The current browser client does not call this path. The endpoint remains available
+for older clients, separately from SAM/depth provider routing.
+
 
 The private CPU service in `../reference_cleanup` uses BiRefNet Portrait through
 rembg/ONNX CPU to predict alpha, then composites the original RGB onto neutral

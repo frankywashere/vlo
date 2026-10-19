@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, CircularProgress, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import type { ReferenceAsset } from "../model/model";
 import { useCharSwapStore } from "../useCharSwapStore";
 import { cleanReferenceBackground } from "../services/referenceCleanup";
+import { UnsupportedCleanupError } from "../services/browserCleanupProtocol";
+import type { CleanupProgress } from "../services/browserCleanupProtocol";
 import { createLocalId } from "../utils/createLocalId";
 
 interface ReferenceBackgroundProps {
@@ -12,6 +14,7 @@ interface ReferenceBackgroundProps {
 }
 
 export function ReferenceBackground({targetId, reference, cleanupEndpoint}: ReferenceBackgroundProps) {
+  const [progress, setProgress] = useState<CleanupProgress>({phase:"loading"});
   const operation = useRef<AbortController | null>(null);
   const original = reference.cleanup?.originalUrl ?? reference.url;
   function current() {
@@ -34,7 +37,7 @@ export function ReferenceBackground({targetId, reference, cleanupEndpoint}: Refe
     useCharSwapStore.getState().assignReference(targetId, {...reference, id,
       cleanup: {originalUrl: original, mode: "clean", pending: true}});
     try {
-      const image = await cleanReferenceBackground(original, controller.signal, cleanupEndpoint);
+      const image = await cleanReferenceBackground(original, controller.signal, cleanupEndpoint, setProgress);
       const asset = current();
       if (controller.signal.aborted || asset?.id !== id) return;
       const cleanedUrl = URL.createObjectURL(image);
@@ -45,7 +48,7 @@ export function ReferenceBackground({targetId, reference, cleanupEndpoint}: Refe
     } catch (error) {
       const asset = current();
       if (asset?.id === id) useCharSwapStore.getState().assignReference(targetId, {...asset, url: original,
-        cleanup: {originalUrl: original, mode: "original", error: controller.signal.aborted
+        cleanup: {originalUrl: original, mode: "original", unsupported: error instanceof UnsupportedCleanupError, error: controller.signal.aborted
           ? "Cleanup stopped. The original image is still available." : error instanceof Error ? error.message : "Cleanup did not finish. Use the original."}});
     } finally {
       if (operation.current === controller) operation.current = null;
@@ -66,10 +69,10 @@ export function ReferenceBackground({targetId, reference, cleanupEndpoint}: Refe
     <ToggleButtonGroup exclusive size="small" value={reference.cleanup?.mode ?? "original"}
       aria-label="Reference background" onChange={(_, value: "original" | "clean" | null) => {if (value) choose(value);}}>
       <ToggleButton value="original">Original</ToggleButton>
-      <ToggleButton value="clean">Clean background</ToggleButton>
+      <ToggleButton value="clean" disabled={reference.cleanup?.unsupported}>Clean background</ToggleButton>
     </ToggleButtonGroup>
     {reference.cleanup?.pending && <Stack direction="row" spacing={1} alignItems="center" role="status">
-      <CircularProgress size={14} /><Typography variant="caption">Cleaning background… You can use Original while this finishes.</Typography>
+      <CircularProgress size={14} /><Typography variant="caption">{progress.phase === "loading" ? `Loading cleanup${progress.percent === undefined ? "" : ` ${progress.percent}%`}… First use may take a moment.` : "Cleaning background…"} You can use Original while this finishes.</Typography>
     </Stack>}
     {reference.cleanup?.error && <Alert severity="info">{reference.cleanup.error}</Alert>}
   </Stack>;
