@@ -1,6 +1,7 @@
 import { trimDuration } from "../utils/trimRange";
 import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES, MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
+import { referenceCleanupBlocker } from "../model/model";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 import { reportClientError, timeClientStage } from "./diagnostics";
@@ -11,6 +12,7 @@ export type GenerationProvider = "reAPI" | "ToAPIs";
 export type GenerationAccessMode = "api-key" | "credits";
 
 export interface FaceMeshOptions {
+  face_mesh_enabled?: boolean;
   face_mesh_masked_default: boolean;
   face_mesh_unmasked_default: boolean;
   face_mesh_user_control: boolean;
@@ -18,6 +20,7 @@ export interface FaceMeshOptions {
 
 export interface LivePipelineConfig {
   hide_audio_toggle?: boolean;
+  multi_characters?: boolean;
   face_mesh_options?: FaceMeshOptions;
   live: boolean;
   available: boolean;
@@ -239,6 +242,7 @@ function requestMessage(status: number): string {
 function capacityMessage(value: unknown): string | null {
   if (!isRecord(value) || typeof value.code !== "string") return null;
   const messages: Record<string, string> = {
+    single_character_only: "Multi-characters is currently off. Select one person and one reference image.",
     reference_dimensions: "The reference image is too narrow, too wide, or outside the supported size. Use an image with both sides between 256 and 5760 pixels and a width-to-height ratio between 0.4 and 2.5. Crop it or choose a different image.",
     reference_format: "Use one still JPG, PNG, or WebP reference image.",
     reference_unreadable: "The reference image could not be opened. Choose another JPG, PNG, or WebP image.",
@@ -540,7 +544,9 @@ export async function getLiveConfig(
     beta: value.beta,
     credits_available: value.credits_available === true,
     hide_audio_toggle: value.hide_audio_toggle === true,
+    multi_characters: value.multi_characters !== false,
     ...(isRecord(value.face_mesh_options) ? {face_mesh_options: {
+      face_mesh_enabled: value.face_mesh_options.face_mesh_enabled !== false,
       face_mesh_masked_default: value.face_mesh_options.face_mesh_masked_default !== false,
       face_mesh_unmasked_default: value.face_mesh_options.face_mesh_unmasked_default === true,
       face_mesh_user_control: value.face_mesh_options.face_mesh_user_control === true,
@@ -615,8 +621,14 @@ export function validateLiveSetup(state: WalkthroughState) {
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(target.id) || !target.name.trim() || target.name.length > 40
         || ![x, y, time].every(Number.isFinite) || x < 0 || x > 1 || y < 0 || y > 1 || time < start || time >= end)
       throw new LivePipelineError("Select the person again inside the chosen section.");
-    const reference = state.references.find((item) => item.id === state.assignments[target.id]);
-    if (!reference?.url) throw new LivePipelineError(`Assign a reference image to ${target.name}.`);
+    const assigned = state.references.find((item) => item.id === state.assignments[target.id]);
+    if (!assigned?.url) throw new LivePipelineError(`Assign a reference image to ${target.name}.`);
+    const cleanupIssue = referenceCleanupBlocker(assigned);
+    if (cleanupIssue) throw new LivePipelineError(`${target.name}: ${cleanupIssue} No generation was submitted.`);
+    // The user's selected mode is authoritative; never fall back to the original
+    // while Clean background is selected or trust a stale display URL.
+    const reference = {...assigned, url: assigned.cleanup?.mode === "clean" ? assigned.cleanup.cleanedUrl!
+      : assigned.cleanup?.originalUrl ?? assigned.url};
     let referenceIndex = references.findIndex((item) => item.id === reference.id || item.url === reference.url);
     if (referenceIndex < 0) {
       referenceIndex = references.length;

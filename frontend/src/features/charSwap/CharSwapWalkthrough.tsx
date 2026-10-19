@@ -270,10 +270,12 @@ export function CharSwapWalkthrough({
     selectedDuration >= 4 &&
     selectedDuration <= 15 &&
     Math.abs(selectedDuration - Math.round(selectedDuration)) < 1e-6;
+  const singleCharacterBlocked = live && (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) && pipeline.multiCharacters === false && (targets.length > 1 || replaceAllPeople);
   const continueDisabled =
     busy ||
     !(step === "references" ? canContinue(state,"people") && hasAssignedReferenceImages(state) : canContinue(state, clipStep ? "trim" : step)) ||
     (live && clipStep && !validLiveTrim) ||
+    (singleCharacterBlocked && ["people", "references", "review"].includes(step)) ||
     (step === "matches" && !trackingReady) ||
     !fullyFunded;
   const cleanupPending=hasPendingReferenceCleanup(state);
@@ -548,6 +550,7 @@ export function CharSwapWalkthrough({
                     " credits. Your choices are saved while you top up."}
               </Alert>
             )}
+          {singleCharacterBlocked && <Alert severity="warning" sx={{mb: 2}}>Multi-characters is currently off. Keep one person and one reference image before submitting.</Alert>}
           {retryNotice && <Alert severity="info" sx={{mb: 2}}>{retryNotice}</Alert>}
           {(step !== "generation" || isUploadUnconfirmed(displayedPreparation)) && displayedPreparation && (
             <Box sx={{ mb: 2 }}>
@@ -589,7 +592,7 @@ export function CharSwapWalkthrough({
             {step === "people" && (
               <PeopleStep
                 demo={demo}
-                maxPeople={5}
+                maxPeople={live && pipeline.multiCharacters === false ? 1 : 5}
               />
             )}
             {step === "references" && waitingForCleanup && <ReferenceCleanupWait targets={targets} references={references} assignments={assignments} onBack={()=>setWaitingForCleanup(false)}/> }
@@ -684,7 +687,7 @@ export function CharSwapWalkthrough({
                 trackingReady={trackingReady}
                 onOptionsChange={() => { pipeline.reset(); invalidateTracking(); }}
                 job={pipeline.job}
-                busy={Boolean(locked)}
+                busy={Boolean(locked) || singleCharacterBlocked}
                 creditBalance={balance}
                 generationCredits={generationCredits}
                 isAdmin={isAdmin}

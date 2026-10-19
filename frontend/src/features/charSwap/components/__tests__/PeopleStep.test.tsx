@@ -48,3 +48,22 @@ describe("mobile-friendly person selection", () => {
     expect(useCharSwapStore.getState().targets).toHaveLength(1);
   });
 });
+
+it("limits selection to one and hides Replace all when Multi-characters is off", () => {
+  render(<PeopleStep demo={null} maxPeople={1} />);
+  expect(screen.queryByRole("button",{name:"Replace all people"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"Tap person 1"}));
+  fireEvent.click(screen.getByRole("button",{name:"Tap person 2"}));
+  expect(useCharSwapStore.getState().targets).toHaveLength(1);
+  expect(useCharSwapStore.getState().error).toMatch(/Choose one person/);
+});
+
+it("retains restored selections so the user can remove extras without losing the first", () => {
+  const store=useCharSwapStore.getState();
+  for(let i=1;i<=2;i++)store.selectTarget({id:`p${i}`,name:`Person ${i}`,color:TARGET_COLORS[i-1],anchor:{x:i*.2,y:.5,time:1}});
+  render(<PeopleStep demo={null} maxPeople={1} />);
+  expect(useCharSwapStore.getState().targets).toHaveLength(2);
+  expect(screen.getByText(/Remove extra selections/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"Remove Person 2"}));
+  expect(useCharSwapStore.getState().targets.map(t=>t.id)).toEqual(["p1"]);
+});

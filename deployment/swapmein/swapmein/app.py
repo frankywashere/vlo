@@ -27,7 +27,7 @@ from .media import Anchor, Setup, normalize_reference, strip_audio
 from .pipeline import Pipeline
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .provider_failure import provider_failure, failure_message
-from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot
+from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot, enforce_character_limit
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
@@ -323,8 +323,9 @@ def config():
             "beta": "multi-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
             "accounts_required": settings.require_account, "credits_available": credit_ready,
             "hide_audio_toggle": mesh.get("hide_audio_toggle", False),
+            "multi_characters": mesh.get("multi_characters", True),
             "face_mesh_options": {key: mesh.get(key, default) for key, default in (
-                ("face_mesh_masked_default", True), ("face_mesh_unmasked_default", False), ("face_mesh_user_control", False))},
+                ("face_mesh_enabled", True), ("face_mesh_masked_default", True), ("face_mesh_unmasked_default", False), ("face_mesh_user_control", False))},
             "reference_cleanup_available": bool(settings.reference_cleanup_url),
             # A cold cleanup can exceed Firebase Hosting's 60-second proxy limit.
             # This is our account-authenticated gateway, never the private worker.
@@ -379,7 +380,7 @@ class CreditGrant(BaseModel):
 
 class ClientDiagnostic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_auth", "cleanup_previous_interruption", "cleanup_retry_after_interruption", "cleanup_cpu_unsupported", "cleanup_gpu_unsupported"]
+    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_video_decode", "library_auth", "cleanup_previous_interruption", "cleanup_retry_after_interruption", "cleanup_cpu_unsupported", "cleanup_gpu_unsupported"]
     error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError", "Unknown"] = "Unknown"
     http_status: int | None = Field(default=None, ge=400, le=599)
     job_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
@@ -565,6 +566,8 @@ class PipelineSettingsUpdate(BaseModel):
     face_mesh_unmasked_default: bool | None = None
     face_mesh_user_control: bool | None = None
     hide_audio_toggle: bool | None = None
+    multi_characters: bool | None = None
+    face_mesh_enabled: bool | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
@@ -573,7 +576,7 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
     records, _, _ = services()
     return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
-                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle)
+                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled)
 
 
 @app.post("/api/commerce/admin/features")
@@ -757,6 +760,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     except ValidationError:
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
     validate_reference_mapping(options, 1)
+    enforce_character_limit(options, 1, pipeline_settings(records)["multi_characters"])
     check_generation_funding(records, options, active_session)
     watermark_offer = watermark_snapshot(records, options, active_session)
     job_id = uuid.uuid4().hex
@@ -782,11 +786,12 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             extension, content_type = ("png", "image/png") if transparent else ("jpg", "image/jpeg")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.{extension}", image, content_type)
         defaults = pipeline_settings(records)
+        enforce_character_limit(options, 1, defaults["multi_characters"])
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
                "source_uri": source_uri, "reference_uri": reference_uri, "reference_uris": [reference_uri],
                "access_mode": active_session.get("access_mode", "api-key"),
-               "audio_processing": defaults["audio_processing"],
+               "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
@@ -880,6 +885,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
                  x_reapi_key: str | None = Header(default=None)):
     owner, active_session = authenticate(authorization)
     records, cloud, _ = services()
+    enforce_character_limit(options.setup, len(options.reference_sizes), pipeline_settings(records)["multi_characters"])
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
     check_generation_funding(records, options.setup, active_session)
@@ -938,6 +944,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
     if len(raw_reference_uris) != len(reference_sizes):
         raise PublicError("Reference uploads are incomplete. Prepare the clip again.", 409)
     validate_reference_mapping(options, len(raw_reference_uris))
+    enforce_character_limit(options, len(raw_reference_uris), pipeline_settings(records)["multi_characters"])
     check_generation_funding(records, options, active_session)
     if (manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
             and not manifest.get("auto_key_ciphertext")):
@@ -981,11 +988,12 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                 current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
         reserved = True
         defaults = pipeline_settings(records)
+        enforce_character_limit(options, len(reference_uris), defaults["multi_characters"])
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
-               "audio_processing": defaults["audio_processing"],
+               "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
@@ -1415,6 +1423,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True, **job["setup"]})
     reference_uris = job.get("reference_uris") or [job["reference_uri"]]
     validate_reference_mapping(options, len(reference_uris))
+    enforce_character_limit(options, len(reference_uris), job.get("multi_characters", True))
     submission_uri = job["guide_uri"]
     if options.submit_without_audio:
         if not job.get("source_uri") or not cloud.asset_exists(job["source_uri"]):

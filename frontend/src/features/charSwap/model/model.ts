@@ -280,9 +280,17 @@ export function hasAssignedReferenceImages(state: WalkthroughState): boolean {
   return state.targets.every(target=>state.references.some(reference=>reference.id===state.assignments[target.id]&&Boolean(reference.url)));
 }
 
+export function referenceCleanupBlocker(reference: ReferenceAsset): string | null {
+  if (reference.cleanup?.error) return "Cleanup did not finish. Choose Original or finish cleanup before continuing.";
+  if (reference.cleanup?.mode === "clean" && (reference.cleanup.pending || !reference.cleanup.cleanedUrl))
+    return "Wait for background cleanup, or choose Original to continue now.";
+  return null;
+}
+
 export function hasPendingReferenceCleanup(state: WalkthroughState): boolean {
   return state.targets.some(target => state.references.some(reference =>
-    reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" && reference.cleanup.pending));
+    reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" &&
+      (reference.cleanup.pending || !reference.cleanup.cleanedUrl)));
 }
 
 export function getStepBlocker(
@@ -348,8 +356,11 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       ) {
         return state.replaceAllPeople ? "Add one replacement image for everyone." : "Add a replacement image for each selected person.";
       }
-      if (hasPendingReferenceCleanup(state))
-        return "Wait for background cleanup, or choose Original to continue now.";
+      for (const target of state.targets) {
+        const reference = state.references.find(item => item.id === state.assignments[target.id]);
+        const blocker = reference && referenceCleanupBlocker(reference);
+        if (blocker) return blocker;
+      }
       return null;
     case "matches":
     case "review":

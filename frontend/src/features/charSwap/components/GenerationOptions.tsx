@@ -18,11 +18,11 @@ export function GenerationOptions({ hideAudioToggle = false, disabled = false, o
       <Typography component="h2" variant="subtitle1" fontWeight={700}>Generation options</Typography>
       {(isAdmin || faceMeshOptions?.face_mesh_user_control) && <Box>
         <FormControlLabel sx={{m: 0, width: "100%", justifyContent: "space-between"}} labelPlacement="start"
-          control={<Switch checked={defaults.faceMesh ?? (enhanced ? faceMeshOptions?.face_mesh_masked_default ?? true : faceMeshOptions?.face_mesh_unmasked_default ?? false)}
-            disabled={disabled} onChange={(_, value) => {onChange?.(); defaults.setFaceMesh(value);}}
+          control={<Switch checked={faceMeshOptions?.face_mesh_enabled !== false && (defaults.faceMesh ?? (enhanced ? faceMeshOptions?.face_mesh_masked_default ?? true : faceMeshOptions?.face_mesh_unmasked_default ?? false))}
+            disabled={disabled || faceMeshOptions?.face_mesh_enabled === false} onChange={(_, value) => {onChange?.(); defaults.setFaceMesh(value);}}
             slotProps={{input: {role: "switch", "aria-describedby": "face-mesh-help"}}} />}
           label={<Typography variant="body2" fontWeight={650}>Face mesh</Typography>} />
-        <Typography id="face-mesh-help" variant="body2" color="text.secondary" sx={{mt: .5}}>Adds facial-motion guidance for selected people. May take extra time.</Typography>
+        <Typography id="face-mesh-help" variant="body2" color="text.secondary" sx={{mt: .5}}>{faceMeshOptions?.face_mesh_enabled === false ? "Face mesh is disabled globally." : "Adds facial-motion guidance for selected people. May take extra time."}</Typography>
       </Box>}
       <Box>
         <FormControlLabel sx={{ m: 0, width: "100%", justifyContent: "space-between" }} labelPlacement="start"

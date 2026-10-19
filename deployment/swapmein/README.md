@@ -656,3 +656,36 @@ in the anchor's detected shot or use their original coordinate/time instructions
 A retry that finds no mask retains the coordinate fallback. Overlap conflicts
 stop submission rather than changing someone else's assignment. Initial and
 reviewed recovery share the same worker request/report validation.
+
+Admin → Experimental → “Multi-characters” defaults on. Turning it off limits new
+submissions to one selected person and one reference, including shared-reference
+multi-target and Replace all requests. Both multipart and direct-upload admission
+check the policy; direct-upload completion checks again to reject stale tickets.
+New jobs snapshot the policy, and generation uses that snapshot so existing
+prepared, queued, and running jobs are not retroactively blocked. Library retries
+are new submissions and follow the current policy. The picker and submission UI
+show the same restriction without silently deleting saved selections.
+
+Library retry restores an upload's video container MIME before creating its Blob
+URL. Source uploads are stored as application/octet-stream; WebKit can reject that
+Blob despite valid H.264/AAC media. Recovery recognizes MP4, QuickTime and WebM
+containers without transcoding or changing the bytes. If the browser still cannot
+decode a saved video, photos, assignments and trim remain available, and only the
+original clip needs re-uploading. Decode failures emit the controlled
+library_video_decode diagnostic without media URLs or exception messages.
+
+Reference cleanup is checked again at the final browser upload boundary, in
+addition to the Next/wait screen. Every assigned Clean background photo must
+have a completed cleaned URL with no pending work or unacknowledged error.
+Submission uses that cleaned URL explicitly, not a possibly stale display URL.
+An explicit Original choice uses the original URL immediately, even if optional
+cleanup continues in the background. Unassigned photos do not block a job.
+Upload confirmation is sent only after every selected reference upload succeeds.
+
+Face mesh has independent availability and visibility controls under Experimental.
+“Enable face mesh” defaults on and is the master for new jobs: off forces the
+saved face_mesh flag false for both upload routes, regardless of user/admin
+requests or restored draft overrides. On restores the saved masked/unmasked
+defaults and optional per-run overrides. “Show face-mesh switch to users” controls
+public visibility independently; admins always see the per-run switch, disabled
+and off while the master is off. Existing submitted jobs retain their saved mode.

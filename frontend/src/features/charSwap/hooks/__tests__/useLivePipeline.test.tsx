@@ -592,3 +592,27 @@ describe("live BYOK pipeline", () => {
   });
 
 });
+
+it("blocks multi-person and Replace all drafts before uploading when globally disabled", async () => {
+  requests.mockImplementation((input)=>input==="/api/config" ? Promise.resolve(json({...CONFIG,multi_characters:false})) : defaultRequest(input));
+  const {result}=await renderLive();
+  await waitFor(()=>expect(result.current.multiCharacters).toBe(false));
+  const state=setup();
+  state.targets.push({...state.targets[0],id:"second",name:"Person 2"});
+  state.assignments.second="reference";
+  await act(async()=>{expect(await result.current.prepare(state)).toBe(false);});
+  expect(result.current.error).toMatch(/Multi-characters is currently off/);
+  await act(async()=>{expect(await result.current.prepare(setReplaceAllPeople(setup(),true))).toBe(false);});
+  expect(calls("/api/uploads")).toHaveLength(0);
+  expect(calls("/api/session")).toHaveLength(0);
+});
+
+it("submits face mesh off when the global master is off, despite a saved on override",async()=>{
+  requests.mockImplementation(input=>input==="/api/config"?Promise.resolve(json({...CONFIG,face_mesh_options:{face_mesh_enabled:false,face_mesh_masked_default:true,face_mesh_unmasked_default:true,face_mesh_user_control:true}})):defaultRequest(input));
+  const {result}=await renderLive();
+  await waitFor(()=>expect(result.current.faceMeshOptions?.face_mesh_enabled).toBe(false));
+  const state=setup();state.faceMesh=true;
+  await act(async()=>{expect(await result.current.prepare(state)).toBe(true);});
+  const body=JSON.parse(String(calls("/api/uploads")[0][1]?.body));
+  expect(body.setup.face_mesh).toBe(false);
+});
