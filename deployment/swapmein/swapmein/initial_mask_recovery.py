@@ -27,7 +27,8 @@ def recover_initial_selection(pipeline, job, masks, metadata, targets, root, rem
         requests.append({"segment_id": "initial-" + target["id"], "start_frame": start, "end_frame": end,
                          "frame": frame, "x": anchor["x"], "y": anchor["y"], "label": target["label"]})
     combined = root / "initial-selected-masks.zip"
-    coverage = build_selected_masks(masks, metadata, tracks, combined, allow_unmatched=True)
+    coverage = build_selected_masks(masks, metadata, tracks, combined, allow_unmatched=True,
+                                    allow_cross_shot_ids=True)
     uri = pipeline.cloud.upload(pipeline.settings.worker_bucket,
         f"inputs/swapmein-{job_id}/initial-selected-{uuid.uuid4().hex}.zip", combined, "application/zip")
     retry = job.get("retry_missing_masks_with_sam") is True
