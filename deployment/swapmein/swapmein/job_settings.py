@@ -11,6 +11,9 @@ def settings_used(job):
             result[key] = value
     if "depth_guidance" in result and setup.get("enhanced_character_masking") is False:
         result["depth_guidance"] = False
+    opacity = job.get("depth_overlay_opacity", result.get("depth_overlay_opacity"))
+    if type(opacity) in (int, float) and math.isfinite(opacity) and 0 <= opacity <= 1:
+        result["depth_overlay_opacity"] = opacity
     if setup.get("submit_without_audio"):
         result["audio_processing"] = False
     if isinstance(setup.get("enhanced_character_masking"), bool):
@@ -47,4 +50,4 @@ def settings_used(job):
     if generation.get("resolution") in {"768P", "768p"}:
         result["requested_resolution"] = "768p"
     allowed = {"face_mesh", "depth_guidance", "add_watermark", "watermark_bonus_credits", "submit_without_audio", "easy_mode", "replace_all_people", "audio_processing", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution"}
-    return {key: value for key, value in result.items() if key in allowed}
+    return {key: value for key, value in result.items() if key in allowed or key == "depth_overlay_opacity"}

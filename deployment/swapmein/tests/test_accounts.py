@@ -12,6 +12,20 @@ from swapmein.storage import reserve_queued_preparation, claim_queued_slot, rele
 from test_api import api, authenticated, ready_job
 
 
+@pytest.mark.parametrize("mode,charge,refund,expected", [
+    ("credits", 78, 0, 78), ("credits", 78, 78, 0),
+    ("credits", 78, 20, 58), ("credits", 0, 0, 0), ("api-key", 78, 0, 0),
+])
+def test_consumer_total_uses_site_wallet_charge_and_refund_not_quote(mode, charge, refund, expected):
+    job = {"id": "clip", "access_mode": mode, "generation_credits": 999}
+    wallet = {"applied": {"generation:clip": -charge, "refund:clip": refund}}
+    assert accounts.consumer_credit_usage(job, wallet)["consumer_credits_used"] == expected
+
+
+def test_archived_consumer_total_can_use_saved_actual_charge():
+    assert accounts.consumer_credit_usage({"id": "clip", "access_mode": "credits", "app_credits_charged": 78}, None)["consumer_credits_used"] == 78
+
+
 def test_google_identity_signature_audience_and_claims(monkeypatch):
     calls = []
     claims = {"sub": "user-a", "iss": "https://securetoken.google.com/project", "firebase": {"sign_in_provider": "google.com"}, "email_verified": True, "email": "user@example.com"}

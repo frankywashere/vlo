@@ -295,6 +295,13 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
               </>}
             </Alert>}
             {selected && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used} /></>}
+            {selected?.consumer_credits_used !== undefined && <Box>
+              <Typography fontWeight={600}>Credits used: {selected.consumer_credits_used.toLocaleString()}</Typography>
+              {!!selected.consumer_credits_returned && <Typography variant="body2" color="text.secondary">
+                {selected.consumer_credits_returned.toLocaleString()} credits refunded
+              </Typography>}
+              {selected.access_mode === "api-key" && <Typography variant="body2" color="text.secondary">Provider API key used; no site credits charged.</Typography>}
+            </Box>}
             {selected?.guide_url && !selected.easy_mode && (
               <Box
                 component="video"

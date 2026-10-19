@@ -1,0 +1,22 @@
+{
+  "status": "completed",
+  "gpu_sessions": 1,
+  "provider_submissions": 0,
+  "shutdown_verified": true,
+  "elapsed_seconds": 147.46239537512884,
+  "scope": "First shot, 84 frames; mask-only comparison, no render or production change.",
+  "findings": [
+    "Sampled compositor cleanup removed zero pixels: observed gaps predate that cleanup.",
+    "720p and 768p text-prompt masks show small boundary differences, without a clear visual win over 480p.",
+    "Fresh moving-frame torso point produced the most promising whole-person coverage in reviewed frames.",
+    "Initial-frame anchor produced a tiny partial mask and 15 empty frames; an anchor name is not proof it selected the torso.",
+    "Arm-only point tracked a body part rather than a full person; unsuitable as standalone person mask.",
+    "3px and 7px closing made small changes and did not establish a solution."
+  ],
+  "limitations": [
+    "No hand-labelled ground truth; added mask area is not an accuracy score.",
+    "Reviewed four moving frames and whole-shot coverage counts; not a cross-clip quality validation.",
+    "No global thresholds or production defaults changed."
+  ],
+  "recommendation": "Prefer a well-placed whole-person recovery prompt with quality checks over globally raising resolution or blindly expanding masks."
+}

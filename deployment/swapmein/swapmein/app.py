@@ -793,7 +793,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
-               "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2,
+               "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **watermark_offer,
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"])}
@@ -995,7 +995,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
-               "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2,
+               "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
@@ -1238,6 +1238,8 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, cloud, _ = services()
     listing, _ = records.read(f"accounts/{account['account_id']}/index.json")
+    wallet, _ = records.read(f"accounts/{account['account_id']}/wallet.json")
+    from .accounts import consumer_credit_usage
     items = []
     for job_id in (listing or {}).get("jobs", [])[:50]:
         if not isinstance(job_id, str) or not ID_PATTERN.fullmatch(job_id):
@@ -1269,6 +1271,7 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
                 public.update(status="expired", message="The 30-day video retention period has ended.")
             else:
                 public.update(status="expired")
+        public.update(consumer_credit_usage(job if job and job.get("account_id") == account["account_id"] else item, wallet))
         items.append({**public, "title": item.get("title", "Your clip"), "created_at": item.get("created_at"),
                       "completed_at": public.get("completed_at") or item.get("completed_at"),
                       "expires_at": item.get("expires_at") or job and job.get("library_expires_at")})

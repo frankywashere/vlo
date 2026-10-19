@@ -12,6 +12,16 @@ from .job_settings import settings_used
 LIBRARY_SECONDS = 30 * 86400
 
 
+def consumer_credit_usage(job: dict, wallet: dict | None) -> dict:
+    """Site credit charges minus refunds, including archived clips."""
+    if job.get("access_mode", "api-key") != "credits":
+        return {"consumer_credits_used": 0}
+    applied = (wallet or {}).get("applied", {})
+    charged = abs(applied.get("generation:" + job["id"], job.get("app_credits_charged", 0)))
+    returned = max(0, applied.get("refund:" + job["id"], 0))
+    return {"consumer_credits_used": max(0, charged - returned), "consumer_credits_returned": returned}
+
+
 def verify_account(token: str | None, project: str) -> dict:
     if not isinstance(token, str) or not 20 < len(token) < 10000:
         raise PublicError("Sign in with Google to continue.", 401)

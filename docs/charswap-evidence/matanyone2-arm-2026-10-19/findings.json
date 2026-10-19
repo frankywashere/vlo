@@ -1,0 +1,25 @@
+{
+  "status": "completed",
+  "frames": 84,
+  "device": "mps",
+  "seconds": 15.083247290924191,
+  "input": "SAM 3 baseline first-frame binary mask + original 480p RGB footage",
+  "warmup_frames": 10,
+  "initial_mask_morphology": "none",
+  "live_services_changed": false,
+  "provider_submissions": 0,
+  "checkpoint_sha256": "5e9821e4087231427376b437c85bb6e072b41e582314f06fd524f75bc4af5914",
+  "source_revision": "0079197acd6d16a741f71558809c06c586c579e0",
+  "visual_findings": [
+    "Soft boundaries follow motion blur more naturally, but the shadowed extended arm becomes partially transparent or disappears in reviewed frames at 2.667 and 2.833 seconds.",
+    "This default first-frame SAM-seeded run does not solve missing arm coverage; it is not a clear improvement for the depth-guide use case."
+  ],
+  "recommendation": "Do not integrate based on this test. The soft alpha matte may be appropriate for blur, but it does not establish full body coverage in shadow.",
+  "limitations": [
+    "One 3.5-second shot at 480p; visual review of four problem frames, no ground-truth matte.",
+    "Official model and default memory settings; no initial-mask erosion/dilation; ten warmup iterations."
+  ],
+  "sources": [
+    "https://github.com/pq-yang/MatAnyone2"
+  ]
+}

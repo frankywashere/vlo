@@ -689,3 +689,16 @@ requests or restored draft overrides. On restores the saved masked/unmasked
 defaults and optional per-run overrides. “Show face-mesh switch to users” controls
 public visibility independently; admins always see the per-run switch, disabled
 and off while the master is off. Existing submitted jobs retain their saved mode.
+
+### Consumer credit totals and depth tint
+
+Library Details reports site credits actually charged minus refunds, using the
+account wallet ledger and the archived charge fallback. Provider-key jobs show
+zero site credits; a generation quote is not counted as a charge.
+
+Depth remains off by default. New jobs that enable depth save a 20% shared
+magenta tint: colored depth is the base inside selected masks, with original RGB
+outside. The compositor no longer collapses those new depth guides to maximum
+RGB-channel brightness. Existing jobs without the saved opacity keep their
+previous composition. Deploy the CPU `/compose` schema before the gateway that
+sends `depth_opacity`.
