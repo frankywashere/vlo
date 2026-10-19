@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Alert, Avatar, Box, Button, Stack, Typography, RadioGroup, Radio, FormControlLabel } from "@mui/material";
+import { referenceCleanupBlocker } from "../model/model";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { FaceMeshOptions, LivePipelineJob } from "../services/livePipeline";
 import { VideoPreview } from "./VideoPreview";
@@ -66,7 +67,9 @@ export function ReviewStep({
     accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits;
   const needsPreparation = !job || ["failed", "completed"].includes(job.status);
   const manualPreparationComplete = live && !easyMode && !!job && (job.status === "ready" || trackingReady);
-  const canSubmit = enoughCredits && !busy && creditsAvailable && (
+  const cleanupIssue = targets.map(target => references.find(reference => reference.id === assignments[target.id]))
+    .map(reference => reference && referenceCleanupBlocker(reference)).find(Boolean);
+  const canSubmit = !cleanupIssue && enoughCredits && !busy && creditsAvailable && (
     live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && playableGuide === guideIdentity)
     : !easyMode && enhancedCharacterMasking && !trackingReady
   );
@@ -167,6 +170,7 @@ export function ReviewStep({
         )}
       </Stack>
       <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+        {cleanupIssue && <Alert severity="info">{cleanupIssue}</Alert>}
         {manualPreparationComplete ? (
           <Stack component="section" aria-label="Prepared settings" spacing={1}
             sx={{ p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: "5px", bgcolor: "background.paper" }}>

@@ -106,6 +106,17 @@ export function AdminPage() {
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.multi_characters ?? true}
+            disabled={busy || !can("pipeline_settings")}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, multi_characters: enabled});
+                setAdmin({...admin, pipeline});
+                setMessage(`Multi-characters ${enabled ? "enabled" : "disabled"} for new submissions. Existing jobs keep their saved setting.`);
+              });
+            }} />} label="Multi-characters" />
+          <Typography color="text.secondary">On by default. Turn off to allow only one selected person and one reference image. Applies to all users and new retries; existing jobs continue with their saved setting.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.hide_audio_toggle ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
@@ -118,6 +129,7 @@ export function AdminPage() {
             }} />} label="Hide Submit without audio switch globally" />
           <Typography color="text.secondary">Hides the switch for everyone, including admins. Does not change saved choices or running jobs. Refresh an open create page after changing visibility.</Typography>
           {([
+            ["face_mesh_enabled", "Enable face mesh", true],
             ["face_mesh_masked_default", "Face mesh default with Enhanced Masking", true],
             ["face_mesh_unmasked_default", "Face mesh default without masking", false],
             ["face_mesh_user_control", "Show face-mesh switch to users", false],
@@ -131,7 +143,7 @@ export function AdminPage() {
                   setMessage("Face-mesh settings saved for new jobs. Existing jobs keep their saved mode.");
                 });
               }} />} label={label} />)}
-          <Typography color="text.secondary">Defaults apply when the user switch is hidden or unchanged. When shown, users can turn face mesh on or off for their run, overriding either default. May take extra time.</Typography>
+          <Typography color="text.secondary">Enable face mesh is the global control for new jobs. When off, user and admin overrides cannot enable it. Existing jobs keep their saved mode. When enabled, defaults apply when the user switch is hidden or unchanged. When shown, users can turn face mesh on or off for their run, overriding either default. May take extra time.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.depth_guidance ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

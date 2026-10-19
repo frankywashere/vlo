@@ -15,15 +15,15 @@ def test_audio_toggle_defaults_off_is_owner_only_and_rejects_stale_saves(api, mo
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
     monkeypatch.setattr(gateway, "verify_account", lambda token, project: {
         "account_id": digest(token), "email": "frank@whipsnapfilms.com" if token == "owner" else "user@example.com"})
-    assert pipeline_settings(records) == {"revision": 0, "audio_processing": False, "hide_audio_toggle": False,
-        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
+    assert pipeline_settings(records) == {"revision": 0, "audio_processing": False, "hide_audio_toggle": False, "multi_characters": True,
+        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_enabled": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
     url = "/api/commerce/admin/pipeline"
     body = {"revision": 0, "audio_processing": True}
     assert client.post(url, headers={"X-Firebase-Token": "user"}, json=body).status_code == 403
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={**body, "audio_processing": 1}).status_code == 422
     response = client.post(url, headers={"X-Firebase-Token": "owner"}, json=body)
-    assert response.json() == {"revision": 1, "audio_processing": True, "hide_audio_toggle": False,
-        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
+    assert response.json() == {"revision": 1, "audio_processing": True, "hide_audio_toggle": False, "multi_characters": True,
+        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_enabled": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json=body).status_code == 409
     assert client.get("/api/commerce/admin", headers={"X-Firebase-Token": "owner"}).json()["pipeline"] == response.json()
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 1, "audio_processing": False}).json()["audio_processing"] is False
@@ -187,7 +187,7 @@ def test_new_job_pins_depth_setting_and_other_saves_preserve_it(api, monkeypatch
     job = records.data[f"jobs/{response.json()['id']}.json"]
     assert job["depth_guidance"] is False
     assert job["guide_style_version"] == 2
-    assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 2, "depth_guidance": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}).json()["depth_guidance"] is True
+    assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 2, "depth_guidance": True, "face_mesh_enabled": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}).json()["depth_guidance"] is True
     assert job["depth_guidance"] is False
     assert client.get(f"/api/jobs/{job['id']}", headers=headers).json()["settings_used"]["depth_guidance"] is False
 

@@ -31,6 +31,7 @@ const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
   hideAudioToggle?: boolean;
+  multiCharacters?: boolean;
   faceMeshOptions?: LivePipelineConfig["face_mesh_options"];
   referenceCleanupAvailable?: boolean;
   referenceCleanupEndpoint?: string;
@@ -257,6 +258,9 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       if (!enabled) throw new LivePipelineError("Live preparation is unavailable on this page.");
       if (accessMode === "api-key") assertLiveKey(apiKey);
       validateLiveSetup(state);
+      if (config?.multi_characters === false && (state.targets.length > 1 || state.replaceAllPeople)) {
+        throw new LivePipelineError("Multi-characters is currently off. Select one person and one reference image.");
+      }
       if (currentJob.current && !["failed", "completed"].includes(currentJob.current.status)) {
         throw new LivePipelineError("Your current job is retained. Review it before preparing another swap.");
       }
@@ -274,7 +278,8 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     setPreparationProgress({phase: "checking_access", message: accessMode === "credits" ? "Checking your credits…" : "Checking your API key…"});
     try {
       const access = await ensureSession(controller.signal);
-      const prepared = await createLiveJob(state, access.token, controller.signal, (progress) => {
+      const submittedState = config?.face_mesh_options?.face_mesh_enabled === false ? {...state, faceMesh: false} : state;
+      const prepared = await createLiveJob(submittedState, access.token, controller.signal, (progress) => {
         if (!controller.signal.aborted && epoch.current === version) setPreparationProgress(progress);
       }, autoGenerate, accessMode === "api-key" ? apiKey : "");
       if (controller.signal.aborted || epoch.current !== version) return false;
@@ -294,7 +299,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [enabled, apiKey, accessMode, reset, ensureSession, publishJob]);
+  }, [config?.face_mesh_options?.face_mesh_enabled, config?.multi_characters, enabled, apiKey, accessMode, reset, ensureSession, publishJob]);
 
   const resolveTracking = useCallback(async (choices: TrackingReviewChoice[]) => {
     const active = currentJob.current;
@@ -443,6 +448,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     enabled,
     creditsAvailable: config?.credits_available === true,
     hideAudioToggle: config?.hide_audio_toggle,
+    multiCharacters: config?.multi_characters !== false,
     faceMeshOptions: config?.face_mesh_options,
     referenceCleanupAvailable: config?.reference_cleanup_available === true,
     referenceCleanupEndpoint: config?.reference_cleanup_endpoint,

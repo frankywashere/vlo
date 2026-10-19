@@ -76,16 +76,18 @@ export interface PipelineSettings {
   revision: number;
   audio_processing: boolean;
   hide_audio_toggle?: boolean;
+  multi_characters?: boolean;
   preparation_provider?: PreparationProvider;
   retry_missing_masks_with_sam?: boolean;
   depth_guidance?: boolean;
+  face_mesh_enabled?: boolean;
   face_mesh_masked_default?: boolean;
   face_mesh_unmasked_default?: boolean;
   face_mesh_user_control?: boolean;
   replicate_api_key_configured?: boolean;
 }
 
-export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "hide_audio_toggle" | "audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
+export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "multi_characters" | "hide_audio_toggle" | "audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_enabled" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
   return commerceRequest<PipelineSettings>("/api/commerce/admin/pipeline", settings);
 }
 

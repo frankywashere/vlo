@@ -121,3 +121,12 @@ it("hides the audio switch globally even for admins without changing saved audio
   view.rerender(<GenerationOptions hideAudioToggle={false} isAdmin />);
   expect(screen.getByRole("switch", {name: "Submit without audio"})).toBeChecked();
 });
+
+it.each([false,true])("shows a disabled off face-mesh switch when globally off (admin: %s)", (isAdmin) => {
+  useCharSwapStore.getState().setFaceMesh(true);
+  render(<GenerationOptions isAdmin={isAdmin} faceMeshOptions={{face_mesh_enabled:false,face_mesh_masked_default:true,face_mesh_unmasked_default:true,face_mesh_user_control:!isAdmin}} />);
+  const toggle=screen.getByRole("switch",{name:"Face mesh"});
+  expect(toggle).not.toBeChecked();
+  expect(toggle).toBeDisabled();
+  expect(screen.getByText("Face mesh is disabled globally.")).toBeInTheDocument();
+});

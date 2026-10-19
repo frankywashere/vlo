@@ -49,7 +49,8 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
       !targets.some((p) => p.id === person.id)
     ) {
       setError(
-        `Choose up to ${maxPeople} people. Remove a selection to choose someone else.`,
+        maxPeople === 1 ? "Choose one person. Remove the current selection to choose someone else."
+          : `Choose up to ${maxPeople} people. Remove a selection to choose someone else.`,
       );
       return;
     }
@@ -110,7 +111,7 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
   }
   return (
     <Stack spacing={2.5}>
-      <Box sx={PANEL}>
+      {maxPeople > 1 && <Box sx={PANEL}>
         <Button variant={replaceAllPeople ? "contained" : "outlined"}
           aria-pressed={Boolean(replaceAllPeople)}
           onClick={() => setReplaceAllPeople(!replaceAllPeople)}
@@ -121,7 +122,9 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
           Use one reference image for everyone in every scene. Each person becomes a separate version of that character.
           {replaceAllPeople ? " Tap a person below to switch back to individual selections." : " Or tap up to five people below and give each their own replacement."}
         </Typography>
-      </Box>
+      </Box>}
+      {maxPeople === 1 && <Alert severity="info">Select one person and one reference image. Multi-characters is currently off.</Alert>}
+      {maxPeople === 1 && (targets.length > 1 || replaceAllPeople) && <Alert severity="warning">Remove extra selections before continuing. Your existing selections have been kept.</Alert>}
       <VideoPreview
         clip={clip}
         trim={trim}

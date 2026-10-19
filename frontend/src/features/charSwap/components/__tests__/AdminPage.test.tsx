@@ -330,3 +330,28 @@ it("lets authorized admins hide and reveal the audio switch globally", async () 
   await screen.findByText(/Submit without audio switch shown globally/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 1, hide_audio_toggle: false});
 });
+
+it("defaults Multi-characters on and saves the global single-character policy", async () => {
+  await renderExpandedAdmin();
+  const toggle=screen.getByRole("switch",{name:"Multi-characters"});
+  expect(toggle).toBeChecked();
+  await userEvent.click(toggle);
+  await screen.findByText(/Multi-characters disabled for new submissions/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision:0,multi_characters:false});
+  await userEvent.click(toggle);
+  await screen.findByText(/Multi-characters enabled for new submissions/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision:1,multi_characters:true});
+});
+
+it("exposes the face-mesh master separately from public switch visibility",async()=>{
+  await renderExpandedAdmin();
+  const master=screen.getByRole("switch",{name:"Enable face mesh"});
+  const visibility=screen.getByRole("switch",{name:"Show face-mesh switch to users"});
+  expect(master).toBeChecked();expect(visibility).not.toBeChecked();
+  await userEvent.click(master);
+  await screen.findByText(/Face-mesh settings saved/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision:0,face_mesh_enabled:false});
+  await userEvent.click(visibility);
+  await waitFor(()=>expect(api.pipeline).toHaveBeenLastCalledWith({revision:1,face_mesh_user_control:true}));
+  expect(master).not.toBeChecked();
+});

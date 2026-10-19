@@ -76,3 +76,10 @@ it("keeps personal-key controls hidden for ordinary users and available only to 
   expect(screen.getByRole("button", {name: "Add API key"})).toBeInTheDocument();
   expect(screen.getByRole("button", {name: "Generate video"})).toBeDisabled();
 });
+
+it("blocks final submission if a selected clean photo is still pending on the review page", () => {
+  useCharSwapStore.getState().assignReference("person",{id:"pending",name:"Photo",url:"blob:original",cleanup:{originalUrl:"blob:original",mode:"clean",pending:true}});
+  render(<ReviewStep {...properties()} />);
+  expect(screen.getByRole("button",{name:"Generate video"})).toBeDisabled();
+  expect(screen.getByText(/Wait for background cleanup/)).toBeInTheDocument();
+});
