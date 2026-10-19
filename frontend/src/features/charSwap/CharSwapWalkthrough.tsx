@@ -688,6 +688,7 @@ export function CharSwapWalkthrough({
                 creditBalance={balance}
                 generationCredits={generationCredits}
                 isAdmin={isAdmin}
+                hideAudioToggle={pipeline.hideAudioToggle}
                 faceMeshOptions={pipeline.faceMeshOptions}
                 watermarkOffer={creditAccount.catalog?.watermark_enabled && accessMode === "credits" ? {bonusCredits: creditAccount.catalog.watermark_bonus_credits ?? 25} : undefined}
                 creditsAvailable={!live || accessMode === "api-key" || pipeline.creditsAvailable}

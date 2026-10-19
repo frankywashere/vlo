@@ -3,7 +3,7 @@ import type { FaceMeshOptions } from "../services/livePipeline";
 import { useShallow } from "zustand/react/shallow";
 import { useCharSwapStore } from "../useCharSwapStore";
 
-export function GenerationOptions({ disabled = false, onChange, watermarkOffer, faceMeshOptions, isAdmin = false }: { disabled?: boolean; onChange?: () => void; watermarkOffer?: {bonusCredits: number}; faceMeshOptions?: FaceMeshOptions; isAdmin?: boolean }) {
+export function GenerationOptions({ hideAudioToggle = false, disabled = false, onChange, watermarkOffer, faceMeshOptions, isAdmin = false }: { hideAudioToggle?: boolean; disabled?: boolean; onChange?: () => void; watermarkOffer?: {bonusCredits: number}; faceMeshOptions?: FaceMeshOptions; isAdmin?: boolean }) {
   const defaults = useCharSwapStore(useShallow(state => ({
     faceMesh: state.faceMesh, setFaceMesh: state.setFaceMesh,
     easyMode: state.easyMode ?? true, enhanced: state.enhancedCharacterMasking ?? true,
@@ -42,7 +42,7 @@ export function GenerationOptions({ disabled = false, onChange, watermarkOffer, 
           Adds a visual guide when the person is hard to distinguish in the scene.
         </Typography>
       </Box>
-      <Box>
+      {!hideAudioToggle && <Box>
         <FormControlLabel sx={{ m: 0, width: "100%", justifyContent: "space-between" }} labelPlacement="start"
           control={<Switch checked={defaults.silent} disabled={disabled} onChange={(_, value) => { onChange?.(); defaults.setSilent(value); }}
             slotProps={{ input: { role: "switch", "aria-describedby": "silent-submit-help" } }} />}
@@ -50,7 +50,7 @@ export function GenerationOptions({ disabled = false, onChange, watermarkOffer, 
         <Typography id="silent-submit-help" variant="body2" color="text.secondary" sx={{ mt: .5 }}>
           Try this if characters have trouble saying their lines. Sends MiniMax a silent clip and restores your original soundtrack after generation.
         </Typography>
-      </Box>
+      </Box>}
       {watermarkOffer && <Box>
         <FormControlLabel sx={{ m: 0, width: "100%", justifyContent: "space-between" }} labelPlacement="start"
           control={<Switch checked={defaults.watermark} disabled={disabled} onChange={(_, value) => { onChange?.(); defaults.setWatermark(value); }}

@@ -17,6 +17,7 @@ export interface FaceMeshOptions {
 }
 
 export interface LivePipelineConfig {
+  hide_audio_toggle?: boolean;
   face_mesh_options?: FaceMeshOptions;
   live: boolean;
   available: boolean;
@@ -538,6 +539,7 @@ export async function getLiveConfig(
     delivery: value.delivery,
     beta: value.beta,
     credits_available: value.credits_available === true,
+    hide_audio_toggle: value.hide_audio_toggle === true,
     ...(isRecord(value.face_mesh_options) ? {face_mesh_options: {
       face_mesh_masked_default: value.face_mesh_options.face_mesh_masked_default !== false,
       face_mesh_unmasked_default: value.face_mesh_options.face_mesh_unmasked_default === true,

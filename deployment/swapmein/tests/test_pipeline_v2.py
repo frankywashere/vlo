@@ -355,12 +355,15 @@ def test_v2_background_anchor_requires_explicit_manual_matches_without_rerunning
         monkeypatch, media, tmp_path, selection, easy):
     job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
         selection=selection, audio_processing=False, background_tap=True)
-    assert not cloud.enqueued
     assert [payload["operation"] for kind, _, payload in cloud.calls if kind == "gpu"] == ["depth", "sam"]
-    assert not [endpoint for _, endpoint, _ in cloud.calls if endpoint == "/compose"]
     if easy:
-        assert job["status"] == "failed" and "missed" in job["message"]
+        assert job["status"] == "ready", job.get("message")
+        assert job["coordinate_fallback_sections"] == 1
+        assert job["normalized_targets"][0]["coordinate_fallback"]
+        assert cloud.enqueued and any(endpoint == "/compose" for _, endpoint, _ in cloud.calls)
         return
+    assert not cloud.enqueued
+    assert not [endpoint for _, endpoint, _ in cloud.calls if endpoint == "/compose"]
     assert job["status"] == "tracking_review", job.get("message")
     assert "could not match an initial selection" in job["message"]
     plan = job["tracking_plan"]

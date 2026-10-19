@@ -15,14 +15,14 @@ def test_audio_toggle_defaults_off_is_owner_only_and_rejects_stale_saves(api, mo
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
     monkeypatch.setattr(gateway, "verify_account", lambda token, project: {
         "account_id": digest(token), "email": "frank@whipsnapfilms.com" if token == "owner" else "user@example.com"})
-    assert pipeline_settings(records) == {"revision": 0, "audio_processing": False,
+    assert pipeline_settings(records) == {"revision": 0, "audio_processing": False, "hide_audio_toggle": False,
         "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
     url = "/api/commerce/admin/pipeline"
     body = {"revision": 0, "audio_processing": True}
     assert client.post(url, headers={"X-Firebase-Token": "user"}, json=body).status_code == 403
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={**body, "audio_processing": 1}).status_code == 422
     response = client.post(url, headers={"X-Firebase-Token": "owner"}, json=body)
-    assert response.json() == {"revision": 1, "audio_processing": True,
+    assert response.json() == {"revision": 1, "audio_processing": True, "hide_audio_toggle": False,
         "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json=body).status_code == 409
     assert client.get("/api/commerce/admin", headers={"X-Firebase-Token": "owner"}).json()["pipeline"] == response.json()
@@ -223,3 +223,20 @@ def test_face_mesh_job_snapshot_honors_only_visible_user_overrides(api, monkeypa
     records.data[PATH]['face_mesh_user_control']=False
     assert job['face_mesh'] is expected
     assert client.get(f"/api/jobs/{job['id']}",headers=headers).json()['settings_used']['face_mesh'] is expected
+
+
+def test_hide_audio_switch_is_permissioned_visible_in_config_and_preserves_audio(api, monkeypatch):
+    from test_staff_permissions import setup_staff
+    client, records = setup_staff(api, monkeypatch, ["pipeline_settings"])
+    records.data[PATH] = {"revision": 2, "audio_processing": True}
+    url = "/api/commerce/admin/pipeline"
+    assert client.get('/api/config').json()['hide_audio_toggle'] is False
+    response = client.post(url, json={"revision": 2, "hide_audio_toggle": True})
+    assert response.status_code == 200
+    assert response.json()['audio_processing'] is True
+    assert client.get('/api/config').json()['hide_audio_toggle'] is True
+    # Other setting saves cannot silently restore the hidden switch.
+    assert client.post(url, json={"revision": 3, "depth_guidance": True}).json()['hide_audio_toggle'] is True
+    assert client.post(url, json={"revision": 3, "hide_audio_toggle": False}).status_code == 409
+    assert client.post(url, json={"revision": 4, "hide_audio_toggle": 1}).status_code == 422
+    assert client.post(url, json={"revision": 4, "hide_audio_toggle": False}).json()['hide_audio_toggle'] is False

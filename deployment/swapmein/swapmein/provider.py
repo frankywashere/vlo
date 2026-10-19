@@ -85,7 +85,7 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
 def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_masking: bool, mask_style: str):
     instructions = []
     shared_cyan = mask_style in SHARED_CYAN_STYLES
-    has_coordinate_fallback = any(scene.get("coordinate_fallback") for target in targets for scene in target.get("scenes", []))
+    has_coordinate_fallback = any(target.get("coordinate_fallback") or any(scene.get("coordinate_fallback") for scene in target.get("scenes", [])) for target in targets)
     for index, target in enumerate(targets):
         anchor = target.get("anchor", target)
         reference = target["reference_index"] + 1
@@ -93,13 +93,15 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
                     f"{anchor['y'] * 100:.0f}% of its height, measured from the top left, "
                     f"at {anchor['time']:.2f} seconds")
         marker = (f" covered by {TARGET_COLORS[index][1]}-tinted depth imagery" if mask_style in {"depth_multi", "solid_multi"}
-                  else " covered by colored depth imagery") if enhanced_masking and not shared_cyan else ""
+                  else " covered by colored depth imagery") if enhanced_masking and not shared_cyan and not target.get("coordinate_fallback") else ""
         if target.get("scenes"):
             instructions.append(f"Person {index + 1} uses the character from reference image {reference}. "
                                 "Use the following scene-specific positions and absences as the authoritative assignments.")
         else:
             instructions.append(f"Person {index + 1}{marker}, {location}, must be replaced with the character "
                                 f"from reference image {reference}.")
+        if target.get("coordinate_fallback"):
+            instructions.append(f"Person {index + 1} has no detected selection mask. Use that person's stated position and timestamp to identify them in the original visible footage; do not substitute a different masked person.")
         for scene in target.get("scenes", []):
             interval = f"from {scene['start']:.2f} to {scene['end']:.2f} seconds"
             if scene["absent"]:
@@ -137,9 +139,11 @@ def compact_multi_scene_prompt(duration: int, targets: list[dict], enhanced_mask
         "Scene entries are authoritative. Replace the identified person throughout each listed interval. "
         "Absent intervals mean do not replace anyone for that assignment."]
     for index, target in enumerate(targets):
-        marker = f" ({TARGET_COLORS[index][1]} depth)" if enhanced_masking and mask_style in {"depth_multi", "solid_multi"} else ""
+        marker = f" ({TARGET_COLORS[index][1]} depth)" if enhanced_masking and not target.get("coordinate_fallback") and mask_style in {"depth_multi", "solid_multi"} else ""
         lines.append(f"Person {index + 1}{marker} -> reference image {target['reference_index'] + 1}.")
         scenes = target.get("scenes", [])
+        if target.get("coordinate_fallback"):
+            lines.append("No selection mask: identify from the stated position/time in original pixels, not another masked person.")
         if not scenes:
             point = target.get("anchor", target)
             lines.append(f"Identify at {point['time']:.2f}s, x={point['x'] * 100:.0f}%, y={point['y'] * 100:.0f}%; follow through the clip.")

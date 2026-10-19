@@ -636,3 +636,23 @@ Release the verified CPU overlay before the gateway, set the live pipeline depth
 default off and masked face-mesh default on, then publish the matching frontend.
 Keep Easy Mode and Enhanced Masking on, source audio processing off, and silent
 submission off by default. Existing job snapshots are not rewritten.
+
+Library provider failures retain an allowlisted reason: reAPI workflow error `80006`
+shows “Content rejected”; an explicit face-rejection signal shows “Face rejected”.
+Other failures remain generic. Logs retain only the numeric error code and category,
+not the provider's raw error message, URLs, or credentials. Existing credit refunds
+still run through the same idempotent refund path.
+
+Admin → Experimental → “Hide Submit without audio switch globally” controls the
+visibility of that switch for all users, including admins. It defaults off (visible),
+is returned through `/api/config`, and takes effect when a create page loads its
+configuration. It does not change audio defaults, saved per-run choices, or jobs
+already submitted.
+
+The missing-mask policy also applies to initial V2 Easy Mode anchors, including
+multi-person and face-mesh-only preparation. If an anchor misses SAM, matched
+people retain their masks; unmatched people either receive a bounded SAM retry
+in the anchor's detected shot or use their original coordinate/time instructions.
+A retry that finds no mask retains the coordinate fallback. Overlap conflicts
+stop submission rather than changing someone else's assignment. Initial and
+reviewed recovery share the same worker request/report validation.
