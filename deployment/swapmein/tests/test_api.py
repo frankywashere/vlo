@@ -129,7 +129,8 @@ def ready_job(records, owner):
 
 
 @pytest.mark.parametrize("duration,quoted", [(5, None), (15, None), (5, 60)])
-def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch, duration, quoted):
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monkeypatch, duration, quoted, reviewed):
     client, records, cloud, provider = api
     job_id = "b" * 32
     account_id = "c" * 64
@@ -144,6 +145,11 @@ def test_credit_job_submits_once_and_checks_provider_after_tab_closes(api, monke
         "setup": {"trim": [0, duration], "anchor": {"x": .5, "y": .5, "time": 1},
                   "easy_mode": True, "auto_generate": True},
     }
+    if reviewed:
+        job = records.data[f"jobs/{job_id}.json"]
+        job["setup"].update(easy_mode=False, auto_generate=False)
+        job.update(tracking_reviewed=True, tracking_applied_revision=1, generation_after_review_revision=1,
+            review_generation_queued=True, recover_missing_masks=False)
     if quoted is not None:
         records.data[f"jobs/{job_id}.json"]["generation_credits"] = quoted
     submitted = client.post("/internal/generate", json={"job_id": job_id})
