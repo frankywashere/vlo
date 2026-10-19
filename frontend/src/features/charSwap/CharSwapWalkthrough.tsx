@@ -565,6 +565,7 @@ export function CharSwapWalkthrough({
               <ReferencesStep
                 demo={demo}
                 cleanupEnabled={live && pipeline.referenceCleanupAvailable}
+                cleanupEndpoint={pipeline.referenceCleanupEndpoint}
                 pendingIds={assets.pendingReferences}
                 onImport={(id, file) => {
                   if (file.size > 5 * 1024 * 1024) {

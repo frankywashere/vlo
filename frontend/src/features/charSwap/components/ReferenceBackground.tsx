@@ -8,9 +8,10 @@ import { createLocalId } from "../utils/createLocalId";
 interface ReferenceBackgroundProps {
   targetId: string;
   reference: ReferenceAsset;
+  cleanupEndpoint?: string;
 }
 
-export function ReferenceBackground({targetId, reference}: ReferenceBackgroundProps) {
+export function ReferenceBackground({targetId, reference, cleanupEndpoint}: ReferenceBackgroundProps) {
   const operation = useRef<AbortController | null>(null);
   const original = reference.cleanup?.originalUrl ?? reference.url;
   function current() {
@@ -33,7 +34,7 @@ export function ReferenceBackground({targetId, reference}: ReferenceBackgroundPr
     useCharSwapStore.getState().assignReference(targetId, {...reference, id,
       cleanup: {originalUrl: original, mode: "clean", pending: true}});
     try {
-      const image = await cleanReferenceBackground(original, controller.signal);
+      const image = await cleanReferenceBackground(original, controller.signal, cleanupEndpoint);
       const asset = current();
       if (controller.signal.aborted || asset?.id !== id) return;
       const cleanedUrl = URL.createObjectURL(image);

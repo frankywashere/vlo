@@ -105,6 +105,11 @@ peak RSS, and a failed 8 GiB trial. **The first service HTTP proof took 168.83
 seconds end to end**; inference time is not upload-to-preview latency. Cold start,
 model initialization, and queueing can add substantial delay. Inputs are bounded
 to 5 MiB and normalized dimensions, with 100 attempts/account/day and 500/project/day.
+Photos are serialized per browser tab; each active request gets its own deadline.
+Cleanup uses the exact authenticated public gateway URL returned by `/api/config`
+and allowed by Hosting's CSP, bypassing [Hosting's 60-second proxy timeout](https://firebase.google.com/docs/hosting/cloud-run).
+The private CPU worker URL and invocation token never reach the browser. When
+changing gateway domains, update the client's exact host allowlist and CSP together.
 Inspect edges and retain the original fallback; fine hair color spill was visible
 in the benchmark. Source evidence is in the local
 `CharSwap/experiments/birefnet_cpu_v1/{analysis,result,service-proof}.json` reports.

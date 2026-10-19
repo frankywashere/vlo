@@ -112,3 +112,32 @@ it("aborts the active request while allowing another photo to proceed", async ()
   pending.resolve(response(new Blob(["stale"], {type: "image/jpeg"})));
   await settle();
 });
+
+it("uses only the configured trusted direct gateway and keeps its authenticated request private", async () => {
+  const {cleanReferenceBackground} = await import("../referenceCleanup");
+  const endpoint = "https://recastfx-api-63lqoskl5q-uk.a.run.app/api/references/clean";
+  const requests = vi.fn<typeof fetch>().mockResolvedValue(response(new Blob(["image"], {type: "image/jpeg"})));
+  vi.stubGlobal("fetch", requests);
+  await expect(cleanReferenceBackground("blob:photo", new AbortController().signal, endpoint)).resolves.toBeInstanceOf(Blob);
+  const [url, options] = requests.mock.calls.find(([, value]) => value?.method === "POST")!;
+  expect(url).toBe(endpoint);
+  expect(options).toMatchObject({credentials: "omit", cache: "no-store", redirect: "error",
+    headers: {"X-Firebase-Token": "account-token"}});
+  expect(requests.mock.calls[0][1]?.headers).toBeUndefined();
+});
+
+it.each([
+  "https://untrusted.run.app/api/references/clean",
+  "https://recastfx-api-63lqoskl5q-uk.a.run.app.evil.test/api/references/clean",
+  "http://recastfx-api-63lqoskl5q-uk.a.run.app/api/references/clean",
+  "https://user@recastfx-api-63lqoskl5q-uk.a.run.app/api/references/clean",
+  "https://recastfx-api-63lqoskl5q-uk.a.run.app/api/references/clean?forward=other",
+  "https://recastfx-api-63lqoskl5q-uk.a.run.app/api/other",
+])("rejects an untrusted cleanup endpoint before reading credentials: %s", async endpoint => {
+  const {cleanReferenceBackground} = await import("../referenceCleanup");
+  const requests = vi.fn<typeof fetch>();
+  vi.stubGlobal("fetch", requests);
+  await expect(cleanReferenceBackground("blob:photo", new AbortController().signal, endpoint)).rejects.toThrow("not configured");
+  expect(account.accountToken).not.toHaveBeenCalled();
+  expect(requests).not.toHaveBeenCalled();
+});

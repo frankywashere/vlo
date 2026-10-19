@@ -4,6 +4,7 @@ import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 import { reportClientError } from "./diagnostics";
 import { accountToken } from "./accountContext";
+import { isReferenceCleanupEndpoint } from "./referenceCleanup";
 
 export type GenerationProvider = "reAPI" | "ToAPIs";
 export type GenerationAccessMode = "api-key" | "credits";
@@ -17,6 +18,7 @@ export interface LivePipelineConfig {
   beta: "single-person" | "multi-person";
   credits_available?: boolean;
   reference_cleanup_available?: boolean;
+  reference_cleanup_endpoint?: string;
 }
 
 export type LiveJobStatus =
@@ -484,6 +486,8 @@ export async function getLiveConfig(
     beta: value.beta,
     credits_available: value.credits_available === true,
     reference_cleanup_available: value.reference_cleanup_available === true,
+    ...(isReferenceCleanupEndpoint(value.reference_cleanup_endpoint)
+      ? {reference_cleanup_endpoint: value.reference_cleanup_endpoint} : {}),
   };
 }
 

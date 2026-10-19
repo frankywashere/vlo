@@ -285,7 +285,11 @@ def config():
             "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "multi-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
             "accounts_required": settings.require_account, "credits_available": credit_ready,
-            "reference_cleanup_available": bool(settings.reference_cleanup_url)}
+            "reference_cleanup_available": bool(settings.reference_cleanup_url),
+            # A cold cleanup can exceed Firebase Hosting's 60-second proxy limit.
+            # This is our account-authenticated gateway, never the private worker.
+            "reference_cleanup_endpoint": settings.service_url + "/api/references/clean"
+                if settings.reference_cleanup_url and settings.service_url else None}
 
 
 @app.post("/api/references/clean")

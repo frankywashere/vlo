@@ -33,6 +33,20 @@ def test_cleanup_requires_account_before_compute(api,monkeypatch):
     response=client.post('/api/references/clean',files={'reference':('image.png',photo(),'image/png')})
     assert response.status_code==401
 
+def test_cleanup_config_points_at_authenticated_gateway_not_private_worker(api,monkeypatch):
+    client,_,_,_=api
+    url='https://recastfx-api-63lqoskl5q-uk.a.run.app'
+    monkeypatch.setattr(gateway,'settings',replace(gateway.settings,
+        service_url=url,reference_cleanup_url='https://private-cleanup.run.app'))
+    config=client.get('/api/config').json()
+    assert config['reference_cleanup_available'] is True
+    assert config['reference_cleanup_endpoint']==url+'/api/references/clean'
+    assert 'private-cleanup.run.app' not in str(config)
+    monkeypatch.setattr(gateway,'settings',replace(gateway.settings,reference_cleanup_url=''))
+    config=client.get('/api/config').json()
+    assert config['reference_cleanup_available'] is False
+    assert config['reference_cleanup_endpoint'] is None
+
 def worker_module():
     path=Path(__file__).parents[2]/'reference_cleanup'/'app.py'
     spec=importlib.util.spec_from_file_location('reference_cleanup_worker',path)

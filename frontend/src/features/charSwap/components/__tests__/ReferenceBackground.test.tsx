@@ -49,3 +49,10 @@ it("falls back to Original after cleanup failure",async()=>{
   expect(await screen.findByText("Cleanup unavailable")).toBeVisible();expect(assigned().cleanup?.mode).toBe("original");
   expect(assigned().url).toBe("blob:original");expect(getStepBlocker(useCharSwapStore.getState(),"references")).toBeNull();
 });
+it("passes the trusted configured gateway to the cleanup service",async()=>{
+  const endpoint="https://recastfx-api-63lqoskl5q-uk.a.run.app/api/references/clean";
+  vi.mocked(cleanReferenceBackground).mockResolvedValue(new Blob(["image"],{type:"image/jpeg"}));
+  render(<ReferenceBackground targetId="a" reference={assigned()} cleanupEndpoint={endpoint}/>);
+  await act(async()=>{});
+  expect(cleanReferenceBackground).toHaveBeenCalledWith("blob:original",expect.any(AbortSignal),endpoint);
+});

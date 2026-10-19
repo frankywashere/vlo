@@ -4,12 +4,22 @@ import { accountToken } from "./accountContext";
 // serialized so a cold start does not send the other characters into its queue.
 let cleanupQueue: Promise<void> = Promise.resolve();
 const REQUEST_TIMEOUT_MS = 260_000;
+const CLEANUP_PATH = "/api/references/clean";
+const CLEANUP_GATEWAY = "https://recastfx-api-63lqoskl5q-uk.a.run.app" + CLEANUP_PATH;
+
+export function isReferenceCleanupEndpoint(value: unknown): value is string {
+  // Never forward Firebase credentials to an arbitrary configured URL. The
+  // direct gateway avoids Firebase Hosting's shorter request timeout.
+  return value === CLEANUP_PATH || value === CLEANUP_GATEWAY;
+}
 
 function aborted() {
   return new DOMException("Reference cleanup was canceled.", "AbortError");
 }
 
-export function cleanReferenceBackground(url: string, signal: AbortSignal): Promise<Blob> {
+export function cleanReferenceBackground(url: string, signal: AbortSignal, endpoint = CLEANUP_PATH): Promise<Blob> {
+  if (!isReferenceCleanupEndpoint(endpoint))
+    return Promise.reject(new Error("Reference cleanup is not configured for this service."));
   if (signal.aborted) return Promise.reject(aborted());
   const result = cleanupQueue.then(async () => {
     // Removed photos remain in the promise chain but never read, authenticate,
@@ -28,7 +38,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal): Prom
       controller.abort();
     }, REQUEST_TIMEOUT_MS);
     try {
-      const image = await Promise.race([requestCleanup(url, controller.signal), canceled]);
+      const image = await Promise.race([requestCleanup(url, controller.signal, endpoint), canceled]);
       if (controller.signal.aborted) throw aborted();
       return image;
     } catch (error) {
@@ -55,7 +65,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal): Prom
   });
 }
 
-async function requestCleanup(url: string, signal: AbortSignal): Promise<Blob> {
+async function requestCleanup(url: string, signal: AbortSignal, endpoint: string): Promise<Blob> {
   const token = await accountToken();
   if (signal.aborted) throw aborted();
   if (!token) throw new Error("Sign in to clean a reference background.");
@@ -68,8 +78,8 @@ async function requestCleanup(url: string, signal: AbortSignal): Promise<Blob> {
   if (blob.size > 5 * 1024 * 1024) throw new Error("Choose a reference smaller than 5 MiB.");
   const body = new FormData();
   body.append("reference", blob, "reference.jpg");
-  const response = await fetch("/api/references/clean", {method: "POST", body, signal,
-    cache: "no-store", credentials: "omit", headers: {"X-Firebase-Token": token}});
+  const response = await fetch(endpoint, {method: "POST", body, signal,
+    cache: "no-store", credentials: "omit", redirect: "error", headers: {"X-Firebase-Token": token}});
   if (!response.ok) {
     let message = "Background cleanup did not finish. You can use the original image.";
     try {

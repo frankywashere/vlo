@@ -25,6 +25,7 @@ interface ReferencesStepProps {
   onImport: (id: string, file: File) => void;
   pendingIds: string[];
   cleanupEnabled?: boolean;
+  cleanupEndpoint?: string;
 }
 
 interface ReferenceCardProps extends ReferencesStepProps {
@@ -45,6 +46,7 @@ function ReferenceCard({
   assignReference,
   clearReference,
   cleanupEnabled,
+  cleanupEndpoint,
 }: ReferenceCardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const pending = pendingIds.includes(person.id);
@@ -128,7 +130,7 @@ function ReferenceCard({
               </IconButton>
             )}
           </Stack>
-          {cleanupEnabled && reference && <ReferenceBackground targetId={person.id} reference={reference} />}
+          {cleanupEnabled && reference && <ReferenceBackground targetId={person.id} reference={reference} cleanupEndpoint={cleanupEndpoint} />}
           {demo && (
             <Button
               size="small"
@@ -175,6 +177,7 @@ export function ReferencesStep({
   onImport,
   pendingIds,
   cleanupEnabled = false,
+  cleanupEndpoint,
 }: ReferencesStepProps) {
   const { targets, references, assignments, assignReference, clearReference } =
     useCharSwapStore(
@@ -202,6 +205,7 @@ export function ReferencesStep({
           demo={demo}
           pendingIds={pendingIds}
           cleanupEnabled={cleanupEnabled}
+          cleanupEndpoint={cleanupEndpoint}
           onImport={onImport}
           assignReference={assignReference}
           clearReference={clearReference}
