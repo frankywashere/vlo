@@ -102,7 +102,7 @@ export function GenerationPage({
             {complete
               ? "Watch it, save it, and make another."
               : uploadSaved
-                ? "Your job is saved. You can come back to it in your library."
+                ? "Your upload is saved. You can safely close this tab and see progress in your Library."
                 : "Keep this tab open until your upload is confirmed."}
           </Typography>
         </Box>
@@ -255,7 +255,7 @@ export function GenerationPage({
               {download.busy ? "Downloading…" : "Download video"}
             </Button>
           )}
-          {job && (
+          {job && !canCreateAnother && !complete && (
             <Button variant="outlined" onClick={onLibrary}>
               Open your library
             </Button>
@@ -267,7 +267,7 @@ export function GenerationPage({
           )}
           {failed && <Button onClick={onReview}>Review setup</Button>}
           {(complete || canCreateAnother) && (
-            <Button onClick={onNew}>Create another recast</Button>
+            <Button variant="contained" onClick={onNew}>Start a new recast</Button>
           )}
         </Stack>
       </Box>

@@ -194,8 +194,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
       canVisitStep(state, step) &&
       (step !== "generation" ||
         state.trackingReady ||
-        (state.easyMode ?? true) ||
-        (state.clip?.mode === "upload" && !state.enhancedCharacterMasking))
+        (state.easyMode ?? true))
     )
       set({ step, error: null });
   },
@@ -207,8 +206,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     }
     if (state.step === "review" || state.step === "generation" || state.step === "matches" && !state.trackingReady) return;
     const steps =
-      (state.easyMode ?? true) ||
-      (state.clip?.mode === "upload" && !state.enhancedCharacterMasking)
+      (state.easyMode ?? true)
         ? STEPS.filter((step) => step !== "matches")
         : STEPS;
     const next = steps[steps.indexOf(state.step) + 1];

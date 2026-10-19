@@ -229,9 +229,7 @@ export function CharSwapWalkthrough({
       !pipeline.job.tracking_segments.some((segment) => segment.needs_review),
   );
   const skipMaskReview =
-    easyMode ||
-    (clip?.mode === "upload" && !enhancedCharacterMasking) ||
-    noFlaggedSections;
+    easyMode || noFlaggedSections;
   const clipStep = step === "clip" || step === "trim";
   const flowSteps = (
     skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS
@@ -385,8 +383,7 @@ export function CharSwapWalkthrough({
       await pipeline.prepare(state, true);
     } else if (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) {
       if (!(await pipeline.prepare(state))) return;
-      if (enhancedCharacterMasking) visit("matches");
-      else { visit("generation"); await pipeline.generate(); }
+      visit("matches");
     } else if (pipeline.job.status === "ready") {
       visit("generation");
       await pipeline.generate();
@@ -424,7 +421,15 @@ export function CharSwapWalkthrough({
       }}
     >
       {pendingCreate && <Alert severity="info" sx={{ mb: 2 }}>Your new setup will open once the current upload or render submission is confirmed. Your saved job will remain in your Library.</Alert>}
-      <CreationProgress step={step} canVisit={canGoTo} onVisit={visit} />
+      <CreationProgress step={step} manualReview={!easyMode} sceneReviewed={trackingReady}
+        canVisit={(item) => !easyMode && item === "review" && !trackingReady ? false
+          : canGoTo(!easyMode && item === "matches" && !pipeline.job ? "review" : item)}
+        onVisit={(item) => visit(!easyMode && item === "matches" && !pipeline.job ? "review" : item)} />
+      {step !== "generation" && renderCanContinueInLibrary && (
+        <Alert severity="success" sx={{ mb: 2 }} action={<Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
+          Your upload is saved. You can safely close this tab and see progress in your Library.
+        </Alert>
+      )}
       <ApiKeySettingsDialog apiKeyAllowed={apiKeyAllowed} open={apiSettingsOpen && apiKeyAllowed}
         apiKey={apiKey} provider={provider} live={pipeline.enabled} onSave={saveKey} onClear={clearKey}
         onProviderChange={value => { pipeline.clear(); clearKey(); setProvider(value); }}
@@ -456,7 +461,7 @@ export function CharSwapWalkthrough({
                 >
                   {clipStep && clip
                     ? "Choose your moment."
-                    : STEP_INFO[step].title}
+                    : step === "review" && !easyMode && !trackingReady ? "Prepare and check scenes" : STEP_INFO[step].title}
                 </Typography>
                 <Typography
                   color="text.secondary"
@@ -464,7 +469,7 @@ export function CharSwapWalkthrough({
                 >
                   {clipStep && clip
                     ? "Trim your clip. The estimate updates as you go."
-                    : STEP_INFO[step].description}
+                    : step === "review" && !easyMode && !trackingReady ? "Prepare your clip, then confirm your people in each scene before generating." : STEP_INFO[step].description}
                 </Typography>
               </Box>
               {clip && (
@@ -570,6 +575,7 @@ export function CharSwapWalkthrough({
                     targets={targets}
                     references={targets.map(target => ({ targetId: target.id, asset: references.find(reference => reference.id === assignments[target.id]) }))}
                     duration={pipeline.job.duration ?? selectedDuration}
+                    enhancedMasking={enhancedCharacterMasking}
                     width={pipeline.job.width ?? clip?.width ?? 854}
                     height={pipeline.job.height ?? clip?.height ?? 480}
                     busy={pipeline.busy}

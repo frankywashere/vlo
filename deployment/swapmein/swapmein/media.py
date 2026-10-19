@@ -17,6 +17,22 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .errors import PublicError
 
 
+def scene_thumbnails(source: Path, directory: Path, frames: list[int]) -> dict[int, Path]:
+    """Decode bounded review thumbnails in one pass, including for mobile Safari."""
+    frames = sorted(set(frames))
+    if not frames or len(frames) > 300 or any(type(frame) is not int or not 0 <= frame < 360 for frame in frames):
+        raise PublicError("The scene preview frames are invalid.")
+    directory.mkdir(exist_ok=True)
+    selection = "+".join(f"eq(n\\,{frame})" for frame in frames)
+    run(["ffmpeg", "-v", "error", "-y", "-i", str(source),
+         "-vf", f"select='{selection}',scale=320:-2", "-fps_mode", "vfr",
+         "-q:v", "3", str(directory / "scene-%03d.jpg")], timeout=45)
+    result = {frame: directory / f"scene-{index + 1:03d}.jpg" for index, frame in enumerate(frames)}
+    if any(not path.is_file() for path in result.values()):
+        raise PublicError("The scene previews could not be prepared.")
+    return result
+
+
 class Anchor(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     x: float = Field(ge=0, le=1)

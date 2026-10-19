@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Alert,
   Avatar,
   Box,
   Button,
@@ -11,6 +12,7 @@ import {
 import type { AccountJob } from "../services/accounts";
 import { isGenerationRunning } from "../utils/libraryJobs";
 import { JobSettings } from "./JobSettings";
+import { useVideoDownload } from "../hooks/useVideoDownload";
 import { JobElapsedTime } from "./JobElapsedTime";
 
 const STATUS_LABELS: Record<AccountJob["status"], string> = {
@@ -32,6 +34,7 @@ interface GenerationCardProps {
 }
 
 export function GenerationCard({ job, onOpen, onRemove }: GenerationCardProps) {
+  const download = useVideoDownload();
   const [previewFailed, setPreviewFailed] = useState(false);
   const running = isGenerationRunning(job);
   const finished = job.status === "completed" && Boolean(job.output_url);
@@ -199,6 +202,7 @@ export function GenerationCard({ job, onOpen, onRemove }: GenerationCardProps) {
             {job.message}
           </Typography>
         )}
+        {download.error && <Alert severity="error" sx={{ mt: 2 }}>{download.error}</Alert>}
         <Stack
           direction="row"
           justifyContent="space-between"
@@ -206,8 +210,8 @@ export function GenerationCard({ job, onOpen, onRemove }: GenerationCardProps) {
           sx={{ mt: "auto", pt: 2 }}
         >
           {finished ? (
-            <Button component="a" href={job.output_url} download sx={{ px: 0 }}>
-              Download video
+            <Button disabled={download.busy} onClick={() => void download.download(job.output_url!)} sx={{ px: 0 }}>
+              {download.busy ? "Downloading…" : "Download video"}
             </Button>
           ) : (
             job.status !== "expired" && (

@@ -131,8 +131,9 @@ function AccountWorkspace({
   destination,
   onDestination,
 }: AccountWorkspaceProps) {
+  const [homeRequested, setHomeRequested] = useState(false);
   const view = account.user
-    ? destination === "home"
+    ? destination === "home" && !homeRequested
       ? "library"
       : destination
     : "home";
@@ -186,6 +187,7 @@ function AccountWorkspace({
     globalThis.history.replaceState(null, "", url);
   }, [account.user]);
   function navigate(next: AppView) {
+    if (next === "home") setHomeRequested(true);
     if (next === "create") {
       setStarted(true);
       creationRef.current?.startAnotherIfSaved();

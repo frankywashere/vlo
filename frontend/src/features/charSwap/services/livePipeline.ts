@@ -103,6 +103,7 @@ export interface SelectionTarget {
 }
 
 export interface TrackingReviewSegment {
+  thumbnail_url?: string;
   id: string;
   start_frame: number;
   end_frame: number;
@@ -128,6 +129,12 @@ export interface LivePipelineSession {
 }
 
 const REQUEST_TIMEOUT_MS = 45000;
+function isSafeMediaUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch { return false; }
+}
 const JOB_STATUSES: ReadonlySet<string> = new Set([
   "queued",
   "preparing",
@@ -404,6 +411,7 @@ function readJob(value: unknown): LivePipelineJob {
       id: segment.id, start_frame: segment.start_frame, end_frame: segment.end_frame,
       start: segment.start, end: segment.end, seek_time: segment.seek_time,
       reason: segment.reason, needs_review: segment.needs_review,
+      ...(typeof segment.thumbnail_url === "string" && isSafeMediaUrl(segment.thumbnail_url) ? {thumbnail_url: segment.thumbnail_url} : {}),
       ...(segment.selected_label !== undefined ? {selected_label: segment.selected_label} : {}),
       ...(segment.target_id !== undefined ? {target_id: segment.target_id} : {}),
       ...(segment.target_name !== undefined ? {target_name: segment.target_name} : {}),

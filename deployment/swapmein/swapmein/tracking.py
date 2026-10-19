@@ -24,7 +24,7 @@ MAX_SEGMENTS = 60
 MAX_FRAME_BYTES = 8_000_000
 
 
-def merge_all_people_masks(archive: Path, output: Path, metadata: dict):
+def merge_all_people_masks(archive: Path, output: Path, metadata: dict, *, detection_summary: dict | None = None):
     """Union every non-background SAM label per frame into the compose label 1.
 
     No identity continuity or scene matching is needed. Empty shots remain
@@ -34,10 +34,13 @@ def merge_all_people_masks(archive: Path, output: Path, metadata: dict):
         raise _invalid("Save the combined masks separately from the detected masks.")
     validation = {**metadata, "scene_cuts": [], "anchor": {"frame": 0, "time": 0}}
     coverage = []
+    counts = []
     try:
         with _maps(archive, validation) as read, zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as masks:
             for index in range(metadata["frames"]):
-                selected = (read(index) > 0).astype(np.uint16)
+                labels = read(index)
+                counts.append(int(np.count_nonzero(np.unique(labels))))
+                selected = (labels > 0).astype(np.uint16)
                 coverage.append(int(np.count_nonzero(selected)))
                 buffer = BytesIO()
                 Image.fromarray(selected).save(buffer, "PNG")
@@ -45,6 +48,13 @@ def merge_all_people_masks(archive: Path, output: Path, metadata: dict):
         if not any(coverage):
             raise PublicError("No people were detected in this clip. Try a clearer section or turn enhanced masking off.",
                               code="no_people_detected")
+        if detection_summary is not None:
+            cuts = sorted({round(cut * FPS) for cut in metadata.get("scene_cuts", []) if 0 < round(cut * FPS) < len(counts)})
+            detection_summary.update(first_frame_people=counts[0], max_people=max(counts),
+                frames_with_people=sum(count > 0 for count in counts),
+                frames_with_multiple_people=sum(count > 1 for count in counts),
+                scene_people=[{"start_frame": start, "end_frame": end, "max_people": max(counts[start:end])}
+                    for start, end in zip([0, *cuts], [*cuts, len(counts)])])
         return coverage
     except Exception:
         Path(output).unlink(missing_ok=True)
@@ -237,7 +247,8 @@ def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict
     for index, segment in enumerate(segments):
         start, end = segment["start_frame"], segment["end_frame"]
         contains_anchor = start <= anchor_frame < end
-        healthy_anchor = contains_anchor and segment["reason"] == "selected_person" and not segment["merged"]
+        healthy_anchor = (contains_anchor and segment["reason"] == "selected_person"
+                          and not segment["merged"] and not metadata.get("review_all_scenes"))
         seek_frame = anchor_frame if contains_anchor else (start + end - 1) // 2
         result.append({"id": f"segment-{index:03d}", "start_frame": start, "end_frame": end,
                        "start": start / FPS, "end": end / FPS, "seek_time": seek_frame / FPS,

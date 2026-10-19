@@ -64,6 +64,16 @@ def test_continuous_healthy_anchor_needs_no_review_and_keeps_only_selected_perso
         assert np.array_equal(binary, (raw == 2).astype(np.uint16))
 
 
+def test_manual_review_includes_anchor_scene_and_preserves_explicit_absence(tmp_path):
+    path = masks(tmp_path / "masks.zip", [person()] * 12)
+    info = {**metadata(12, cuts=[4, 8]), "review_all_scenes": True}
+    plan = analyze_tracking(path, info, 2)
+    assert len(plan["segments"]) == 3 and all(section["needs_review"] for section in plan["segments"])
+    choices = [choose(section, absent=index == 1) for index, section in enumerate(plan["segments"])]
+    result = resolve_tracking(path, info, plan, choices, tmp_path / "reviewed.zip")
+    assert result["coverage"] == [144] * 4 + [0] * 4 + [144] * 4
+
+
 def test_each_cut_requires_confirmation_even_if_sam_reuses_the_same_label(tmp_path):
     path = masks(tmp_path / "masks.zip", [person()] * 12)
     info = metadata(12, cuts=[4, 8])

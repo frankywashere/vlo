@@ -1,6 +1,7 @@
 """Recastfx gateway with private account credits and owner-gated BYOK access."""
 from functools import lru_cache
 from pathlib import Path
+import math
 import os
 import secrets
 import re
@@ -242,7 +243,14 @@ def view(job: dict):
         if job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available):
             result[output] = cloud.signed_url(job[field])
     if job.get("tracking_plan") and temporary_media_available:
-        result["tracking_segments"] = job["tracking_plan"]["segments"]
+        result["tracking_segments"] = []
+        for section in job["tracking_plan"]["segments"]:
+            preview = {**section}
+            frame = str(math.floor(section["seek_time"] * 24 + 1e-7))
+            uri = job.get("scene_thumbnail_uris", {}).get(frame)
+            if uri:
+                preview["thumbnail_url"] = cloud.signed_url(uri)
+            result["tracking_segments"].append(preview)
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]
     if job.get("normalized_uri") and temporary_media_available:
@@ -917,6 +925,21 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     if (review.revision != job.get("tracking_revision") or not expected
             or len(supplied) != len(expected) or set(supplied) != expected):
         raise PublicError(invalid, 400, code="tracking_review_invalid")
+    if plan.get("version") == 3:
+        from .scene_selection import resolve
+        choices = [choice.model_dump() for choice in review.choices]
+        targets = resolve(job["tracking_metadata"], plan, choices)
+        def apply_scene_choices(current):
+            if current.get("tracking_revision") != review.revision or current.get("status") != "tracking_review":
+                raise PublicError(invalid, 409, code="tracking_review_invalid")
+            return {**current, "status": "ready", "normalized_targets": targets,
+                "tracking_applied_revision": review.revision, "tracking_reviewed": True,
+                "tracking_choices": choices, "message": "Scene selections saved. Review your clip before generating.",
+                "updated_at": time.time()}
+        job = records.update(f"jobs/{job_id}.json", apply_scene_choices)
+        emit("scene_selections_applied", job_id=job_id, section_count=len(choices),
+             absent_sections=sum(choice["absent"] for choice in choices))
+        return view(job)
     current, _ = records.read("control/preparation.json")
     check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
     reserved = claimed = queued = False

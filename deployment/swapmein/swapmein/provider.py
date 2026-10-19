@@ -28,6 +28,7 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
             "Keep each replacement in its original person's position, following that person's individual motion, "
             "pose, interactions and speaking timing. Do not merge people, add extra characters, or leave human body parts. "
             "Include people entering later scenes. In frames without people, preserve the scene without adding anyone. "
+            "Inspect the entire reference video, not only its opening frame. People who enter later or first appear after a cut must also be replaced. "
             f"Preserve the background, camera, lighting and exact {duration}-second timing. "
             "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
             "Replace the existing people rather than adding characters beside them."
@@ -90,8 +91,21 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
                     f"at {anchor['time']:.2f} seconds")
         marker = (f" covered by {TARGET_COLORS[index][1]}-tinted depth imagery" if mask_style == "depth_multi"
                   else " covered by colored depth imagery") if enhanced_masking else ""
-        instructions.append(f"Person {index + 1}{marker}, {location}, must be replaced with the character "
-                            f"from reference image {reference}.")
+        if target.get("scenes"):
+            instructions.append(f"Person {index + 1} uses the character from reference image {reference}. "
+                                "Use the following scene-specific positions and absences as the authoritative assignments.")
+        else:
+            instructions.append(f"Person {index + 1}{marker}, {location}, must be replaced with the character "
+                                f"from reference image {reference}.")
+        for scene in target.get("scenes", []):
+            interval = f"from {scene['start']:.2f} to {scene['end']:.2f} seconds"
+            if scene["absent"]:
+                instructions.append(f"Person {index + 1} is absent {interval}; do not replace anyone for this assignment.")
+            else:
+                point = scene["anchor"]
+                instructions.append(f"In the scene {interval}, identify Person {index + 1} at "
+                    f"{point['time']:.2f} seconds, {point['x'] * 100:.0f}% across and {point['y'] * 100:.0f}% down "
+                    f"from the top left; replace that person with reference image {reference} throughout this scene.")
     return (
         "Use reference video 1 as the source scene and precise motion guide. "
         + " ".join(instructions) + " "

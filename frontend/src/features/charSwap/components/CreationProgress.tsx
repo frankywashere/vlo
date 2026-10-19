@@ -11,22 +11,30 @@ const VISIBLE_STEPS = [
 
 interface CreationProgressProps {
   step: Step;
+  manualReview?: boolean;
+  sceneReviewed?: boolean;
   canVisit: (step: Step) => boolean;
   onVisit: (step: Step) => void;
 }
 
 export function CreationProgress({
   step,
+  manualReview = false,
+  sceneReviewed = false,
   canVisit,
   onVisit,
 }: CreationProgressProps) {
+  const steps: ReadonlyArray<readonly [Step, string]> = manualReview
+    ? [["clip", "Clip"], ["people", "People"], ["references", "Character"], ["matches", "Check scenes"], ["review", "Generate"]]
+    : VISIBLE_STEPS;
   const visibleStep =
     step === "trim"
       ? "clip"
-      : ["matches", "generation"].includes(step)
+      : manualReview && step === "review" && !sceneReviewed ? "matches"
+      : step === "generation" || !manualReview && step === "matches"
         ? "review"
         : step;
-  const current = VISIBLE_STEPS.findIndex(([id]) => id === visibleStep);
+  const current = steps.findIndex(([id]) => id === visibleStep);
   return (
     <Box
       component="nav"
@@ -34,7 +42,7 @@ export function CreationProgress({
       sx={{
         position: "relative",
         display: "grid",
-        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+        gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`,
         mb: { xs: 2, md: 2.5 },
         pt: 1,
       }}
@@ -44,8 +52,8 @@ export function CreationProgress({
         sx={{
           position: "absolute",
           top: 22,
-          left: "12.5%",
-          right: "12.5%",
+          left: `${50 / steps.length}%`,
+          right: `${50 / steps.length}%`,
           height: 2,
           bgcolor: "divider",
         }}
@@ -53,13 +61,13 @@ export function CreationProgress({
         <Box
           sx={{
             height: "100%",
-            width: (Math.max(0, current) / 3) * 100 + "%",
+            width: (Math.max(0, current) / (steps.length - 1)) * 100 + "%",
             bgcolor: "primary.main",
             transition: "width 250ms ease",
           }}
         />
       </Box>
-      {VISIBLE_STEPS.map(([id, label], index) => (
+      {steps.map(([id, label], index) => (
         <ButtonBase
           key={id}
           aria-label={label}

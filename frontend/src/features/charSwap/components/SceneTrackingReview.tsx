@@ -3,7 +3,7 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
+  ButtonBase,
   FormControlLabel,
   LinearProgress,
   Stack,
@@ -24,6 +24,7 @@ import { SceneReviewFrame } from "./SceneReviewFrame";
 import { PANEL } from "./stepStyles";
 
 interface SceneTrackingReviewProps {
+  enhancedMasking?: boolean;
   sourceUrl: string;
   trackingUrl?: string;
   segments: TrackingReviewSegment[];
@@ -53,6 +54,7 @@ const REASONS: Record<string, string> = {
 
 /** Review a still at a time; decisions retain exact normalized frame coordinates. */
 export function SceneTrackingReview({
+  enhancedMasking = true,
   sourceUrl,
   trackingUrl,
   segments,
@@ -207,10 +209,8 @@ export function SceneTrackingReview({
         sx={{ display: "flex", gap: 1, overflowX: "auto", pb: 0.5 }}
       >
         {sections.map((section, index) => (
-          <Chip
+          <ButtonBase
             key={section.id}
-            component="button"
-            clickable
             disabled={busy}
             aria-current={index === activeIndex ? "step" : undefined}
             aria-label={`${multiplePeople ? `${section.target_name ?? targets.find((person) => person.id === section.target_id)?.name ?? "Person"}, ` : ""}Section ${index + 1}${choices[section.id] ? ", checked" : ", needs checking"}`}
@@ -220,10 +220,14 @@ export function SceneTrackingReview({
                 acknowledgedError: errorSegmentId ?? null,
               })
             }
-            icon={choices[section.id] ? <CheckRounded /> : undefined}
-            label={`${multiplePeople ? `${section.target_name ?? targets.find((person) => person.id === section.target_id)?.name ?? "Person"} · ` : ""}${index + 1} · ${formatTime(section.start)}–${formatTime(section.end)}`}
             sx={{
               flexShrink: 0,
+              width: 144,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "stretch",
+              borderRadius: 1,
+              overflow: "hidden",
               minHeight: 44,
               bgcolor:
                 index === activeIndex ? "action.selected" : "background.paper",
@@ -232,7 +236,15 @@ export function SceneTrackingReview({
               borderColor:
                 index === activeIndex ? "primary.main" : "transparent",
             }}
-          />
+          >
+            {section.thumbnail_url ? <Box component="img" src={section.thumbnail_url} loading="lazy" alt=""
+              sx={{ width: "100%", height: 80, objectFit: "contain", bgcolor: "#0d0f12" }} />
+              : <Box sx={{ height: 60, display: "grid", placeItems: "center", bgcolor: "action.hover" }}><Typography variant="caption">Scene {index + 1}</Typography></Box>}
+            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ p: 1 }}>
+              {choices[section.id] && <CheckRounded sx={{ fontSize: 16 }} />}
+              <Typography variant="caption">{multiplePeople ? `${section.target_name ?? "Person"} · ` : ""}{formatTime(section.start)}–{formatTime(section.end)}</Typography>
+            </Stack>
+          </ButtonBase>
         ))}
       </Box>
       <Typography
@@ -363,13 +375,13 @@ export function SceneTrackingReview({
       </Box>
       {allChosen && (
         <Alert severity="success">
-          All sections checked. Apply your matches to rebuild the guide, or tap
+          All sections checked. Apply your matches to {enhancedMasking ? "rebuild the guide" : "save your scene selections"}, or tap
           a checked section to change it.
         </Alert>
       )}
       <Typography variant="body2" color="text.secondary">
         Your choices apply to these sections only. The complete guide is
-        reviewed before generation.
+        reviewed before generation. {!enhancedMasking && "Masking stays off; your positions and timestamps are included in the generation prompt."}
       </Typography>
       <Button
         size="large"

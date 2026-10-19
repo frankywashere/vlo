@@ -28,6 +28,15 @@ function loadedFrame() {
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
 
 describe("still-frame scene tracking review", () => {
+  it("shows server-rendered scene thumbnails and keeps non-masked choices explicit", () => {
+    const props = properties();
+    props.segments[1] = {...props.segments[1], thumbnail_url: "https://storage.googleapis.com/test/scene.jpg"} as typeof props.segments[number];
+    render(<SceneTrackingReview {...props} enhancedMasking={false} />);
+    const navigation = screen.getByRole("navigation", {name: "Sections to check"});
+    expect(navigation.querySelector("img")).toHaveAttribute("src", "https://storage.googleapis.com/test/scene.jpg");
+    expect(screen.getByText(/Masking stays off/)).toBeInTheDocument();
+    expect(screen.queryByRole("switch", {name: "Show detected people"})).not.toBeInTheDocument();
+  });
   it("shows the correct person and replacement for overlapping multi-person scene checks", () => {
     const props = properties();
     const targets = [props.target, {...props.target, id: "second", name: "Person 2", color: "#ff4fd8"}];
