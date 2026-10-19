@@ -200,3 +200,65 @@ it("holds the final touch-drag position across release and late time events", ()
   fireEvent.seeked(video);
   expect(surface).toHaveAttribute("aria-disabled", "false");
 });
+
+it.each(["seeked", "canPlay"] as const)("unlocks a frame whose %s arrived before touch release without requiring another seek event", (readyEvent) => {
+  const {video, load, surface, tap, onPoint} = preview();
+  load();
+  const slider = screen.getByRole("slider");
+  const root = slider.closest(".MuiSlider-root")!;
+  vi.spyOn(root, "getBoundingClientRect").mockReturnValue({left: 0, top: 0, width: 200, height: 40, right: 200, bottom: 40, x: 0, y: 0, toJSON: () => ({})});
+  fireEvent.pointerDown(root, {pointerId: 1, pointerType: "touch"});
+  fireEvent.touchStart(root, {changedTouches: [{identifier: 1, clientX: 0, clientY: 20}]});
+  fireEvent.touchMove(document, {changedTouches: [{identifier: 1, clientX: 121, clientY: 20}]});
+  const chosen = Number(slider.getAttribute("aria-valuenow"));
+  fireEvent[readyEvent](video); // Safari can finish decoding while the finger is still down.
+  tap();
+  expect(onPoint).not.toHaveBeenCalled();
+  expect(surface).toHaveAttribute("aria-disabled", "true");
+  fireEvent.touchEnd(document, {changedTouches: [{identifier: 1, clientX: 121, clientY: 20}]});
+  // No new native seek is needed at the same timestamp, so there may be no
+  // later seeked/canplay event. The already-confirmed frame must be usable.
+  expect(video.currentTime).toBeCloseTo(chosen);
+  expect(surface).toHaveAttribute("aria-disabled", "false");
+  tap();
+  expect(onPoint).toHaveBeenCalledTimes(1);
+  expect(onPoint.mock.calls[0][1].currentTime).toBeCloseTo(chosen);
+});
+
+it("does not lock an already decoded frame after a touch drag that stays at the same position", () => {
+  const {video, load, surface, tap, onPoint} = preview();
+  load();
+  const root = screen.getByRole("slider").closest(".MuiSlider-root")!;
+  vi.spyOn(root, "getBoundingClientRect").mockReturnValue({left: 0, top: 0, width: 200, height: 40, right: 200, bottom: 40, x: 0, y: 0, toJSON: () => ({})});
+  fireEvent.pointerDown(root, {pointerId: 1, pointerType: "touch"});
+  fireEvent.touchStart(root, {changedTouches: [{identifier: 1, clientX: 0, clientY: 20}]});
+  tap();
+  expect(onPoint).not.toHaveBeenCalled();
+  fireEvent.touchEnd(document, {changedTouches: [{identifier: 1, clientX: 0, clientY: 20}]});
+  expect(video.currentTime).toBe(4);
+  expect(surface).toHaveAttribute("aria-disabled", "false");
+  tap();
+  expect(onPoint).toHaveBeenCalledTimes(1);
+});
+
+it("keeps waiting for the latest frame when only an older seek finished during the drag", () => {
+  const {video, load, surface, tap, onPoint} = preview();
+  load();
+  const root = screen.getByRole("slider").closest(".MuiSlider-root")!;
+  vi.spyOn(root, "getBoundingClientRect").mockReturnValue({left: 0, top: 0, width: 200, height: 40, right: 200, bottom: 40, x: 0, y: 0, toJSON: () => ({})});
+  fireEvent.pointerDown(root, {pointerId: 1, pointerType: "touch"});
+  fireEvent.touchStart(root, {changedTouches: [{identifier: 1, clientX: 0, clientY: 20}]});
+  fireEvent.touchMove(document, {changedTouches: [{identifier: 1, clientX: 121, clientY: 20}]});
+  const chosen = video.currentTime;
+  video.currentTime = 5;
+  fireEvent.seeked(video);
+  fireEvent.touchEnd(document, {changedTouches: [{identifier: 1, clientX: 121, clientY: 20}]});
+  expect(surface).toHaveAttribute("aria-disabled", "true");
+  tap();
+  expect(onPoint).not.toHaveBeenCalled();
+  video.currentTime = chosen;
+  fireEvent.seeked(video);
+  expect(surface).toHaveAttribute("aria-disabled", "false");
+  tap();
+  expect(onPoint).toHaveBeenCalledTimes(1);
+});

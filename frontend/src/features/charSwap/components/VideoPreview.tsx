@@ -71,10 +71,10 @@ export function VideoPreview({
     setTime(next);
     const video = videoRef.current;
     if (!video) return;
-    const settled = !sourceChanged && !scrubbing.current && pendingSeek.current === null && video.readyState >= 2
+    const settled = !sourceChanged && pendingSeek.current === null && video.readyState >= 2
       && !video.seeking && Math.abs(video.currentTime - next) < 1 / 48;
     pendingSeek.current = settled ? null : next;
-    setFrameReady(settled);
+    setFrameReady(settled && !scrubbing.current);
     video.pause();
     if (!settled && (sourceChanged || Math.abs(video.currentTime - next) >= 1 / 48)) {
       // Safari can defer/reject a seek until metadata arrives. Keep the intent
@@ -84,7 +84,7 @@ export function VideoPreview({
   }
   function reportFrameReady() {
     const video = videoRef.current;
-    if (!video || video.seeking || video.readyState < 2 || scrubbing.current) return;
+    if (!video || video.seeking || video.readyState < 2) return;
     const target = pendingSeek.current ?? (video.paused ? requestedTime.current : null);
     if (target !== null && Math.abs(video.currentTime - target) > 1 / 48) {
       pendingSeek.current = target;
@@ -93,8 +93,10 @@ export function VideoPreview({
       return;
     }
     if (video.currentTime < start || video.currentTime >= end) return;
+    // A seek may finish before touchend. Remember that decoded frame now;
+    // releasing at the same time will not necessarily emit another seeked.
     pendingSeek.current = null;
-    setFrameReady(true);
+    setFrameReady(!scrubbing.current);
   }
   function selectPoint(point: NormalizedPoint) {
     const video = videoRef.current;
