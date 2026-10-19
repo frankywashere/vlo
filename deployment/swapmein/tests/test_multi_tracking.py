@@ -54,14 +54,46 @@ def test_non_easy_scene_choices_keep_each_person_reference_when_sam_ids_swap(tmp
             assert labels[16, 12] == 1 and labels[16, 50] == 2
 
 
-def test_easy_mode_rejects_two_references_assigned_to_the_same_sam_track(tmp_path):
+@pytest.mark.parametrize("cross_shot", [False, True])
+def test_easy_mode_rejects_two_references_assigned_to_the_same_sam_track(tmp_path, cross_shot):
     archive, metadata = fixture(tmp_path, same_track=True)
     tracks = selected_tracks(archive, metadata, metadata["targets"])
     output = tmp_path / "mapped.zip"
     with pytest.raises(PublicError) as error:
-        build_selected_masks(archive, metadata, tracks, output)
+        build_selected_masks(archive, metadata, tracks, output, allow_cross_shot_ids=cross_shot)
     assert error.value.code == "tracking_target_conflict"
     assert not output.exists() and not output.with_name("mapped.zip.partial").exists()
+
+
+@pytest.mark.parametrize("allow_unmatched", [False, True])
+def test_easy_reused_id_is_scoped_to_each_selected_shot(tmp_path, allow_unmatched):
+    archive, metadata = fixture(tmp_path)
+    # ID 11 changes from the left person to the right person after the cut.
+    metadata["targets"][1]["anchor"] = {"x": .8, "y": .5, "time": 2.5, "frame": 60}
+    tracks = selected_tracks(archive, metadata, metadata["targets"])
+    assert [item["selected_label"] for item in tracks] == [11, 11]
+    if allow_unmatched:
+        tracks.append({"id": "missing", "reference_index": 2, "label": 3,
+                       "selected_label": 0, "anchor": {"x": .5, "y": .5, "time": 1}})
+    output = tmp_path / "mapped.zip"
+    build_selected_masks(archive, metadata, tracks, output,
+                         allow_cross_shot_ids=True, allow_unmatched=allow_unmatched)
+    with zipfile.ZipFile(output) as masks:
+        for frame in (0, 47, 48, 95):
+            labels = np.asarray(Image.open(BytesIO(masks.read(f"labels/labels_{frame:05d}.png"))))
+            assert set(np.unique(labels)) == {0, 1 if frame < 48 else 2}
+            assert labels[16, 12 if frame < 48 else 50] == (1 if frame < 48 else 2)
+
+
+def test_easy_unique_ids_keep_existing_cross_cut_behavior(tmp_path):
+    archive, metadata = fixture(tmp_path)
+    tracks = selected_tracks(archive, metadata, metadata["targets"])
+    before, after = tmp_path / "before.zip", tmp_path / "after.zip"
+    build_selected_masks(archive, metadata, tracks, before)
+    build_selected_masks(archive, metadata, tracks, after, allow_cross_shot_ids=True)
+    with zipfile.ZipFile(before) as original, zipfile.ZipFile(after) as updated:
+        assert original.namelist() == updated.namelist()
+        assert all(original.read(name) == updated.read(name) for name in original.namelist())
 
 
 def test_unresolved_manual_target_cannot_be_composited_as_a_background_mask(tmp_path):

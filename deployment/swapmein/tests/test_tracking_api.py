@@ -32,7 +32,7 @@ def tracking_review(api, monkeypatch):
             "needs_review": True, "selected_label": None,
         }], "review_required": True},
         tracking_metadata={"duration": 5, "width": 4, "height": 4, "frames": 120,
-                           "anchor": {"frame": 24}},
+                           "anchor": {"frame": 24, "time": 1, "x": .5, "y": .5}},
         tracking_masks_uri="gs://private-app/tracking-masks.zip",
         tracking_depth_uri="gs://private-app/depth.mp4",
         tracking_vocals_uri="gs://private-app/vocals.wav",
@@ -82,6 +82,44 @@ def review_endpoint(job_id):
 
 def review_body(choices=None, revision=1):
     return {"revision": revision, "choices": [selected_choice()] if choices is None else choices}
+
+
+def test_masked_manual_review_passes_every_scene_to_provider(tracking_review, monkeypatch):
+    from swapmein.provider import generation_payload
+    _, records, cloud, _, _, job_id, _ = tracking_review
+    job = records.data[f"jobs/{job_id}.json"]
+    targets = [
+        {"id": "first", "name": "Person 1", "reference_index": 0,
+         "anchor": {"x": .42, "y": .52, "time": 0}},
+        {"id": "second", "name": "Person 2", "reference_index": 1,
+         "anchor": {"x": .35, "y": .26, "time": 3.67}},
+    ]
+    segments, choices, assignments = [], [], []
+    for target_index, target in enumerate(targets):
+        for scene_index, (start, end) in enumerate([(0, 3.5), (3.5, 6)]):
+            section_id = f"t{target_index}-segment-{scene_index:03d}"
+            absent = target_index == 1 and scene_index == 0
+            point = {"x": .66, "y": .35, "time": 4.73} if target_index == 0 and scene_index == 1 else target["anchor"]
+            segments.append({"id": section_id, "target_id": target["id"], "start": start, "end": end})
+            choices.append({"segment_id": section_id, "absent": absent, "anchor": None if absent else point})
+            assignments.append({"segment_id": section_id, "absent": absent, "selected_label": None if absent else target_index + 1})
+    job.update(tracking_plan={"version": 2, "targets": targets, "segments": segments},
+               tracking_choices=choices, normalized_targets=targets, tracking_applied_revision=1)
+
+    def resolve(archive, metadata, plan, supplied, output):
+        output.write_bytes(b"reviewed masks")
+        return {"coverage": [1] * 144, "assignments": assignments}
+
+    # Pipeline imports the public alias from tracking, as the real worker does.
+    monkeypatch.setattr(tracking, "resolve_multi_tracking", resolve)
+    saved = resolve_saved(records, cloud, job_id)
+    assert saved["coordinate_fallback_sections"] == 0
+    prompt = generation_payload(6, ["ref1", "ref2"], "guide", True,
+        mask_style="cyan_overlay_multi_20", targets=saved["normalized_targets"], face_mesh=True)["prompt"]
+    assert "4.73 seconds, 66% across and 35% down" in prompt
+    assert "Person 2 is absent from 0.00 to 3.50 seconds" in prompt
+    assert "reference image 1 throughout this scene" in prompt
+    assert len(prompt) <= 7000
 
 
 def test_tracking_review_accepts_owner_token_without_a_provider_key(tracking_review):
@@ -315,11 +353,17 @@ def test_multi_person_review_dispatches_its_saved_plan_and_retains_target_sectio
         {**section, "id": "t0-segment-000", "target_id": "left", "target_name": "Left person"},
         {**section, "id": "t1-segment-000", "target_id": "right", "target_name": "Right person"},
     ])
+    job["tracking_plan"]["targets"] = [
+        {"id": name, "name": name, "reference_index": index,
+         "anchor": {"x": .5, "y": .5, "time": 1}}
+        for index, name in enumerate(["left", "right"])]
     dispatched = []
     def resolve(archive, metadata, plan, choices, output):
         dispatched.append((plan["version"], copy.deepcopy(choices)))
         output.write_bytes(b"reviewed labels")
-        return {"coverage": [2] * 120, "assignments": [{"target_id": "left"}, {"target_id": "right"}]}
+        return {"coverage": [2] * 120, "assignments": [
+            {"target_id": "left", "segment_id": "t0-segment-000"},
+            {"target_id": "right", "segment_id": "t1-segment-000"}]}
     monkeypatch.setattr(tracking, "resolve_multi_tracking", resolve)
     choices = [{**selected_choice(), "segment_id": "t0-segment-000"},
                {"segment_id": "t1-segment-000", "absent": True}]

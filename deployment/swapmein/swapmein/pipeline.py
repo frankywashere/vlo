@@ -197,7 +197,8 @@ class Pipeline:
                             plan = analyze_multi_tracking(masks, metadata, targets)
                         if not plan or not plan["review_required"]:
                             combined = root / "selected-people-masks.zip"
-                            coverage = build_selected_masks(masks, metadata, tracks, combined)
+                            coverage = build_selected_masks(masks, metadata, tracks, combined,
+                                allow_cross_shot_ids=options.easy_mode)
                             masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "selected-people-masks.zip", combined, "application/zip")
                         label = 1
                     else:
@@ -402,8 +403,9 @@ class Pipeline:
             fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
             recover = bool(fallback_count and job.get("tracking_recovery_requested")
                 and job.get("retry_missing_masks_with_sam") is True)
-            targets = (reviewed_mask_targets(metadata, plan, choices, resolved["assignments"])
-                if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
+            # Reviewed positions are authoritative even when every tap has a mask.
+            # Shared guide colors cannot communicate identity across scene cuts.
+            targets = reviewed_mask_targets(metadata, plan, choices, resolved["assignments"])
             uri = self.cloud.upload(self.settings.worker_bucket,
                 f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
         saved = self.update_job(job_id, reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"],

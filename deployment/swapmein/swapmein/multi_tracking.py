@@ -47,12 +47,30 @@ def selected_tracks(archive: Path, metadata: dict, targets: list[dict], *, allow
     return result
 
 
-def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], output: Path, *, allow_unmatched=False):
+def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], output: Path, *, allow_unmatched=False,
+                         allow_cross_shot_ids=False):
     """Remap chosen SAM IDs to stable person slots, rejecting ambiguous overlap."""
     if any(type(target.get("selected_label")) is not int or not (0 if allow_unmatched else 1) <= target["selected_label"] <= 65535
            for target in targets):
         raise PublicError("Review each unmatched person before building the guide.", code="tracking_review_invalid")
-    width, height, frames, _, _ = _metadata(metadata)
+    width, height, frames, _, cuts = _metadata(metadata)
+    # A reused ID is only an identity cue within its selected shot. Never
+    # choose one reference arbitrarily for that ID in other, unanchored shots.
+    shot_ranges = {}
+    if allow_cross_shot_ids:
+        boundaries = [0, *cuts, frames]
+        for target in targets:
+            label = target["selected_label"]
+            if not label or sum(item["selected_label"] == label for item in targets) < 2:
+                continue
+            anchor_frame = _metadata({**metadata, "anchor": target["anchor"]})[3]
+            start, end = next((start, end) for start, end in zip(boundaries, boundaries[1:])
+                              if start <= anchor_frame < end)
+            if any(other_label == label and other_start == start
+                   for other_label, other_start, _ in shot_ranges.values()):
+                raise PublicError("Two references select the same person in the same scene. Choose a different person or review scene matches.",
+                                  code="tracking_target_conflict")
+            shot_ranges[target["label"]] = (label, start, end)
     temporary = output.with_name(output.name + ".partial")
     coverage = []
     try:
@@ -63,6 +81,10 @@ def build_selected_masks(archive: Path, metadata: dict, targets: list[dict], out
                 for target in targets:
                     if target["selected_label"] == 0:
                         continue
+                    if target["label"] in shot_ranges:
+                        _, start, end = shot_ranges[target["label"]]
+                        if not start <= frame < end:
+                            continue
                     mask = source == target["selected_label"]
                     if np.any(mask & (mapped > 0)):
                         raise PublicError("Two selected people resolve to the same track. Select them in the same scene, or turn Easy mode off and review their scene matches.",
