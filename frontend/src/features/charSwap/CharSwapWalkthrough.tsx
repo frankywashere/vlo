@@ -1,3 +1,4 @@
+import { processingStageCopy } from "./utils/processingStage";
 import { trimDuration } from "./utils/trimRange";
 import { warmReferenceCleanup } from "./services/referenceCleanup";
 import {
@@ -211,6 +212,7 @@ export function CharSwapWalkthrough({
     pipeline.preparationProgress || ["queued", "preparing"].includes(pipeline.job?.status ?? ""),
   );
   const sceneReviewActive = live && step === "matches" && pipeline.job?.status === "tracking_review";
+  const stageCopy = processingStageCopy(pipeline.job);
   const displayedPreparation = pipeline.preparationProgress ?? (manualPreparation ? {
     phase: pipeline.job?.status === "queued" ? "queued" as const : "preparing" as const,
     message: pipeline.job?.message ?? "Preparing the scenes for your review…",
@@ -455,7 +457,9 @@ export function CharSwapWalkthrough({
         onVisit={(item) => visit(!easyMode && item === "matches" && !pipeline.job ? "review" : item)} />
       {step !== "generation" && renderCanContinueInLibrary && (
         <Alert severity="success" sx={{ mb: 2 }} action={manualPreparation || sceneReviewActive ? undefined : <Button color="inherit" onClick={startNewSwap}>Start a new recast</Button>}>
-          {!easyMode && !replaceAllPeople && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
+          {stageCopy && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
+            ? "Your scene choices are saved. You can close this tab and follow progress in your Library."
+            : !easyMode && !replaceAllPeople && ["queued", "preparing"].includes(pipeline.job?.status ?? "")
             ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
             : "Your upload is saved. You can safely close this tab and see progress in your Library."}
         </Alert>
@@ -540,10 +544,10 @@ export function CharSwapWalkthrough({
           {retryNotice && <Alert severity="info" sx={{mb: 2}}>{retryNotice}</Alert>}
           {(step !== "generation" || isUploadUnconfirmed(displayedPreparation)) && displayedPreparation && (
             <Box sx={{ mb: 2 }}>
-              {manualPreparation && <Typography component="h1" variant="h4" sx={{ mb: 2 }}>Preparing your clip</Typography>}
+              {manualPreparation && <Typography component="h1" variant="h4" sx={{ mb: 2 }}>{stageCopy?.title ?? "Preparing your clip"}</Typography>}
               <PreparationProgress
-                title={manualPreparation ? "Processing scenes" : "Preparing your clip"}
-                progress={displayedPreparation}
+                title={stageCopy?.title ?? (manualPreparation ? "Processing scenes" : "Preparing your clip")}
+                progress={stageCopy ? {...displayedPreparation, message: stageCopy.detail} : displayedPreparation}
                 elapsedSeconds={pipeline.preparationElapsedSeconds}
                 showSavedNotice={!manualPreparation}
               />

@@ -53,6 +53,7 @@ export interface JobSettingsUsed {
 }
 
 export interface LivePipelineJob {
+  processing_stage?: "guide_rebuild" | "mask_recovery" | "generation_queue" | "guide_review";
   settings_used?: JobSettingsUsed;
   /** Browser-only: the upload finished but queue acknowledgement was lost. */
   upload_confirmation_pending?: boolean;
@@ -329,6 +330,8 @@ function readJob(value: unknown): LivePipelineJob {
     status: value.status as LiveJobStatus,
   };
   if (value.access_mode === "credits" || value.access_mode === "api-key") job.access_mode = value.access_mode;
+  if (["guide_rebuild", "mask_recovery", "generation_queue", "guide_review"].includes(String(value.processing_stage)))
+    job.processing_stage = value.processing_stage as LivePipelineJob["processing_stage"];
   if (["depth", "depth_multi", "cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")

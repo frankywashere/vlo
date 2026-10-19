@@ -590,3 +590,17 @@ def test_review_recovery_generation_requires_completed_matching_approval_and_sub
     assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
     assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
     assert len(provider.submissions) == (1 if completed and approved_revision == 2 else 0)
+
+
+@pytest.mark.parametrize("extra,stage", [
+    ({"status": "preparing", "preparation_kind": "tracking_rebuild"}, "guide_rebuild"),
+    ({"status": "queued", "preparation_kind": "tracking_rebuild", "recover_missing_masks": True}, "mask_recovery"),
+    ({"status": "preparing", "preparation_kind": "tracking_rebuild", "recover_missing_masks": True,
+      "mask_recovery_completed": True}, "guide_rebuild"),
+    ({"status": "ready", "tracking_reviewed": True, "mask_style": "depth"}, "guide_review"),
+    ({"status": "ready", "review_generation_queued": True}, "generation_queue"),
+    ({"status": "preparing"}, None),
+])
+def test_job_view_distinguishes_scene_detection_from_reviewed_guide_work(api, extra, stage):
+    job = {"id": "a"*32, **extra}
+    assert gateway.view(job).get("processing_stage") == stage

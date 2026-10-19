@@ -228,6 +228,13 @@ def view(job: dict):
               "access_mode": "credits" if credits_mode else "api-key",
               "settings_used": settings_used(job),
               "replace_all_people": bool(job.get("setup", {}).get("replace_all_people", False))}
+    if job.get("status") == "ready" and job.get("review_generation_queued"):
+        result["processing_stage"] = "generation_queue"
+    elif status in {"queued", "preparing"} and job.get("preparation_kind") == "tracking_rebuild":
+        result["processing_stage"] = ("mask_recovery" if job.get("recover_missing_masks")
+            and not job.get("mask_recovery_completed") else "guide_rebuild")
+    elif status == "ready" and job.get("tracking_reviewed") and job.get("mask_style") != "none":
+        result["processing_stage"] = "guide_review"
     if not credits_mode:
         result["provider"] = job.get("provider", "reAPI")
     targets = job.get("normalized_targets") or job.get("setup", {}).get("targets")

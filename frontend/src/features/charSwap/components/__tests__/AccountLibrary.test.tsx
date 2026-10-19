@@ -286,3 +286,27 @@ it("keeps the Library scene review free of the old warning, filename and full re
   expect(screen.getByRole("img", {name: "Person 1"})).toBeVisible();
   expect(screen.getByText(/Tap the person in each box below/)).toBeVisible();
 });
+
+it("shows refresh feedback while preserving the visible Library cards", async () => {
+  const user = userEvent.setup();
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([job]);
+  render(<AccountLibrary onCreate={() => {}} />);
+  await screen.findByText("My clip");
+  let finish: ((jobs: typeof job[]) => void) | undefined;
+  vi.mocked(loadAccountJobs).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await user.click(screen.getByRole("button", {name: "Refresh library"}));
+  expect(screen.getByRole("button", {name: "Refresh library"})).toBeDisabled();
+  expect(screen.getByLabelText("Refreshing library")).toBeVisible();
+  expect(screen.getByText("My clip")).toBeVisible();
+  finish?.([job]);
+  await waitFor(() => expect(screen.getByRole("button", {name: "Refresh library"})).toBeEnabled());
+  expect(screen.queryByLabelText("Refreshing library")).not.toBeInTheDocument();
+});
+
+it("identifies the post-selection guide rebuild without asking users to select scenes again", async () => {
+  vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "preparing", easy_mode: false, processing_stage: "guide_rebuild"}]);
+  render(<AccountLibrary onCreate={() => {}} />);
+  expect(await screen.findByText("Building your guide")).toBeVisible();
+  expect(screen.getByText(/masks and depth already prepared/)).toBeVisible();
+  expect(screen.queryByText(/Come back to choose people/)).not.toBeInTheDocument();
+});

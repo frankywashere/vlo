@@ -1,3 +1,4 @@
+import { processingStageCopy } from "../utils/processingStage";
 import { useEffect, useRef } from "react";
 import {
   Alert,
@@ -67,7 +68,8 @@ export function GenerationPage({
       : job?.status === "generating" || unknown
         ? 1
         : 0;
-  const title = complete
+  const stageCopy = processingStageCopy(job);
+  const title = stageCopy?.title ?? (complete
     ? "Your recast is ready."
     : unknown
       ? "Checking your submission"
@@ -81,7 +83,7 @@ export function GenerationPage({
               ? "Your recast is in line"
               : job
                 ? "Preparing your clip"
-                : "Uploading your clip";
+                : "Uploading your clip");
   return (
     <Box>
       <Stack
@@ -103,7 +105,7 @@ export function GenerationPage({
           <Typography color="text.secondary" sx={{ mt: 1 }}>
             {complete
               ? "Watch it, save it, and make another."
-              : uploadSaved
+              : stageCopy ? stageCopy.detail : uploadSaved
                 ? !easyMode && !replaceAllPeople && ["queued", "preparing"].includes(job?.status ?? "")
                   ? "Your upload is saved. You can close this tab. Return to your Library after processing to review each scene and choose who to replace."
                   : "Your upload is saved. You can safely close this tab and see progress in your Library."

@@ -14,6 +14,7 @@ import { isGenerationRunning } from "../utils/libraryJobs";
 import { JobSettings } from "./JobSettings";
 import { useVideoDownload } from "../hooks/useVideoDownload";
 import { JobElapsedTime } from "./JobElapsedTime";
+import { processingStageCopy } from "../utils/processingStage";
 
 const STATUS_LABELS: Record<AccountJob["status"], string> = {
   queued: "In queue",
@@ -36,6 +37,8 @@ interface GenerationCardProps {
 
 export function GenerationCard({ job, onOpen, onRemove, removing = false }: GenerationCardProps) {
   const download = useVideoDownload();
+  const stageCopy = processingStageCopy(job);
+  const statusLabel = job.status === "ready" ? STATUS_LABELS.ready : stageCopy?.title ?? STATUS_LABELS[job.status];
   const [previewFailed, setPreviewFailed] = useState(false);
   const running = isGenerationRunning(job);
   const statusColor = job.status === "completed" ? "success"
@@ -136,7 +139,7 @@ export function GenerationCard({ job, onOpen, onRemove, removing = false }: Gene
               <CircularProgress size={28} color="inherit" aria-label={`${job.title} in progress`} />
             </Box>
             <Typography variant="body2" fontWeight={650}>
-              {STATUS_LABELS[job.status]}…
+              {statusLabel}…
             </Typography>
           </Box>
         )}
@@ -191,7 +194,7 @@ export function GenerationCard({ job, onOpen, onRemove, removing = false }: Gene
           </Typography>
           <Chip
             size="small"
-            label={STATUS_LABELS[job.status]}
+            label={statusLabel}
             color={statusColor}
             variant="outlined"
             sx={{ flexShrink: 0, fontSize: 10, ...(pulse ? pulseStyle : {}) }}
@@ -207,8 +210,8 @@ export function GenerationCard({ job, onOpen, onRemove, removing = false }: Gene
         <Box sx={{ mt: 1.5 }}>
             <JobElapsedTime job={job} />
           </Box>
-        {manualPreparing && <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-          Processing scenes. Come back to choose people in each scene when this clip needs attention.
+        {(stageCopy || manualPreparing) && <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+          {stageCopy?.detail ?? "Processing scenes. Come back to choose people in each scene when this clip needs attention."}
         </Typography>}
         <Box sx={{ mt: 1.5 }}><JobSettings settings={job.settings_used} /></Box>
         {(job.status === "failed" || job.status === "expired") && (

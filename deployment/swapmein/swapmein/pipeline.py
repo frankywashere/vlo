@@ -356,7 +356,7 @@ class Pipeline:
             job = recover_reviewed_masks(self, job, remaining)
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
-        self.update_job(job_id, message="Applying your scene matches and rebuilding the guide.")
+        self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")
         with self.cloud.worker("audio") as invoke:
             payload = {"input_uri": job["normalized_uri"],
                 "masks_uri": job["reviewed_masks_uri"], "guide_audio_uri": job["tracking_vocals_uri"],
@@ -375,9 +375,9 @@ class Pipeline:
         guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
             f"outputs/{job_id}/guide-reviewed-{uuid.uuid4().hex}.mp4")
         self.update_job(job_id, status="ready", guide_uri=guide_uri,
-            message=("Your scene matches have been applied. "
+            message=("Your guide is ready. "
                 + (f"{job['coordinate_fallback_sections']} selections use position and time because SAM found no mask. " if job.get("coordinate_fallback_sections") else "")
-                + "Review the complete guide before continuing."),
+                + "Review the masked preview, then approve it to start rendering."),
             tracking_reviewed=True, review_required=True, mask_style="depth_multi" if job.get("target_styles") else "depth",
             mask_frames=job["tracking_metadata"]["frames"],
             mask_coverage_min=min(job["reviewed_coverage"]),

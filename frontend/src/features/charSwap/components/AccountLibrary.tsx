@@ -49,6 +49,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const [checkingRecovery, setCheckingRecovery] = useState(false);
   const [jobs, setJobs] = useState<AccountJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshCount = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountJob | null>(null);
@@ -80,6 +82,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   );
   const controller = useRef<AbortController | null>(null);
   const refresh = useCallback(async () => {
+    refreshCount.current += 1;
+    setRefreshing(true);
     try {
       const received = await loadAccountJobs();
       if (mounted.current) {
@@ -138,7 +142,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             : "The library could not be loaded.",
         );
     } finally {
-      if (mounted.current) setLoading(false);
+      refreshCount.current -= 1;
+      if (mounted.current) { setLoading(false); setRefreshing(refreshCount.current > 0); }
     }
   }, []);
   useEffect(() => {
@@ -531,15 +536,16 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             <span>
               <IconButton
                 aria-label="Refresh library"
+                aria-busy={refreshing}
                 onClick={() => void refresh()}
-                disabled={loading}
+                disabled={loading || refreshing}
                 sx={{
                   border: "1px solid",
                   borderColor: "divider",
                   color: "text.secondary",
                 }}
               >
-                <RefreshRounded fontSize="small" />
+                {refreshing ? <CircularProgress size={18} aria-label="Refreshing library" /> : <RefreshRounded fontSize="small" />}
               </IconButton>
             </span>
           </Tooltip>
