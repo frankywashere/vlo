@@ -99,8 +99,7 @@ export function PreparationProgress({
     </DialogTitle>
     <DialogContent>
       <Alert severity="warning" id="upload-stay-open-description" sx={{mb: 2}}>
-        <Typography fontWeight={700}>Your upload is not saved yet.</Typography>
-        Don’t close or refresh this page. On mobile, keep this page visible and your screen awake until we confirm it’s saved.
+        Uploading
       </Alert>
       {panel}
       <Typography variant="body2" color="text.secondary" sx={{mt: 2}}>
