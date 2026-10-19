@@ -15,9 +15,9 @@ def settings_used(job):
         result["audio_processing"] = False
     if isinstance(setup.get("enhanced_character_masking"), bool):
         result["enhanced_masking"] = setup["enhanced_character_masking"]
-    elif job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "gray", "solid_multi"}:
+    elif job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20", "gray", "solid_multi"}:
         result["enhanced_masking"] = job["mask_style"] != "none"
-    if job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "gray", "solid_multi"}:
+    if job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20", "gray", "solid_multi"}:
         result["mask_style"] = job["mask_style"]
     if isinstance(job.get("watermark_bonus_credits"), int):
         result["watermark_bonus_credits"] = job["watermark_bonus_credits"]

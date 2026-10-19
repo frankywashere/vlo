@@ -216,3 +216,13 @@ pixel. It ran the deployed image with the explicit CPU delegate in Cloud Build;
 no GPU or provider render was started. Its single-frame timing is not a production
 startup or clip-duration benchmark. Model licensing is documented in Google's
 [Face Mesh V2 model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf).
+
+### Shared cyan at twenty percent
+
+`stage_cyan_overlay.py` stages only the CPU compositor, its request interface,
+face-mesh helper and a synthetic smoke test on the verified face-mesh image.
+The build checks `fill_mode: "translucent"`, shared color across two labels,
+20% blending, preserved unselected RGB, MediaPipe CPU initialization and package
+integrity. No model download, GPU change or user media enters the build context.
+`fill_mode: "color"` retains its legacy 50% overlay; gray and solid guides remain
+available for older saved jobs.

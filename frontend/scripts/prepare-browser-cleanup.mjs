@@ -46,7 +46,7 @@ if(!await validCpu()){
  if(b.length!==176240148||createHash('sha256').update(b).digest('hex')!==cpuSha)throw Error('CPU cleanup model checksum mismatch');
  await writeFile(cpuTarget,b);
 }
-const cpuRuntime=path.join(frontend,'public/charSwap-runtime/ml/litert-2.5.3-cpu-v3-alpha');
+const cpuRuntime=path.join(frontend,'public/charSwap-runtime/ml/litert-2.5.3-cpu-v4-white');
 await mkdir(cpuRuntime,{recursive:true});
 for(const file of ['litert_wasm_compat_internal.js','litert_wasm_compat_internal.wasm','litert_wasm_internal.js','litert_wasm_internal.wasm'])
  await copyFile(path.join(frontend,'node_modules/@litertjs/core/wasm',file),path.join(cpuRuntime,file));

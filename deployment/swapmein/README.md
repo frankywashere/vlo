@@ -612,3 +612,27 @@ inside its merged label. This is expression guidance, not a speaker identity loc
 The CPU image build checks native libraries, explicit CPU inference and package
 compatibility before publishing. No additional GPU model or service is required.
 The user-facing description remains: “May take extra time.”
+
+### Selected shared cyan preset
+
+New jobs snapshot `guide_style_version: 2`. With Enhanced Masking enabled and
+Admin depth guidance disabled, the CPU compositor uses the same cyan `#00dcff`
+for every selected label at 20% color opacity over original RGB. Initial guides
+and reviewed/recovered guide rebuilds share this selection rule. Depth-enabled
+jobs retain their depth guides; unmasked jobs retain original pixels with the
+optional selected-person face mesh. Older jobs without the version snapshot keep
+their original flat/depth guide behavior.
+
+The generation prompt uses the selected white-reference Test 02 wording for this
+shared-cyan mode. Reference images define appearance; the source video supplies
+performance and speaking turns. Manual scene assignments, coordinate fallbacks,
+face-mesh instructions, audio options and the 7,000-character limit remain
+mode-aware. The authored per-shot schedule from Test 06 is not enabled by this
+preset. Browser cleanup composites soft edges onto white on desktop and iOS CPU;
+Original remains available. The CPU worker URL changes while model cache keys
+remain unchanged.
+
+Release the verified CPU overlay before the gateway, set the live pipeline depth
+default off and masked face-mesh default on, then publish the matching frontend.
+Keep Easy Mode and Enhanced Masking on, source audio processing off, and silent
+submission off by default. Existing job snapshots are not rewritten.

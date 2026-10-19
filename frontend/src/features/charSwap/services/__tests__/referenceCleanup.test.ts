@@ -91,7 +91,7 @@ it.each([
   // A GPU failure from an older release must not disable the new CPU worker.
   const result=cleanReferenceBackground("blob:a",new AbortController().signal); await settle();
   const worker=TestWorker.all[0];
-  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v3-alpha/referenceCleanup.cpu.js");
+  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v4-white/referenceCleanup.cpu.js");
   expect(worker.options).toBeUndefined();
   worker.reply({type:"ready"});await settle();
   const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");

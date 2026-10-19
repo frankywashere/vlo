@@ -27,7 +27,7 @@ def health():
     # otherwise look healthy and fail only after expensive GPU preparation.
     from composite import compose
     from PIL import __version__ as pillow_version
-    return {"status": "ready", "device": "cpu", "version": "audio-mesh-guide-v7",
+    return {"status": "ready", "device": "cpu", "version": "audio-cyan-guide-v8",
             "operations": ["audio", "compose"], "compositor_ready": callable(compose),
             "pillow_version": pillow_version}
 
@@ -44,7 +44,7 @@ class ComposeRequest(BaseModel):
     masks_uri: str
     guide_audio_uri: str
     selected_label: int = Field(ge=1, le=65535)
-    fill_mode: Literal['gray','original','color','depth','solid'] = 'gray'
+    fill_mode: Literal['gray','original','color','depth','solid','translucent'] = 'gray'
     depth_uri: str | None = None
     target_styles: list[TargetStyle] | None = Field(default=None, min_length=1, max_length=5)
     run_id: str
@@ -53,7 +53,7 @@ class ComposeRequest(BaseModel):
 
     @model_validator(mode='after')
     def validate_styles(self):
-        if self.target_styles and self.fill_mode not in ['depth','solid','original']:
+        if self.target_styles and self.fill_mode not in ['depth','solid','original','translucent']:
             raise ValueError('Target styles require a depth or solid guide')
         if self.target_styles and (len({style.label for style in self.target_styles})!=len(self.target_styles)
                                   or any(style.color.lower()=='#000000' for style in self.target_styles)):

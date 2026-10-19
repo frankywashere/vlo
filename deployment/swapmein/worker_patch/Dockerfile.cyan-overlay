@@ -1,0 +1,4 @@
+FROM us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:d77a09c0de8951f0e3b0c7f59b313109d43760b22f41a8fa10d73b00f3d1757f
+COPY app.py composite.py face_mesh.py /app/
+COPY cyan_overlay_smoke.py /tmp/cyan-smoke.py
+RUN python /tmp/cyan-smoke.py && pip check

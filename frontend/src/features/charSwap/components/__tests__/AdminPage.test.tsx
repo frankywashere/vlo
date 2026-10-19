@@ -290,17 +290,17 @@ it("defaults watermark rewards to 25 credits and saves the global hide setting",
   await waitFor(() => expect(api.watermark).toHaveBeenCalledWith({revision: 0, enabled: false, bonus_credits: 50}));
 });
 
-it("defaults depth guidance on and saves its experimental switch independently", async () => {
+it("defaults depth guidance off and saves its experimental switch independently", async () => {
   const user = userEvent.setup();
   await renderExpandedAdmin();
   const toggle = screen.getByRole("switch", {name: "Add depth to person masks"});
-  expect(toggle).toBeChecked();
-  await user.click(toggle);
-  await waitFor(() => expect(toggle).not.toBeChecked());
-  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 0, depth_guidance: false});
+  expect(toggle).not.toBeChecked();
   await user.click(toggle);
   await waitFor(() => expect(toggle).toBeChecked());
-  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 1, depth_guidance: true});
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 0, depth_guidance: true});
+  await user.click(toggle);
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 1, depth_guidance: false});
 });
 
 it("saves masked and unmasked face-mesh defaults separately from user-switch visibility", async () => {

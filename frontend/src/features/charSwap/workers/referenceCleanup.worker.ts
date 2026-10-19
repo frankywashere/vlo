@@ -1,4 +1,4 @@
-import {applyCleanupAlpha, encodeCleanupPng} from "./cleanupImage";
+import {applyCleanupWhite, encodeCleanupPng} from "./cleanupImage";
 import * as ort from "onnxruntime-web/webgpu";
 import {MODEL_PATH, RUNTIME_PATH, UNSUPPORTED_CLEANUP} from "../services/browserCleanupProtocol";
 import type {CleanupRequest, CleanupReply} from "../services/browserCleanupProtocol";
@@ -103,7 +103,7 @@ async function clean(image: Blob) {
     maskContext.drawImage(small,0,0,width,height);
     const alpha = maskContext.getImageData(0,0,width,height).data;
     const pixels = context.getImageData(0,0,width,height);
-    applyCleanupAlpha(pixels.data, alpha);
+    applyCleanupWhite(pixels.data, alpha);
     context.putImageData(pixels,0,0);
     return await encodeCleanupPng(original);
   } finally {for (const output of Object.values(outputs)) output.dispose();}

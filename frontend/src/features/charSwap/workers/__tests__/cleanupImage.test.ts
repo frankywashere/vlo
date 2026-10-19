@@ -1,15 +1,15 @@
 import {afterEach, expect, it, vi} from "vitest";
-import {applyCleanupAlpha, encodeCleanupPng} from "../cleanupImage";
+import {applyCleanupWhite, encodeCleanupPng} from "../cleanupImage";
 
 afterEach(() => vi.unstubAllGlobals());
-it("keeps foreground colours, multiplies soft alpha, and removes hidden background RGB", () => {
+it("keeps foreground colour and composites soft edges and empty pixels onto opaque white", () => {
   const pixels = new Uint8ClampedArray([220,80,40,255, 120,60,30,128, 90,80,70,255]);
   const mask = new Uint8ClampedArray([255,255,255,255, 128,128,128,255, 0,0,0,255]);
-  applyCleanupAlpha(pixels, mask);
-  expect([...pixels]).toEqual([220,80,40,255, 120,60,30,64, 0,0,0,0]);
+  applyCleanupWhite(pixels, mask);
+  expect([...pixels]).toEqual([220,80,40,255, 221,206,198,255, 255,255,255,255]);
 });
-it("saves PNG without flattening alpha into JPEG", async () => {
-  const png = new Blob(["transparent png"], {type:"image/png"});
+it("saves the white composite as PNG without JPEG loss", async () => {
+  const png = new Blob(["white png"], {type:"image/png"});
   const convertToBlob = vi.fn().mockResolvedValue(png);
   expect(await encodeCleanupPng({convertToBlob} as unknown as OffscreenCanvas)).toBe(png);
   expect(convertToBlob).toHaveBeenCalledWith({type:"image/png"});

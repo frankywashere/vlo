@@ -16,7 +16,7 @@ def pipeline_settings(records):
     provider = current.get("preparation_provider", "workers")
     return {"revision": current.get("revision", 0),
             "audio_processing": current.get("audio_processing") is True,
-            "depth_guidance": current.get("depth_guidance", True) is not False,
+            "depth_guidance": current.get("depth_guidance", False) is not False,
             "face_mesh_masked_default": current.get("face_mesh_masked_default", True) is not False,
             "face_mesh_unmasked_default": current.get("face_mesh_unmasked_default") is True,
             "face_mesh_user_control": current.get("face_mesh_user_control") is True,
@@ -40,7 +40,7 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
             raise PublicError("Pipeline settings changed in another session. Reload before saving.", 409)
         return {"revision": revision + 1,
                 "audio_processing": current.get("audio_processing") is True if audio_processing is None else audio_processing,
-                "depth_guidance": current.get("depth_guidance", True) is not False if depth_guidance is None else depth_guidance,
+                "depth_guidance": current.get("depth_guidance", False) is not False if depth_guidance is None else depth_guidance,
                 "retry_missing_masks_with_sam": (current.get("retry_missing_masks_with_sam") is True
                     if retry_missing_masks_with_sam is None else retry_missing_masks_with_sam),
                 "preparation_provider": preparation_provider or current.get("preparation_provider", "workers"),

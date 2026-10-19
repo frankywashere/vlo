@@ -1,4 +1,4 @@
-import {applyCleanupAlpha, encodeCleanupPng} from "./cleanupImage";
+import {applyCleanupWhite, encodeCleanupPng} from "./cleanupImage";
 import {loadLiteRt, loadAndCompile, Tensor} from "@litertjs/core";
 import type {CompiledModel} from "@litertjs/core";
 import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, UNSUPPORTED_CLEANUP} from "../services/browserCleanupProtocol";
@@ -74,7 +74,7 @@ async function clean(image: Blob) {
     if (!mc) throw new Unsupported();
     mc.drawImage(small,0,0,width,height);
     const matte=mc.getImageData(0,0,width,height).data, original=context.getImageData(0,0,width,height);
-    applyCleanupAlpha(original.data, matte);
+    applyCleanupWhite(original.data, matte);
     context.putImageData(original,0,0);
     return await encodeCleanupPng(canvas);
   } finally {bitmap?.close();tensor?.delete();outputs?.forEach(value=>value.delete());}

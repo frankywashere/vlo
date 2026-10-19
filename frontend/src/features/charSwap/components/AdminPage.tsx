@@ -121,7 +121,7 @@ export function AdminPage() {
                 });
               }} />} label={label} />)}
           <Typography color="text.secondary">Defaults apply when the user switch is hidden or unchanged. When shown, users can turn face mesh on or off for their run, overriding either default. May take extra time.</Typography>
-          <FormControlLabel control={<Switch checked={admin.pipeline?.depth_guidance ?? true}
+          <FormControlLabel control={<Switch checked={admin.pipeline?.depth_guidance ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
               const enabled = event.target.checked;

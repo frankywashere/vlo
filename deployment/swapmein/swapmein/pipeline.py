@@ -7,6 +7,7 @@ import uuid
 
 from .cloud import Cloud
 from .config import Settings
+from .guide_style import guide_style, compose_styles
 from .errors import PublicError
 from .diagnostics import emit, timed, wait_timing
 from .limits import MAX_SOURCE_BYTES
@@ -102,8 +103,7 @@ class Pipeline:
                 multi = len(targets) > 1
                 tracking_needed = options.enhanced_character_masking or job.get("face_mesh", False)
                 depth_enabled = options.enhanced_character_masking and job.get("depth_guidance", True)
-                fill_mode = ("depth" if depth_enabled else "solid") if options.enhanced_character_masking else "original"
-                mask_style = (("depth_multi" if multi else "depth") if depth_enabled else ("solid_multi" if multi else "gray")) if options.enhanced_character_masking else "none"
+                fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
                 prefix = f"inputs/swapmein-{job_id}/"
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
                 self.update_job(job_id, duration=metadata["duration"], width=metadata["width"], height=metadata["height"],
@@ -248,7 +248,7 @@ class Pipeline:
                                     "fill_mode": fill_mode, "run_id": guide_run,
                                     "face_mesh": job.get("face_mesh", False), "mesh_all_people": options.replace_all_people}
                                 if multi:
-                                    compose_payload["target_styles"] = [{"label": target["label"], "color": target["color"]} for target in targets]
+                                    compose_payload["target_styles"] = compose_styles(fill_mode, targets)
                                 composed = invoke("/compose", compose_payload, remaining())
                                 if composed.get("metrics", {}).get("face_mesh_metrics"):
                                     self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])
@@ -419,15 +419,15 @@ class Pipeline:
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
         self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")
+        fill_mode, mask_style = guide_style(job, job.get("setup", {}).get("enhanced_character_masking", True), bool(job.get("target_styles")))
         with self.cloud.worker("audio") as invoke:
             payload = {"input_uri": job["normalized_uri"],
                 "masks_uri": job["reviewed_masks_uri"], "guide_audio_uri": job["tracking_vocals_uri"],
                 "depth_uri": job.get("tracking_depth_uri"), "selected_label": 1,
-                "fill_mode": (("depth" if job.get("depth_guidance", True) else "solid")
-                    if job.get("setup", {}).get("enhanced_character_masking", True) else "original"), "run_id": run_id,
+                "fill_mode": fill_mode, "run_id": run_id,
                 "face_mesh": job.get("face_mesh", False), "mesh_all_people": job.get("replace_all_people", False)}
             if job.get("target_styles"):
-                payload["target_styles"] = [{"label": target["label"], "color": target["color"]} for target in job["target_styles"]]
+                payload["target_styles"] = compose_styles(fill_mode, job["target_styles"])
             composed = invoke("/compose", payload, remaining())
             if composed.get("metrics", {}).get("face_mesh_metrics"):
                 self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])
@@ -450,9 +450,7 @@ class Pipeline:
             message=("Your scene matches are applied. Generation is queued." if auto_submit else "Your guide is ready. "
                 + (f"{job['coordinate_fallback_sections']} selections use position and time because SAM found no mask. " if job.get("coordinate_fallback_sections") else "")
                 + "Review the masked preview, then approve it to start rendering."),
-            tracking_reviewed=True, review_required=True, mask_style=(("depth_multi" if job.get("target_styles") else "depth") if job.get("depth_guidance", True)
-                        else ("solid_multi" if job.get("target_styles") else "gray"))
-                if job.get("setup", {}).get("enhanced_character_masking", True) else "none",
+            tracking_reviewed=True, review_required=True, mask_style=mask_style,
             mask_frames=job["tracking_metadata"]["frames"],
             mask_coverage_min=min(job["reviewed_coverage"]),
             preparation_kind="initial", tracking_revision=job["tracking_applied_revision"] + 1)

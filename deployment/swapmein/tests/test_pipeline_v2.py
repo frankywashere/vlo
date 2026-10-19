@@ -63,7 +63,7 @@ def image_at(archive_bytes, index=24):
 
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
-            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False):
+            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -121,7 +121,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         def __init__(self):
             self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/upload.bin",
                                "setup": options, "audio_processing": audio_processing,
-                               "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh},
+                               "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh, "guide_style_version": guide_style_version},
                 "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
         def read(self, key):
             return copy.deepcopy(self.data.get(key)), 1
@@ -237,9 +237,10 @@ def test_replicate_preflight_rejects_unprotected_composition_before_paying_for_i
 @pytest.mark.parametrize("selection", ["single", "multi"])
 @pytest.mark.parametrize("approve", [False, True])
 @pytest.mark.parametrize("depth_guidance", [False, True])
-def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_prediction(monkeypatch, media, tmp_path, selection, approve, depth_guidance):
+@pytest.mark.parametrize("guide_style_version", [1, 2])
+def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_prediction(monkeypatch, media, tmp_path, selection, approve, depth_guidance, guide_style_version):
     job, cloud, _, _, _ = harness(monkeypatch, media, easy=False, enhanced=True,
-        selection=selection, audio_processing=False, preparation_provider="replicate", depth_guidance=depth_guidance)
+        selection=selection, audio_processing=False, preparation_provider="replicate", depth_guidance=depth_guidance, guide_style_version=guide_style_version)
     archive, output = tmp_path / "raw.zip", tmp_path / "reviewed.zip"
     archive.write_bytes(cloud.objects[job["tracking_masks_uri"]])
     choices = [{"segment_id": section["id"], "absent": False,
@@ -260,7 +261,7 @@ def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_predi
     records = Records()
     pipeline = Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud)
     pipeline.rebuild_reviewed_guide(job, lambda: 60)
-    assert cloud.calls[-1][2]["fill_mode"] == ("depth" if depth_guidance else "solid")
+    assert cloud.calls[-1][2]["fill_mode"] == ("depth" if depth_guidance else "translucent" if guide_style_version >= 2 else "solid")
     assert records.data["status"] == "ready" and records.data["tracking_reviewed"]
     assert cloud.enqueued == ([("generate", job["id"])] if approve else [])
     assert len(cloud.replicate_calls) == 1 and all(kind != "gpu" for kind, _, _ in cloud.calls)
@@ -439,3 +440,21 @@ def test_mesh_uses_internal_sam_even_without_visible_mask_fill(monkeypatch, medi
         assert payload["face_mesh"] is True
         assert payload["mesh_all_people"] is (selection == "all")
         assert payload["fill_mode"] == ("depth" if enhanced else "original")
+
+
+@pytest.mark.parametrize("provider", ["workers", "replicate"])
+@pytest.mark.parametrize("selection", ["single", "multi", "all"])
+def test_new_shared_cyan_initial_preparation_reuses_labels_and_original_audio(monkeypatch, media, provider, selection):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+        selection=selection, audio_processing=False, depth_guidance=False, face_mesh=True,
+        preparation_provider=provider, guide_style_version=2)
+    assert job["status"] == "ready", job.get("message")
+    assert job["mask_style"] == ("cyan_overlay_multi_20" if selection == "multi" else "cyan_overlay_20")
+    composed = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]
+    assert len(composed) == 1
+    assert composed[0]["fill_mode"] == "translucent" and composed[0]["face_mesh"] is True
+    assert composed[0]["guide_audio_uri"] == job["normalized_uri"]
+    assert not [call for call in cloud.calls if call[0] == "audio" and call[1] == "/benchmark"]
+    if selection == "multi":
+        assert [target["color"] for target in composed[0]["target_styles"]] == ["#00dcff", "#00dcff"]
+    assert cloud.enqueued == [("generate", job["id"])]
