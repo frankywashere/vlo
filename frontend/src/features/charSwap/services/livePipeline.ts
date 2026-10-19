@@ -100,6 +100,7 @@ export interface LivePipelineJob {
 }
 
 export interface SelectionTarget {
+  thumbnail_url?: string;
   id: string;
   name: string;
   anchor: { x: number; y: number; time: number };
@@ -386,6 +387,7 @@ function readJob(value: unknown): LivePipelineJob {
       id: target.id, name: target.name, anchor: {...target.anchor}, reference_index: target.reference_index,
       color: typeof target.color === "string" && /^#[0-9a-f]{6}$/i.test(target.color) ? target.color : TARGET_COLORS[index],
       ...(typeof target.color_name === "string" ? {color_name: target.color_name.slice(0, 40)} : {}),
+      ...(typeof target.thumbnail_url === "string" && isSafeMediaUrl(target.thumbnail_url) ? {thumbnail_url: target.thumbnail_url} : {}),
     }));
   }
   for (const field of [

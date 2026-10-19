@@ -116,7 +116,7 @@ describe("private account library", () => {
     }]);
     render(<AccountLibrary onCreate={vi.fn()} />);
     await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
-    expect(await screen.findByText(/Masking stays off; your positions and timestamps/)).toBeVisible();
+    expect(await screen.findByText(/Masking stays off\./)).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", {name: "Check scene matches", level: 1})).toBeVisible();
     await user.click(screen.getAllByRole("button", {name: "Back to Library"})[0]);

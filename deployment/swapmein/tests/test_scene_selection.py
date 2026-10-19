@@ -97,3 +97,19 @@ def test_public_review_groups_scenes_and_exposes_matching_stills_without_mutatin
     assert [section["scene_index"] for section in sections] == [section["scene"] for section in plan["segments"]]
     assert all("thumbnail_url" in section and "tracking_thumbnail_url" in section for section in sections)
     assert plan == saved
+
+
+def test_library_character_picture_uses_the_original_selected_frame(api):
+    client, records, cloud, _ = api
+    headers, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    metadata, plan, _ = setup_scene_review()
+    targets = copy.deepcopy(plan["targets"])
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(normalized_targets=targets, scene_thumbnail_uris={"12": "gs://app/original-left.jpg", "84": "gs://app/original-right.jpg"})
+    response = client.get(f"/api/jobs/{job_id}", headers=headers)
+    assert response.status_code == 200
+    public = response.json()["selection_targets"]
+    assert "original-left.jpg" in public[0]["thumbnail_url"]
+    assert "original-right.jpg" in public[1]["thumbnail_url"]
+    assert "thumbnail_url" not in targets[0]

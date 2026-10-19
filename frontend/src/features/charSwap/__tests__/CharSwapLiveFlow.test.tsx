@@ -123,8 +123,7 @@ describe("explicit generation approval", () => {
     });
     fireEvent.loadedMetadata(frame);
     fireEvent.seeked(frame);
-    await user.click(screen.getByRole("button", { name: "Not in this scene" }));
-    await user.click(screen.getByRole("button", { name: "Apply matches" }));
+    await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(live.resolveTracking).toHaveBeenCalledWith([
       { segment_id: "segment-001", absent: true, anchor: null },
     ]);
@@ -379,7 +378,7 @@ describe("explicit generation approval", () => {
     live.busy = false;
     view.rerender(<CharSwapWalkthrough onLibrary={() => {}} />);
     expect(screen.getByRole("heading", {name: "Check scene matches"})).toBeVisible();
-    expect(screen.getByRole("button", {name: "Not in this scene"})).toBeVisible();
+    expect(screen.getByRole("button", {name: "Submit"})).toBeVisible();
     expect(screen.queryByRole("button", {name: "Start a new recast while this processes"})).not.toBeInTheDocument();
   });
 

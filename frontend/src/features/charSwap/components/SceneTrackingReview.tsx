@@ -1,22 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Alert,
-  Box,
-  Button,
-  ButtonBase,
-  FormControlLabel,
-  LinearProgress,
-  Stack,
-  Switch,
-  Typography,
-} from "@mui/material";
-import CheckRounded from "@mui/icons-material/CheckRounded";
+import { Alert, Box, Button, FormControlLabel, Stack, Switch, Typography } from "@mui/material";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import type { ReferenceAsset, TargetPerson } from "../model/model";
-import type {
-  TrackingReviewChoice,
-  TrackingReviewSegment,
-} from "../services/livePipeline";
+import type { TrackingReviewChoice, TrackingReviewSegment } from "../services/livePipeline";
 import { formatTime } from "../utils/videoGeometry";
 import { reviewFrameNumbers } from "../utils/trackingReviewFrames";
 import { sceneReviewGroups } from "../utils/sceneReviewGroups";
@@ -31,7 +17,7 @@ interface SceneTrackingReviewProps {
   segments: TrackingReviewSegment[];
   target: TargetPerson;
   targets?: TargetPerson[];
-  references?: {targetId: string; asset?: ReferenceAsset}[];
+  references?: { targetId: string; asset?: ReferenceAsset }[];
   duration: number;
   width: number;
   height: number;
@@ -44,365 +30,162 @@ interface SceneTrackingReviewProps {
   onRefresh: () => void;
 }
 
-const REASONS: Record<string, string> = {
-  scene_cut: "A new scene needs your confirmation.",
-  missing_mask: "Tracking lost your person in this section.",
-  tracking_reappeared: "Confirm that tracking found the same person again.",
-  tracking_jump: "The tracked person changed suddenly here.",
-  tracking_changes: "Tracking needs a second look in this section.",
-  selected_person: "Confirm your selected person here.",
-};
+interface SceneChoiceCardProps {
+  section: TrackingReviewSegment;
+  label: string;
+  sourceUrl: string;
+  trackingUrl?: string;
+  showDetected: boolean;
+  width: number;
+  height: number;
+  busy: boolean;
+  choice?: TrackingReviewChoice;
+  error?: string | null;
+  onChoose: (choice: TrackingReviewChoice) => void;
+  onRefresh: () => void;
+}
 
-/** Review a still at a time; decisions retain exact normalized frame coordinates. */
-export function SceneTrackingReview({
-  enhancedMasking = true,
-  sourceUrl,
-  trackingUrl,
-  segments,
-  target: fallbackTarget,
-  targets = [],
-  references = [],
-  width,
-  height,
-  busy,
-  errorSegmentId,
-  errorMessage,
-  message,
-  initialChoices = [],
-  onApply,
-  onRefresh,
-}: SceneTrackingReviewProps) {
-  const scenes = sceneReviewGroups(segments, (targets.length ? targets : [fallbackTarget]).map((person) => person.id));
-  const sections = scenes.flatMap((scene) => scene.sections);
-  const [navigation, setNavigation] = useState<{
-    index: number;
-    acknowledgedError: string | null;
-  }>({ index: 0, acknowledgedError: null });
-  const errorIndex = sections.findIndex(
-    (section) => section.id === errorSegmentId,
-  );
-  const activeIndex =
-    errorSegmentId &&
-    errorSegmentId !== navigation.acknowledgedError &&
-    errorIndex >= 0
-      ? errorIndex
-      : navigation.index;
-  const [choices, setChoices] = useState<Record<string, TrackingReviewChoice>>(
-    () =>
-      Object.fromEntries(
-        initialChoices.map((choice) => [choice.segment_id, choice]),
-      ),
-  );
-  const [frameSelections, setFrameSelections] = useState<
-    Record<string, number>
-  >({});
-  const [showOriginal, setShowOriginal] = useState(false);
-  const [readyFrame, setReadyFrame] = useState<string | null>(null);
-  const [failedFrame, setFailedFrame] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState("");
-  const sectionHeading = useRef<HTMLHeadingElement>(null);
-  const active = sections[Math.min(activeIndex, sections.length - 1)];
-  const previousSection = useRef(active?.id);
+/** Offscreen decoders are released so a long review doesn't exhaust phone memory. */
+function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected, width, height, busy, choice, error, onChoose, onRefresh }: SceneChoiceCardProps) {
+  const container = useRef<HTMLElement | null>(null);
+  const [visible, setVisible] = useState(typeof IntersectionObserver === "undefined");
+  const [selectedFrame, setSelectedFrame] = useState<number>();
+  const [failed, setFailed] = useState(false);
+  const frames = reviewFrameNumbers(section, choice?.anchor?.time);
+  const frame = selectedFrame !== undefined && frames.includes(selectedFrame) ? selectedFrame : frames[0];
+  const detected = Boolean(trackingUrl) && showDetected;
+  const url = detected ? trackingUrl! : sourceUrl;
+  const imageUrl = frame === Math.floor(section.seek_time * 24 + 1e-7)
+    ? detected ? section.tracking_thumbnail_url : section.thumbnail_url : undefined;
 
   useEffect(() => {
-    if (
-      (previousSection.current !== active?.id ||
-        errorSegmentId === active?.id) &&
-      active
-    ) {
-      sectionHeading.current?.focus();
-      sectionHeading.current?.scrollIntoView?.({
-        block: "start",
-        behavior: "smooth",
-      });
+    if (typeof IntersectionObserver === "undefined" || !container.current) return;
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: "400px" });
+    observer.observe(container.current);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (error) {
+      container.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      container.current?.focus();
     }
-    previousSection.current = active?.id;
-  }, [errorSegmentId, active]);
-  if (!active) return null;
-  const target = targets.find((person) => person.id === active.target_id)
-    ?? (active.target_id ? {...fallbackTarget, id: active.target_id, name: active.target_name ?? fallbackTarget.name} : fallbackTarget);
-  const reference = references.find((assignment) => assignment.targetId === target.id)?.asset;
-  const multiplePeople = targets.length > 1;
-  const sceneIndex = scenes.findIndex((scene) => scene.sections.some((section) => section.id === active.id));
-  const scene = scenes[sceneIndex];
-  const personChecks = scene.sections.filter((section) => (section.target_id ?? fallbackTarget.id) === target.id);
+  }, [error]);
 
-  const choice = choices[active.id];
-  const frameNumbers = reviewFrameNumbers(active, choice?.anchor?.time);
-  const storedFrame = frameSelections[active.id];
-  const frame = frameNumbers.includes(storedFrame)
-    ? storedFrame
-    : frameNumbers[0];
-  const frameIndex = frameNumbers.indexOf(frame);
-  const showingDetectedPeople = Boolean(trackingUrl) && !showOriginal;
-  const previewUrl = showingDetectedPeople ? trackingUrl! : sourceUrl;
-  const imageUrl = frame === Math.floor(active.seek_time * 24 + 1e-7)
-    ? showingDetectedPeople ? active.tracking_thumbnail_url : active.thumbnail_url : undefined;
-  const frameIdentity = `${active.id}:${previewUrl}:${frame}:${imageUrl ?? ""}`;
-  const ready = readyFrame === frameIdentity;
-  const failed = failedFrame === frameIdentity;
-  const completed = sections.filter((section) => choices[section.id]).length;
-  const allChosen = completed === sections.length;
-  const next = sections[activeIndex + 1];
-  const nextInScene = next && scene.sections.some((section) => section.id === next.id);
-  const nextName = next?.target_name ?? targets.find((person) => person.id === next?.target_id)?.name ?? fallbackTarget.name;
-  const nextLabel = nextInScene ? nextName === target.name ? "Next check" : `Next: ${nextName}` : "Next scene";
-  const selectedPoint =
-    choice?.anchor && Math.floor(choice.anchor.time * 24 + 1e-7) === frame
-      ? choice.anchor
-      : undefined;
+  return <Box component="section" ref={container} aria-label={label} tabIndex={-1}
+    sx={{ ...PANEL, outline: "none", scrollMarginTop: 24, borderColor: error ? "error.main" : choice?.anchor ? "success.main" : "divider" }}>
+    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+      <Typography component="h3" variant="subtitle1">{label}</Typography>
+      <Typography variant="caption" color="text.secondary">{formatTime(section.start)}–{formatTime(section.end)}</Typography>
+    </Stack>
+    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    <Box sx={{ aspectRatio: `${width}/${height}`, width: "100%" }}>
+      {visible && <SceneReviewFrame key={`${url}:${frame}:${imageUrl ?? ""}`} url={url} imageUrl={imageUrl}
+        frame={frame} width={width} height={height} disabled={busy}
+        selectedPoint={choice?.anchor && Math.floor(choice.anchor.time * 24 + 1e-7) === frame ? choice.anchor : undefined}
+        onReadyChange={(ready) => setFailed(!ready)}
+        onSelect={(point, time) => onChoose({ segment_id: section.id, absent: false, anchor: { ...point, time } })} />}
+    </Box>
+    <Typography variant="body2" color={choice?.anchor ? "success.main" : "text.secondary"} sx={{ mt: 1.5 }}>
+      {choice?.anchor ? "Selected. Tap again to change the person." : "No selection — not in this scene."}
+    </Typography>
+    <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap", gap: 1 }}>
+      <Button startIcon={<RefreshRounded />} disabled={busy || frames.length < 2}
+        onClick={() => { setSelectedFrame(frames[(frames.indexOf(frame) + 1) % frames.length]); setFailed(false); }}>Show another frame</Button>
+      {choice?.anchor && <Button disabled={busy} onClick={() => onChoose({ segment_id: section.id, absent: true, anchor: null })}>Clear selection</Button>}
+      {failed && <Button disabled={busy} onClick={onRefresh}>Refresh preview</Button>}
+    </Stack>
+  </Box>;
+}
 
-  function choose(next: TrackingReviewChoice) {
-    const updated = { ...choices, [next.segment_id]: next };
-    setChoices(updated);
-    setNavigation({index: activeIndex, acknowledgedError: errorSegmentId ?? null});
-    setAnnouncement(next.absent ? `${target.name} marked not visible.` : `${target.name} selected. You can change the point before continuing.`);
+/** Both Library and Create review one character across all scenes before moving on. */
+export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackingUrl, segments,
+  target: fallbackTarget, targets = [], references = [], width, height, busy, errorSegmentId,
+  errorMessage, initialChoices = [], onApply, onRefresh }: SceneTrackingReviewProps) {
+  const suppliedPeople = [...(targets.length ? targets : [fallbackTarget])];
+  for (const section of segments) {
+    if (section.target_id && !suppliedPeople.some((person) => person.id === section.target_id)) {
+      suppliedPeople.push({ ...fallbackTarget, id: section.target_id, name: section.target_name ?? fallbackTarget.name,
+        thumbnail: undefined, color: fallbackTarget.color });
+    }
+  }
+  const scenes = sceneReviewGroups(segments, suppliedPeople.map((person) => person.id));
+  const sections = scenes.flatMap((scene) => scene.sections);
+  const people = suppliedPeople.filter((person) => sections.some((section) => (section.target_id ?? fallbackTarget.id) === person.id));
+  const [navigation, setNavigation] = useState({ index: 0, acknowledgedError: null as string | null });
+  const [choices, setChoices] = useState<Record<string, TrackingReviewChoice>>(() => Object.fromEntries(initialChoices.map((choice) => [choice.segment_id, choice])));
+  const [showDetected, setShowDetected] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const header = useRef<HTMLHeadingElement>(null);
+  const rejected = sections.find((section) => section.id === errorSegmentId);
+  const rejectedIndex = rejected ? people.findIndex((person) => person.id === (rejected.target_id ?? fallbackTarget.id)) : -1;
+  const activeIndex = errorSegmentId && navigation.acknowledgedError !== errorSegmentId && rejectedIndex >= 0 ? rejectedIndex : navigation.index;
+  const person = people[Math.min(activeIndex, people.length - 1)];
+  const locked = busy || submitting;
+
+  useEffect(() => {
+    if (!errorSegmentId || navigation.acknowledgedError === errorSegmentId) {
+      header.current?.focus();
+      header.current?.scrollIntoView?.({ block: "start" });
+    }
+  }, [activeIndex, errorSegmentId, navigation.acknowledgedError]);
+  if (!person) return null;
+  const personSections = sections.filter((section) => (section.target_id ?? fallbackTarget.id) === person.id);
+  const reference = references.find((item) => item.targetId === person.id)?.asset;
+  const last = activeIndex === people.length - 1;
+
+  function choose(choice: TrackingReviewChoice) {
+    setChoices((previous) => ({ ...previous, [choice.segment_id]: choice }));
+    setNavigation({ index: activeIndex, acknowledgedError: errorSegmentId ?? null });
+  }
+  async function advance() {
+    if (locked) return;
+    // The API still receives one explicit decision for every required section.
+    const completed = { ...choices };
+    for (const section of personSections) completed[section.id] ??= { segment_id: section.id, absent: true, anchor: null };
+    setChoices(completed);
+    if (!last) {
+      setNavigation({ index: activeIndex + 1, acknowledgedError: errorSegmentId ?? null });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onApply(sections.map((section) => completed[section.id] ?? { segment_id: section.id, absent: true, anchor: null }));
+    } finally { setSubmitting(false); }
   }
 
-  return (
-    <Stack spacing={2.5}>
-      <Alert severity="info" role="note">
-        {message ?? "Choose each person in the scene, then continue to the next scene."}
-      </Alert>
-      <Box sx={PANEL}>
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          spacing={2}
-          justifyContent="space-between"
-          alignItems={{ xs: "stretch", sm: "center" }}
-        >
-          <PersonBadge
-            person={target}
-            subtitle="Find this person in each image"
-          />
-          {reference && <Stack direction="row" spacing={1} alignItems="center">
-            <Box component="img" src={reference.url} alt={`${target.name} replacement: ${reference.name}`}
-              sx={{width: 56, height: 56, borderRadius: 1, objectFit: "contain", border: `2px solid ${target.color}`}} />
-            <Typography variant="body2">Replaced with {reference.name}</Typography>
-          </Stack>}
-          <Box sx={{ minWidth: { sm: 160 } }}>
-            <Typography variant="body2" sx={{ mb: 1 }} aria-live="polite">
-              {completed} of {sections.length} matches checked
-            </Typography>
-            <LinearProgress
-              variant="determinate"
-              value={(completed / sections.length) * 100}
-              aria-label="Scene matches completed"
-            />
-          </Box>
-        </Stack>
-      </Box>
-      <Box
-        component="nav"
-        aria-label="Scenes to check"
-        sx={{ display: "flex", gap: 1, overflowX: "auto", pb: 0.5 }}
-      >
-        {scenes.map((item, index) => {
-          const checked = item.sections.every((section) => choices[section.id]);
-          const first = item.sections.find((section) => !choices[section.id]) ?? item.sections[0];
-          const thumbnail = item.sections.find((section) => section.thumbnail_url)?.thumbnail_url;
-          return (
-          <ButtonBase
-            key={item.id}
-            disabled={busy}
-            aria-current={index === sceneIndex ? "step" : undefined}
-            aria-label={`Scene ${index + 1}, ${checked ? "checked" : "needs checking"}`}
-            onClick={() =>
-              setNavigation({
-                index: sections.findIndex((section) => section.id === first.id),
-                acknowledgedError: errorSegmentId ?? null,
-              })
-            }
-            sx={{
-              flexShrink: 0,
-              width: 144,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "stretch",
-              borderRadius: 1,
-              overflow: "hidden",
-              minHeight: 44,
-              bgcolor:
-                index === sceneIndex ? "action.selected" : "background.paper",
-              color: index === sceneIndex ? "primary.main" : "text.secondary",
-              border: "1px solid",
-              borderColor:
-                index === sceneIndex ? "primary.main" : "divider",
-            }}
-          >
-            {thumbnail ? <Box component="img" src={thumbnail} loading="lazy" alt=""
-              sx={{ width: "100%", height: 94, objectFit: "contain", bgcolor: "#0d0f12" }} />
-              : <Box sx={{ height: 60, display: "grid", placeItems: "center", bgcolor: "action.hover" }}><Typography variant="caption">Scene {index + 1}</Typography></Box>}
-            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ p: 1 }}>
-              {checked && <CheckRounded sx={{ fontSize: 16 }} />}
-              <Typography variant="caption">Scene {index + 1} · {formatTime(item.start)}–{formatTime(item.end)}</Typography>
-            </Stack>
-          </ButtonBase>
-        );})}
-      </Box>
-      <Typography
-        role="status"
-        variant="body2"
-        color="text.secondary"
-        sx={{ minHeight: 20 }}
-      >
-        {announcement ||
-          "Select a person, then use Next to continue."}
+  return <Stack spacing={2.5}>
+    <Box sx={PANEL}>
+      <Typography ref={header} component="h2" variant="h6" tabIndex={-1} sx={{ mb: 2, outline: "none" }}>
+        Character {activeIndex + 1} of {people.length} · {person.name}
       </Typography>
-      <Box sx={PANEL}>
-        <Typography
-          component="h2"
-          variant="h6"
-          tabIndex={-1}
-          ref={sectionHeading}
-          sx={{ outline: "none", scrollMarginTop: 20 }}
-        >
-          Scene {sceneIndex + 1} of {scenes.length}
-          {multiplePeople && ` · ${target.name}`}
-        </Typography>
-        {multiplePeople && <Stack component="nav" aria-label="People in this scene" direction="row" spacing={1} sx={{mt: 2, flexWrap: "wrap", gap: 1}}>
-          {targets.map((person) => {
-            const checks = scene.sections.filter((section) => section.target_id === person.id);
-            if (!checks.length) return null;
-            const first = checks.find((section) => !choices[section.id]) ?? checks[0];
-            return <Button key={person.id} disabled={busy} aria-pressed={person.id === target.id}
-              variant={person.id === target.id ? "contained" : "outlined"}
-              startIcon={checks.every((section) => choices[section.id]) ? <CheckRounded /> : undefined}
-              onClick={() => setNavigation({index: sections.findIndex((section) => section.id === first.id), acknowledgedError: errorSegmentId ?? null})}>{person.name}</Button>;
-          })}
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="space-between">
+        <PersonBadge person={person} subtitle="Find this person in each scene below" />
+        {reference && <Stack direction="row" spacing={1} alignItems="center">
+          <Box component="img" src={reference.url} alt={`${person.name} replacement: ${reference.name}`}
+            sx={{ width: 56, height: 56, objectFit: "contain", borderRadius: 1, border: `2px solid ${person.color}` }} />
+          <Typography variant="body2">Replaced with {reference.name}</Typography>
         </Stack>}
-        {personChecks.length > 1 && <Typography variant="body2" sx={{mt: 1}}>
-          Tracking check {personChecks.findIndex((section) => section.id === active.id) + 1} of {personChecks.length} for {target.name} in this scene.
-        </Typography>}
-        <Typography
-          color="text.secondary"
-          variant="body2"
-          sx={{ mt: 0.75, mb: 2 }}
-        >
-          {REASONS[active.reason] ??
-            "Confirm the person to replace in this section."}
-        </Typography>
-        {errorSegmentId === active.id && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {errorMessage || "This scene needs another look. Review the selected person, or use Show another frame."}
-          </Alert>
-        )}
-        <Stack
-          direction="row"
-          justifyContent="space-between"
-          alignItems="center"
-          sx={{ mb: 1 }}
-        >
-          {trackingUrl ? (
-            <FormControlLabel
-              sx={{ ml: 0, minHeight: 44 }}
-              label="Show detected people"
-              control={
-                <Switch
-                  checked={showingDetectedPeople}
-                  disabled={busy}
-                  onChange={(_event, checked) => setShowOriginal(!checked)}
-                />
-              }
-            />
-          ) : (
-            <Box />
-          )}
-          <Typography variant="caption" color="text.secondary">
-            Frame {frameIndex + 1} of {frameNumbers.length}
-          </Typography>
-        </Stack>
-        <SceneReviewFrame
-          key={frameIdentity}
-          url={previewUrl}
-          imageUrl={imageUrl}
-          frame={frame}
-          width={width}
-          height={height}
-          disabled={busy}
-          selectedPoint={selectedPoint}
-          onReadyChange={(value) => {
-            setReadyFrame(value ? frameIdentity : null);
-            setFailedFrame(value ? null : frameIdentity);
-          }}
-          onSelect={(point, time) =>
-            choose({
-              segment_id: active.id,
-              absent: false,
-              anchor: { ...point, time },
-            })
-          }
-        />
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-          {showingDetectedPeople
-            ? `Tap inside the colored mask on ${target.name}.`
-            : `Tap ${target.name} in the image.`}{" "}
-          If they’re hidden or blurry, try another frame.
-        </Typography>
-        {choice && (
-          <Typography variant="body2" sx={{ color: "success.main", mt: 1.5 }}>
-            {choice.absent
-              ? multiplePeople ? `${target.name} is not in this scene. This changes only their replacement.` : "Marked not in this scene. Nobody will be replaced in this section."
-              : "Person selected. Tap again to change your choice."}
-          </Typography>
-        )}
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          spacing={1.5}
-          sx={{ mt: 2 }}
-        >
-          <Button
-            startIcon={<RefreshRounded />}
-            variant="outlined"
-            disabled={busy || frameNumbers.length < 2}
-            onClick={() =>
-              setFrameSelections((previous) => ({
-                ...previous,
-                [active.id]:
-                  frameNumbers[(frameIndex + 1) % frameNumbers.length],
-              }))
-            }
-          >
-            Show another frame
-          </Button>
-          <Button
-            variant={choice?.absent ? "contained" : "outlined"}
-            disabled={!ready || busy}
-            onClick={() =>
-              choose({ segment_id: active.id, absent: true, anchor: null })
-            }
-          >
-            Not in this scene
-          </Button>
-          {next && <Button variant="contained" disabled={busy || !choice || failed}
-            onClick={() => {setNavigation({index: activeIndex + 1, acknowledgedError: errorSegmentId ?? null}); setAnnouncement("");}}>{nextLabel}</Button>}
-        </Stack>
-        {failed && (
-          <Button sx={{ mt: 1 }} onClick={onRefresh}>
-            Refresh preview
-          </Button>
-        )}
-      </Box>
-      {allChosen && (
-        <Alert severity="success">
-          All scenes checked. Apply your matches, or revisit a scene to make changes.
-        </Alert>
-      )}
-      <Typography variant="body2" color="text.secondary">
-        Your choices apply to these sections only. The complete guide is
-        reviewed before generation. {!enhancedMasking && "Masking stays off; your positions and timestamps are included in the generation prompt."}
-      </Typography>
-      <Button
-        size="large"
-        variant="contained"
-        disabled={busy || !allChosen || failed}
-        onClick={() => {
-          setNavigation({ index: activeIndex, acknowledgedError: null });
-          void onApply(sections.map((section) => choices[section.id]));
-        }}
-      >
-        {busy ? "Applying matches…" : "Apply matches"}
-      </Button>
+      </Stack>
+      <Typography sx={{ mt: 2 }}>Tap this person wherever they appear. Leave an image untapped if they’re not in that scene.</Typography>
+      {!enhancedMasking && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Masking stays off. Your selections tell the model who to replace.</Typography>}
+      {trackingUrl && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
+        onChange={(_event, checked) => setShowDetected(checked)} />} />}
+    </Box>
+    {scenes.map((scene, index) => {
+      const checks = scene.sections.filter((section) => (section.target_id ?? fallbackTarget.id) === person.id);
+      if (!checks.length) return null;
+      return <Stack key={`${person.id}:${scene.id}`} spacing={2}>
+        {checks.map((section, checkIndex) => <SceneChoiceCard key={`${person.id}:${section.id}`} section={section}
+          label={`Scene ${index + 1}${checks.length > 1 ? ` · Tracking check ${checkIndex + 1} of ${checks.length}` : ""}`}
+          sourceUrl={sourceUrl} trackingUrl={trackingUrl} showDetected={showDetected} width={width} height={height}
+          busy={locked} choice={choices[section.id]} onChoose={choose} onRefresh={onRefresh}
+          error={section.id === errorSegmentId ? errorMessage || "This scene needs another look. Review the selected person, or use Show another frame." : null} />)}
+      </Stack>;
+    })}
+    <Typography variant="body2" color="text.secondary">Untapped images will be saved as “not in this scene” for {person.name}.</Typography>
+    <Stack direction="row" spacing={2} justifyContent="space-between">
+      {activeIndex > 0 ? <Button disabled={locked} onClick={() => setNavigation({ index: activeIndex - 1, acknowledgedError: errorSegmentId ?? null })}>Previous character</Button> : <Box />}
+      <Button variant="contained" disabled={locked} onClick={() => void advance()}>{submitting ? "Submitting…" : last ? "Submit" : "Next character"}</Button>
     </Stack>
-  );
+  </Stack>;
 }

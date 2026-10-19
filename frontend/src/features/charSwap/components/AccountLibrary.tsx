@@ -271,7 +271,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     }
   }
   const selectedTargets = selected?.selection_targets?.map((target, index) => ({ ...target,
-    color: target.color ?? TARGET_COLORS[index % TARGET_COLORS.length] })) ?? [];
+    thumbnail: target.thumbnail_url, color: target.color ?? TARGET_COLORS[index % TARGET_COLORS.length] })) ?? [];
   const selectedReferences = selected?.reference_urls ?? (selected?.reference_url ? [selected.reference_url] : []);
   const processingCount = jobs.filter(isGenerationRunning).length;
   const details = (<>
@@ -355,6 +355,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             {selected?.status === "tracking_review" &&
               selected.source_preview_url && (
                 <SceneTrackingReview
+                  key={`${selected.id}:${selected.tracking_revision}`}
                   enhancedMasking={selected.mask_style !== "none"}
                   sourceUrl={selected.source_preview_url}
                   trackingUrl={selected.tracking_url}

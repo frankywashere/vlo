@@ -229,10 +229,20 @@ def view(job: dict):
     if not credits_mode:
         result["provider"] = job.get("provider", "reAPI")
     targets = job.get("normalized_targets") or job.get("setup", {}).get("targets")
+    if not targets and status == "tracking_review" and job.get("tracking_metadata", {}).get("anchor"):
+        targets = [{"id": "selected", "name": job.get("setup", {}).get("target_name") or "Person 1",
+                    "anchor": job["tracking_metadata"]["anchor"], "reference_index": 0}]
     if targets:
-        result["selection_targets"] = [{key: target[key] for key in
-            ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
-            for target in targets]
+        result["selection_targets"] = []
+        for target in targets:
+            public_target = {key: target[key] for key in
+                ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
+            anchor = target.get("anchor", {})
+            frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
+            thumbnail = job.get("scene_thumbnail_uris", {}).get(str(frame))
+            if thumbnail:
+                public_target["thumbnail_url"] = cloud.signed_url(thumbnail)
+            result["selection_targets"].append(public_target)
     reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
     temporary_media_available = not job.get("temporary_media_cleanup_started_at")
     if reference_uris and temporary_media_available:

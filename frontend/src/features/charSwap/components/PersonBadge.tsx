@@ -23,6 +23,7 @@ export function PersonBadge({
       <Avatar
         variant="rounded"
         src={person.thumbnail}
+        alt={person.name}
         sx={{
           width: compact ? 38 : 56,
           height: compact ? 38 : 56,

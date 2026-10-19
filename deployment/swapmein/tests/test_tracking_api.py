@@ -388,3 +388,15 @@ def test_successful_review_logs_resolved_labels_before_queuing(tracking_review, 
     validated = next(item for item in events if item["event"] == "tracking_review_validated")
     assert validated["attempt_id"] == attempt["attempt_id"]
     assert validated["assignments"][0]["segment_id"] == "segment-000"
+
+
+def test_single_person_library_review_restores_original_character_picture(tracking_review):
+    client, records, _, _, headers, job_id, _ = tracking_review
+    job = records.data[f"jobs/{job_id}.json"]
+    job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
+    job["scene_thumbnail_uris"] = {"24": "gs://app/original-character.jpg"}
+    response = client.get(f"/api/jobs/{job_id}", headers=headers)
+    assert response.status_code == 200
+    target = response.json()["selection_targets"][0]
+    assert target["id"] == "selected" and target["reference_index"] == 0
+    assert "original-character.jpg" in target["thumbnail_url"]
