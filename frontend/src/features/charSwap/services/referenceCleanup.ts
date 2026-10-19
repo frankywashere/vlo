@@ -165,7 +165,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
         running = true; markRunning(true);
         worker.postMessage({type:"clean",id,image} satisfies CleanupRequest);
         const cleaned = await timeClientStage("cleanup_inference", () => result);
-        if (!(cleaned instanceof Blob) || cleaned.type !== "image/jpeg" || !cleaned.size || cleaned.size > 5*1024*1024)
+        if (!(cleaned instanceof Blob) || cleaned.type !== "image/png" || !cleaned.size || cleaned.size > 5*1024*1024)
           throw new Error("The cleaned reference could not be read. Use Original.");
         return cleaned;
       };

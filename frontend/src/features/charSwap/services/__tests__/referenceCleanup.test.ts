@@ -10,7 +10,7 @@ class TestWorker extends EventTarget {
   postMessage(message: CleanupRequest){this.messages.push(message);}
   reply(data: CleanupReply){this.dispatchEvent(new MessageEvent("message",{data}));}
 }
-const image=()=>new Blob(["photo"],{type:"image/jpeg"});
+const image=()=>new Blob(["photo"],{type:"image/png"});
 async function settle(){for(let i=0;i<20;i++)await Promise.resolve();}
 beforeEach(()=>{
   sessionStorage.removeItem("recastfx-cleanup-cpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");
@@ -91,7 +91,7 @@ it.each([
   // A GPU failure from an older release must not disable the new CPU worker.
   const result=cleanReferenceBackground("blob:a",new AbortController().signal); await settle();
   const worker=TestWorker.all[0];
-  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v2/referenceCleanup.cpu.js");
+  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v3-alpha/referenceCleanup.cpu.js");
   expect(worker.options).toBeUndefined();
   worker.reply({type:"ready"});await settle();
   const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");

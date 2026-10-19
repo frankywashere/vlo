@@ -290,10 +290,18 @@ def normalize_reference(raw: Path, output: Path):
                     raise PublicError("Reference sides must be 256–5760px, with an aspect ratio between 0.4 and 2.5.", code="reference_dimensions")
                 image.load()
                 image = ImageOps.exif_transpose(image)
+                has_alpha = "A" in image.getbands() or "transparency" in image.info
+                if has_alpha:
+                    image = image.convert("RGBA")
                 image.thumbnail((2048, 2048))
-                image.convert("RGB").save(output, "JPEG", quality=92)
-                return {"input_format": source_format, "output_format": "JPEG",
-                        "flattened_photo": source_format == "MPO"}
+                transparent = has_alpha and image.getchannel("A").getextrema()[0] < 255
+                image.info.clear()  # Keep the existing metadata-removal guarantee for PNG too.
+                if transparent:
+                    image.save(output, "PNG")
+                else:
+                    image.convert("RGB").save(output, "JPEG", quality=92)
+                return {"input_format": source_format, "output_format": "PNG" if transparent else "JPEG",
+                        "has_transparency": transparent, "flattened_photo": source_format == "MPO"}
     except PublicError:
         raise
     except Exception:

@@ -774,7 +774,9 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                 reference_details = await run_in_threadpool(normalize_reference, raw_reference, image)
             emit("reference_normalized", job_id=job_id, reference_index=0, **(reference_details or {}))
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
-            reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
+            transparent = (reference_details or {}).get("output_format") == "PNG"
+            extension, content_type = ("png", "image/png") if transparent else ("jpg", "image/jpeg")
+            reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.{extension}", image, content_type)
         defaults = pipeline_settings(records)
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
@@ -963,10 +965,12 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                     error.reference_index = index
                     raise
                 emit("reference_normalized", job_id=job_id, reference_index=index, **(reference_details or {}))
-                images.append(image)
+                transparent = (reference_details or {}).get("output_format") == "PNG"
+                extension, content_type = ("png", "image/png") if transparent else ("jpg", "image/jpeg")
+                images.append((image, extension, content_type))
             reference_uris = [cloud.upload(settings.app_bucket,
-                f"uploads/{job_id}/reference{'' if index == 0 else '-' + str(index)}.jpg", image, "image/jpeg")
-                for index, image in enumerate(images)]
+                f"uploads/{job_id}/reference{'' if index == 0 else '-' + str(index)}.{extension}", image, content_type)
+                for index, (image, extension, content_type) in enumerate(images)]
         records.update("control/preparation.json", lambda current: reserve_queued_preparation(
             current, time.time(), settings.monthly_preparations, settings.daily_preparations)
             if settings.require_account else reserve_preparation(
