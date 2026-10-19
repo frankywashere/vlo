@@ -117,3 +117,86 @@ describe("settled frame person selection", () => {
     expect(onPoint).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("scrubber seek ownership", () => {
+  it("keeps a drag made before metadata arrives instead of resetting to the trim start", () => {
+    const {video, media} = preview();
+    const slider = screen.getByRole("slider", {name: "Preview position"});
+    fireEvent.change(slider, {target: {value: "7"}});
+    media.readyState = 1;
+    video.currentTime = 4;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBe(7);
+    expect(slider).toHaveValue("7");
+  });
+
+  it("ignores old time updates and retries an older finished seek without moving the thumb", () => {
+    const {video, media, load} = preview();
+    load();
+    const slider = screen.getByRole("slider");
+    fireEvent.change(slider, {target: {value: "7"}});
+    video.currentTime = 5;
+    fireEvent.timeUpdate(video);
+    expect(slider).toHaveValue("7");
+    media.seeking = false;
+    fireEvent.seeked(video);
+    expect(video.currentTime).toBe(7);
+    expect(slider).toHaveValue("7");
+  });
+
+  it("does not restart when a paused scrub reaches the endpoint, and keeps its last frame selectable", () => {
+    const {video, load, surface} = preview();
+    load();
+    const slider = screen.getByRole("slider");
+    fireEvent.change(slider, {target: {value: "9"}});
+    fireEvent.timeUpdate(video);
+    expect(video.currentTime).toBeCloseTo(9 - 1 / 24);
+    fireEvent.seeked(video);
+    expect(surface).toHaveAttribute("aria-disabled", "false");
+    expect(Number(slider.getAttribute("aria-valuenow"))).toBeCloseTo(9 - 1 / 24);
+  });
+
+  it("still returns to the trim start at the end of active playback", () => {
+    const {video, load} = preview();
+    load();
+    Object.defineProperty(video, "paused", {configurable: true, value: false});
+    video.currentTime = 9;
+    fireEvent.timeUpdate(video);
+    expect(video.currentTime).toBe(4);
+  });
+
+  it("queues a rejected pre-metadata seek and retries it when metadata becomes available", () => {
+    const {video, media} = preview();
+    let nativeTime = 4;
+    Object.defineProperty(video, "currentTime", {configurable: true,
+      get: () => nativeTime,
+      set: (value: number) => {if (media.readyState === 0) throw new DOMException("Not ready", "InvalidStateError"); nativeTime = value;},
+    });
+    fireEvent.change(screen.getByRole("slider"), {target: {value: "6"}});
+    expect(screen.getByRole("slider")).toHaveValue("6");
+    media.readyState = 1;
+    fireEvent.loadedMetadata(video);
+    expect(video.currentTime).toBe(6);
+  });
+});
+
+it("holds the final touch-drag position across release and late time events", () => {
+  const {video, load, surface} = preview();
+  load();
+  const slider = screen.getByRole("slider");
+  const root = slider.closest(".MuiSlider-root")!;
+  vi.spyOn(root, "getBoundingClientRect").mockReturnValue({left: 0, top: 0, width: 200, height: 40, right: 200, bottom: 40, x: 0, y: 0, toJSON: () => ({})});
+  fireEvent.pointerDown(root, {pointerId: 1, pointerType: "touch"});
+  fireEvent.touchStart(root, {changedTouches: [{identifier: 1, clientX: 0, clientY: 20}]});
+  fireEvent.touchMove(document, {changedTouches: [{identifier: 1, clientX: 121, clientY: 20}]});
+  const chosen = Number(slider.getAttribute("aria-valuenow"));
+  expect(chosen).toBeGreaterThan(6.9);
+  video.currentTime = 4;
+  fireEvent.timeUpdate(video);
+  expect(Number(slider.getAttribute("aria-valuenow"))).toBe(chosen);
+  fireEvent.touchEnd(document, {changedTouches: [{identifier: 1, clientX: 121, clientY: 20}]});
+  expect(video.currentTime).toBeCloseTo(chosen);
+  expect(surface).toHaveAttribute("aria-disabled", "true");
+  fireEvent.seeked(video);
+  expect(surface).toHaveAttribute("aria-disabled", "false");
+});

@@ -38,7 +38,7 @@ export function GenerationOptions({ disabled = false, onChange, watermarkOffer }
             slotProps={{ input: { role: "switch", "aria-describedby": "silent-submit-help" } }} />}
           label={<Typography variant="body2" fontWeight={650}>Submit without audio</Typography>} />
         <Typography id="silent-submit-help" variant="body2" color="text.secondary" sx={{ mt: .5 }}>
-          Send MiniMax a silent clip. Restore your original soundtrack after generation.
+          Try this if characters have trouble saying their lines. Sends MiniMax a silent clip and restores your original soundtrack after generation.
         </Typography>
       </Box>
       {watermarkOffer && <Box>
