@@ -17,7 +17,7 @@ from google.protobuf import duration_pb2, timestamp_pb2
 
 from .config import Settings
 from .errors import PublicError
-from .diagnostics import emit, timed, timed_stage
+from .diagnostics import emit, timed, timed_stage, worker_failure_event
 from .security import validate_media_url
 
 
@@ -274,7 +274,11 @@ class Cloud:
                 with timed_stage(stage, job_id=self.job_id, worker=service, operation=operation):
                     response = self.http.post(worker_url + endpoint, json=body, headers=headers, timeout=min(600, timeout))
                     if not response.is_success:
-                        raise PublicError("A private processing worker failed. Try a clearer continuous clip.", 502)
+                        worker_failure_event(response, job_id=self.job_id, worker=service, stage=stage, payload=body)
+                        if response.status_code == 422:
+                            raise PublicError("The processing service rejected the guide request. Your scene choices are saved; no generation was submitted.",
+                                502, code="worker_request_rejected")
+                        raise PublicError("A private processing worker failed. Your choices are saved; no generation was submitted.", 502)
                     result = response.json()
                     metrics = result.get("metrics", {})
                     if isinstance(metrics, dict):

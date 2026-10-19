@@ -68,3 +68,28 @@ def test_nested_timers_keep_job_correlation_and_redact_exception_details(capsys,
     assert inner["outcome"] == "raised" and inner["error_type"] == "ValueError"
     assert "private-token-and-media" not in json.dumps(records)
     assert module._timing_job.get() is None and module._timing_stage.get() is None
+
+
+def test_worker_validation_logs_field_types_without_private_inputs(capsys):
+    from swapmein.diagnostics import worker_failure_event
+    response = httpx.Response(422, json={"detail": [
+        {"loc": ["body", "face_mesh"], "type": "extra_forbidden", "input": "secret-photo-url", "msg": "secret-key"},
+        {"loc": ["body", "private-filename"], "type": "secret-value", "input": "private-body"}]})
+    worker_failure_event(response, job_id="job123", worker="audio", stage="guide_composition",
+        payload={"face_mesh": True, "input_uri": "gs://private-photo", "private-filename": "secret-key"})
+    raw = capsys.readouterr().out
+    record = json.loads(raw)
+    assert record["http_status"] == 422
+    assert record["validation_errors"] == [{"field": ["body", "face_mesh"], "type": "extra_forbidden"},
+        {"field": ["body", "other"], "type": "other"}]
+    assert record["request_field_types"] == {"face_mesh": "bool", "input_uri": "str"}
+    assert all(value not in raw for value in ("secret", "private-photo", "private-filename", "private-body"))
+
+
+def test_worker_failure_logs_non_json_response_without_body(capsys):
+    from swapmein.diagnostics import worker_failure_event
+    worker_failure_event(httpx.Response(503, text="private-error"), job_id="job123", worker="audio",
+        stage="guide_composition", payload={})
+    raw = capsys.readouterr().out
+    assert json.loads(raw)["validation_errors"] == []
+    assert "private-error" not in raw

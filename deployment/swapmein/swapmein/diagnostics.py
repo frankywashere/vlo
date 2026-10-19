@@ -116,3 +116,33 @@ def wait_timing(stage, started_at, *, job_id, ended_at=None):
     ended_at = time.time() if ended_at is None else ended_at
     emit("stage_wait_observed", stage=stage, job_id=job_id,
          elapsed_seconds=round(max(0, ended_at - started_at), 6), timing_basis="wall_clock")
+
+
+_WORKER_FIELDS = frozenset({"body", "input_uri", "masks_uri", "guide_audio_uri", "depth_uri",
+    "selected_label", "fill_mode", "run_id", "face_mesh", "mesh_all_people", "target_styles", "label", "color"})
+_VALIDATION_TYPES = frozenset({"missing", "extra_forbidden", "string_type", "int_type", "int_parsing",
+    "bool_type", "bool_parsing", "list_type", "dict_type", "literal_error", "value_error", "too_long",
+    "too_short", "greater_than_equal", "less_than_equal", "string_pattern_mismatch", "json_invalid"})
+
+
+def worker_failure_event(response, *, job_id, worker, stage, payload):
+    """Log schema locations and types only; worker error inputs can contain private media URIs."""
+    issues = []
+    try:
+        body = response.json()
+        details = body.get("detail", []) if isinstance(body, dict) else []
+        if isinstance(details, list):
+            for detail in details[:20]:
+                if not isinstance(detail, dict):
+                    continue
+                loc = detail.get("loc", [])
+                if not isinstance(loc, (list, tuple)):
+                    loc = []
+                issues.append({"field": [part if (type(part) is int and 0 <= part <= 100)
+                    or (isinstance(part, str) and part in _WORKER_FIELDS) else "other" for part in loc[:8]],
+                    "type": detail.get("type") if detail.get("type") in _VALIDATION_TYPES else "other"})
+    except (ValueError, TypeError):
+        pass
+    emit("worker_request_failed", severity="ERROR", job_id=job_id, worker=worker, stage=stage,
+        http_status=response.status_code, validation_errors=issues,
+        request_field_types={key: type(value).__name__ for key, value in payload.items() if key in _WORKER_FIELDS})

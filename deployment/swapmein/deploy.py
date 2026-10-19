@@ -243,8 +243,24 @@ def worker_details():
         if any(set(binding.get("members", [])) & {"allUsers", "allAuthenticatedUsers"}
                for binding in policy.get("bindings", [])):
             raise SetupError(f"{service} has a public IAM member. This script will not alter that policy automatically.")
-        url = gcloud("run", "services", "describe", service, f"--region={region}")["status"]["url"]
-        details[service] = {"url": url, "scaling": scaling, "template": template}
+        deployed = gcloud("run", "services", "describe", service, f"--region={region}")
+        expected = template.get("containers", [{}])[0].get("image", "")
+        serving = []
+        for target in deployed.get("status", {}).get("traffic", []):
+            if target.get("percent", 0) <= 0:
+                continue
+            revision = target.get("revisionName")
+            if not revision:
+                raise SetupError(f"{service} has unconfirmed serving revisions.")
+            actual = gcloud("run", "revisions", "describe", revision, f"--region={region}")
+            digest = actual.get("status", {}).get("imageDigest")
+            if "@sha256:" not in expected or digest != expected:
+                raise SetupError(f"{service} is serving an image that differs from its configured image. Verify revision traffic before deploying.")
+            serving.append({"revision": revision, "image": digest})
+        if not serving:
+            raise SetupError(f"{service} has no verified serving revision.")
+        details[service] = {"url": deployed["status"]["url"], "scaling": scaling, "template": template,
+            "serving_images": serving}
     return details
 
 
