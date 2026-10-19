@@ -402,7 +402,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                         selected.tracking_revision ?? 0,
                         choices,
                         controller.current.signal,
-                        {enabled: selected.mask_style !== "none", key, generateAfterReview: true},
+                        {enabled: selected.mask_style !== "none" || selected.settings_used?.face_mesh === true, key, generateAfterReview: true},
                       );
                       if (mounted.current) {
                         // Publish the saved state to the list before navigation;

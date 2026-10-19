@@ -1,6 +1,6 @@
-import { reportClientTiming, timeClientStage } from "./diagnostics";
+import { reportClientError, reportClientTiming, timeClientStage } from "./diagnostics";
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
-import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, CleanupSkippedError, UnsupportedCleanupError} from "./browserCleanupProtocol";
+import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, CleanupSkippedError, InterruptedCleanupError, UnsupportedCleanupError} from "./browserCleanupProtocol";
 import type {CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
 
 // Retained for older gateway configuration; photos are no longer sent there.
@@ -14,10 +14,20 @@ let ready: Promise<void> | undefined;
 const cpuCleanup = () => isIOSCleanupDevice(navigator.userAgent,navigator.platform,navigator.maxTouchPoints);
 const INTERRUPTED_KEY = cpuCleanup() ? "recastfx-cleanup-cpu-interrupted-v1" : "recastfx-cleanup-interrupted-v1";
 function interrupted() {try {return sessionStorage.getItem(INTERRUPTED_KEY) === "1";} catch {return false;}}
-function markRunning(running: boolean) {
-  try {if (running) sessionStorage.setItem(INTERRUPTED_KEY,"1"); else sessionStorage.removeItem(INTERRUPTED_KEY);} catch { /* Storage is optional. */ }
+function markRunning(active: boolean) {
+  try {if (active) sessionStorage.setItem(INTERRUPTED_KEY,"1"); else sessionStorage.removeItem(INTERRUPTED_KEY);} catch { /* Storage is optional. */ }
 }
-let unsupported = interrupted();
+const RECOVERY_KEY = "recastfx-cleanup-cpu-recovery-v1";
+function recoveryAttempted() {try {return sessionStorage.getItem(RECOVERY_KEY) === "1";} catch {return false;}}
+function clearRecovery() {try {sessionStorage.removeItem(RECOVERY_KEY);} catch { /* Storage is optional. */ }}
+const previousInterruption = interrupted();
+const repeatedCPUInterruption = cpuCleanup() && previousInterruption && recoveryAttempted();
+let unsupported = !cpuCleanup() && previousInterruption;
+let running = false;
+// Normal navigation is not evidence of a WebKit crash. Preserve the in-memory
+// worker on bfcache restores, but do not leave a crash marker after a clean exit.
+globalThis.addEventListener("pagehide", () => {markRunning(false); clearRecovery();});
+globalThis.addEventListener("pageshow", () => {if (running) markRunning(true);});
 let sequence = 0;
 let generation = 0;
 let prefetch: Promise<void> | undefined;
@@ -27,14 +37,18 @@ let progress: ((value: CleanupProgress) => void) | undefined;
 let lastProgress: CleanupProgress = {phase:"loading"};
 const abortError = () => new DOMException("Reference cleanup was canceled.","AbortError");
 function stop() {
-  generation++; markRunning(false); clearTimeout(idle); worker?.terminate(); worker = undefined; ready = undefined;
+  generation++; running = false; markRunning(false); clearRecovery(); clearTimeout(idle); worker?.terminate(); worker = undefined; ready = undefined;
   for (const cancel of [...waiting]) cancel();
 }
 function releaseLater() {clearTimeout(idle); idle = setTimeout(stop, 60_000);}
 function supported() {
+  if (repeatedCPUInterruption) {
+    reportClientError("cleanup_previous_interruption", undefined);
+    throw new InterruptedCleanupError();
+  }
   if (unsupported || !globalThis.isSecureContext || typeof Worker === "undefined" ||
     (!cpuCleanup() && !navigator.gpu) || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function")
-    throw new UnsupportedCleanupError();
+    { reportClientError(cpuCleanup() ? "cleanup_cpu_unsupported" : "cleanup_gpu_unsupported", undefined); throw new UnsupportedCleanupError(); }
 }
 function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefined, timeout: number): Promise<T> {
   return new Promise((resolve,reject) => {
@@ -43,7 +57,7 @@ function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefine
     waiting.add(cancel);
     function finish() {waiting.delete(cancel); clearTimeout(timer); target.removeEventListener("message",message); target.removeEventListener("error",crash);}
     function fail(error: Error) {finish(); stop(); reject(error);}
-    function crash() {unsupported = true; fail(new UnsupportedCleanupError());}
+    function crash() {fail(new Error("Background cleanup stopped unexpectedly. You can use Original."));}
     function message(event: MessageEvent<CleanupReply>) {
       const reply = event.data;
       if (reply.type === "progress") {lastProgress = reply.progress; progress?.(reply.progress); return;}
@@ -52,7 +66,7 @@ function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefine
         fail(reply.kind === "unsupported" ? new UnsupportedCleanupError() : new Error(reply.message)); return;
       }
       const value = match(reply);
-      if (value !== undefined) {markRunning(false); finish(); resolve(value);}
+      if (value !== undefined) {running = false; markRunning(false); if (reply.type === "result") clearRecovery(); finish(); resolve(value);}
     }
     target.addEventListener("message",message); target.addEventListener("error",crash);
   });
@@ -60,7 +74,11 @@ function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefine
 function initialize() {
   supported(); clearTimeout(idle);
   if (!ready) {
-    markRunning(true);
+    if (cpuCleanup() && previousInterruption) {
+      reportClientError("cleanup_retry_after_interruption", undefined);
+      try {sessionStorage.setItem(RECOVERY_KEY,"1");} catch { /* Storage is optional. */ }
+    }
+    running = true; markRunning(true);
     const epoch=generation;
     if (!prefetch) lastProgress = {phase:"loading",downloadMB:cpuCleanup() ? 176 : 99};
     ready=timeClientStage("cleanup_model_load", async()=>{
@@ -69,7 +87,7 @@ function initialize() {
       if (generation!==epoch) throw abortError();
       try {worker=cpuCleanup()?new Worker(CPU_RUNTIME_PATH+"referenceCleanup.cpu.js")
         :new Worker(new URL("../workers/referenceCleanup.worker.ts",import.meta.url),{type:"module"});}
-      catch {markRunning(false);unsupported=true;throw new UnsupportedCleanupError();}
+      catch {running = false; markRunning(false);unsupported=true;throw new UnsupportedCleanupError();}
       const loaded=waitFor(worker,reply=>reply.type==="ready"?true:undefined,cpuCleanup()?300_000:90_000);
       worker.postMessage({type:"initialize"} satisfies CleanupRequest);
       await loaded;
@@ -144,10 +162,10 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
         if (signal.aborted || !worker) throw abortError();
         const id = ++sequence;
         const result = waitFor(worker, reply => reply.type === "result" && reply.id === id ? reply.image : undefined,cpuCleanup() ? 60_000 : 30_000);
-        markRunning(true);
+        running = true; markRunning(true);
         worker.postMessage({type:"clean",id,image} satisfies CleanupRequest);
         const cleaned = await timeClientStage("cleanup_inference", () => result);
-        if (!(cleaned instanceof Blob) || cleaned.type !== "image/jpeg" || !cleaned.size || cleaned.size > 5*1024*1024)
+        if (!(cleaned instanceof Blob) || cleaned.type !== "image/png" || !cleaned.size || cleaned.size > 5*1024*1024)
           throw new Error("The cleaned reference could not be read. Use Original.");
         return cleaned;
       };

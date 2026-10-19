@@ -42,6 +42,7 @@ interface CharSwapStore extends WalkthroughState {
   setReplaceAllPeople: (enabled: boolean) => void;
   setEasyMode: (enabled: boolean) => void;
   setSubmitWithoutAudio: (enabled: boolean) => void;
+  setFaceMesh: (enabled: boolean) => void;
   setAddWatermark: (enabled: boolean) => void;
   setEnhancedCharacterMasking: (enabled: boolean) => void;
   loadClip: (clip: ClipAsset) => void;
@@ -61,6 +62,7 @@ interface CharSwapStore extends WalkthroughState {
 
 export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   ...createInitialState(),
+  faceMesh: undefined,
   step: "clip",
   selectionVersion: 0,
   trackingReady: false,
@@ -72,6 +74,11 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   }),
   setAddWatermark: (enabled) => set((state) => enabled === (state.addWatermark ?? false) ? state : {
     addWatermark: enabled, selectionVersion: state.selectionVersion + 1,
+    trackingReady: false, issues: [], decisions: {},
+    step: ["matches", "generation"].includes(state.step) ? "review" : state.step,
+  }),
+  setFaceMesh: (enabled) => set((state) => enabled === state.faceMesh ? state : {
+    faceMesh: enabled, selectionVersion: state.selectionVersion + 1,
     trackingReady: false, issues: [], decisions: {},
     step: ["matches", "generation"].includes(state.step) ? "review" : state.step,
   }),
@@ -110,7 +117,8 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
               : state.step,
           },
     ),
-  restoreRetry: (draft) => set((state) => ({...createInitialState(), ...draft, step: "clip",
+  restoreRetry: (draft) => set((state) => ({...createInitialState(),
+    faceMesh: undefined, ...draft, step: "clip",
     selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null})),
   loadClip: (clip) =>
     set((state) => ({
@@ -228,6 +236,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   reset: () =>
     set({
       ...createInitialState(),
+      faceMesh: undefined,
       retryNotice: undefined, retryNeedsSource: false,
       selectionVersion: get().selectionVersion + 1,
       step: "clip",

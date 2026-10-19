@@ -93,7 +93,7 @@ describe("private account library", () => {
       within(current).getByRole("button", { name: "Check scene matches" }),
     ).toBeInTheDocument();
     expect(
-      within(current).getAllByRole("button", { name: "View progress" })[0],
+      within(current).getAllByRole("button", { name: "View reference images" })[0],
     ).toBeInTheDocument();
     expect(within(current).getByText("Finished clip")).toBeInTheDocument();
     expect(screen.getByText("2 videos in progress")).toBeInTheDocument();
@@ -313,8 +313,9 @@ it("identifies the post-selection guide rebuild without asking users to select s
 });
 
 
-it.each([false, true])("shows saved choices as processing immediately, with an older refresh pending: %s", async (olderRefresh) => {
+it.each([{olderRefresh:false,meshOnly:false},{olderRefresh:true,meshOnly:false},{olderRefresh:false,meshOnly:true}])("shows saved choices as processing immediately with saved routing: %s", async ({olderRefresh,meshOnly}) => {
   const review = {...job, status: "tracking_review" as const, access_mode: "credits" as const,
+    ...(meshOnly?{mask_style:"none" as const,settings_used:{face_mesh:true}}:{}),
     source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
     tracking_revision: 1, tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
       seek_time: 1, needs_review: true, reason: "scene_selection"}]};
@@ -332,6 +333,7 @@ it.each([false, true])("shows saved choices as processing immediately, with an o
   await user.click(screen.getByRole("button", {name: "Check scene matches"}));
   await user.click(screen.getByRole("button", {name: "Submit and generate"}));
   await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(resolveLiveTracking).mock.calls[0][5]).toMatchObject({enabled:true,generateAfterReview:true});
   await waitFor(() => expect(screen.getAllByRole("button", {name: "Back to Library"})[0]).toBeEnabled());
   await user.click(screen.getAllByRole("button", {name: "Back to Library"})[0]);
   expect(await screen.findByRole("region", {name: "Your generations"})).toBeVisible();

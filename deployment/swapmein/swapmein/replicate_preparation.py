@@ -205,7 +205,10 @@ class ReplicatePreparation:
     @timed("replicate_preparation")
     def prepare(self, root, metadata, sam_metadata, source_uri, sam_uri, remaining):
         saved = {}
-        for operation, uri, working_metadata in (("sam", sam_uri, sam_metadata), ("depth", source_uri, metadata)):
+        operations = [("sam", sam_uri, sam_metadata)]
+        if self.job.get("depth_guidance", True):
+            operations.append(("depth", source_uri, metadata))
+        for operation, uri, working_metadata in operations:
             state = self._state(operation)
             identity = {"uri": uri, "metadata": working_metadata,
                 "prompt": "person" if operation == "sam" else None,
@@ -243,7 +246,7 @@ class ReplicatePreparation:
                 f"inputs/swapmein-{self.job['id']}/{uuid.uuid4().hex}-{name}", local, content_type)
             self._update(operation, asset_uri=asset_uri, asset_verified=True)
             saved[operation] = asset_uri
-        return {"masks_uri": saved["sam"], "depth_uri": saved["depth"]}
+        return {"masks_uri": saved["sam"], "depth_uri": saved.get("depth")}
 
 
 def _metric(result, key):

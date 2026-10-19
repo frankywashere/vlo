@@ -16,14 +16,14 @@ def test_audio_toggle_defaults_off_is_owner_only_and_rejects_stale_saves(api, mo
     monkeypatch.setattr(gateway, "verify_account", lambda token, project: {
         "account_id": digest(token), "email": "frank@whipsnapfilms.com" if token == "owner" else "user@example.com"})
     assert pipeline_settings(records) == {"revision": 0, "audio_processing": False,
-        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False}
+        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
     url = "/api/commerce/admin/pipeline"
     body = {"revision": 0, "audio_processing": True}
     assert client.post(url, headers={"X-Firebase-Token": "user"}, json=body).status_code == 403
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={**body, "audio_processing": 1}).status_code == 422
     response = client.post(url, headers={"X-Firebase-Token": "owner"}, json=body)
     assert response.json() == {"revision": 1, "audio_processing": True,
-        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False}
+        "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "depth_guidance": False, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json=body).status_code == 409
     assert client.get("/api/commerce/admin", headers={"X-Firebase-Token": "owner"}).json()["pipeline"] == response.json()
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 1, "audio_processing": False}).json()["audio_processing"] is False
@@ -163,3 +163,63 @@ def test_silent_submission_requires_original_soundtrack_before_provider_charge(a
     response = client.post(f"/api/jobs/{job_id}/generate", headers=headers, json={"approved": True})
     assert response.status_code == 409
     assert not provider.submissions
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_new_job_pins_depth_setting_and_other_saves_preserve_it(api, monkeypatch, direct):
+    client, records, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "owner@example.com")
+    monkeypatch.setattr(gateway, "verify_account", lambda token, project: {"account_id": digest(token), "email": "owner@example.com"})
+    url = "/api/commerce/admin/pipeline"
+    assert pipeline_settings(records)["depth_guidance"] is False
+    assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 0, "depth_guidance": 0}).status_code == 422
+    assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 0, "depth_guidance": False}).json()["depth_guidance"] is False
+    assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 1, "audio_processing": False}).json()["depth_guidance"] is False
+    headers, _ = authenticated(api)
+    if direct:
+        ticket = client.post("/api/uploads", headers=headers, json=upload_options()).json()
+        response = client.post(f"/api/uploads/{ticket['id']}/complete", headers=headers)
+    else:
+        image = BytesIO(); Image.new("RGB", (256, 256), "blue").save(image, "PNG")
+        response = client.post("/api/jobs", headers=headers, files={"clip": ("clip.mp4", b"source", "video/mp4"),
+            "reference": ("ref.png", image.getvalue(), "image/png")}, data={"setup": json.dumps(upload_options()["setup"])})
+    assert response.status_code == 202, response.text
+    job = records.data[f"jobs/{response.json()['id']}.json"]
+    assert job["depth_guidance"] is False
+    assert job["guide_style_version"] == 2
+    assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={"revision": 2, "depth_guidance": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}).json()["depth_guidance"] is True
+    assert job["depth_guidance"] is False
+    assert client.get(f"/api/jobs/{job['id']}", headers=headers).json()["settings_used"]["depth_guidance"] is False
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("masked", [False, True])
+@pytest.mark.parametrize("visible", [False, True])
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("is_admin", [False, True])
+def test_face_mesh_job_snapshot_honors_only_visible_user_overrides(api, monkeypatch, direct, masked, visible, override, is_admin):
+    client, records, _, _=api
+    records.data[PATH]={"revision":1,"face_mesh_masked_default":True,"face_mesh_unmasked_default":False,
+                        "face_mesh_user_control":visible}
+    headers,_=authenticated(api)
+    if is_admin:
+        monkeypatch.setenv("COMMERCE_OWNER_EMAILS","admin@example.com")
+        for path in records.data:
+            if path.startswith("sessions/"): records.data[path]["email"]="admin@example.com"
+    request=upload_options()
+    request['setup'].update(enhanced_character_masking=masked,face_mesh=override)
+    if direct:
+        ticket=client.post('/api/uploads',headers=headers,json=request).json()
+        response=client.post(f"/api/uploads/{ticket['id']}/complete",headers=headers)
+    else:
+        image=BytesIO();Image.new('RGB',(256,256),'blue').save(image,'PNG')
+        response=client.post('/api/jobs',headers=headers,files={'clip':('clip.mp4',b'source','video/mp4'),
+            'reference':('ref.png',image.getvalue(),'image/png')},data={'setup':json.dumps(request['setup'])})
+    assert response.status_code==202,response.text
+    job=records.data[f"jobs/{response.json()['id']}.json"]
+    expected=override if (visible or is_admin) else masked
+    assert job['face_mesh'] is expected
+    records.data[PATH]['face_mesh_masked_default']=False
+    records.data[PATH]['face_mesh_user_control']=False
+    assert job['face_mesh'] is expected
+    assert client.get(f"/api/jobs/{job['id']}",headers=headers).json()['settings_used']['face_mesh'] is expected

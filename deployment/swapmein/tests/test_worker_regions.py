@@ -8,13 +8,16 @@ def test_deployment_discovers_and_checks_the_workers_in_their_own_regions(monkey
     def read(url):
         urls.append(url)
         return {"scaling": {"scalingMode": "MANUAL", "manualInstanceCount": 0},
-                "template": {"scaling": {"maxInstanceCount": 1}}}
+                "template": {"scaling": {"maxInstanceCount": 1}, "containers": [{"image": "image@sha256:abc"}]}}
 
     def command(*args, **kwargs):
         commands.append(args)
         if args[:3] == ("run", "services", "get-iam-policy"):
             return {"bindings": []}
-        return {"status": {"url": "https://" + args[3] + ".run.app"}}
+        if args[:3] == ("run", "revisions", "describe"):
+            return {"status": {"imageDigest": "image@sha256:abc"}}
+        return {"status": {"url": "https://" + args[3] + ".run.app",
+            "traffic": [{"percent": 100, "revisionName": args[3] + "-revision"}]}}
 
     monkeypatch.setattr(deploy, "google_get", read)
     monkeypatch.setattr(deploy, "gcloud", command)
@@ -41,3 +44,19 @@ def test_scaler_permission_checks_follow_each_worker_region(monkeypatch):
         f"//run.googleapis.com/projects/{deploy.PROJECT}/locations/us-central1/services/proof-gpu",
         f"//run.googleapis.com/projects/{deploy.PROJECT}/locations/us-east4/services/proof-audio",
     ]
+
+
+def test_deployment_rejects_configured_image_that_is_not_serving(monkeypatch):
+    import pytest
+    monkeypatch.setattr(deploy, "google_get", lambda _url: {
+        "scaling": {"scalingMode": "MANUAL", "manualInstanceCount": 0},
+        "template": {"scaling": {"maxInstanceCount": 1}, "containers": [{"image": "image@sha256:new"}]}})
+    def command(*args, **_kwargs):
+        if args[:3] == ("run", "services", "get-iam-policy"):
+            return {"bindings": []}
+        if args[:3] == ("run", "revisions", "describe"):
+            return {"status": {"imageDigest": "image@sha256:old"}}
+        return {"status": {"url": "https://worker.run.app", "traffic": [{"percent": 100, "revisionName": "old"}]}}
+    monkeypatch.setattr(deploy, "gcloud", command)
+    with pytest.raises(deploy.SetupError, match="differs from its configured image"):
+        deploy.worker_details()

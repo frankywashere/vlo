@@ -27,11 +27,11 @@ def clean_border_fragments(mask):
                 yy,xx=zip(*component);band[yy,xx]=False
     return result
 
-def compose(source, archive, vocals, output, selected_label, fill_mode='gray', depth_source=None, target_styles=None):
-    if fill_mode not in ['gray','original','color','depth']:raise ValueError('Invalid fill mode')
+def compose(source, archive, vocals, output, selected_label, fill_mode='gray', depth_source=None, target_styles=None, face_mesh=False, mesh_all_people=False):
+    if fill_mode not in ['gray','original','color','depth','solid','translucent']:raise ValueError('Invalid fill mode')
     styles=[]
     if target_styles is not None:
-        if fill_mode!='depth':raise ValueError('Target styles require a depth guide')
+        if fill_mode not in ['depth','solid','original','translucent']:raise ValueError('Target styles require a depth or solid guide')
         if not isinstance(target_styles,list) or not 1<=len(target_styles)<=5:raise ValueError('Expected 1–5 target styles')
         for style in target_styles:
             if (not isinstance(style,dict) or set(style)!={'label','color'} or type(style['label']) is not int
@@ -68,6 +68,10 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
     audio = json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-of','json',str(vocals)]))
     if abs(float(audio['format']['duration'])-duration) > .1:
         raise ValueError('Guide audio and masks do not have matching duration')
+    painter = None
+    if face_mesh:
+        from face_mesh import FaceMeshPainter
+        painter = FaceMeshPainter(multiple_per_label=mesh_all_people)
     depth_decoder=subprocess.Popen(['ffmpeg','-v','error','-i',str(depth_source),'-map','0:v:0','-f','rawvideo','-pix_fmt','rgb24','pipe:1'],stdout=subprocess.PIPE) if fill_mode=='depth' else None
     decoded = subprocess.Popen(['ffmpeg','-v','error','-i',str(source),'-map','0:v:0','-f','rawvideo','-pix_fmt','rgb24','pipe:1'],stdout=subprocess.PIPE)
     labels = subprocess.Popen(['ffmpeg','-v','error','-framerate','24','-i',str(masks/'labels_%05d.png'),'-f','rawvideo','-pix_fmt','gray16le','pipe:1'],stdout=subprocess.PIPE)
@@ -80,6 +84,7 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
             if len(raw)!=width*height*3 or len(mask)!=width*height*2:
                 raise ValueError('Source and mask frame dimensions/count do not match')
             frame = np.frombuffer(raw,dtype=np.uint8).reshape(height,width,3).copy()
+            original = frame.copy() if painter else None
             label_frame=np.frombuffer(mask,dtype='<u2').reshape(height,width)
             target = clean_border_fragments(label_frame==selected_label) if not styles else np.zeros((height,width),dtype=bool)
             styled_masks=[]
@@ -88,8 +93,17 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
                 styled_masks.append((styled,rgb));target|=styled
                 target_coverage[str(label)].append(int(styled.sum()))
             area=int(target.sum())
-            if not area and fill_mode not in ['color','depth']: raise ValueError(f'Selected person absent in frame {i}; review required')
+            if not area and not face_mesh and fill_mode not in ['color','depth','solid','translucent']: raise ValueError(f'Selected person absent in frame {i}; review required')
             coverage.append(area)
+            if fill_mode=='solid':
+                if styles:
+                    for styled,rgb in styled_masks:frame[styled]=rgb.astype(np.uint8)
+                else:frame[target]=128
+            if fill_mode=='translucent':
+                if styles:
+                    for styled,rgb in styled_masks:
+                        frame[styled]=np.rint(frame[styled].astype(np.float32)*.8+rgb*.2).astype(np.uint8)
+                else:frame[target]=np.rint(frame[target].astype(np.float32)*.8+np.array([0,220,255],dtype=np.float32)*.2).astype(np.uint8)
             if fill_mode=='gray':frame[target]=128
             elif fill_mode=='color':frame[target]=np.rint(frame[target].astype(np.float32)*.5 + np.array([0,220,255],dtype=np.float32)*.5).astype(np.uint8)
             if fill_mode=='depth':
@@ -103,16 +117,20 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
                     for styled,rgb in styled_masks:
                         frame[styled]=np.rint(brightness[styled,None]*(rgb/rgb.max())).astype(np.uint8)
                 else:frame[target]=depth_frame[target]
+            if painter:
+                painter.apply(original, frame, label_frame, target)
             encoded.stdin.write(frame.tobytes())
-        if decoded.stdout.read(1) or labels.stdout.read(1):
+        if decoded.stdout.read(1) or (labels and labels.stdout.read(1)):
             raise ValueError('Unexpected extra source or mask frames')
         if depth_decoder and depth_decoder.stdout.read(1):raise ValueError('Unexpected extra depth frames')
         encoded.stdin.close()
-        if any(p.wait()!=0 for p in [decoded, labels, encoded]+([depth_decoder] if depth_decoder else [])):
+        if any(p.wait()!=0 for p in [p for p in (decoded, labels, encoded, depth_decoder) if p is not None]):
             raise RuntimeError('Video decode/encode failed')
     finally:
-        for p in [decoded, labels, encoded]+([depth_decoder] if depth_decoder else []):
+        if painter:painter.close()
+        for p in [p for p in (decoded, labels, encoded, depth_decoder) if p is not None]:
             if p.poll() is None: p.kill();p.wait()
-    result={'frames':len(entries),'fps':24,'duration_seconds':duration,'width':width,'height':height,'selected_label':selected_label,'mask_pixels_per_frame':coverage,'fill_mode':fill_mode,'fill_rgb':[128,128,128] if fill_mode=='gray' else None,'overlay_rgb':[0,220,255] if fill_mode=='color' else None,'overlay_opacity':.5 if fill_mode=='color' else None,'device':'cpu','depth':fill_mode=='depth','face_mesh':False}
+    result={'frames':len(entries),'fps':24,'duration_seconds':duration,'width':width,'height':height,'selected_label':selected_label,'mask_pixels_per_frame':coverage,'fill_mode':fill_mode,'fill_rgb':[128,128,128] if fill_mode=='gray' else None,'overlay_rgb':[0,220,255] if fill_mode in ['color','translucent'] else None,'overlay_opacity':.2 if fill_mode=='translucent' else .5 if fill_mode=='color' else None,'device':'cpu','depth':fill_mode=='depth','face_mesh':face_mesh}
+    if painter:result['face_mesh_metrics']=painter.metrics
     if styles:result.update(target_styles=target_styles,target_coverage=target_coverage)
     return result

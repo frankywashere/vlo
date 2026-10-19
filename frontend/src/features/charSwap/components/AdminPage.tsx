@@ -106,6 +106,32 @@ export function AdminPage() {
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
+          {([
+            ["face_mesh_masked_default", "Face mesh default with Enhanced Masking", true],
+            ["face_mesh_unmasked_default", "Face mesh default without masking", false],
+            ["face_mesh_user_control", "Show face-mesh switch to users", false],
+          ] as const).map(([field, label, initial]) => <FormControlLabel key={field}
+            control={<Switch checked={admin.pipeline?.[field] ?? initial} disabled={busy || !can("pipeline_settings")}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                void run(async () => {
+                  const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, [field]: enabled});
+                  setAdmin({...admin, pipeline});
+                  setMessage("Face-mesh settings saved for new jobs. Existing jobs keep their saved mode.");
+                });
+              }} />} label={label} />)}
+          <Typography color="text.secondary">Defaults apply when the user switch is hidden or unchanged. When shown, users can turn face mesh on or off for their run, overriding either default. May take extra time.</Typography>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.depth_guidance ?? false}
+            disabled={busy || !can("pipeline_settings")}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, depth_guidance: enabled});
+                setAdmin({...admin, pipeline});
+                setMessage(`Depth guidance ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved mode.`);
+              });
+            }} />} label="Add depth to person masks" />
+          <Typography color="text.secondary">On by default. Turn off to use flat person masks without running Depth Anything. Enhanced person masking still runs SAM. Applies to new jobs only.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.retry_missing_masks_with_sam ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

@@ -2,7 +2,7 @@ import {createContext, useCallback, useContext, useEffect, useRef, useState} fro
 import type {ReactNode} from "react";
 import {useCharSwapStore} from "../useCharSwapStore";
 import {cleanReferenceBackground} from "../services/referenceCleanup";
-import {CleanupSkippedError, UnsupportedCleanupError} from "../services/browserCleanupProtocol";
+import {CleanupSkippedError, InterruptedCleanupError, UnsupportedCleanupError} from "../services/browserCleanupProtocol";
 import type {CleanupProgress} from "../services/browserCleanupProtocol";
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
 import {createLocalId} from "../utils/createLocalId";
@@ -49,7 +49,7 @@ export function ReferenceCleanupProvider({enabled,endpoint,children}:{enabled:bo
       const asset=current(targetId);
       if (asset?.id!==id) return;
       useCharSwapStore.getState().assignReference(targetId,{...asset,url:original,
-        cleanup:{originalUrl:original,mode:"original",pending:false,unsupported:error instanceof UnsupportedCleanupError,
+        cleanup:{originalUrl:original,mode:"original",pending:false,unsupported:error instanceof UnsupportedCleanupError, interrupted:error instanceof InterruptedCleanupError,
           error:error instanceof CleanupSkippedError || controller.signal.aborted || asset.cleanup?.mode==="original" ? undefined : error instanceof Error ? error.message : "Cleanup did not finish. Use Original."}});
     }).finally(()=>{if (jobs.current.get(targetId)?.id===id) jobs.current.delete(targetId);});
   },[enabled,endpoint]);

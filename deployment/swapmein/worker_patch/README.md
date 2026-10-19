@@ -10,7 +10,7 @@ A built tag alone is not proof of deployment or successful inference.
 
 | Recipe | Layer members | Pinned base | New tag |
 | --- | --- | --- | --- |
-| [cloudbuild.json](cloudbuild.json) | `app/app.py`, `app/composite.py`, **`app/common.py`**, complete pinned Pillow wheel under CPython 3.12 site-packages | audio `sha256:809458c2d9bd5d718df704763dfd6b402556c606c54df9e6ef5844c8d7ccf5ff` | `audio:multi-768-v2-pillow11-3` |
+| [cloudbuild.json](cloudbuild.json) | `app/app.py`, `app/composite.py`, **`app/common.py`**, complete pinned Pillow wheel under CPython 3.12 site-packages | last deployed audio `sha256:4f2fb2d9623f73ade7d46b6e62cd006b88eb45d55e5085cd13927241cdb9e019` | `audio:solid-masks-v1` |
 | [cloudbuild.gpu.json](cloudbuild.gpu.json) | **`app/common.py`** | GPU `sha256:6b1bb4e7f1ac184f8a49831d26c89d06375e1b8d4fa8af8dce96482d49a259fd` | `gpu:working-768-v1` |
 | [cloudbuild.gpu-iowa.json](cloudbuild.gpu-iowa.json) | `app/bounded_gpu_mask_iou.py`, `app/serve_gpu.py` | last deployed GPU `sha256:68908ec486591296875fdbf414f4bdd743e36b88a549f7f4026f0a787645283d` | `gpu:bounded-sam-iowa-v1` |
 
@@ -187,3 +187,42 @@ authorized by this commit alone.
 
 References: [Transformers point tracker](https://huggingface.co/docs/transformers/model_doc/sam3_tracker_video)
 and [pinned 5.19 tracker implementation](https://github.com/huggingface/transformers/blob/v5.19.0/src/transformers/models/sam3_tracker_video/modeling_sam3_tracker_video.py).
+
+### Flat masks without depth
+
+`fill_mode: "solid"` uses the same reviewed labels and original background, accepts
+per-person `target_styles`, and needs no depth asset. One selected label is flat gray;
+multiple labels use the supplied RGB colors. Depth mode is unchanged. Deploy this
+CPU overlay before exposing the gateway's experimental depth-guidance setting.
+No GPU overlay or model download is required.
+
+### CPU facial landmarks
+
+`Dockerfile.face-mesh` extends the tested solid-mask CPU image with MediaPipe 1.1.1,
+its system libraries and a hash-verified Face Landmarker model. Model bytes and
+Python sources are staged by `stage_face_mesh.py`; no input video/photo is included.
+The build performs a CPU inference smoke test and `pip check` before publishing.
+`face_mesh.py` streams each original RGB frame through the detector; the compositor
+then paints approved facial landmarks after mask/depth fill. It never detects from
+the filled guide, never applies mesh to unselected labels, and logs ambiguity/gaps.
+For mesh without visible masking, SAM supplies internal labels and `fill_mode:
+"original"` preserves RGB. Per-person styles are accepted for this mode as labels
+only; they are not painted. Existing depth/flat behavior stays unchanged when mesh
+is off. This worker source layer must deploy before the gateway enables mesh defaults.
+
+The [native CPU proof](face-mesh-proof.json) detected two real faces in the official
+MediaPipe sample and painted only the selected side, preserving every unselected
+pixel. It ran the deployed image with the explicit CPU delegate in Cloud Build;
+no GPU or provider render was started. Its single-frame timing is not a production
+startup or clip-duration benchmark. Model licensing is documented in Google's
+[Face Mesh V2 model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf).
+
+### Shared cyan at twenty percent
+
+`stage_cyan_overlay.py` stages only the CPU compositor, its request interface,
+face-mesh helper and a synthetic smoke test on the verified face-mesh image.
+The build checks `fill_mode: "translucent"`, shared color across two labels,
+20% blending, preserved unselected RGB, MediaPipe CPU initialization and package
+integrity. No model download, GPU change or user media enters the build context.
+`fill_mode: "color"` retains its legacy 50% overlay; gray and solid guides remain
+available for older saved jobs.

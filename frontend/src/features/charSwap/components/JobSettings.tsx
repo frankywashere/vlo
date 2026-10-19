@@ -10,6 +10,8 @@ export function JobSettings({ settings }: { settings?: JobSettingsUsed }) {
     for (const [label, value] of [
       ["Easy mode", settings.easy_mode],
       ["Enhanced masking", settings.enhanced_masking],
+      ["Depth guidance", settings.depth_guidance],
+      ["Face mesh", settings.face_mesh],
       ["Audio processing", settings.audio_processing],
       ["Submit without audio", settings.submit_without_audio],
       ["RecastFX watermark", settings.add_watermark],
@@ -17,7 +19,7 @@ export function JobSettings({ settings }: { settings?: JobSettingsUsed }) {
     if (settings.replace_all_people) rows.push(["People", "Replace everyone"]);
     else if (settings.people_count !== undefined) rows.push(["People selected", String(settings.people_count)]);
     if (settings.reference_count !== undefined) rows.push(["References", String(settings.reference_count)]);
-    const styles: Record<string, string> = { depth: "Depth guidance", depth_multi: "Depth guidance", cyan_overlay: "Cyan overlay", gray: "Gray silhouette" };
+    const styles: Record<string, string> = { depth: "Depth guidance", depth_multi: "Depth guidance", cyan_overlay: "Cyan overlay", gray: "Gray silhouette", solid_multi: "Flat colored masks" };
     if (settings.mask_style && styles[settings.mask_style]) rows.push(["Mask method", styles[settings.mask_style]]);
     if (settings.prep_width && settings.prep_height) rows.push(["Prepared video", `${settings.prep_width} × ${settings.prep_height}${settings.prep_fps ? ` · ${settings.prep_fps} fps` : ""}`]);
     if (settings.model) rows.push(["Model", settings.model]);

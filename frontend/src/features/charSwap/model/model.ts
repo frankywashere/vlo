@@ -39,6 +39,7 @@ export interface ReferenceAsset {
     pending?: boolean;
     error?: string;
     unsupported?: boolean;
+    interrupted?: boolean;
   };
 }
 
@@ -65,6 +66,7 @@ export interface WalkthroughState {
   replaceAllPeople?: boolean;
   easyMode?: boolean;
   submitWithoutAudio?: boolean;
+  faceMesh?: boolean;
   addWatermark?: boolean;
   watermarkBonusQuote?: number;
   enhancedCharacterMasking?: boolean;

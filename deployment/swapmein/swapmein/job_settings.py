@@ -5,17 +5,19 @@ import math
 def settings_used(job):
     result = dict(job.get("settings_used") or {})
     setup = job.get("setup") or {}
-    for key in ("easy_mode", "replace_all_people", "audio_processing", "submit_without_audio", "add_watermark"):
+    for key in ("easy_mode", "replace_all_people", "audio_processing", "submit_without_audio", "add_watermark", "depth_guidance", "face_mesh"):
         value = job.get(key, setup.get(key))
         if isinstance(value, bool):
             result[key] = value
+    if "depth_guidance" in result and setup.get("enhanced_character_masking") is False:
+        result["depth_guidance"] = False
     if setup.get("submit_without_audio"):
         result["audio_processing"] = False
     if isinstance(setup.get("enhanced_character_masking"), bool):
         result["enhanced_masking"] = setup["enhanced_character_masking"]
-    elif job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "gray"}:
+    elif job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20", "gray", "solid_multi"}:
         result["enhanced_masking"] = job["mask_style"] != "none"
-    if job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "gray"}:
+    if job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20", "gray", "solid_multi"}:
         result["mask_style"] = job["mask_style"]
     if isinstance(job.get("watermark_bonus_credits"), int):
         result["watermark_bonus_credits"] = job["watermark_bonus_credits"]
@@ -44,5 +46,5 @@ def settings_used(job):
         result["model"] = "MiniMax H3"
     if generation.get("resolution") in {"768P", "768p"}:
         result["requested_resolution"] = "768p"
-    allowed = {"add_watermark", "watermark_bonus_credits", "submit_without_audio", "easy_mode", "replace_all_people", "audio_processing", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution"}
+    allowed = {"face_mesh", "depth_guidance", "add_watermark", "watermark_bonus_credits", "submit_without_audio", "easy_mode", "replace_all_people", "audio_processing", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution"}
     return {key: value for key, value in result.items() if key in allowed}

@@ -10,7 +10,14 @@ import { isReferenceCleanupEndpoint } from "./referenceCleanup";
 export type GenerationProvider = "reAPI" | "ToAPIs";
 export type GenerationAccessMode = "api-key" | "credits";
 
+export interface FaceMeshOptions {
+  face_mesh_masked_default: boolean;
+  face_mesh_unmasked_default: boolean;
+  face_mesh_user_control: boolean;
+}
+
 export interface LivePipelineConfig {
+  face_mesh_options?: FaceMeshOptions;
   live: boolean;
   available: boolean;
   provider: "reAPI";
@@ -39,6 +46,8 @@ export interface JobSettingsUsed {
   add_watermark?: boolean;
   watermark_bonus_credits?: number;
   enhanced_masking?: boolean;
+  depth_guidance?: boolean;
+  face_mesh?: boolean;
   audio_processing?: boolean;
   replace_all_people?: boolean;
   mask_style?: string;
@@ -98,7 +107,7 @@ export interface LivePipelineJob {
   watermark_bonus_credits?: number;
   auto_generate?: boolean;
   scene_cut_count?: number;
-  mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
+  mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "solid_multi" | "none";
   generation_started_at?: number;
   review_wait_seconds?: number;
   review_paused_at?: number;
@@ -339,7 +348,7 @@ function readJob(value: unknown): LivePipelineJob {
   };
   if (isRecord(value.settings_used)) {
     const saved: JobSettingsUsed = {};
-    for (const field of ["easy_mode", "enhanced_masking", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
+    for (const field of ["easy_mode", "enhanced_masking", "depth_guidance", "face_mesh", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
       if (typeof value.settings_used[field] === "boolean") saved[field] = value.settings_used[field];
     for (const field of ["watermark_bonus_credits", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps"] as const) {
       const number = value.settings_used[field];
@@ -354,7 +363,7 @@ function readJob(value: unknown): LivePipelineJob {
   if (value.access_mode === "credits" || value.access_mode === "api-key") job.access_mode = value.access_mode;
   if (["guide_rebuild", "mask_recovery", "generation_queue", "guide_review"].includes(String(value.processing_stage)))
     job.processing_stage = value.processing_stage as LivePipelineJob["processing_stage"];
-  if (["depth", "depth_multi", "cyan_overlay", "gray", "none"].includes(String(value.mask_style)))
+  if (["depth", "depth_multi", "cyan_overlay", "gray", "solid_multi", "none"].includes(String(value.mask_style)))
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);
@@ -529,6 +538,11 @@ export async function getLiveConfig(
     delivery: value.delivery,
     beta: value.beta,
     credits_available: value.credits_available === true,
+    ...(isRecord(value.face_mesh_options) ? {face_mesh_options: {
+      face_mesh_masked_default: value.face_mesh_options.face_mesh_masked_default !== false,
+      face_mesh_unmasked_default: value.face_mesh_options.face_mesh_unmasked_default === true,
+      face_mesh_user_control: value.face_mesh_options.face_mesh_user_control === true,
+    }} : {}),
     reference_cleanup_available: value.reference_cleanup_available === true,
     ...(isReferenceCleanupEndpoint(value.reference_cleanup_endpoint)
       ? {reference_cleanup_endpoint: value.reference_cleanup_endpoint} : {}),
@@ -733,6 +747,7 @@ export async function createLiveJob(
           enhanced_character_masking: state.enhancedCharacterMasking ?? true,
           easy_mode: state.easyMode ?? true,
           submit_without_audio: state.submitWithoutAudio ?? false,
+          ...(typeof state.faceMesh === "boolean" ? {face_mesh: state.faceMesh} : {}),
           ...(state.addWatermark ? {add_watermark: true, watermark_bonus_quote: state.watermarkBonusQuote} : {}),
           auto_generate: autoGenerate,
         },

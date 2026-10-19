@@ -577,3 +577,62 @@ Each shot uses its own selected mask label; no cross-cut identity matching is
 inferred. Existing jobs without the flag keep their original saved sections so
 old choices are never silently remapped. Mask quality and missing pixels still
 follow the existing coordinate fallback / optional SAM recovery behavior.
+
+### Experimental depth guidance
+
+Admin → Experimental → **Add depth to person masks** defaults on. Turning it off
+snapshots `depth_guidance: false` on new jobs in both upload paths. Enhanced masking
+still detects/tracks people with SAM on original RGB, but skips local and Replicate
+depth inference and depth asset copies. The CPU compositor fills selected silhouettes
+with flat gray (one reference) or per-person colors (multiple references), retaining
+the original background and unmasked coordinate-fallback regions. Review rebuilds
+and optional point-mask recovery retain the job's saved mode and auto-submit policy.
+Old jobs without this field keep depth guidance; masking-off remains unchanged.
+Provider prompts and Settings used describe flat masks without claiming depth.
+This toggle does not restore original mouth/face pixels or guarantee speaker matching.
+
+### Experimental face mesh
+
+Three Admin defaults control face mesh: masked default **on**, unmasked default
+**off**, and user-switch visibility **off**. A visible per-run Face mesh switch
+can override either global default. Hidden switches cannot override server defaults.
+Both upload paths snapshot the effective boolean; existing jobs without a snapshot
+keep mesh off. Settings used records the effective mode. No per-account targeting.
+
+MediaPipe Face Landmarker 1.1.1 runs on the existing CPU compositor using a pinned
+3.8 MB official model. Landmarks are detected from the original trimmed RGB frames,
+never from depth or masked frames. SAM labels associate faces only with selected
+people; per-scene manual selections are reused. With masking off, enabling mesh
+still runs SAM internally, skips depth/fill, and leaves original RGB visible.
+Mesh is clipped to selected-mask pixels; ambiguous, missing-head and unselected
+faces are skipped, counted, and logged. Replace Everyone permits multiple faces
+inside its merged label. This is expression guidance, not a speaker identity lock.
+
+`worker_patch/stage_face_mesh.py` stages source plus the model with SHA256 validation.
+The CPU image build checks native libraries, explicit CPU inference and package
+compatibility before publishing. No additional GPU model or service is required.
+The user-facing description remains: “May take extra time.”
+
+### Selected shared cyan preset
+
+New jobs snapshot `guide_style_version: 2`. With Enhanced Masking enabled and
+Admin depth guidance disabled, the CPU compositor uses the same cyan `#00dcff`
+for every selected label at 20% color opacity over original RGB. Initial guides
+and reviewed/recovered guide rebuilds share this selection rule. Depth-enabled
+jobs retain their depth guides; unmasked jobs retain original pixels with the
+optional selected-person face mesh. Older jobs without the version snapshot keep
+their original flat/depth guide behavior.
+
+The generation prompt uses the selected white-reference Test 02 wording for this
+shared-cyan mode. Reference images define appearance; the source video supplies
+performance and speaking turns. Manual scene assignments, coordinate fallbacks,
+face-mesh instructions, audio options and the 7,000-character limit remain
+mode-aware. The authored per-shot schedule from Test 06 is not enabled by this
+preset. Browser cleanup composites soft edges onto white on desktop and iOS CPU;
+Original remains available. The CPU worker URL changes while model cache keys
+remain unchanged.
+
+Release the verified CPU overlay before the gateway, set the live pipeline depth
+default off and masked face-mesh default on, then publish the matching frontend.
+Keep Easy Mode and Enhanced Masking on, source audio processing off, and silent
+submission off by default. Existing job snapshots are not rewritten.

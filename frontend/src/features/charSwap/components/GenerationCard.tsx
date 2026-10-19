@@ -233,7 +233,7 @@ export function GenerationCard({ job, onOpen, onRemove, removing = false }: Gene
           ) : (
             job.status !== "expired" && (
               <Button onClick={onOpen} sx={{ px: 0 }}>
-                {job.status === "tracking_review" ? "Check scene matches" : job.status === "ready" ? "Review prepared clip" : running ? "View progress" : "View details"}
+                {job.status === "tracking_review" ? "Check scene matches" : job.status === "ready" ? "Review prepared clip" : running ? "View reference images" : "View details"}
               </Button>
             )
           )}

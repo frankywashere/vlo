@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-19",
+  "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:d77a09c0de8951f0e3b0c7f59b313109d43760b22f41a8fa10d73b00f3d1757f",
+  "model_sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+  "runtime": "MediaPipe 1.1.1, Linux Python 3.12, explicit CPU delegate",
+  "image_build": "86f0fd61-eb6e-4ff9-9034-dd947578ec59",
+  "proof_build": "08d786d3-4a6c-4f55-af77-6f1e469ce423",
+  "sample": "https://storage.googleapis.com/mediapipe-assets/portrait.jpg",
+  "fixture": "Two copies side by side; synthetic label 7 on left, unselected label 9 on right",
+  "frames": 1,
+  "frames_with_mesh": 1,
+  "faces_detected": 2,
+  "faces_drawn": 1,
+  "unmatched_faces": 1,
+  "ambiguous_faces": 0,
+  "processing_seconds": 0.04341734299998734,
+  "unselected_pixels_unchanged": true,
+  "selected_pixels_contain_mesh": true,
+  "gpu_started": false,
+  "provider_generation_submitted": false,
+  "limits": "A CPU landmark/selection proof, not a production latency, SAM-quality or multi-shot dialogue benchmark. Real generated output still requires review.",
+  "live_compose_contract_check": {
+    "worker_revision": "proof-audio-mesh-v1-1019",
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:d77a09c0de8951f0e3b0c7f59b313109d43760b22f41a8fa10d73b00f3d1757f",
+    "http_status": 200,
+    "frames": 360,
+    "duration_seconds": 15.0,
+    "processing_seconds": 27.039536327,
+    "face_mesh_metrics": {
+      "frames": 360,
+      "frames_with_mesh": 231,
+      "faces_detected": 296,
+      "faces_drawn": 231,
+      "unmatched_faces": 65,
+      "ambiguous_faces": 0,
+      "processing_seconds": 10.052163811000014
+    },
+    "submitted_to_provider": false,
+    "shutdown_verified": true
+  }
+}

@@ -25,7 +25,7 @@ export function ReferenceCleanupWait({targets,references,assignments,onBack}:{ta
     {failures.map(({target,reference})=><Alert severity="info" key={target.id}>
       <Typography>{target.name}: {reference.cleanup?.error}</Typography>
       <Stack direction="row" gap={1} sx={{mt:1}}>
-        {!reference.cleanup?.unsupported && <Button onClick={()=>choose(target.id,"clean")}>Retry cleanup</Button>}
+        {!reference.cleanup?.unsupported && !reference.cleanup?.interrupted && <Button onClick={()=>choose(target.id,"clean")}>Retry cleanup</Button>}
         <Button onClick={()=>choose(target.id,"original")}>Use Original</Button>
       </Stack>
     </Alert>)}

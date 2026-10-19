@@ -98,7 +98,11 @@ function ReferenceCard({
               src={reference.url}
               draggable={false}
               alt={`${person.name} replacement: ${reference.name}`}
-              sx={{ width: "100%", height: "100%", objectFit: "contain" }}
+              sx={{ width: "100%", height: "100%", objectFit: "contain",
+                ...(reference.cleanup?.mode === "clean" && reference.cleanup.cleanedUrl ? {
+                  backgroundColor: "#fff",
+                } : {}),
+              }}
             />
           ) : (
             <AddPhotoAlternateOutlined

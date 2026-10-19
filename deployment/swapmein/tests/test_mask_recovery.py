@@ -30,7 +30,8 @@ def mask_bytes(recovered=False):
 
 
 @pytest.mark.parametrize("outcome", ["recovered", "coordinate_fallback", "conflict", "invalid"])
-def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconflicting_generation(monkeypatch, outcome):
+@pytest.mark.parametrize("enhanced,mesh,depth", [(True,False,True),(True,True,True),(True,True,False),(False,True,False)])
+def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconflicting_generation(monkeypatch, outcome, enhanced, mesh, depth):
     requests, enqueued, invocations, ready_snapshots = [], [], [], []
     anchor = {"x": .75, "y": .5, "time": 2.5}
     targets = [{"id": "left", "anchor": {"x": .25, "y": .5, "time": 1}, "reference_index": 0},
@@ -40,7 +41,8 @@ def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconfl
     selections = [{"segment_id": "left-scene", "absent": False, "anchor": targets[0]["anchor"]},
                   {"segment_id": "right-scene-six", "absent": False, "anchor": anchor}]
     job = {"id": "a"*32, "status": "preparing", "normalized_uri": "gs://worker/rgb.mp4",
-        "reviewed_masks_uri": "gs://worker/selected.zip", "tracking_depth_uri": "gs://worker/depth.mp4",
+        "setup": {"enhanced_character_masking":enhanced}, "face_mesh":mesh, "depth_guidance":depth,
+        "reviewed_masks_uri": "gs://worker/selected.zip", "tracking_depth_uri": "gs://worker/depth.mp4" if depth else None,
         "tracking_vocals_uri": "gs://worker/vocals.wav", "recover_missing_masks": True,
         "generation_after_review_revision": 2, "tracking_applied_revision": 2, "tracking_task_token": "b"*32,
         "tracking_plan": {"targets": targets, "segments": sections}, "tracking_choices": selections,
@@ -86,10 +88,14 @@ def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconfl
                     return result
                 assert kind == "audio" and endpoint == "/compose"
                 assert payload["depth_uri"] == job["tracking_depth_uri"]
+                assert payload["face_mesh"] is mesh
+                assert payload["input_uri"] == job["normalized_uri"]
+                assert payload["fill_mode"] == ("original" if not enhanced else "depth" if depth else "solid")
                 assert payload["guide_audio_uri"] == job["tracking_vocals_uri"]
                 assert payload["masks_uri"] != job["reviewed_masks_uri"]
                 self.objects["gs://worker/guide.mp4"] = b"rebuilt-guide"
-                return {"prepared_guide.mp4": "gs://worker/guide.mp4"}
+                return {"prepared_guide.mp4": "gs://worker/guide.mp4",
+                    "metrics": {"face_mesh_metrics":{"frames":120,"faces_drawn":60}} if mesh else {}}
             yield invoke
     def sam_input(source, destination):
         assert source.read_bytes() == b"original-rgb"
@@ -108,6 +114,8 @@ def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconfl
         "frame": 60, "x": .75, "y": .5, "label": 2}]
     assert invocations == [("gpu", "/recover-masks"), ("audio", "/compose")]
     assert saved["tracking_choices"] == selections and saved["tracking_reviewed"]
+    assert bool(saved.get("face_mesh_metrics")) is mesh
+    assert saved["mask_style"] == ("none" if not enhanced else "depth_multi" if depth else "solid_multi")
     assert saved["mask_recovery_completed"] and saved["status"] == "ready"
     assert saved["coordinate_fallback_sections"] == (0 if outcome == "recovered" else 1)
     assert len(enqueued) == (0 if outcome == "conflict" else 1)

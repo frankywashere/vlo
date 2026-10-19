@@ -29,7 +29,8 @@ def test_depth_prompt_identifies_only_selected_person():
     assert 'cyan' not in prompt and 'gray silhouette' not in prompt
 
 
-def test_color_compositor_changes_only_selected_label_and_allows_missing_scene(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fill_mode,opacity", [("color", .5), ("translucent", .2)])
+def test_color_compositor_changes_only_selected_label_and_allows_missing_scene(tmp_path, monkeypatch, fill_mode, opacity):
     patch = Path(__file__).parents[1] / 'worker_patch/composite.py'
     monkeypatch.setitem(sys.modules, 'common', SimpleNamespace(probe=probe))
     spec = importlib.util.spec_from_file_location('tested_color_composite', patch)
@@ -45,10 +46,10 @@ def test_color_compositor_changes_only_selected_label_and_allows_missing_scene(t
             if index < 12: labels[10:50, 60:85] = 2
             raw = BytesIO(); Image.fromarray(labels).save(raw, format='PNG')
             z.writestr(f'labels/labels_{index:05d}.png', raw.getvalue())
-    metrics = module.compose(source, archive, audio, output, 2, 'color')
+    metrics = module.compose(source, archive, audio, output, 2, fill_mode)
     assert metrics['mask_pixels_per_frame'][12:] == [0] * 12
     assert metrics['overlay_rgb'] == [0, 220, 255]
-    assert metrics['overlay_opacity'] == .5
+    assert metrics['overlay_opacity'] == opacity
     def frames(path):
         data = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(path), '-map', '0:v:0', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
         return np.frombuffer(data, np.uint8).reshape(-1, 64, 96, 3)
@@ -56,7 +57,7 @@ def test_color_compositor_changes_only_selected_label_and_allows_missing_scene(t
     assert actual.shape == original.shape
     assert np.abs(actual[:,20:40,15:30].astype(float)-original[:,20:40,15:30]).mean() < 5
     assert np.abs(actual[12:].astype(float)-original[12:]).mean() < 5
-    expected = original[0,25,70].astype(float)*.5 + np.array([0,220,255])*.5
+    expected = original[0,25,70].astype(float)*(1-opacity) + np.array([0,220,255])*opacity
     assert np.abs(actual[0,25,70].astype(float)-expected).max() < 8
     assert float(next(s for s in probe(output)['streams'] if s['codec_type']=='audio')['duration']) >= .99
 
@@ -94,3 +95,11 @@ def test_depth_compositor_replaces_only_selected_pixels_and_preserves_missing_fr
     assert np.abs(actual[:,20:40,15:30]-original[:,20:40,15:30]).mean() < 5
     assert np.abs(actual[12:]-original[12:]).mean() < 5
     assert np.abs(actual[0,25,70]-colored[0,25,70]).max() < 8
+
+
+def test_flat_multi_mask_prompt_does_not_claim_depth():
+    targets = [{"reference_index": 0, "anchor": {"x": .2, "y": .4, "time": 0}},
+               {"reference_index": 1, "anchor": {"x": .8, "y": .4, "time": 0}}]
+    prompt = generation_payload(5, ['a', 'b'], 'video', True, mask_style='solid_multi', targets=targets)['prompt']
+    assert 'depth' not in prompt.lower()
+    assert 'cyan' in prompt and 'magenta' in prompt and 'flat' in prompt

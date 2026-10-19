@@ -121,6 +121,7 @@ export function CharSwapWalkthrough({
     decisions,
     easyMode,
     submitWithoutAudio,
+    faceMesh,
     addWatermark,
     enhancedCharacterMasking,
     selectionVersion,
@@ -146,6 +147,7 @@ export function CharSwapWalkthrough({
       decisions: state.decisions,
       easyMode: state.easyMode ?? true,
       submitWithoutAudio: state.submitWithoutAudio ?? false,
+      faceMesh: state.faceMesh,
       addWatermark: state.addWatermark ?? false,
       enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
       selectionVersion: state.selectionVersion,
@@ -168,6 +170,7 @@ export function CharSwapWalkthrough({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const assets = useLocalAssets();
   const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [accessMode, setAccessMode] = useState<"credits" | "api-key">("credits");
   const [provider, setProvider] = useState<"reAPI" | "ToAPIs">("reAPI");
   const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
@@ -179,6 +182,7 @@ export function CharSwapWalkthrough({
     void loadAccountAccess().then(access => {
       if (!active) return;
       setApiKeyAllowed(access.api_key_enabled);
+      setIsAdmin(Boolean(access.role));
       if (access.api_key_enabled) setAccessMode("api-key");
     }).catch(() => { if (active) setApiKeyAllowed(false); });
     return () => { active = false; };
@@ -228,6 +232,7 @@ export function CharSwapWalkthrough({
     watermarkBonusQuote: creditAccount.catalog?.watermark_bonus_credits,
     easyMode,
     submitWithoutAudio,
+    faceMesh,
     addWatermark: Boolean(addWatermark && creditAccount.catalog?.watermark_enabled && accessMode === "credits"),
     enhancedCharacterMasking,
     clip,
@@ -682,6 +687,8 @@ export function CharSwapWalkthrough({
                 busy={Boolean(locked)}
                 creditBalance={balance}
                 generationCredits={generationCredits}
+                isAdmin={isAdmin}
+                faceMeshOptions={pipeline.faceMeshOptions}
                 watermarkOffer={creditAccount.catalog?.watermark_enabled && accessMode === "credits" ? {bonusCredits: creditAccount.catalog.watermark_bonus_credits ?? 25} : undefined}
                 creditsAvailable={!live || accessMode === "api-key" || pipeline.creditsAvailable}
                 onGenerate={() => void generate()}

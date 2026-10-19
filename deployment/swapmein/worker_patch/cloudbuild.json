@@ -5,11 +5,11 @@
       "args": [
         "append",
         "--base",
-        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:809458c2d9bd5d718df704763dfd6b402556c606c54df9e6ef5844c8d7ccf5ff",
+        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:4f2fb2d9623f73ade7d46b6e62cd006b88eb45d55e5085cd13927241cdb9e019",
         "--new_layer",
         "overlay_cpu_pillow_patch.tar",
         "--new_tag",
-        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio:multi-768-v2-pillow11-3"
+        "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio:solid-masks-v1"
       ]
     }
   ],

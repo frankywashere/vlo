@@ -96,7 +96,7 @@ def test_camera_mpo_is_flattened_to_its_main_photo(tmp_path):
     with Image.open(source) as camera:
         assert camera.format == "MPO" and camera.n_frames == 2
     details = normalize_reference(source, output)
-    assert details == {"input_format": "MPO", "output_format": "JPEG", "flattened_photo": True}
+    assert details == {"input_format": "MPO", "output_format": "JPEG", "has_transparency": False, "flattened_photo": True}
     with Image.open(output) as photo:
         assert photo.format == "JPEG" and getattr(photo, "n_frames", 1) == 1
         assert photo.size == (640, 480)
@@ -371,3 +371,44 @@ def test_watermark_also_works_when_retaining_provider_audio(tmp_path):
     pixels = np.frombuffer(subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]), dtype=np.uint8).reshape(240, 320, 3)
     assert pixels[220:, 240:, 0].max() > 200  # White lettering is in the lower-right corner.
     assert decoded_audio_samples(output) >= 3.95 * 44100
+
+
+@pytest.mark.parametrize("source_format", ["PNG", "WEBP"])
+def test_reference_preserves_transparency_and_soft_edges(tmp_path, source_format):
+    source, output = tmp_path / "cutout", tmp_path / "normalized"
+    image = Image.new("RGBA", (512,512), (0,0,0,0))
+    image.paste((210,80,40,255),(128,128,384,384))
+    image.putpixel((127,128),(210,80,40,128))
+    image.save(source, source_format, lossless=True)
+    details=normalize_reference(source, output)
+    assert details["output_format"]=="PNG" and details["has_transparency"]
+    with Image.open(output) as result:
+        assert result.format=="PNG" and result.mode=="RGBA"
+        assert result.getpixel((0,0))[3]==0
+        assert result.getpixel((200,200))==(210,80,40,255)
+        assert result.getpixel((127,128))==(210,80,40,128)
+
+
+def test_reference_preserves_palette_png_transparency(tmp_path):
+    source, output = tmp_path / "palette.png", tmp_path / "normalized"
+    image=Image.new("P",(256,256),0)
+    image.putpalette([0,0,0,255,0,0]+[0]*762)
+    image.paste(1,(64,64,192,192))
+    image.save(source,transparency=0)
+    assert normalize_reference(source,output)["has_transparency"]
+    with Image.open(output) as result:
+        assert result.mode=="RGBA" and result.getpixel((0,0))[3]==0
+        assert result.getpixel((128,128))==(255,0,0,255)
+
+
+def test_transparent_reference_rotates_and_removes_metadata(tmp_path):
+    source, output = tmp_path / "photo.png", tmp_path / "normalized.png"
+    image=Image.new("RGBA",(300,400),(210,80,40,128))
+    exif=Image.Exif();exif[274]=6;exif[315]="private-metadata"
+    image.save(source,exif=exif)
+    normalize_reference(source,output)
+    with Image.open(output) as result:
+        assert result.size==(400,300) and result.mode=="RGBA"
+        assert not result.getexif()
+        assert result.getpixel((150,150))[3]==128
+    assert b"private-metadata" not in output.read_bytes()

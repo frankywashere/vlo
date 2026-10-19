@@ -1,0 +1,177 @@
+{
+  "review_date": "2026-10-19",
+  "selected_by": "Frank",
+  "selection_type": "top three set with no internal ranking specified",
+  "selected_variants": [
+    "02-refs34-white",
+    "05-white34-compact-motion-prompt",
+    "06-white34-shot-identity-prompt"
+  ],
+  "exact_user_feedback": "the top 3 imo were '02-refs34-white' , '05-white34-compact-motion-prompt' and '06-white34-shot-identity-prompt'",
+  "document": "MiniMax Top Three Test Log.docx",
+  "production_changed": false,
+  "records": [
+    {
+      "variant": "02-refs34-white",
+      "prompt": "Use reference video 1 as the source scene and precise motion guide. Person 1, selected at approximately 61% of the frame width and 50% of its height, measured from the top left, at 0.00 seconds, must be replaced with the character from reference image 1. Person 2, selected at approximately 52% of the frame width and 54% of its height, measured from the top left, at 3.21 seconds, must be replaced with the character from reference image 2. Person 3, selected at approximately 40% of the frame width and 47% of its height, measured from the top left, at 6.50 seconds, must be replaced with the character from reference image 3. Person 4, selected at approximately 35% of the frame width and 44% of its height, measured from the top left, at 8.72 seconds, must be replaced with the character from reference image 4. Person 5, selected at approximately 57% of the frame width and 45% of its height, measured from the top left, at 11.03 seconds, must be replaced with the character from reference image 5. Replace each selected person's entire head, hands, body and feet. Keep these assignments separate, even when people overlap or change positions. Follow each selected person's individual motion, pose, interactions and speaking timing through scene changes. When a selected person is absent, preserve the scene and do not replace another person in their place. Keep all other people unchanged. Do not merge people, add extra characters or leave human body parts. Preserve the background, camera, lighting and exact 15-second timing. Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue. Reference images supply replacement appearance only; retain the source scene background. Replace the selected people rather than adding characters beside them. Facial mesh lines in the reference video mark detected facial motion only. Use them as expression and mouth-motion guidance; remove every mesh line from all faces in the final video. Keep speaker assignments and dialogue timing tied to the original people, including across cuts. All selected people share the same cyan overlay at 20% color opacity. The shared color indicates selection, not identity. Use each person's stated position and timestamp to establish their reference-image assignment, and preserve that assignment across cuts. Remove all overlay colors and face mesh markings from the finished video. Reference images define appearance only. Follow each corresponding source person's visible facial expressions, mouth movements, and speaking turns. Keep listeners' mouths at rest when they are not speaking, even while another person's dialogue continues.",
+      "settings": {
+        "intervention": "Only background of reference 3 and 4 changed",
+        "reference_background": "white",
+        "reference_background_rgb": [
+          255,
+          255,
+          255
+        ],
+        "reference_files_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "guide": "same automatic shared cyan at 20%, face mesh on",
+        "prompt_sha256": "97b219974bf3e5935a3c6884f6793c715349d31811afbd4298ddb097e9ed0e95",
+        "duration_seconds": 15,
+        "resolution": "768P",
+        "reference_order": [
+          1,
+          2,
+          3,
+          5,
+          6
+        ],
+        "original_soundtrack": true,
+        "production_changed": false
+      },
+      "run": {
+        "variant": "02-refs34-white",
+        "status": "completed",
+        "started_at": 1792429703.429678,
+        "request_sha256": "56772e5acb751bdad94aac6b88166482050decc696876ee9ddaf9726ea9ed47a",
+        "task_id": "task_01a15522c160778a9d3a7d9013c4fe88",
+        "submitted_at": 1792429703.702867,
+        "checked_at": 1792431639.315789,
+        "elapsed_seconds": 634.7,
+        "terminal_observed_at": 1792430338.376456,
+        "supplier_credits": 1097,
+        "supplier_cost_usd": 1.097,
+        "output_file": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_autonomous_shared_cyan_v1/02-refs34-white/result.mp4",
+        "sha256": "2f62793be45653639c7e50e3209dcbfad24b6ed7bc6bf413b8d1594dc3689585",
+        "width": 1024,
+        "height": 768,
+        "duration_seconds": 15.083333
+      }
+    },
+    {
+      "variant": "05-white34-compact-motion-prompt",
+      "prompt": "Recreate reference video 1 as the same 15-second scene, replacing only the five selected people. The video controls every shot, background, camera position, body movement, gesture, facial expression, mouth movement and speaking turn. The five reference images control appearance only; never copy their background, static pose or expression. Person 1, selected at approximately 61% of the frame width and 50% of its height, measured from the top left, at 0.00 seconds, must be replaced with the character from reference image 1. Person 2, selected at approximately 52% of the frame width and 54% of its height, measured from the top left, at 3.21 seconds, must be replaced with the character from reference image 2. Person 3, selected at approximately 40% of the frame width and 47% of its height, measured from the top left, at 6.50 seconds, must be replaced with the character from reference image 3. Person 4, selected at approximately 35% of the frame width and 44% of its height, measured from the top left, at 8.72 seconds, must be replaced with the character from reference image 4. Person 5, selected at approximately 57% of the frame width and 45% of its height, measured from the top left, at 11.03 seconds, must be replaced with the character from reference image 5. Keep each identity consistent whenever that source person returns after a cut. Preserve all original cuts and the original restaurant environment. The shared 20% cyan tint marks selected people only; it does not identify which reference belongs to whom. The face mesh provides motion cues. Render natural unmarked faces and clothing, with no tint or mesh. Animate each replacement continuously from the corresponding source performance; do not hold a still portrait. Preserve the original embedded soundtrack without adding dialogue. Follow the visible source mouth movements: a listener stays a listener while another person speaks. Keep the full frame at a consistent size throughout; do not add borders, inset frames or zoom changes.",
+      "settings": {
+        "intervention": "Prompt only versus white-reference case",
+        "reference_background": "white",
+        "reference_background_rgb": [
+          255,
+          255,
+          255
+        ],
+        "reference_files_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "guide": "same automatic shared cyan at 20%, face mesh on",
+        "prompt_sha256": "9c19afb730515956120732ec6f6732a49798b43761d2a8b77bf2536a5936e2ff",
+        "duration_seconds": 15,
+        "resolution": "768P",
+        "reference_order": [
+          1,
+          2,
+          3,
+          5,
+          6
+        ],
+        "original_soundtrack": true,
+        "production_changed": false,
+        "prompt_type": "compact-motion-prompt",
+        "prompt_characters": 2013,
+        "explicit_shot_identity_schedule": false,
+        "shot_schedule_note": "Initial coordinate anchors only"
+      },
+      "run": {
+        "variant": "05-white34-compact-motion-prompt",
+        "status": "completed",
+        "started_at": 1792430827.7431831,
+        "task_id": "task_01a15533e92e75ba81391f5fae49b016",
+        "submitted_at": 1792430827.9933681,
+        "checked_at": 1792431639.887236,
+        "elapsed_seconds": 811.9,
+        "terminal_observed_at": 1792431639.887236,
+        "supplier_credits": 1097,
+        "supplier_cost_usd": 1.097,
+        "output_file": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_autonomous_shared_cyan_v1/05-white34-compact-motion-prompt/result.mp4",
+        "sha256": "3233a1cc81a1d2b36e31fff8aaa8d9dd427c6ac4bb0f50c5e6b8af31ad27c77c",
+        "width": 1024,
+        "height": 768,
+        "duration_seconds": 15.083333
+      }
+    },
+    {
+      "variant": "06-white34-shot-identity-prompt",
+      "prompt": "Recreate reference video 1 as the same 15-second scene, replacing only the five selected people. The video controls every shot, background, camera position, body movement, gesture, facial expression, mouth movement and speaking turn. The five reference images control appearance only; never copy their background, static pose or expression. Person 1, selected at approximately 61% of the frame width and 50% of its height, measured from the top left, at 0.00 seconds, must be replaced with the character from reference image 1. Person 2, selected at approximately 52% of the frame width and 54% of its height, measured from the top left, at 3.21 seconds, must be replaced with the character from reference image 2. Person 3, selected at approximately 40% of the frame width and 47% of its height, measured from the top left, at 6.50 seconds, must be replaced with the character from reference image 3. Person 4, selected at approximately 35% of the frame width and 44% of its height, measured from the top left, at 8.72 seconds, must be replaced with the character from reference image 4. Person 5, selected at approximately 57% of the frame width and 45% of its height, measured from the top left, at 11.03 seconds, must be replaced with the character from reference image 5. Keep each identity consistent whenever that source person returns after a cut. Preserve all original cuts and the original restaurant environment. The shared 20% cyan tint marks selected people only; it does not identify which reference belongs to whom. The face mesh provides motion cues. Render natural unmarked faces and clothing, with no tint or mesh. Animate each replacement continuously from the corresponding source performance; do not hold a still portrait. Preserve the original embedded soundtrack without adding dialogue. Follow the visible source mouth movements: a listener stays a listener while another person speaks. Keep the full frame at a consistent size throughout; do not add borders, inset frames or zoom changes. Shot-specific identity schedule, using trimmed-video time: 0.000\u20130.708 seconds: the foreground selected man uses reference image 1. 0.708\u20133.333: the foreground selected woman uses reference image 2. 3.333\u20136.000: the returning foreground man still uses reference image 1. 6.000\u20138.292: the seated foreground woman uses reference image 3. 8.292\u201310.458: the seated foreground man with glasses uses reference image 4. 10.458\u201312.708: the seated foreground woman in white uses reference image 5. 12.708\u201315.000: at the foreground table, the woman on the left uses reference image 2 and the man on the right uses reference image 1. Preserve everyone else and the restaurant. This schedule specifies identity, not new cuts or new actions; follow the exact source performance.",
+      "settings": {
+        "intervention": "Prompt only versus white-reference case",
+        "reference_background": "white",
+        "reference_background_rgb": [
+          255,
+          255,
+          255
+        ],
+        "reference_files_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "guide": "same automatic shared cyan at 20%, face mesh on",
+        "prompt_sha256": "02affd02a10b3ca5b06a86606b1c739b68240530c27a63266b7a0e2b478eaf8d",
+        "duration_seconds": 15,
+        "resolution": "768P",
+        "reference_order": [
+          1,
+          2,
+          3,
+          5,
+          6
+        ],
+        "original_soundtrack": true,
+        "production_changed": false,
+        "prompt_type": "shot-identity-prompt",
+        "prompt_characters": 2779,
+        "explicit_shot_identity_schedule": true,
+        "shot_schedule_note": "Authored per-shot mapping based on known clip; not proof of automated Easy Mode matching"
+      },
+      "run": {
+        "variant": "06-white34-shot-identity-prompt",
+        "status": "completed",
+        "started_at": 1792430828.165591,
+        "task_id": "task_01a15533eafe7383a30998b017ae3589",
+        "submitted_at": 1792430828.462445,
+        "checked_at": 1792431640.6740448,
+        "elapsed_seconds": 812.2,
+        "terminal_observed_at": 1792431640.6740448,
+        "supplier_credits": 1097,
+        "supplier_cost_usd": 1.097,
+        "output_file": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_autonomous_shared_cyan_v1/06-white34-shot-identity-prompt/result.mp4",
+        "sha256": "7f1b86aa387e44de0c7cfbf70dee27c0de5b188dfa214ce4afd2d17f70148489",
+        "width": 1024,
+        "height": 768,
+        "duration_seconds": 15.083333
+      }
+    }
+  ]
+}

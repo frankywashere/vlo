@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Alert, Avatar, Box, Button, Stack, Typography, RadioGroup, Radio, FormControlLabel } from "@mui/material";
 import { useCharSwapStore } from "../useCharSwapStore";
-import type { LivePipelineJob } from "../services/livePipeline";
+import type { FaceMeshOptions, LivePipelineJob } from "../services/livePipeline";
 import { VideoPreview } from "./VideoPreview";
 import { GenerationOptions } from "./GenerationOptions";
 import { formatTime } from "../utils/videoGeometry";
@@ -10,6 +10,8 @@ import { formatTime } from "../utils/videoGeometry";
 interface ReviewStepProps {
   accessMode?: "credits" | "api-key";
   watermarkOffer?: {bonusCredits: number};
+  faceMeshOptions?: FaceMeshOptions;
+  isAdmin?: boolean;
   apiKeyAllowed?: boolean;
   hasKey?: boolean;
   provider?: "reAPI" | "ToAPIs";
@@ -28,7 +30,7 @@ interface ReviewStepProps {
 }
 
 export function ReviewStep({
-  watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
+  isAdmin, faceMeshOptions, watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
   onApiSettings, onAccessModeChange, trackingReady = false, onOptionsChange,
   live = false,
   job = null,
@@ -175,7 +177,7 @@ export function ReviewStep({
               Enhanced person masking: {(job.settings_used?.enhanced_masking ?? enhancedCharacterMasking) ? "On" : "Off"}
             </Typography>
           </Stack>
-        ) : <GenerationOptions disabled={busy} onChange={onOptionsChange} watermarkOffer={watermarkOffer} />}
+        ) : <GenerationOptions disabled={busy} onChange={onOptionsChange} watermarkOffer={watermarkOffer} faceMeshOptions={faceMeshOptions} isAdmin={isAdmin} />}
         {!!targets.length && (
           <Box
             component="section"

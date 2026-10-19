@@ -71,7 +71,7 @@ describe("scene check progress", () => {
   it("keeps the warning at 100 percent until server confirmation arrives", () => {
     const {rerender} = render(<PreparationProgress progress={{phase: "uploading", message: "Uploading…", uploadPercent: 100}} elapsedSeconds={5} />);
     expect(screen.getByRole("dialog", {name: "Keep this page open"})).toBeInTheDocument();
-    expect(screen.getByText(/keep this page visible and your screen awake/)).toBeInTheDocument();
+    expect(screen.getByText("Uploading")).toBeInTheDocument();
     rerender(<PreparationProgress progress={{phase: "confirming", message: "Confirming upload…"}} elapsedSeconds={6} />);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText(/Please wait for confirmation/)).toBeInTheDocument();

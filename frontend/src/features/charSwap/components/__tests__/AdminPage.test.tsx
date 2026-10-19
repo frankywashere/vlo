@@ -289,3 +289,32 @@ it("defaults watermark rewards to 25 credits and saves the global hide setting",
   await user.click(screen.getByRole("button", {name: "Save watermark rewards"}));
   await waitFor(() => expect(api.watermark).toHaveBeenCalledWith({revision: 0, enabled: false, bonus_credits: 50}));
 });
+
+it("defaults depth guidance off and saves its experimental switch independently", async () => {
+  const user = userEvent.setup();
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "Add depth to person masks"});
+  expect(toggle).not.toBeChecked();
+  await user.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 0, depth_guidance: true});
+  await user.click(toggle);
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 1, depth_guidance: false});
+});
+
+it("saves masked and unmasked face-mesh defaults separately from user-switch visibility", async () => {
+  const user=userEvent.setup();
+  await renderExpandedAdmin();
+  const masked=screen.getByRole("switch",{name:"Face mesh default with Enhanced Masking"});
+  const unmasked=screen.getByRole("switch",{name:"Face mesh default without masking"});
+  const visible=screen.getByRole("switch",{name:"Show face-mesh switch to users"});
+  expect(masked).toBeChecked();expect(unmasked).not.toBeChecked();expect(visible).not.toBeChecked();
+  await user.click(unmasked);
+  await waitFor(()=>expect(unmasked).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision:0,face_mesh_unmasked_default:true});
+  expect(masked).toBeChecked();expect(visible).not.toBeChecked();
+  await user.click(visible);
+  await waitFor(()=>expect(visible).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision:1,face_mesh_user_control:true});
+});

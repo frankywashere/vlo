@@ -7,6 +7,7 @@ import httpx
 from .errors import PublicError
 from .diagnostics import emit, submission_event
 from .multi_tracking import TARGET_COLORS
+from .guide_style import SHARED_CYAN_STYLES
 
 BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -56,7 +57,7 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
             "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue. "
             "Replace the selected person rather than adding another character."
         )
-    if mask_style == "cyan_overlay":
+    if mask_style in {"cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20"}:
         return (
             "Use reference video 1 as the source scene and precise motion guide. "
             "Replace only the person highlighted by the translucent cyan (blue-green) overlay with the character "
@@ -83,6 +84,7 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
 
 def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_masking: bool, mask_style: str):
     instructions = []
+    shared_cyan = mask_style in SHARED_CYAN_STYLES
     has_coordinate_fallback = any(scene.get("coordinate_fallback") for target in targets for scene in target.get("scenes", []))
     for index, target in enumerate(targets):
         anchor = target.get("anchor", target)
@@ -90,8 +92,8 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
         location = (f"selected at approximately {anchor['x'] * 100:.0f}% of the frame width and "
                     f"{anchor['y'] * 100:.0f}% of its height, measured from the top left, "
                     f"at {anchor['time']:.2f} seconds")
-        marker = (f" covered by {TARGET_COLORS[index][1]}-tinted depth imagery" if mask_style == "depth_multi"
-                  else " covered by colored depth imagery") if enhanced_masking else ""
+        marker = (f" covered by {TARGET_COLORS[index][1]}-tinted depth imagery" if mask_style in {"depth_multi", "solid_multi"}
+                  else " covered by colored depth imagery") if enhanced_masking and not shared_cyan else ""
         if target.get("scenes"):
             instructions.append(f"Person {index + 1} uses the character from reference image {reference}. "
                                 "Use the following scene-specific positions and absences as the authoritative assignments.")
@@ -118,7 +120,7 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
         "pose, interactions and speaking timing through scene changes. "
         + (("Colored depth imagery marks only selections with detected masks; identify unmasked selections using their scene-specific positions and timestamps. "
             if has_coordinate_fallback else "The colored depth imagery identifies each selected person and describes shape and motion, not appearance. ")
-           + "Remove every depth-map color from the completed characters. " if enhanced_masking else "")
+           + "Remove every depth-map color from the completed characters. " if enhanced_masking and not shared_cyan else "")
         + "When a selected person is absent, preserve the scene and do not replace another person in their place. "
         "Keep all other people unchanged. Do not merge people, add extra characters or leave human body parts. "
         f"Preserve the background, camera, lighting and exact {duration}-second timing. "
@@ -135,7 +137,7 @@ def compact_multi_scene_prompt(duration: int, targets: list[dict], enhanced_mask
         "Scene entries are authoritative. Replace the identified person throughout each listed interval. "
         "Absent intervals mean do not replace anyone for that assignment."]
     for index, target in enumerate(targets):
-        marker = f" ({TARGET_COLORS[index][1]} depth)" if enhanced_masking and mask_style == "depth_multi" else ""
+        marker = f" ({TARGET_COLORS[index][1]} depth)" if enhanced_masking and mask_style in {"depth_multi", "solid_multi"} else ""
         lines.append(f"Person {index + 1}{marker} -> reference image {target['reference_index'] + 1}.")
         scenes = target.get("scenes", [])
         if not scenes:
@@ -153,11 +155,29 @@ def compact_multi_scene_prompt(duration: int, targets: list[dict], enhanced_mask
         "Follow original motion, pose, interactions, expressions and speaking timing. Keep all other people unchanged; "
         "do not merge people, add characters, or leave human body parts. Reference images supply appearance only; "
         f"preserve the source background, camera, lighting and exact {duration}-second timing.")
-    if enhanced_masking:
+    if enhanced_masking and mask_style not in SHARED_CYAN_STYLES:
         lines.append("Depth colors describe shape and motion, not appearance. Remove all depth colors. "
             "Unmasked selections use their listed position and time; never substitute a different masked person.")
     lines.append("Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.")
     return " ".join(lines)
+
+
+def mask_prompt(prompt: str, mask_style: str):
+    if mask_style in SHARED_CYAN_STYLES:
+        return prompt.replace("not a depth color", "not an overlay color")
+    if mask_style not in {"solid_multi", "gray"}:
+        return prompt
+    # Flat masks carry identity markers, not estimated geometry or appearance.
+    for old, new in (("colored depth imagery", "flat colored silhouettes"),
+                     ("Colored depth imagery", "Flat colored silhouettes"),
+                     ("colored depth", "flat colored masks"),
+                     ("depth imagery", "flat mask imagery"), ("depth colors", "mask colors"),
+                     ("depth-map color", "mask color"), ("depth color", "mask color"),
+                     ("Depth colors describe shape and motion", "Flat mask colors identify selected people"),
+                     (" depth)", " mask)"),
+                     ("describes shape and motion, not appearance", "marks identity, not appearance")):
+        prompt = prompt.replace(old, new)
+    return prompt
 
 
 def audio_prompt(prompt: str, audio_processing: bool, submit_without_audio: bool):
@@ -177,7 +197,27 @@ def audio_prompt(prompt: str, audio_processing: bool, submit_without_audio: bool
     return prompt
 
 
-def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None):
+
+PERFORMANCE_GUIDANCE = (
+    "Reference images define appearance only. Follow each corresponding source person's visible facial expressions, "
+    "mouth movements, and speaking turns. Keep listeners' mouths at rest when they are not speaking, "
+    "even while another person's dialogue continues."
+)
+
+
+
+def shared_cyan_guidance(mask_style, face_mesh, replace_all_people):
+    if mask_style not in SHARED_CYAN_STYLES:
+        return ""
+    identity = ("Use each person's stated position and timestamp to establish their reference-image assignment, "
+                "and preserve that assignment across cuts. " if not replace_all_people else "")
+    return (" All selected people share the same cyan overlay at 20% color opacity. "
+            "The shared color indicates selection, not identity. " + identity
+            + ("Remove all overlay colors and face mesh markings from the finished video." if face_mesh
+               else "Remove all overlay colors from the finished video."))
+
+
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False):
     images = [image_url] if isinstance(image_url, str) else image_url
     if (not isinstance(images, list) or not 1 <= len(images) <= 5
             or any(not isinstance(url, str) or not url for url in images)):
@@ -198,10 +238,11 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         prompt = multi_replacement_prompt(duration, targets, enhanced_masking, mask_style)
     else:
         prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
-    prompt = audio_prompt(prompt, audio_processing, submit_without_audio)
+    mesh_note = (" Facial mesh lines in the reference video mark detected facial motion only. Use them as expression and mouth-motion guidance; remove every mesh line from all faces in the final video. Keep speaker assignments and dialogue timing tied to the original people, including across cuts." if face_mesh else "")
+    prompt = audio_prompt(mask_prompt(prompt, mask_style), audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + " " + PERFORMANCE_GUIDANCE
     if len(prompt) > 7000 and targets:
-        prompt = audio_prompt(compact_multi_scene_prompt(duration, targets, enhanced_masking, mask_style),
-            audio_processing, submit_without_audio)
+        prompt = audio_prompt(mask_prompt(compact_multi_scene_prompt(duration, targets, enhanced_masking, mask_style), mask_style),
+            audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + " " + PERFORMANCE_GUIDANCE
     if len(prompt) > 7000:
         raise PublicError("This clip has too many scene assignments for the provider prompt limit. Use a shorter clip or fewer replacements. No generation was submitted.",
             400, code="provider_prompt_too_long")
