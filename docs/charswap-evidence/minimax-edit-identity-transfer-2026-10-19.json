@@ -1,0 +1,104 @@
+{
+  "status": "completed; not a demonstrated blending improvement; user audiovisual review pending",
+  "recommendation": "Keep current production defaults. Do not promote this prompt from one sample.",
+  "production_changed": false,
+  "photos_changed": false,
+  "prompt_only": true,
+  "supplier_cost_usd": 1.097,
+  "cloud_inference_workers_started": false,
+  "case": {
+    "variant": "01-edit-identity-transfer",
+    "status": "completed",
+    "submitted_at": 1792440520.89631,
+    "task_id": "task_01a155c7d15d769595127b4ff3f1670f",
+    "checked_at": 1792441569.0253959,
+    "elapsed_seconds": 1048.1,
+    "terminal_observed_at": 1792441569.025399,
+    "supplier_credits": 1097,
+    "supplier_cost_usd": 1.097,
+    "sha256": "912200c098aaad7926029874bb3dffd661f5ac947a500426647d0bb947a22e58"
+  },
+  "settings": {
+    "baseline": "02-refs34-white",
+    "prompt_changed": true,
+    "face_mesh": true,
+    "overlay_color": "cyan",
+    "overlay_opacity": 0.2,
+    "depth": false,
+    "duration": 15,
+    "resolution": "768P",
+    "references": "exact prior test 02 assets, including white refs 3 and 4",
+    "original_soundtrack": true,
+    "production_changed": false,
+    "prompt_sha256": "17ad80ddb46cff1e2cd6b117170414b0751330abe8b3c4f652ce8e499fb68197",
+    "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+    "reference_sha256": [
+      "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+      "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+      "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+      "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+      "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+    ],
+    "reference_preprocessing": "References 3 and 4 white, remaining exact original test 02 inputs (transparent).",
+    "intervention": "Explicit source-video editing + named source/replacement subjects + identity/clothing attribute transfer. Exact previous test 02 photos and guide unchanged."
+  },
+  "prompt": "subject_definitions:\n<Video 1> is the original source footage being edited, including its existing shots and camera rendering. The shared cyan tint and face-mesh lines are selection and motion annotations, not the target visual style.\n<Audio 1> is the synchronized soundtrack embedded in <Video 1>.\n<Subject 1> is the source performer selected in <Video 1> at 0.00 seconds, 61% across and 50% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 6> is the replacement character whose identity, hair and clothing come from <Picture 1>. The photo defines the character, not a target frame or pose.\n<Subject 2> is the source performer selected in <Video 1> at 3.21 seconds, 52% across and 54% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 7> is the replacement character whose identity, hair and clothing come from <Picture 2>. The photo defines the character, not a target frame or pose.\n<Subject 3> is the source performer selected in <Video 1> at 6.50 seconds, 40% across and 47% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 8> is the replacement character whose identity, hair and clothing come from <Picture 3>. The photo defines the character, not a target frame or pose.\n<Subject 4> is the source performer selected in <Video 1> at 8.72 seconds, 35% across and 44% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 9> is the replacement character whose identity, hair and clothing come from <Picture 4>. The photo defines the character, not a target frame or pose.\n<Subject 5> is the source performer selected in <Video 1> at 11.03 seconds, 57% across and 45% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 10> is the replacement character whose identity, hair and clothing come from <Picture 5>. The photo defines the character, not a target frame or pose.\n\nsummary:\n[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1>. Change only the selected performers: <Subject 1> becomes <Subject 6>, <Subject 2> becomes <Subject 7>, <Subject 3> becomes <Subject 8>, <Subject 4> becomes <Subject 9>, <Subject 5> becomes <Subject 10>. Keep every original shot and the source performance.\n\nretention_analysis:\n<Video 1>: partially_preserved - retain the source environment, unselected people, framing, camera work, timing and photographic treatment. Only the selected identities and clothing change, and guide annotations are removed.\n<Audio 1>: fully_copy - retain the original embedded soundtrack without added dialogue or music.\n<Subject 1>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 6>.\n<Subject 6>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 1> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 2>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 7>.\n<Subject 7>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 2> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 3>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 8>.\n<Subject 8>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 3> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 4>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 9>.\n<Subject 9>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 4> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 5>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 10>.\n<Subject 10>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 5> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n\ndetailed_description:\nThe source video governs how the whole scene is photographed, including the replacement people. Render their appearance within that same source-shot lighting and image texture. Identity comes from the pictures; photographic rendering comes from <Video 1>.\nFollow all existing shots, cuts, actions and interactions in <Video 1> over its exact 15-second timeline. Keep the five pairings separate through cuts and overlaps. A replacement appears only where its corresponding source performer is present; do not insert it elsewhere or replace an unselected bystander.\nPreserve each source performer's continuous movement and visible mouth performance, not the still pose or expression in the photograph. Keep a listener listening when somebody else speaks. Replace the entire selected character, including head, hands, body and feet, consistently with its reference identity and clothing.\nAll selected performers share the same cyan overlay at 20% opacity. The color marks selection, not identity; use the defined position/time anchors for identity. Face-mesh lines describe facial motion only. Remove all cyan and mesh marks from the finished footage.\noverall_soundscape: Reuse the original dialogue, ambience, laughter and effects from <Audio 1>, retaining their source timing and speaker associations.\nnon_diegetic_music: Retain only music already present in <Audio 1>; add none.\n",
+  "research_source": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md",
+  "visual_findings": [
+    "All five replacement references remain recognizable in the seven sampled source-shot intervals.",
+    "The unselected background person in shot 5 is retained here, unlike the recent unchanged control repeat.",
+    "Opening changes to a wider over-the-shoulder composition rather than retaining source framing.",
+    "Dario holds the reference photograph's raised pinched-hand pose through samples at 6.2, 6.7, 7.2 and 7.7 seconds, while the source performer's hands are down.",
+    "Sam remains front-facing and portrait-like at 11.0 and 11.5 seconds; no clear consistent scene-texture advantage is established.",
+    "The final wide shot is already visible at 12.0 seconds, earlier than the source cut at approximately 12.708 seconds."
+  ],
+  "review_method": "Seven shot-midpoint comparisons plus temporal samples in shots 4 and 6. Desktop Chrome playback completes for all four videos with no media/page errors; mobile-width layout has no overflow. Physical iPhone and full audio creative acceptance are not claimed.",
+  "limitations": [
+    "One unseeded sample; differences cannot be attributed solely to prompt structure.",
+    "Same preserved benchmark as test 02, not an independent clip for generalization.",
+    "Exact prior test 02 references: white on references 3/4 and remaining original transparent inputs. No new photo processing applied.",
+    "The guide describes a rewrite structure, not a guaranteed editing parser or deterministic switch in the reAPI route."
+  ],
+  "browser_proof": {
+    "videos": [
+      {
+        "duration": 15,
+        "time": 15,
+        "width": 640,
+        "height": 480,
+        "error": null,
+        "ended": true
+      },
+      {
+        "duration": 15.083333,
+        "time": 15.083333,
+        "width": 1024,
+        "height": 768,
+        "error": null,
+        "ended": true
+      },
+      {
+        "duration": 15.083333,
+        "time": 15.083333,
+        "width": 1024,
+        "height": 768,
+        "error": null,
+        "ended": true
+      },
+      {
+        "duration": 15.083333,
+        "time": 15.083333,
+        "width": 1024,
+        "height": 768,
+        "error": null,
+        "ended": true
+      }
+    ],
+    "pageErrors": [],
+    "mobileOverflow": false
+  },
+  "result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_edit_identity_transfer_v1/01-edit-identity-transfer/result.mp4",
+  "comparison": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_edit_identity_transfer_v1/four-way-original-audio.mp4",
+  "review_page": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_edit_identity_transfer_v1/review.html",
+  "motion_check": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_edit_identity_transfer_v1/motion-check.jpg"
+}

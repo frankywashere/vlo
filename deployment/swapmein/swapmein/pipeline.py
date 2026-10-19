@@ -259,6 +259,8 @@ class Pipeline:
                                     "face_mesh": job.get("face_mesh", False), "mesh_all_people": options.replace_all_people}
                                 if multi:
                                     compose_payload["target_styles"] = compose_styles(fill_mode, targets)
+                                if fill_mode == "depth" and "depth_overlay_opacity" in job:
+                                    compose_payload["depth_opacity"] = job["depth_overlay_opacity"]
                                 composed = invoke("/compose", compose_payload, remaining())
                                 if composed.get("metrics", {}).get("face_mesh_metrics"):
                                     self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])
@@ -439,6 +441,8 @@ class Pipeline:
                 "face_mesh": job.get("face_mesh", False), "mesh_all_people": job.get("replace_all_people", False)}
             if job.get("target_styles"):
                 payload["target_styles"] = compose_styles(fill_mode, job["target_styles"])
+            if fill_mode == "depth" and "depth_overlay_opacity" in job:
+                payload["depth_opacity"] = job["depth_overlay_opacity"]
             composed = invoke("/compose", payload, remaining())
             if composed.get("metrics", {}).get("face_mesh_metrics"):
                 self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])

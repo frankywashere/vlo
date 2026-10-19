@@ -46,6 +46,7 @@ class ComposeRequest(BaseModel):
     selected_label: int = Field(ge=1, le=65535)
     fill_mode: Literal['gray','original','color','depth','solid','translucent'] = 'gray'
     depth_uri: str | None = None
+    depth_opacity: float = Field(default=1.0, ge=0, le=1)
     target_styles: list[TargetStyle] | None = Field(default=None, min_length=1, max_length=5)
     run_id: str
     face_mesh: bool = False
@@ -81,7 +82,7 @@ def composite(request: ComposeRequest):
                 download_input(request.depth_uri,str(depth_source))
             metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode,depth_source,
                 [style.model_dump() for style in request.target_styles] if request.target_styles is not None else None,
-                face_mesh=request.face_mesh, mesh_all_people=request.mesh_all_people)
+                face_mesh=request.face_mesh, mesh_all_people=request.mesh_all_people, depth_opacity=request.depth_opacity)
             metrics['request_processing_seconds']=time.monotonic()-started
             (output/'metrics.json').write_text(json.dumps(metrics,indent=2))
             return {'metrics':metrics,'files':upload_tree(output,request.run_id)}

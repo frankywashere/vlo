@@ -1,0 +1,58 @@
+{
+  "baseline-480": {
+    "pixels_added_vs_baseline_moving_frames": 0,
+    "pixels_removed_vs_baseline_moving_frames": 0,
+    "empty_frames": 0,
+    "mean_area": 258671.61904761905,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  },
+  "text-person-720": {
+    "pixels_added_vs_baseline_moving_frames": 32610,
+    "pixels_removed_vs_baseline_moving_frames": 16187,
+    "empty_frames": 0,
+    "mean_area": 258904.29761904763,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  },
+  "text-person-768": {
+    "pixels_added_vs_baseline_moving_frames": 28136,
+    "pixels_removed_vs_baseline_moving_frames": 16888,
+    "empty_frames": 0,
+    "mean_area": 258879.91666666666,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  },
+  "point-start-torso": {
+    "pixels_added_vs_baseline_moving_frames": 0,
+    "pixels_removed_vs_baseline_moving_frames": 4414224,
+    "empty_frames": 15,
+    "mean_area": 842.7738095238095,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  },
+  "point-motion-torso": {
+    "pixels_added_vs_baseline_moving_frames": 91516,
+    "pixels_removed_vs_baseline_moving_frames": 6574,
+    "empty_frames": 0,
+    "mean_area": 264105.14285714284,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  },
+  "point-motion-arm": {
+    "pixels_added_vs_baseline_moving_frames": 29354,
+    "pixels_removed_vs_baseline_moving_frames": 4171022,
+    "empty_frames": 13,
+    "mean_area": 14012.047619047618,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  },
+  "baseline-close-3": {
+    "pixels_added_vs_baseline_moving_frames": 629,
+    "pixels_removed_vs_baseline_moving_frames": 0,
+    "empty_frames": 0,
+    "mean_area": 258712.66666666666,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  },
+  "baseline-close-7": {
+    "pixels_added_vs_baseline_moving_frames": 3457,
+    "pixels_removed_vs_baseline_moving_frames": 0,
+    "empty_frames": 0,
+    "mean_area": 258985.72619047618,
+    "note": "Changes versus baseline are not ground-truth accuracy scores."
+  }
+}

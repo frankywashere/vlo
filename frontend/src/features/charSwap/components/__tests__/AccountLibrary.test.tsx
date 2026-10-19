@@ -49,6 +49,15 @@ const job = {
 };
 
 describe("private account library", () => {
+  it("shows actual consumer credits and refunds in clip details", async () => {
+    vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "completed", access_mode: "credits",
+      consumer_credits_used: 58, consumer_credits_returned: 20, generation_credits: 999}]);
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await userEvent.click(await screen.findByRole("button", {name: "View details"}));
+    expect(screen.getByText("Credits used: 58")).toBeVisible();
+    expect(screen.getByText("20 credits refunded")).toBeVisible();
+    expect(screen.queryByText("Credits used: 999")).not.toBeInTheDocument();
+  });
   it("shows processing and finished videos in one grid with an inline processing count", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([
       {

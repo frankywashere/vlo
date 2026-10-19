@@ -27,7 +27,15 @@ def clean_border_fragments(mask):
                 yy,xx=zip(*component);band[yy,xx]=False
     return result
 
-def compose(source, archive, vocals, output, selected_label, fill_mode='gray', depth_source=None, target_styles=None, face_mesh=False, mesh_all_people=False):
+def depth_blend(depth, opacity):
+    # Depth is the base, with a light shared magenta tint. Original RGB is
+    # retained only outside the person masks, not blended into their depth.
+    magenta = np.array([255,79,216],dtype=np.float32)
+    return np.rint(depth.astype(np.float32)*(1-opacity)+magenta*opacity).astype(np.uint8)
+
+
+def compose(source, archive, vocals, output, selected_label, fill_mode='gray', depth_source=None, target_styles=None, face_mesh=False, mesh_all_people=False, depth_opacity=1.0):
+    if not 0 <= depth_opacity <= 1:raise ValueError('Invalid depth opacity')
     if fill_mode not in ['gray','original','color','depth','solid','translucent']:raise ValueError('Invalid fill mode')
     styles=[]
     if target_styles is not None:
@@ -115,8 +123,9 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
                     # giving each selected identity a distinct, stable hue.
                     brightness=depth_frame.max(axis=2)
                     for styled,rgb in styled_masks:
-                        frame[styled]=np.rint(brightness[styled,None]*(rgb/rgb.max())).astype(np.uint8)
-                else:frame[target]=depth_frame[target]
+                        frame[styled]=(depth_blend(depth_frame[styled],depth_opacity)
+                            if depth_opacity < 1 else np.rint(brightness[styled,None]*(rgb/rgb.max())).astype(np.uint8))
+                else:frame[target]=depth_blend(depth_frame[target],depth_opacity) if depth_opacity < 1 else depth_frame[target]
             if painter:
                 painter.apply(original, frame, label_frame, target)
             encoded.stdin.write(frame.tobytes())
@@ -131,6 +140,7 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
         for p in [p for p in (decoded, labels, encoded, depth_decoder) if p is not None]:
             if p.poll() is None: p.kill();p.wait()
     result={'frames':len(entries),'fps':24,'duration_seconds':duration,'width':width,'height':height,'selected_label':selected_label,'mask_pixels_per_frame':coverage,'fill_mode':fill_mode,'fill_rgb':[128,128,128] if fill_mode=='gray' else None,'overlay_rgb':[0,220,255] if fill_mode in ['color','translucent'] else None,'overlay_opacity':.2 if fill_mode=='translucent' else .5 if fill_mode=='color' else None,'device':'cpu','depth':fill_mode=='depth','face_mesh':face_mesh}
+    if fill_mode=='depth':result['depth_opacity']=depth_opacity
     if painter:result['face_mesh_metrics']=painter.metrics
     if styles:result.update(target_styles=target_styles,target_coverage=target_coverage)
     return result

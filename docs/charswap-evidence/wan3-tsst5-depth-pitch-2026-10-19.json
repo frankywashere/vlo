@@ -1,0 +1,114 @@
+{
+  "experiment": "WAN 3 six-second tsst5 depth/pitch test",
+  "date": "2026-10-19",
+  "source": "/Users/frank/Desktop/tsst5.mp4",
+  "references": [
+    "/Users/frank/Desktop/b.jpeg",
+    "/Users/frank/Desktop/a.jpeg"
+  ],
+  "settings": {
+    "model": "wan3.0-video",
+    "resolution": "480P",
+    "size": "16:9",
+    "duration": 6,
+    "generation_type": "reference",
+    "audio": true,
+    "content_filter": true,
+    "prompt_extend": false,
+    "endpoint": "https://reapi.ai/api/v1/videos/generations",
+    "max_submissions": 1,
+    "face_mesh": true,
+    "depth": true,
+    "vocals_pitch_semitones": 3,
+    "reference_background": "white",
+    "mapping": {
+      "man_both_shots": "b.jpeg",
+      "woman_second_shot": "a.jpeg"
+    },
+    "skipped_models": {
+      "kling-3-0": "No source-video input on documented standard route",
+      "flux-3-video": "Video continuation; reference images are keyframes"
+    },
+    "docs": [
+      "https://reapi.ai/docs/wan-3-0",
+      "https://reapi.ai/docs/kling-3-0",
+      "https://reapi.ai/docs/flux-3"
+    ]
+  },
+  "result": {
+    "status": "completed",
+    "started_at": 1792448054.42301,
+    "attempts": 1,
+    "task_id": "task_01a1563ad1ad768d9c1a81fd5d00e1e1",
+    "usage": {
+      "credits": 424
+    },
+    "error": null,
+    "elapsed_seconds": 156.09
+  },
+  "supplier_cost_usd": 0.424,
+  "output": "/Users/frank/Desktop/Coding/CharSwap/experiments/wan3_tsst5_depth_pitch_v1/provider-result.mp4",
+  "original_audio_output": "/Users/frank/Desktop/Coding/CharSwap/experiments/wan3_tsst5_depth_pitch_v1/result-original-audio.mp4",
+  "output_dimensions": [
+    854,
+    480
+  ],
+  "findings": [
+    "First shot visibly replaces man with photo B.",
+    "Second shot uses photo A on the man instead of retaining B; woman is an unrelated generated person.",
+    "Requested identities are not preserved across the cut.",
+    "Raw depth inference succeeded, but current tinted compositor discards much of its shading; see limitation file."
+  ],
+  "depth_limitation": {
+    "depth_model_ran": true,
+    "raw_depth_file": "/Users/frank/Desktop/Coding/CharSwap/experiments/wan3_tsst5_depth_pitch_v1/raw-depth.mp4",
+    "guide_depth_mode": true,
+    "issue": "Multi-character compositor uses max RGB channel from colorized depth, discarding hue variations and flattening character depth detail.",
+    "target_frame_24_depth_max_channel_percentiles": [
+      144,
+      240,
+      249,
+      251,
+      255
+    ],
+    "render_already_submitted": true,
+    "additional_paid_submissions": 0,
+    "production_modified": false,
+    "raw_depth_preview": "/tmp/recastfx-wan-raw-depth.png",
+    "guide_preview": "/tmp/recastfx-wan-depth-guide.jpg"
+  },
+  "local_followup": {
+    "base": "raw depth colormap inside selected masks; original RGB outside",
+    "overlay": "shared magenta tint at 20 percent",
+    "preview": "/Users/frank/Desktop/Coding/CharSwap/experiments/wan3_tsst5_depth_pitch_v1/pure-depth-magenta20-preview-no-mesh.mp4",
+    "preview_has_face_mesh": false,
+    "second_render_submitted": false,
+    "production_deployed": false
+  },
+  "artifacts_preserved": true,
+  "workers_shutdown_verified": true,
+  "production_changed": false,
+  "corrected_followup": {
+    "status": "completed",
+    "task_id": "task_01a156464eb47748a1532518f6b0c730",
+    "supplier_cost_usd": 0.424,
+    "dimensions": [
+      854,
+      480
+    ],
+    "input_guide": "raw depth with magenta tint at 20 percent, original RGB outside selected masks",
+    "face_mesh": true,
+    "face_mesh_frames": 45,
+    "audio": "isolated vocals +3 semitones; original soundtrack restored in separate export",
+    "findings": [
+      "Both subjects are transformed in the sampled second shot, unlike the prior generic-woman result.",
+      "Reference faces/clothing appear mixed across the cut; not a clean identity-preserving replacement."
+    ],
+    "output": "/Users/frank/Desktop/Coding/CharSwap/experiments/wan3_tsst5_depth_pitch_v1/corrected-depth20-mesh/provider-result.mp4",
+    "original_audio_output": "/Users/frank/Desktop/Coding/CharSwap/experiments/wan3_tsst5_depth_pitch_v1/corrected-depth20-mesh/result-original-audio.mp4",
+    "further_tests_authorized": 0,
+    "cpu_job_terminal": true,
+    "gpu_run_for_correction": false,
+    "production_deployed": false
+  }
+}

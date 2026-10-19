@@ -7,6 +7,8 @@ export function JobSettings({ settings }: { settings?: JobSettingsUsed }) {
   if (settings) {
     if (settings.trim?.length === 2) rows.push(["Source section", `${seconds(settings.trim[0])}–${seconds(settings.trim[1])}`]);
     if (settings.duration !== undefined) rows.push(["Clip length", seconds(settings.duration)]);
+    if (settings.depth_guidance && settings.depth_overlay_opacity !== undefined)
+      rows.push(["Depth tint opacity", `${Math.round(settings.depth_overlay_opacity * 100)}%`]);
     for (const [label, value] of [
       ["Easy mode", settings.easy_mode],
       ["Enhanced masking", settings.enhanced_masking],

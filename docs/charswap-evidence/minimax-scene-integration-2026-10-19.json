@@ -1,0 +1,206 @@
+{
+  "status": "completed; no clear improvement; user audiovisual review pending",
+  "production_changed": false,
+  "supplier_cost_usd": 3.291,
+  "cpu_signing_cost": "Excluded from supplier total; one bounded CPU execution completed in 14.85 seconds. No GPU inference used.",
+  "recommended_action": "Keep existing defaults. Do not promote the detailed photography prompt or disable guides globally.",
+  "review_method": "One frame from each of seven source shots, comparing original, repeated control, revised prompt, no-guides version; browser playback checked separately.",
+  "cases": [
+    {
+      "variant": "01-repeat-02-control",
+      "assessment": "Control, not a new default",
+      "observations": [
+        "References are recognizable in sampled shots, but foreground people remain crisper than the soft source footage.",
+        "Reference-like forward-facing poses remain especially apparent in shots 5 and 6.",
+        "Framing and an unselected background character differ from source; the repeat also differs from the prior test 02 output."
+      ],
+      "settings": {
+        "baseline": "02-refs34-white",
+        "prompt_changed": false,
+        "face_mesh": true,
+        "overlay_color": "cyan",
+        "overlay_opacity": 0.2,
+        "depth": false,
+        "duration": 15,
+        "resolution": "768P",
+        "references": "exact prior test 02 assets, including white refs 3 and 4",
+        "original_soundtrack": true,
+        "production_changed": false,
+        "prompt_sha256": "97b219974bf3e5935a3c6884f6793c715349d31811afbd4298ddb097e9ed0e95",
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "reference_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "reference_preprocessing": "References 3 and 4 white, remaining exact original test 02 inputs (transparent)."
+      },
+      "prompt": "Use reference video 1 as the source scene and precise motion guide. Person 1, selected at approximately 61% of the frame width and 50% of its height, measured from the top left, at 0.00 seconds, must be replaced with the character from reference image 1. Person 2, selected at approximately 52% of the frame width and 54% of its height, measured from the top left, at 3.21 seconds, must be replaced with the character from reference image 2. Person 3, selected at approximately 40% of the frame width and 47% of its height, measured from the top left, at 6.50 seconds, must be replaced with the character from reference image 3. Person 4, selected at approximately 35% of the frame width and 44% of its height, measured from the top left, at 8.72 seconds, must be replaced with the character from reference image 4. Person 5, selected at approximately 57% of the frame width and 45% of its height, measured from the top left, at 11.03 seconds, must be replaced with the character from reference image 5. Replace each selected person's entire head, hands, body and feet. Keep these assignments separate, even when people overlap or change positions. Follow each selected person's individual motion, pose, interactions and speaking timing through scene changes. When a selected person is absent, preserve the scene and do not replace another person in their place. Keep all other people unchanged. Do not merge people, add extra characters or leave human body parts. Preserve the background, camera, lighting and exact 15-second timing. Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue. Reference images supply replacement appearance only; retain the source scene background. Replace the selected people rather than adding characters beside them. Facial mesh lines in the reference video mark detected facial motion only. Use them as expression and mouth-motion guidance; remove every mesh line from all faces in the final video. Keep speaker assignments and dialogue timing tied to the original people, including across cuts. All selected people share the same cyan overlay at 20% color opacity. The shared color indicates selection, not identity. Use each person's stated position and timestamp to establish their reference-image assignment, and preserve that assignment across cuts. Remove all overlay colors and face mesh markings from the finished video. Reference images define appearance only. Follow each corresponding source person's visible facial expressions, mouth movements, and speaking turns. Keep listeners' mouths at rest when they are not speaking, even while another person's dialogue continues.",
+      "result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_scene_integration_v1/01-repeat-02-control/result.mp4",
+      "state": {
+        "variant": "01-repeat-02-control",
+        "status": "completed",
+        "submitted_at": 1792438613.980177,
+        "task_id": "task_01a155aab86e763db1bea834e5fafbd4",
+        "checked_at": 1792439438.190801,
+        "elapsed_seconds": 729.1,
+        "terminal_observed_at": 1792439343.048605,
+        "supplier_credits": 1097,
+        "supplier_cost_usd": 1.097,
+        "sha256": "a9f29f2db312d0f4cf5d4b6eeb4babb70eaa85ee3e80b35687bea07ad03594be"
+      }
+    },
+    {
+      "variant": "02-match-source-photography",
+      "assessment": "Reject as replacement default",
+      "observations": [
+        "No consistent improvement in matching source texture/softness across sampled shots.",
+        "Opening shot is reframed wider.",
+        "Shot 4 repeats the preceding replacement character in the foreground, rather than isolating the intended person.",
+        "Shot 5 places reference 1 in the foreground instead of the intended reference 4."
+      ],
+      "settings": {
+        "baseline": "02-refs34-white",
+        "prompt_changed": true,
+        "face_mesh": true,
+        "overlay_color": "cyan",
+        "overlay_opacity": 0.2,
+        "depth": false,
+        "duration": 15,
+        "resolution": "768P",
+        "references": "exact prior test 02 assets, including white refs 3 and 4",
+        "original_soundtrack": true,
+        "production_changed": false,
+        "prompt_sha256": "ca1c796a8e06a2a9098233b8e4e86c08b0967a2cf0ae8b8c043a06aab9e6a134",
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "reference_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "reference_preprocessing": "References 3 and 4 white, remaining exact original test 02 inputs (transparent)."
+      },
+      "prompt": "Use reference video 1 as the source scene and precise motion guide. Person 1, selected at approximately 61% of the frame width and 50% of its height, measured from the top left, at 0.00 seconds, must be replaced with the character from reference image 1. Person 2, selected at approximately 52% of the frame width and 54% of its height, measured from the top left, at 3.21 seconds, must be replaced with the character from reference image 2. Person 3, selected at approximately 40% of the frame width and 47% of its height, measured from the top left, at 6.50 seconds, must be replaced with the character from reference image 3. Person 4, selected at approximately 35% of the frame width and 44% of its height, measured from the top left, at 8.72 seconds, must be replaced with the character from reference image 4. Person 5, selected at approximately 57% of the frame width and 45% of its height, measured from the top left, at 11.03 seconds, must be replaced with the character from reference image 5. Replace each selected person's entire head, hands, body and feet. Keep these assignments separate, even when people overlap or change positions. Follow each selected person's individual motion, pose, interactions and speaking timing through scene changes. When a selected person is absent, preserve the scene and do not replace another person in their place. Keep all other people unchanged. Do not merge people, add extra characters or leave human body parts. Preserve the background, camera, lighting and exact 15-second timing. Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue. Use the reference images for character identity, facial structure, hair, and clothing. Render every replacement as physically present in the original scene and photographed by the same camera. Match the surrounding source footage in each shot: lighting direction and softness, exposure, white balance, contrast, contact shadows, reflections, focus softness, depth of field, motion blur, grain, and compression texture. Adapt the reference photograph's lighting and sharpness to the source footage while preserving recognizable identity. Keep the source performance and body pose; the reference photograph does not supply a frozen pose. Replacement people must have the same apparent sharpness and image texture as other people at the same depth in the scene. Retain the source scene background. Replace the selected people rather than adding characters beside them. Facial mesh lines in the reference video mark detected facial motion only. Use them as expression and mouth-motion guidance; remove every mesh line from all faces in the final video. Keep speaker assignments and dialogue timing tied to the original people, including across cuts. All selected people share the same cyan overlay at 20% color opacity. The shared color indicates selection, not identity. Use each person's stated position and timestamp to establish their reference-image assignment, and preserve that assignment across cuts. Remove all overlay colors and face mesh markings from the finished video. Reference images define identity and clothing; the source video defines photographic treatment. Follow each corresponding source person's visible facial expressions, mouth movements, and speaking turns. Keep listeners' mouths at rest when they are not speaking, even while another person's dialogue continues.",
+      "result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_scene_integration_v1/02-match-source-photography/result.mp4",
+      "state": {
+        "variant": "02-match-source-photography",
+        "status": "completed",
+        "submitted_at": 1792438614.726557,
+        "task_id": "task_01a155aabb55739ba5c9290fe5e34077",
+        "checked_at": 1792439438.411978,
+        "elapsed_seconds": 776.2,
+        "terminal_observed_at": 1792439390.931814,
+        "supplier_credits": 1097,
+        "supplier_cost_usd": 1.097,
+        "sha256": "068b99f8b624f1c297f839f099fadb0b626b1727b43787b06ae17b19b6a419d2"
+      }
+    },
+    {
+      "variant": "03-match-source-no-guides",
+      "assessment": "Mixed, not a demonstrated winner",
+      "observations": [
+        "Shot 2 shows motion blur and a more source-like moving head in the sampled frame.",
+        "Shot 4 resembles the reference photograph pose and changes the source background/framing.",
+        "Shot 6 remains portrait-like and its background changes.",
+        "Does not consistently solve the pasted-reference appearance while preserving the scene."
+      ],
+      "settings": {
+        "baseline": "02-refs34-white",
+        "prompt_changed": true,
+        "face_mesh": false,
+        "overlay_color": null,
+        "overlay_opacity": 0,
+        "depth": false,
+        "duration": 15,
+        "resolution": "768P",
+        "references": "exact prior test 02 assets, including white refs 3 and 4",
+        "original_soundtrack": true,
+        "production_changed": false,
+        "prompt_sha256": "9943c5f24e485d81ba2f201715718c91ddbd72f8a5d23c932f849d738f7e178f",
+        "guide_sha256": "3564e0854b5be6a1de427740b9ef71f043d31f3834f565980814f754b3871ebc",
+        "reference_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "reference_preprocessing": "References 3 and 4 white, remaining exact original test 02 inputs (transparent)."
+      },
+      "prompt": "Use reference video 1 as the source scene and precise motion guide. Person 1, selected at approximately 61% of the frame width and 50% of its height, measured from the top left, at 0.00 seconds, must be replaced with the character from reference image 1. Person 2, selected at approximately 52% of the frame width and 54% of its height, measured from the top left, at 3.21 seconds, must be replaced with the character from reference image 2. Person 3, selected at approximately 40% of the frame width and 47% of its height, measured from the top left, at 6.50 seconds, must be replaced with the character from reference image 3. Person 4, selected at approximately 35% of the frame width and 44% of its height, measured from the top left, at 8.72 seconds, must be replaced with the character from reference image 4. Person 5, selected at approximately 57% of the frame width and 45% of its height, measured from the top left, at 11.03 seconds, must be replaced with the character from reference image 5. Replace each selected person's entire head, hands, body and feet. Keep these assignments separate, even when people overlap or change positions. Follow each selected person's individual motion, pose, interactions and speaking timing through scene changes. When a selected person is absent, preserve the scene and do not replace another person in their place. Keep all other people unchanged. Do not merge people, add extra characters or leave human body parts. Preserve the background, camera, lighting and exact 15-second timing. Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue. Use the reference images for character identity, facial structure, hair, and clothing. Render every replacement as physically present in the original scene and photographed by the same camera. Match the surrounding source footage in each shot: lighting direction and softness, exposure, white balance, contrast, contact shadows, reflections, focus softness, depth of field, motion blur, grain, and compression texture. Adapt the reference photograph's lighting and sharpness to the source footage while preserving recognizable identity. Keep the source performance and body pose; the reference photograph does not supply a frozen pose. Replacement people must have the same apparent sharpness and image texture as other people at the same depth in the scene. Retain the source scene background. Replace the selected people rather than adding characters beside them. Keep speaker assignments and dialogue timing tied to the original people, including across cuts. Use each person's stated position and timestamp to establish their reference-image assignment, and preserve that assignment across cuts. Reference images define identity and clothing; the source video defines photographic treatment. Follow each corresponding source person's visible facial expressions, mouth movements, and speaking turns. Keep listeners' mouths at rest when they are not speaking, even while another person's dialogue continues.",
+      "result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_scene_integration_v1/03-match-source-no-guides/result.mp4",
+      "state": {
+        "variant": "03-match-source-no-guides",
+        "status": "completed",
+        "submitted_at": 1792438615.8915782,
+        "task_id": "task_01a155aabfd074edb85c0144e3c700fb",
+        "checked_at": 1792439438.615529,
+        "elapsed_seconds": 822.7,
+        "terminal_observed_at": 1792439438.615533,
+        "supplier_credits": 1097,
+        "supplier_cost_usd": 1.097,
+        "sha256": "176aed372fbfcafa9e5204c692941f1401ec9ad9f4a40ea5d4620f7d5102ddd2"
+      }
+    }
+  ],
+  "limitations": [
+    "One unseeded sample each; prompt effects and generation variance cannot be fully separated.",
+    "The no-guides case removes both overlay and face mesh together; it does not isolate those two controls.",
+    "The 15-second saved benchmark is different from the latest 12-second production submission.",
+    "References reproduce prior test 02 exactly: only refs 3/4 were flattened white; other references retain their prior transparency.",
+    "Generalization to other source clips and full audiovisual creative acceptance remain unproven."
+  ],
+  "next_candidate": "A shorter identity-versus-photography instruction, or a separately controlled reference-resolution/preprocessing test, while retaining working identity anchors. No further paid submissions started.",
+  "browser_playback": {
+    "videos": [
+      {
+        "duration": 15,
+        "time": 15,
+        "width": 640,
+        "height": 480,
+        "error": null,
+        "ended": true
+      },
+      {
+        "duration": 15.083333,
+        "time": 15.083333,
+        "width": 1024,
+        "height": 768,
+        "error": null,
+        "ended": true
+      },
+      {
+        "duration": 15.083333,
+        "time": 15.083333,
+        "width": 1024,
+        "height": 768,
+        "error": null,
+        "ended": true
+      },
+      {
+        "duration": 15.083333,
+        "time": 15.083333,
+        "width": 1024,
+        "height": 768,
+        "error": null,
+        "ended": true
+      },
+      {
+        "duration": 15.083333,
+        "time": 15.083333,
+        "width": 1024,
+        "height": 768,
+        "error": null,
+        "ended": true
+      }
+    ],
+    "pageErrors": [],
+    "mobileOverflow": false
+  },
+  "comparison_video": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_scene_integration_v1/four-way-original-audio.mp4",
+  "review_page": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_scene_integration_v1/review.html"
+}

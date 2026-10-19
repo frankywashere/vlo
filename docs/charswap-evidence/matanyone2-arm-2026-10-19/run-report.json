@@ -1,0 +1,13 @@
+{
+  "status": "completed",
+  "frames": 84,
+  "device": "mps",
+  "seconds": 15.083247290924191,
+  "input": "SAM 3 baseline first-frame binary mask + original 480p RGB footage",
+  "warmup_frames": 10,
+  "initial_mask_morphology": "none",
+  "live_services_changed": false,
+  "provider_submissions": 0,
+  "checkpoint_sha256": "5e9821e4087231427376b437c85bb6e072b41e582314f06fd524f75bc4af5914",
+  "source_revision": "0079197acd6d16a741f71558809c06c586c579e0"
+}

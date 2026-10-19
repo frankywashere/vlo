@@ -45,6 +45,7 @@ export type LiveJobStatus =
   | "submission_unknown";
 
 export interface JobSettingsUsed {
+  depth_overlay_opacity?: number;
   easy_mode?: boolean;
   submit_without_audio?: boolean;
   add_watermark?: boolean;
@@ -81,6 +82,8 @@ export interface LivePipelineJob {
   provider?: GenerationProvider;
   access_mode?: GenerationAccessMode;
   app_credits_charged?: number;
+  consumer_credits_used?: number;
+  consumer_credits_returned?: number;
   generation_credits?: number;
   id: string;
   status: LiveJobStatus;
@@ -355,7 +358,7 @@ function readJob(value: unknown): LivePipelineJob {
     const saved: JobSettingsUsed = {};
     for (const field of ["easy_mode", "enhanced_masking", "depth_guidance", "face_mesh", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
       if (typeof value.settings_used[field] === "boolean") saved[field] = value.settings_used[field];
-    for (const field of ["watermark_bonus_credits", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps"] as const) {
+    for (const field of ["depth_overlay_opacity", "watermark_bonus_credits", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps"] as const) {
       const number = value.settings_used[field];
       if (typeof number === "number" && Number.isFinite(number) && number >= 0) saved[field] = number;
     }
@@ -445,6 +448,8 @@ function readJob(value: unknown): LivePipelineJob {
     "provider_checked_at",
     "generation_credits",
     "app_credits_charged",
+    "consumer_credits_used",
+    "consumer_credits_returned",
   ] as const) {
     if (
       typeof value[field] === "number" &&
