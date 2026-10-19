@@ -209,3 +209,10 @@ For mesh without visible masking, SAM supplies internal labels and `fill_mode:
 "original"` preserves RGB. Per-person styles are accepted for this mode as labels
 only; they are not painted. Existing depth/flat behavior stays unchanged when mesh
 is off. This worker source layer must deploy before the gateway enables mesh defaults.
+
+The [native CPU proof](face-mesh-proof.json) detected two real faces in the official
+MediaPipe sample and painted only the selected side, preserving every unselected
+pixel. It ran the deployed image with the explicit CPU delegate in Cloud Build;
+no GPU or provider render was started. Its single-frame timing is not a production
+startup or clip-duration benchmark. Model licensing is documented in Google's
+[Face Mesh V2 model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf).
