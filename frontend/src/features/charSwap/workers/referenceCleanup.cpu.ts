@@ -1,6 +1,6 @@
 import {loadLiteRt, loadAndCompile, Tensor} from "@litertjs/core";
 import type {CompiledModel} from "@litertjs/core";
-import {CPU_MODEL_PATH, CPU_RUNTIME_PATH, UNSUPPORTED_CLEANUP} from "../services/browserCleanupProtocol";
+import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, UNSUPPORTED_CLEANUP} from "../services/browserCleanupProtocol";
 import type {CleanupReply, CleanupRequest} from "../services/browserCleanupProtocol";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
@@ -13,7 +13,9 @@ class Unsupported extends Error {}
 async function modelBytes() {
   // One bounded allocation, no Response.clone/cache tee buffering on iOS.
   // The build verifies the pinned model hash; HTTPS serves only that revision.
-  const response = await fetch(CPU_MODEL_PATH, {credentials:"omit",cache:"force-cache"});
+  let response:Response|undefined;
+  try {response=await (await caches.open(CPU_MODEL_CACHE)).match(CPU_MODEL_PATH);} catch { /* Optional disk cache. */ }
+  response ??= await fetch(CPU_MODEL_PATH, {credentials:"omit",cache:"force-cache"});
   if (!response.ok || !response.body) throw new DownloadFailed();
   const bytes = new Uint8Array(176_240_148);
   const reader = response.body.getReader();

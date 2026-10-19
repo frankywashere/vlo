@@ -91,7 +91,7 @@ it.each([
   // A GPU failure from an older release must not disable the new CPU worker.
   const result=cleanReferenceBackground("blob:a",new AbortController().signal); await settle();
   const worker=TestWorker.all[0];
-  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v1/referenceCleanup.cpu.js");
+  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v2/referenceCleanup.cpu.js");
   expect(worker.options).toBeUndefined();
   worker.reply({type:"ready"});await settle();
   const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
@@ -122,4 +122,60 @@ it("blocks a previously interrupted CPU runtime before downloading again",async(
   const {cleanReferenceBackground}=await import("../referenceCleanup");
   await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"UnsupportedCleanupError"});
   expect(TestWorker.all).toHaveLength(0);
+});
+
+it("skips an Original-selected queued photo without restarting the active model",async()=>{
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ const a=cleanReferenceBackground("blob:a",new AbortController().signal);
+ let clean=true;
+ const b=cleanReferenceBackground("blob:b",new AbortController().signal,undefined,undefined,()=>clean);
+ const skipped=expect(b).rejects.toMatchObject({name:"CleanupSkippedError"});
+ await settle();const worker=TestWorker.all[0];worker.reply({type:"ready"});await settle();clean=false;
+ const first=worker.messages.at(-1)!;if(first.type!=="clean")throw Error("missing image");
+ worker.reply({type:"result",id:first.id,image:image()});await a;await skipped;
+ expect(vi.mocked(fetch).mock.calls.map(call=>call[0])).toEqual(["blob:a"]);
+ expect(worker.terminate).not.toHaveBeenCalled();
+ const c=cleanReferenceBackground("blob:c",new AbortController().signal);await settle();
+ const next=worker.messages.at(-1)!;if(next.type!=="clean")throw Error("missing image");
+ worker.reply({type:"result",id:next.id,image:image()});await c;expect(TestWorker.all).toHaveLength(1);
+});
+it("downloads ahead on iOS without initializing a model or creating a worker",async()=>{
+ vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+ const read=vi.fn().mockResolvedValueOnce({done:false,value:{length:176240148}}).mockResolvedValueOnce({done:true});
+ vi.mocked(fetch).mockResolvedValueOnce({ok:true,body:{getReader:()=>({read})}} as unknown as Response);
+ const {warmReferenceCleanup,cleanReferenceBackground}=await import("../referenceCleanup");
+ warmReferenceCleanup();warmReferenceCleanup();await settle();
+ expect(fetch).toHaveBeenCalledTimes(1);expect(TestWorker.all).toHaveLength(0);
+ expect(vi.mocked(fetch).mock.calls[0][0]).toMatch(/^\/models\/ormbg\//);
+ const a=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+ const worker=TestWorker.all[0];worker.reply({type:"ready"});await settle();
+ const first=worker.messages.at(-1)!;if(first.type!=="clean")throw Error("missing image");
+ worker.reply({type:"result",id:first.id,image:image()});await a;
+ expect(vi.mocked(fetch).mock.calls.map(call=>call[0])).toEqual([expect.stringContaining("/models/ormbg/"),"blob:a"]);
+});
+
+it("streams an iOS warmup into optional disk cache without creating a cleanup worker",async()=>{
+ vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+ let stored=0;
+ const put=vi.fn(async(_key:string,response:Response)=>{
+  const reader=response.body!.getReader();while(true){const {done,value}=await reader.read();if(done)break;stored+=value.length;}
+ });
+ vi.stubGlobal("caches",{open:async()=>({match:async()=>undefined,put})});
+ // A size-only stream chunk avoids allocating a real 176 MB fixture in this unit test.
+ const body=new ReadableStream<Uint8Array>({start(output){output.enqueue({length:176240148} as Uint8Array);output.close();}});
+ vi.mocked(fetch).mockResolvedValueOnce(new Response(body));
+ const {warmReferenceCleanup}=await import("../referenceCleanup");warmReferenceCleanup();
+ await settle();await settle();await settle();
+ expect(put).toHaveBeenCalledOnce();expect(stored).toBe(176240148);expect(TestWorker.all).toHaveLength(0);
+});
+it("does not create an orphan worker if a photo is canceled during early download",async()=>{
+ vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+ let finish!:(response:Response)=>void;
+ vi.mocked(fetch).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ const {warmReferenceCleanup,cleanReferenceBackground}=await import("../referenceCleanup");warmReferenceCleanup();
+ const abort=new AbortController(),photo=cleanReferenceBackground("blob:a",abort.signal);
+ const canceled=expect(photo).rejects.toMatchObject({name:"AbortError"});await settle();abort.abort();await canceled;
+ const read=vi.fn().mockResolvedValueOnce({done:false,value:{length:176240148}}).mockResolvedValueOnce({done:true});
+ finish({ok:true,body:{getReader:()=>({read})}} as unknown as Response);
+ await settle();await settle();expect(TestWorker.all).toHaveLength(0);
 });

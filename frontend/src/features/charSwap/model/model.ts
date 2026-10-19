@@ -268,6 +268,10 @@ export function canContinue(state: WalkthroughState, step: Step): boolean {
   return getStepBlocker(state, step) === null;
 }
 
+export function hasAssignedReferenceImages(state: WalkthroughState): boolean {
+  return state.targets.every(target=>state.references.some(reference=>reference.id===state.assignments[target.id]&&Boolean(reference.url)));
+}
+
 export function hasPendingReferenceCleanup(state: WalkthroughState): boolean {
   return state.targets.some(target => state.references.some(reference =>
     reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" && reference.cleanup.pending));

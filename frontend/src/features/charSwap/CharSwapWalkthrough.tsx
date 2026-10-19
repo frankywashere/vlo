@@ -23,7 +23,7 @@ import {
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import { useCharSwapStore, STEPS } from "./useCharSwapStore";
-import { canContinue, canVisitStep, getStepBlocker, hasPendingReferenceCleanup } from "./model/model";
+import { canContinue, canVisitStep, getStepBlocker, hasPendingReferenceCleanup, hasAssignedReferenceImages } from "./model/model";
 import type { Step } from "./model/model";
 import { loadDemo, sampleReviewIssues } from "./services/demo";
 import type { DemoManifest } from "./services/demo";
@@ -38,6 +38,8 @@ import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
 import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
 import { loadAccountAccess } from "./services/commerce";
 import { MAX_SOURCE_BYTES } from "./limits";
+import { ReferenceCleanupProvider } from "./components/ReferenceCleanupProvider";
+import { ReferenceCleanupWait } from "./components/ReferenceCleanupWait";
 import { CreationProgress } from "./components/CreationProgress";
 import { CreditGate } from "./components/CreditGate";
 import { PreparationProgress } from "./components/PreparationProgress";
@@ -163,6 +165,7 @@ export function CharSwapWalkthrough({
   const [provider, setProvider] = useState<"reAPI" | "ToAPIs">("reAPI");
   const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
   const [pendingCreate, setPendingCreate] = useState(false);
+  const [waitingForCleanup,setWaitingForCleanup]=useState(false);
   const { key: apiKey, hasKey, isSampleKey, saveKey, clearKey } = useApiKeyPreview();
   useEffect(() => {
     let active = true;
@@ -253,10 +256,18 @@ export function CharSwapWalkthrough({
     Math.abs(selectedDuration - Math.round(selectedDuration)) < 1e-6;
   const continueDisabled =
     busy ||
-    !canContinue(state, clipStep ? "trim" : step) ||
+    !(step === "references" ? canContinue(state,"people") && hasAssignedReferenceImages(state) : canContinue(state, clipStep ? "trim" : step)) ||
     (live && clipStep && !validLiveTrim) ||
     (step === "matches" && !trackingReady) ||
     !fullyFunded;
+  const cleanupPending=hasPendingReferenceCleanup(state);
+  const cleanupFailed=targets.some(target=>references.find(reference=>reference.id===assignments[target.id])?.cleanup?.error);
+  useEffect(()=>{
+    if (step!=="references" || !clip) {setWaitingForCleanup(false);return;}
+    if (waitingForCleanup && !cleanupPending && !cleanupFailed && !continueDisabled) {
+      setWaitingForCleanup(false);visit("review");
+    }
+  },[step,clip,waitingForCleanup,cleanupPending,cleanupFailed,continueDisabled,visit]);
   const referenceVersion = JSON.stringify(
     Object.entries(assignments).map(([target, id]) => [
       target,
@@ -273,6 +284,7 @@ export function CharSwapWalkthrough({
     resetPipeline();
     setResetDialog(false);
     setPendingCreate(false);
+    setWaitingForCleanup(false);
   }, [cancelPending, reset, resetPipeline]);
   useImperativeHandle(
     ref,
@@ -373,6 +385,7 @@ export function CharSwapWalkthrough({
       return;
     }
     if (step === "references") {
+      if (cleanupPending || cleanupFailed) {setWaitingForCleanup(true);return;}
       visit("review");
       return;
     }
@@ -414,7 +427,7 @@ export function CharSwapWalkthrough({
     return true;
   }
   const referenceWaitLabel = step === "references" ? assets.pendingReferences.length > 0
-    ? "Opening image…" : hasPendingReferenceCleanup(state) ? "Finishing cleanup…" : null : null;
+    ? "Opening image…" : null : null;
   const nextLabel = clipStep
     ? "Select person"
     : step === "people"
@@ -423,6 +436,7 @@ export function CharSwapWalkthrough({
   const gate = !clip && !pipeline.job && !entryFunded;
 
   return (
+    <ReferenceCleanupProvider enabled={Boolean(live && pipeline.referenceCleanupAvailable)} endpoint={pipeline.referenceCleanupEndpoint}>
     <Box
       component="main"
       sx={{
@@ -474,7 +488,7 @@ export function CharSwapWalkthrough({
                   tabIndex={-1}
                   sx={{ outline: "none", fontSize: { xs: 28, md: 36 } }}
                 >
-                  {clipStep && clip
+                  {waitingForCleanup ? "Cleaning up your images" : clipStep && clip
                     ? "Choose your moment."
                     : step === "review" && !easyMode && !trackingReady ? "Prepare and check scenes" : STEP_INFO[step].title}
                 </Typography>
@@ -482,7 +496,7 @@ export function CharSwapWalkthrough({
                   color="text.secondary"
                   sx={{ mt: 0.75, fontSize: 15 }}
                 >
-                  {clipStep && clip
+                  {waitingForCleanup ? "Please wait. We’ll continue when your images are ready." : clipStep && clip
                     ? "Trim your clip. The estimate updates as you go."
                     : step === "review" && !easyMode && !trackingReady ? "Prepare your clip, then confirm your people in each scene before generating." : STEP_INFO[step].description}
                 </Typography>
@@ -566,7 +580,8 @@ export function CharSwapWalkthrough({
                 maxPeople={5}
               />
             )}
-            {step === "references" && (
+            {step === "references" && waitingForCleanup && <ReferenceCleanupWait targets={targets} references={references} assignments={assignments} onBack={()=>setWaitingForCleanup(false)}/> }
+            {step === "references" && !waitingForCleanup && (
               <ReferencesStep
                 demo={demo}
                 cleanupEnabled={live && pipeline.referenceCleanupAvailable}
@@ -681,7 +696,7 @@ export function CharSwapWalkthrough({
               />
             )}
           </Box>}
-          {step !== "generation" && !manualPreparation && !sceneReviewActive && (
+          {step !== "generation" && !manualPreparation && !sceneReviewActive && !waitingForCleanup && (
             <Box
               component="footer"
               sx={{
@@ -769,5 +784,6 @@ export function CharSwapWalkthrough({
         </DialogActions>
       </Dialog>
     </Box>
+    </ReferenceCleanupProvider>
   );
 }

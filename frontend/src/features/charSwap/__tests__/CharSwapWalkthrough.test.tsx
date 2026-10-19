@@ -250,13 +250,28 @@ describe("CharSwap walkthrough", () => {
   });
 });
 
-it("shows a clear wait at Continue and permits Original without waiting for cleanup",async()=>{
+it("opens a waiting screen, permits Back without canceling, and advances when selected cleanup is done",async()=>{
   const store=useCharSwapStore.getState();store.loadClip(sample.clip);
   store.selectTarget({id:"a",name:"Person A",color:"#75baff",anchor:{x:.5,y:.5,time:0}});
   store.assignReference("a",{...sample.reference,cleanup:{originalUrl:sample.reference.url,mode:"clean",pending:true}});
-  store.visit("references");render(<CharSwapWalkthrough/>);
-  expect(screen.getByRole("button",{name:"Finishing cleanup…"})).toBeDisabled();
-  expect(screen.getByRole("progressbar")).toBeInTheDocument();
-  act(()=>useCharSwapStore.getState().assignReference("a",{...sample.reference,cleanup:{originalUrl:sample.reference.url,mode:"original",pending:true}}));
-  expect(screen.getByRole("button",{name:"Continue to generate"})).toBeEnabled();
+  store.visit("references");render(<CharSwapWalkthrough/>);const user=userEvent.setup();
+  const next=()=>screen.getByRole("button",{name:"Continue to generate"});
+  expect(next()).toBeEnabled();await user.click(next());
+  expect(screen.getByRole("heading",{name:"Cleaning up your images"})).toBeVisible();
+  expect(screen.getByText("Character 1 of 1")).toBeVisible();
+  await user.click(screen.getByRole("button",{name:"Back to characters"}));
+  expect(useCharSwapStore.getState().references[0].cleanup?.pending).toBe(true);
+  expect(next()).toBeEnabled();await user.click(next());
+  act(()=>useCharSwapStore.getState().assignReference("a",{...sample.reference,cleanup:{originalUrl:sample.reference.url,mode:"clean",cleanedUrl:"blob:cleaned"}}));
+  await waitFor(()=>expect(useCharSwapStore.getState().step).toBe("review"));
+});
+it("requires an explicit Original choice after a cleanup failure before advancing",async()=>{
+ const s=useCharSwapStore.getState();s.loadClip(sample.clip);
+ s.selectTarget({id:"a",name:"Person A",color:"#75baff",anchor:{x:.5,y:.5,time:0}});
+ s.assignReference("a",{...sample.reference,cleanup:{originalUrl:sample.reference.url,mode:"original",error:"Try another image"}});s.visit("references");
+ render(<CharSwapWalkthrough/>);const user=userEvent.setup();
+ await user.click(screen.getByRole("button",{name:"Continue to generate"}));
+ expect(useCharSwapStore.getState().step).toBe("references");
+ await user.click(screen.getByRole("button",{name:"Use Original"}));
+ await waitFor(()=>expect(useCharSwapStore.getState().step).toBe("review"));
 });

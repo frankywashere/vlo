@@ -1,5 +1,5 @@
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
-import {CPU_RUNTIME_PATH, UnsupportedCleanupError} from "./browserCleanupProtocol";
+import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, CleanupSkippedError, UnsupportedCleanupError} from "./browserCleanupProtocol";
 import type {CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
 
 // Retained for older gateway configuration; photos are no longer sent there.
@@ -18,13 +18,15 @@ function markRunning(running: boolean) {
 }
 let unsupported = interrupted();
 let sequence = 0;
+let generation = 0;
+let prefetch: Promise<void> | undefined;
 const waiting = new Set<() => void>();
 let idle: ReturnType<typeof setTimeout> | undefined;
 let progress: ((value: CleanupProgress) => void) | undefined;
 let lastProgress: CleanupProgress = {phase:"loading"};
 const abortError = () => new DOMException("Reference cleanup was canceled.","AbortError");
 function stop() {
-  markRunning(false); clearTimeout(idle); worker?.terminate(); worker = undefined; ready = undefined;
+  generation++; markRunning(false); clearTimeout(idle); worker?.terminate(); worker = undefined; ready = undefined;
   for (const cancel of [...waiting]) cancel();
 }
 function releaseLater() {clearTimeout(idle); idle = setTimeout(stop, 60_000);}
@@ -58,24 +60,67 @@ function initialize() {
   supported(); clearTimeout(idle);
   if (!ready) {
     markRunning(true);
-    lastProgress = {phase:"loading",downloadMB:cpuCleanup() ? 176 : 99};
-    try {worker = cpuCleanup()
-      ? new Worker(CPU_RUNTIME_PATH + "referenceCleanup.cpu.js")
-      : new Worker(new URL("../workers/referenceCleanup.worker.ts",import.meta.url),{type:"module"});}
-    catch {markRunning(false); unsupported = true; throw new UnsupportedCleanupError();}
-    ready = waitFor(worker, reply => reply.type === "ready" ? true : undefined,cpuCleanup() ? 300_000 : 90_000).then(() => undefined);
-    worker.postMessage({type:"initialize"} satisfies CleanupRequest);
+    const epoch=generation;
+    if (!prefetch) lastProgress = {phase:"loading",downloadMB:cpuCleanup() ? 176 : 99};
+    ready=(async()=>{
+      // Finish the download-only warmup before the worker requests the same file.
+      if (cpuCleanup() && prefetch) await prefetch.catch(()=>undefined);
+      if (generation!==epoch) throw abortError();
+      try {worker=cpuCleanup()?new Worker(CPU_RUNTIME_PATH+"referenceCleanup.cpu.js")
+        :new Worker(new URL("../workers/referenceCleanup.worker.ts",import.meta.url),{type:"module"});}
+      catch {markRunning(false);unsupported=true;throw new UnsupportedCleanupError();}
+      const loaded=waitFor(worker,reply=>reply.type==="ready"?true:undefined,cpuCleanup()?300_000:90_000);
+      worker.postMessage({type:"initialize"} satisfies CleanupRequest);
+      await loaded;
+    })();
   }
   return ready;
 }
-// Fetch and compile once while the user trims their clip, without uploading a photo.
+// On iOS, warm only the HTTP cache while the user trims. Stream and discard
+// chunks instead of retaining a 176 MB JS buffer or initializing an idle model.
 export function warmReferenceCleanup(): void {
-  try {if (!cpuCleanup()) void initialize().then(releaseLater, () => undefined);} catch { /* Unsupported devices keep Original. */ }
+  try {
+    supported();
+    if (!cpuCleanup()) {void initialize().then(releaseLater,()=>undefined);return;}
+    if (prefetch) return;
+    prefetch=(async()=>{
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),300_000);
+      try {
+        let cached:Response|undefined;
+        try {cached=await (await caches.open(CPU_MODEL_CACHE)).match(CPU_MODEL_PATH);} catch { /* Optional cache. */ }
+        if (cached) {lastProgress={phase:"loading",percent:100,downloadMB:176};return;}
+        const response=await fetch(CPU_MODEL_PATH,{cache:"force-cache",credentials:"omit",signal:controller.signal});
+        if (!response.ok || !response.body) throw new Error("Model warmup unavailable");
+        let length=0,previous=-1;
+        function count(value:Uint8Array) {
+          length+=value.length;
+          if(length>176_240_148)throw new Error("Invalid model warmup");
+          const percent=Math.floor(length/176_240_148*100);
+          if(percent!==previous){previous=percent;lastProgress={phase:"loading",percent,downloadMB:176};progress?.(lastProgress);}
+        }
+        let cache:Cache|undefined;
+        try {cache=await caches.open(CPU_MODEL_CACHE);} catch { /* HTTP caching is the fallback. */ }
+        if (cache && !cached && typeof TransformStream!=="undefined") {
+          // Consume once directly into disk cache: no clone/tee that can buffer
+          // an entire model while another consumer falls behind.
+          const stream=response.body.pipeThrough(new TransformStream<Uint8Array,Uint8Array>({transform(value,output){count(value);output.enqueue(value);},flush(){if(length!==176_240_148)throw new Error("Incomplete model warmup");}}));
+          await cache.put(CPU_MODEL_PATH,new Response(stream,{headers:response.headers}));
+        } else {
+          const reader=response.body.getReader();
+          while (true) {const {done,value}=await reader.read();if(done)break;count(value);}
+        }
+        if(length!==176_240_148)throw new Error("Incomplete model warmup");
+      } finally {clearTimeout(timer);}
+    })();
+    void prefetch.catch(()=>undefined);
+  } catch { /* Unsupported devices keep Original. */ }
 }
 export function cleanReferenceBackground(url: string, signal: AbortSignal, _legacyEndpoint?: string,
-  onProgress?: (value: CleanupProgress) => void): Promise<Blob> {
+  onProgress?: (value: CleanupProgress) => void, shouldProcess: () => boolean = () => true): Promise<Blob> {
   if (signal.aborted) return Promise.reject(abortError());
+  onProgress?.({phase:"queued"});
   const task = queue.then(async () => {
+    if (!shouldProcess()) throw new CleanupSkippedError();
     if (signal.aborted) throw abortError();
     supported(); clearTimeout(idle);
     let cancel!: () => void;
@@ -86,6 +131,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
       const run = async () => {
         const loading = initialize(); onProgress?.(lastProgress); await loading;
         if (signal.aborted) throw abortError();
+        if (!shouldProcess()) throw new CleanupSkippedError();
         // Only local draft blobs are read. No authenticated POST or cloud fallback.
         if (!url.startsWith("blob:")) throw new Error("Choose a local reference image to clean.");
         const response = await fetch(url,{signal});
