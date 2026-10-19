@@ -15,7 +15,7 @@ interface LiveTrackingStepProps {
   replaceAllPeople?: boolean;
   enhancedCharacterMasking?: boolean;
   selectedLabel?: number;
-  maskStyle?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "none";
+  maskStyle?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "solid_multi" | "none";
   trackingContinuous?: boolean;
   trackingPerformed?: boolean;
   sceneCutCount?: number;
@@ -88,7 +88,7 @@ export function LiveTrackingStep({
         </Alert>
       )}
       {ready && enhancedCharacterMasking && guideUrl && <Typography variant="body2">
-        {replaceAllPeople ? "All detected people are covered by colored depth imagery. The background stays visible. This guide is sent to MiniMax without face mesh or numbers." : targetCount > 1 ? "Each selected person has a different colored depth guide, matched to their replacement image. Everyone else and the background stay visible. Review every person in every scene." : maskStyle === "depth" ? "Only the selected person is covered by colored depth imagery. The original background stays visible. This guide is sent to MiniMax without face mesh or numbers." : maskStyle === "gray" || !maskStyle ? "This older guide uses solid gray masking." : "Only the selected person is tinted cyan. This guide is sent to MiniMax without numbers."}
+        {maskStyle === "solid_multi" || maskStyle === "gray" ? "Selected people are covered by flat masks without depth guidance. Each mask maps to its assigned reference; the original background stays visible." : replaceAllPeople ? "All detected people are covered by colored depth imagery. The background stays visible. This guide is sent to MiniMax without face mesh or numbers." : targetCount > 1 ? "Each selected person has a different colored depth guide, matched to their replacement image. Everyone else and the background stay visible. Review every person in every scene." : maskStyle === "depth" ? "Only the selected person is covered by colored depth imagery. The original background stays visible. This guide is sent to MiniMax without face mesh or numbers." : !maskStyle ? "This older guide uses solid gray masking." : "Only the selected person is tinted cyan. This guide is sent to MiniMax without numbers."}
       </Typography>}
       {ready && guideUrl && (
         <Box sx={PANEL}>
@@ -123,7 +123,7 @@ export function LiveTrackingStep({
             {replaceAllPeople ? "Review every scene. Everyone detected by SAM should be covered. People missed by SAM may not be fully marked."
               : targetCount > 1 ? "Review every selected person in every scene. Check that each guide color follows the right person and replacement."
               : enhancedCharacterMasking
-              ? "Review the whole clip. The colored depth guide should cover your selected person without covering anyone else."
+              ? "Review the whole clip. The person mask should cover your selected person without covering anyone else."
               : wholeClipReview
                 ? "Watch the whole guide, including every scene change. Confirm the correct person in each scene."
                 : `Check that person label ${selectedLabel ?? "shown"} follows your selected person throughout this tracking preview. The generation guide keeps the original person visible.`}{" "}

@@ -1,0 +1,8 @@
+FROM us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:bb1f3548f2b6ebcba7261d528ab1a1ccbf6ddf382064869d70b61e271c009e6a
+RUN apt-get update && apt-get install -y --no-install-recommends libegl1 libgles2 libgl1 libglib2.0-0 libportaudio2 && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir mediapipe==1.1.1 numpy==2.2.6 pillow==11.3.0
+COPY app.py composite.py face_mesh.py /app/
+COPY face_landmarker.task /models/face_landmarker.task
+RUN python -c "import hashlib; assert hashlib.sha256(open('/models/face_landmarker.task','rb').read()).hexdigest() == '64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff'"
+RUN python -c "import sys; sys.path.insert(0,'/app'); import numpy as np; from face_mesh import FaceMeshPainter; p=FaceMeshPainter(); p.apply(np.zeros((64,64,3),np.uint8),np.zeros((64,64,3),np.uint8),np.ones((64,64),np.uint16),np.ones((64,64),bool)); assert p.metrics['frames']==1; p.close()"
+RUN pip check

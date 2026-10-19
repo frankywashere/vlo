@@ -94,3 +94,11 @@ def test_depth_compositor_replaces_only_selected_pixels_and_preserves_missing_fr
     assert np.abs(actual[:,20:40,15:30]-original[:,20:40,15:30]).mean() < 5
     assert np.abs(actual[12:]-original[12:]).mean() < 5
     assert np.abs(actual[0,25,70]-colored[0,25,70]).max() < 8
+
+
+def test_flat_multi_mask_prompt_does_not_claim_depth():
+    targets = [{"reference_index": 0, "anchor": {"x": .2, "y": .4, "time": 0}},
+               {"reference_index": 1, "anchor": {"x": .8, "y": .4, "time": 0}}]
+    prompt = generation_payload(5, ['a', 'b'], 'video', True, mask_style='solid_multi', targets=targets)['prompt']
+    assert 'depth' not in prompt.lower()
+    assert 'cyan' in prompt and 'magenta' in prompt and 'flat' in prompt

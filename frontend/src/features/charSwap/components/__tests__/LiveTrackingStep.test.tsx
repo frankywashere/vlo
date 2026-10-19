@@ -74,7 +74,7 @@ describe("live guide review", () => {
     render(<LiveTrackingStep {...properties()} enhancedCharacterMasking maskStyle="depth" />);
     expect(screen.getByLabelText("Clip preview")).toHaveAttribute("src", guideUrl);
     expect(screen.getByText("Your generation guide")).toBeInTheDocument();
-    expect(screen.getByText(/The colored depth guide should cover your selected person/)).toBeInTheDocument();
+    expect(screen.getByText(/The person mask should cover your selected person/)).toBeInTheDocument();
     expect(screen.getByText(/Only the selected person is covered by colored depth imagery/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "This is the right person" })).toBeDisabled();
   });

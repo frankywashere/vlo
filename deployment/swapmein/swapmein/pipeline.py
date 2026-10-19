@@ -85,7 +85,7 @@ class Pipeline:
                                                "easy_mode": False, **job["setup"]})
                 self.update_job(job_id, easy_mode=options.easy_mode, auto_generate=options.auto_generate)
                 emit("preparation_mode", job_id=job_id, easy_mode=options.easy_mode,
-                     enhanced_character_masking=options.enhanced_character_masking,
+                     enhanced_character_masking=options.enhanced_character_masking, face_mesh=job.get("face_mesh", False),
                      replace_all_people=options.replace_all_people)
                 self.update_job(job_id, replace_all_people=options.replace_all_people)
                 normalization_started = time.monotonic()
@@ -100,7 +100,10 @@ class Pipeline:
                 if targets:
                     metadata["targets"] = targets
                 multi = len(targets) > 1
-                mask_style = "depth_multi" if multi and options.enhanced_character_masking else "depth" if options.enhanced_character_masking else "none"
+                tracking_needed = options.enhanced_character_masking or job.get("face_mesh", False)
+                depth_enabled = options.enhanced_character_masking and job.get("depth_guidance", True)
+                fill_mode = ("depth" if depth_enabled else "solid") if options.enhanced_character_masking else "original"
+                mask_style = (("depth_multi" if multi else "depth") if depth_enabled else ("solid_multi" if multi else "gray")) if options.enhanced_character_masking else "none"
                 prefix = f"inputs/swapmein-{job_id}/"
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
                 self.update_job(job_id, duration=metadata["duration"], width=metadata["width"], height=metadata["height"],
@@ -114,9 +117,11 @@ class Pipeline:
                 label, coverage, preview = None, [], None
                 plan = None
                 tracking_continuous = False
-                if options.enhanced_character_masking:
-                    self.update_job(job_id, message="Preparing depth guidance and detecting all people." if options.replace_all_people
-                                    else "Preparing depth guidance and tracking the selected person.")
+                if tracking_needed:
+                    self.update_job(job_id, message=("Preparing depth guidance and " if depth_enabled else "Preparing person masks and ")
+                                    + ("detecting all people." if options.replace_all_people else "tracking the selected person."))
+                    depth_uri = None
+                    emit("preparation_depth_mode", job_id=job_id, depth_guidance=depth_enabled)
                     sam_run = "sm-sam-" + job_id
                     if job.get("preparation_provider", "workers") == "replicate":
                         # Composition still uses our CPU worker. Do not pay for
@@ -124,7 +129,7 @@ class Pipeline:
                         self.cloud.check_cap()
                         # Instantiate (and validate credentials) before creating
                         # any paid prediction. Masking-off never enters here.
-                        hosted = ReplicatePreparation(self.records, self.cloud, job)
+                        hosted = ReplicatePreparation(self.records, self.cloud, {**job, "depth_guidance": depth_enabled})
                         sam_input = root / "sam-input.mp4"
                         sam_metadata = sam_input_video(normalized, sam_input)
                         sam_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "sam-input.mp4", sam_input, "video/mp4")
@@ -137,9 +142,10 @@ class Pipeline:
                     elif job.get("preparation_provider", "workers") == "workers":
                         with self.cloud.worker("gpu") as invoke:
                             if options.preparation_version >= 2:
-                                depth_run = "sm-depth-" + job_id
-                                depth_result = invoke("/benchmark", {"input_uri": source_uri, "run_id": depth_run, "operation": "depth"}, remaining())
-                                depth_uri = self.cloud.worker_output(depth_result, depth_run, "depth.mp4")
+                                if depth_enabled:
+                                    depth_run = "sm-depth-" + job_id
+                                    depth_result = invoke("/benchmark", {"input_uri": source_uri, "run_id": depth_run, "operation": "depth"}, remaining())
+                                    depth_uri = self.cloud.worker_output(depth_result, depth_run, "depth.mp4")
                                 sam_input = root / "sam-input.mp4"
                                 # Detect people in the same RGB footage the user selected.
                                 # Depth stays at guide resolution for the later compositor.
@@ -150,8 +156,9 @@ class Pipeline:
                                      height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
                                      source="normalized_rgb")
                             else:
-                                result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both"}, remaining())
-                                depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
+                                result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both" if depth_enabled else "sam"}, remaining())
+                                if depth_enabled:
+                                    depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
                         masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
                         preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
                     else:
@@ -220,10 +227,11 @@ class Pipeline:
                 # The unchanged compose worker can read audio directly from a normalized MP4.
                 # No extra extraction or audio-model call is needed in bypass mode.
                 vocals_uri = source_uri
-                if options.enhanced_character_masking:
-                    depth_input = self.cloud.copy(depth_uri, self.settings.worker_bucket, prefix + "depth.mp4")
+                if tracking_needed:
+                    if depth_enabled:
+                        depth_input = self.cloud.copy(depth_uri, self.settings.worker_bucket, prefix + "depth.mp4")
                     masks_input = self.cloud.copy(masks_uri, self.settings.worker_bucket, prefix + "masks.zip")
-                if audio_processing or (options.enhanced_character_masking and (not plan or not plan["review_required"])):
+                if audio_processing or (tracking_needed and (not plan or not plan["review_required"])):
                     with self.cloud.worker("audio") as invoke:
                         if audio_processing:
                             audio_started = time.monotonic()
@@ -231,17 +239,21 @@ class Pipeline:
                             vocals_uri = self.cloud.worker_output(audio, audio_run, "vocals_plus3.wav")
                             emit("preparation_audio_completed", job_id=job_id,
                                  elapsed_seconds=round(time.monotonic() - audio_started, 3))
-                        if options.enhanced_character_masking:
+                        if tracking_needed:
                             vocals_input = (self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
                                             if audio_processing else source_uri)
                             if not plan or not plan["review_required"]:
                                 compose_payload = {"input_uri": source_uri, "masks_uri": masks_input,
                                     "guide_audio_uri": vocals_input, "selected_label": label, "depth_uri": depth_input,
-                                    "fill_mode": "depth", "run_id": guide_run}
+                                    "fill_mode": fill_mode, "run_id": guide_run,
+                                    "face_mesh": job.get("face_mesh", False), "mesh_all_people": options.replace_all_people}
                                 if multi:
                                     compose_payload["target_styles"] = [{"label": target["label"], "color": target["color"]} for target in targets]
                                 composed = invoke("/compose", compose_payload, remaining())
-                if options.enhanced_character_masking and not audio_processing:
+                                if composed.get("metrics", {}).get("face_mesh_metrics"):
+                                    self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])
+                                    emit("face_mesh_composed", job_id=job_id, **composed["metrics"]["face_mesh_metrics"])
+                if tracking_needed and not audio_processing:
                     vocals_input = source_uri
                 if not audio_processing:
                     emit("preparation_audio_skipped", job_id=job_id)
@@ -269,7 +281,7 @@ class Pipeline:
                         emit("tracking_review_required", job_id=job_id,
                             section_count=sum(section["needs_review"] for section in plan["segments"]))
                         return
-                if options.enhanced_character_masking:
+                if tracking_needed:
                     prepared = self.cloud.worker_output(composed, guide_run, "prepared_guide.mp4")
                     if options.preparation_version >= 2:
                         checked_guide = root / "checked-guide.mp4"
@@ -300,11 +312,13 @@ class Pipeline:
                     message = ("Review every selected person and their colored depth guide. Each color maps to that person's reference image."
                                if options.enhanced_character_masking else
                                "Review your prepared clip. MiniMax will use each person's tap position and timestamp to apply their assigned reference.")
+                if not depth_enabled:
+                    message = message.replace("colored depth imagery", "flat person masks").replace("colored depth guide", "flat mask guide")
                 if options.easy_mode:
                     message = "Preparation is complete. Continue generation here or reopen this job in your Library."
                 if options.auto_generate:
                     message = "Preparation is complete. Your generation is queued."
-                if not options.easy_mode and not options.enhanced_character_masking and not options.replace_all_people:
+                if not options.easy_mode and not tracking_needed and not options.replace_all_people:
                     from .scene_selection import analyze
                     scene_targets = targets or [{"id": "person", "name": options.target_name,
                         "anchor": metadata["anchor"], "reference_index": 0}]
@@ -322,7 +336,7 @@ class Pipeline:
                 self.update_job(job_id, status="ready", message=message,
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
                     normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"].get("time", metadata["anchor"]["frame"] / 24)},
-                    mask_style=mask_style, tracking_performed=options.enhanced_character_masking, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
+                    mask_style=mask_style, tracking_performed=tracking_needed, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous,
                     **tracking_fields)
                 if options.auto_generate:
@@ -408,11 +422,16 @@ class Pipeline:
         with self.cloud.worker("audio") as invoke:
             payload = {"input_uri": job["normalized_uri"],
                 "masks_uri": job["reviewed_masks_uri"], "guide_audio_uri": job["tracking_vocals_uri"],
-                "depth_uri": job["tracking_depth_uri"], "selected_label": 1,
-                "fill_mode": "depth", "run_id": run_id}
+                "depth_uri": job.get("tracking_depth_uri"), "selected_label": 1,
+                "fill_mode": (("depth" if job.get("depth_guidance", True) else "solid")
+                    if job.get("setup", {}).get("enhanced_character_masking", True) else "original"), "run_id": run_id,
+                "face_mesh": job.get("face_mesh", False), "mesh_all_people": job.get("replace_all_people", False)}
             if job.get("target_styles"):
                 payload["target_styles"] = [{"label": target["label"], "color": target["color"]} for target in job["target_styles"]]
             composed = invoke("/compose", payload, remaining())
+            if composed.get("metrics", {}).get("face_mesh_metrics"):
+                self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])
+                emit("face_mesh_composed", job_id=job_id, **composed["metrics"]["face_mesh_metrics"])
         prepared = self.cloud.worker_output(composed, run_id, "prepared_guide.mp4")
         if job.get("preparation_version", 1) >= 2:
             with tempfile.TemporaryDirectory() as temporary:
@@ -431,7 +450,9 @@ class Pipeline:
             message=("Your scene matches are applied. Generation is queued." if auto_submit else "Your guide is ready. "
                 + (f"{job['coordinate_fallback_sections']} selections use position and time because SAM found no mask. " if job.get("coordinate_fallback_sections") else "")
                 + "Review the masked preview, then approve it to start rendering."),
-            tracking_reviewed=True, review_required=True, mask_style="depth_multi" if job.get("target_styles") else "depth",
+            tracking_reviewed=True, review_required=True, mask_style=(("depth_multi" if job.get("target_styles") else "depth") if job.get("depth_guidance", True)
+                        else ("solid_multi" if job.get("target_styles") else "gray"))
+                if job.get("setup", {}).get("enhanced_character_masking", True) else "none",
             mask_frames=job["tracking_metadata"]["frames"],
             mask_coverage_min=min(job["reviewed_coverage"]),
             preparation_kind="initial", tracking_revision=job["tracking_applied_revision"] + 1)

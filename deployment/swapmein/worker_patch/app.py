@@ -27,7 +27,7 @@ def health():
     # otherwise look healthy and fail only after expensive GPU preparation.
     from composite import compose
     from PIL import __version__ as pillow_version
-    return {"status": "ready", "device": "cpu", "version": "audio-depth-guide-v6",
+    return {"status": "ready", "device": "cpu", "version": "audio-mesh-guide-v7",
             "operations": ["audio", "compose"], "compositor_ready": callable(compose),
             "pillow_version": pillow_version}
 
@@ -44,15 +44,17 @@ class ComposeRequest(BaseModel):
     masks_uri: str
     guide_audio_uri: str
     selected_label: int = Field(ge=1, le=65535)
-    fill_mode: Literal['gray','original','color','depth'] = 'gray'
+    fill_mode: Literal['gray','original','color','depth','solid'] = 'gray'
     depth_uri: str | None = None
     target_styles: list[TargetStyle] | None = Field(default=None, min_length=1, max_length=5)
     run_id: str
+    face_mesh: bool = False
+    mesh_all_people: bool = False
 
     @model_validator(mode='after')
     def validate_styles(self):
-        if self.target_styles and self.fill_mode!='depth':
-            raise ValueError('Target styles require a depth guide')
+        if self.target_styles and self.fill_mode not in ['depth','solid','original']:
+            raise ValueError('Target styles require a depth or solid guide')
         if self.target_styles and (len({style.label for style in self.target_styles})!=len(self.target_styles)
                                   or any(style.color.lower()=='#000000' for style in self.target_styles)):
             raise ValueError('Target labels must be unique and their colors visible')
@@ -78,7 +80,8 @@ def composite(request: ComposeRequest):
                 depth_source=root/'depth.mp4'
                 download_input(request.depth_uri,str(depth_source))
             metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode,depth_source,
-                [style.model_dump() for style in request.target_styles] if request.target_styles is not None else None)
+                [style.model_dump() for style in request.target_styles] if request.target_styles is not None else None,
+                face_mesh=request.face_mesh, mesh_all_people=request.mesh_all_people)
             metrics['request_processing_seconds']=time.monotonic()-started
             (output/'metrics.json').write_text(json.dumps(metrics,indent=2))
             return {'metrics':metrics,'files':upload_tree(output,request.run_id)}

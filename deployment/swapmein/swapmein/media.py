@@ -61,6 +61,7 @@ class Target(BaseModel):
 
 
 class Setup(BaseModel):
+    face_mesh: bool | None = Field(default=None, strict=True)
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     enhanced_character_masking: bool = Field(default=True, strict=True)
     easy_mode: bool = Field(default=True, strict=True)

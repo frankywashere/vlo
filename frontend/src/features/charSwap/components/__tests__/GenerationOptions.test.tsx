@@ -85,3 +85,20 @@ it("offers the configured watermark reward as a separate opt-in", async () => {
   view.rerender(<GenerationOptions />);
   expect(screen.queryByRole("switch", {name: /Add RecastFX watermark/})).not.toBeInTheDocument();
 });
+
+it("hides face mesh unless offered and lets a run override either global default", async () => {
+  const user=userEvent.setup();
+  const view=render(<GenerationOptions />);
+  expect(screen.queryByRole("switch",{name:"Face mesh"})).not.toBeInTheDocument();
+  const options={face_mesh_masked_default:true,face_mesh_unmasked_default:false,face_mesh_user_control:true};
+  view.rerender(<GenerationOptions faceMeshOptions={options} />);
+  const mesh=screen.getByRole("switch",{name:"Face mesh"});
+  expect(mesh).toBeChecked();
+  await user.click(mesh);
+  expect(mesh).not.toBeChecked();
+  expect(useCharSwapStore.getState().faceMesh).toBe(false);
+  await user.click(mesh);
+  expect(mesh).toBeChecked();
+  useCharSwapStore.getState().reset();
+  expect(useCharSwapStore.getState().faceMesh).toBeUndefined();
+});

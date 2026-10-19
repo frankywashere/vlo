@@ -65,6 +65,7 @@ export interface WalkthroughState {
   replaceAllPeople?: boolean;
   easyMode?: boolean;
   submitWithoutAudio?: boolean;
+  faceMesh?: boolean;
   addWatermark?: boolean;
   watermarkBonusQuote?: number;
   enhancedCharacterMasking?: boolean;

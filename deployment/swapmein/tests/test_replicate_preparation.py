@@ -192,7 +192,8 @@ def test_download_rejects_oversized_and_empty_assets(adapter, tmp_path):
         assert not output.exists()
 
 
-def test_adapter_saves_validated_id_maps_and_depth_before_human_review(adapter, tmp_path, monkeypatch):
+@pytest.mark.parametrize("depth_guidance", [False, True])
+def test_adapter_saves_validated_id_maps_and_depth_before_human_review(adapter, tmp_path, monkeypatch, depth_guidance):
     make, records, cloud = adapter
     raw = BytesIO()
     png = BytesIO(); Image.fromarray(np.array([[0, 7], [40000, 7]], dtype=np.uint16)).save(png, "PNG")
@@ -213,11 +214,15 @@ def test_adapter_saves_validated_id_maps_and_depth_before_human_review(adapter, 
             return httpx.Response(201, json={"id": "sam1" if isinstance(output, list) else "depth1", "status": "succeeded", "output": output})
         return httpx.Response(200, content=raw.getvalue() if request.url.path.endswith("zip") else b"depth-video")
     monkeypatch.setattr("swapmein.replicate_preparation.validate_depth_media", lambda path, metadata: None)
+    records.data["jobs/job.json"]["depth_guidance"] = depth_guidance
     service = make(handle)
     metadata = {"width": 2, "height": 2, "frames": 1, "duration": 1 / 24, "fps": 24}
     result = service.prepare(tmp_path, metadata, metadata, "gs://source", "gs://sam", lambda: 60)
     assert set(result) == {"masks_uri", "depth_uri"}
-    assert all(uri in cloud.assets for uri in result.values())
+    assert all(uri in cloud.assets for uri in result.values() if uri)
+    assert bool(result["depth_uri"]) is depth_guidance
+    predictions = [json.loads(request.content) for request in calls if request.url.host == "api.replicate.com"]
+    assert len(predictions) == (2 if depth_guidance else 1)
     with zipfile.ZipFile(BytesIO(cloud.assets[result["masks_uri"]])) as archive:
         labels = np.asarray(Image.open(BytesIO(archive.read("labels/labels_00000.png"))))
         assert set(np.unique(labels)) == {0, 7, 40000}
@@ -225,7 +230,8 @@ def test_adapter_saves_validated_id_maps_and_depth_before_human_review(adapter, 
     assert service.prepare(tmp_path, metadata, metadata, "gs://source", "gs://sam", lambda: 60) == result
     assert len(calls) == count  # Cached trusted assets: no repeat prediction, download, or upload.
     with pytest.raises(PublicError, match="does not match"):
-        service.prepare(tmp_path, metadata, metadata, "gs://changed-source", "gs://sam", lambda: 60)
+        service.prepare(tmp_path, metadata, metadata, "gs://changed-source" if depth_guidance else "gs://source",
+                        "gs://sam" if depth_guidance else "gs://changed-sam", lambda: 60)
     assert len(calls) == count
     assert all(item["asset_verified"] for item in records.data["jobs/job.json"]["replicate_predictions"].values())
 

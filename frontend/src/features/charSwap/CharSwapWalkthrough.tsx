@@ -121,6 +121,7 @@ export function CharSwapWalkthrough({
     decisions,
     easyMode,
     submitWithoutAudio,
+    faceMesh,
     addWatermark,
     enhancedCharacterMasking,
     selectionVersion,
@@ -146,6 +147,7 @@ export function CharSwapWalkthrough({
       decisions: state.decisions,
       easyMode: state.easyMode ?? true,
       submitWithoutAudio: state.submitWithoutAudio ?? false,
+      faceMesh: state.faceMesh,
       addWatermark: state.addWatermark ?? false,
       enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
       selectionVersion: state.selectionVersion,
@@ -228,6 +230,7 @@ export function CharSwapWalkthrough({
     watermarkBonusQuote: creditAccount.catalog?.watermark_bonus_credits,
     easyMode,
     submitWithoutAudio,
+    faceMesh,
     addWatermark: Boolean(addWatermark && creditAccount.catalog?.watermark_enabled && accessMode === "credits"),
     enhancedCharacterMasking,
     clip,
@@ -682,6 +685,7 @@ export function CharSwapWalkthrough({
                 busy={Boolean(locked)}
                 creditBalance={balance}
                 generationCredits={generationCredits}
+                faceMeshOptions={pipeline.faceMeshOptions}
                 watermarkOffer={creditAccount.catalog?.watermark_enabled && accessMode === "credits" ? {bonusCredits: creditAccount.catalog.watermark_bonus_credits ?? 25} : undefined}
                 creditsAvailable={!live || accessMode === "api-key" || pipeline.creditsAvailable}
                 onGenerate={() => void generate()}

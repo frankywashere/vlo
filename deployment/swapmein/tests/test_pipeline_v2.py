@@ -63,7 +63,7 @@ def image_at(archive_bytes, index=24):
 
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
-            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True):
+            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -121,7 +121,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         def __init__(self):
             self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/upload.bin",
                                "setup": options, "audio_processing": audio_processing,
-                               "preparation_provider": preparation_provider},
+                               "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh},
                 "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
         def read(self, key):
             return copy.deepcopy(self.data.get(key)), 1
@@ -185,7 +185,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
             assert cloud.objects[sam_uri] != media["depth"].read_bytes()
             assert checked["frames"] == sam_metadata["frames"] == 96
             cloud.replicate_calls.append((source_uri, sam_uri))
-            return {"depth_uri": cloud.worker_output({}, "hosted-depth", "depth.mp4"),
+            return {"depth_uri": cloud.worker_output({}, "hosted-depth", "depth.mp4") if depth_guidance else None,
                     "masks_uri": cloud.worker_output({}, "hosted-sam", "masks.zip")}
     monkeypatch.setattr("swapmein.pipeline.ReplicatePreparation", HostedPreparation)
     Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud).prepare(job_id)
@@ -236,9 +236,10 @@ def test_replicate_preflight_rejects_unprotected_composition_before_paying_for_i
 
 @pytest.mark.parametrize("selection", ["single", "multi"])
 @pytest.mark.parametrize("approve", [False, True])
-def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_prediction(monkeypatch, media, tmp_path, selection, approve):
+@pytest.mark.parametrize("depth_guidance", [False, True])
+def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_prediction(monkeypatch, media, tmp_path, selection, approve, depth_guidance):
     job, cloud, _, _, _ = harness(monkeypatch, media, easy=False, enhanced=True,
-        selection=selection, audio_processing=False, preparation_provider="replicate")
+        selection=selection, audio_processing=False, preparation_provider="replicate", depth_guidance=depth_guidance)
     archive, output = tmp_path / "raw.zip", tmp_path / "reviewed.zip"
     archive.write_bytes(cloud.objects[job["tracking_masks_uri"]])
     choices = [{"segment_id": section["id"], "absent": False,
@@ -259,6 +260,7 @@ def test_replicate_scene_matches_rebuild_from_saved_assets_without_another_predi
     records = Records()
     pipeline = Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud)
     pipeline.rebuild_reviewed_guide(job, lambda: 60)
+    assert cloud.calls[-1][2]["fill_mode"] == ("depth" if depth_guidance else "solid")
     assert records.data["status"] == "ready" and records.data["tracking_reviewed"]
     assert cloud.enqueued == ([("generate", job["id"])] if approve else [])
     assert len(cloud.replicate_calls) == 1 and all(kind != "gpu" for kind, _, _ in cloud.calls)
@@ -400,3 +402,40 @@ def test_saved_legacy_manual_background_anchor_keeps_existing_failure_policy(mon
         selection="single", audio_processing=False, legacy=True, background_tap=True)
     assert job["status"] == "failed" and "missed" in job["message"]
     assert [payload["operation"] for kind, _, payload in cloud.calls if kind == "gpu"] == ["both"]
+
+
+@pytest.mark.parametrize("easy", [False, True])
+@pytest.mark.parametrize("selection", ["single", "multi", "all"])
+@pytest.mark.parametrize("preparation_provider", ["workers", "replicate"])
+def test_depth_disabled_skips_depth_inference_and_keeps_masks(monkeypatch, media, easy, selection, preparation_provider):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
+        selection=selection, audio_processing=False, preparation_provider=preparation_provider, depth_guidance=False)
+    review = not easy and selection != "all"
+    assert job["status"] == ("tracking_review" if review else "ready"), job.get("message")
+    assert job["mask_style"] == ("solid_multi" if selection == "multi" else "gray")
+    assert not any(payload.get("operation") in {"depth", "both"} for _, _, payload in cloud.calls)
+    assert not any(name.endswith("depth.mp4") for _, name in cloud.copies)
+    if review:
+        assert job["tracking_depth_uri"] is None and job["tracking_masks_uri"]
+    else:
+        assert cloud.calls[-1][2]["fill_mode"] == "solid" and cloud.calls[-1][2]["depth_uri"] is None
+
+
+@pytest.mark.parametrize("easy", [False, True])
+@pytest.mark.parametrize("enhanced", [False, True])
+@pytest.mark.parametrize("selection", ["single", "multi", "all"])
+def test_mesh_uses_internal_sam_even_without_visible_mask_fill(monkeypatch, media, easy, enhanced, selection):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=enhanced,
+        selection=selection, audio_processing=False, depth_guidance=True, face_mesh=True)
+    review = not easy and selection != "all"
+    assert job["status"] == ("tracking_review" if review else "ready"), job.get("message")
+    assert any(payload.get("operation") == "sam" for _, _, payload in cloud.calls)
+    assert job["tracking_performed"]
+    if not enhanced:
+        assert not any(payload.get("operation") in {"depth", "both"} for _, _, payload in cloud.calls)
+        assert job["mask_style"] == "none"
+    if not review:
+        payload=cloud.calls[-1][2]
+        assert payload["face_mesh"] is True
+        assert payload["mesh_all_people"] is (selection == "all")
+        assert payload["fill_mode"] == ("depth" if enhanced else "original")

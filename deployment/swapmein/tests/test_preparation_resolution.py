@@ -141,7 +141,9 @@ def test_high_resolution_guide_and_sam_copy_keep_the_same_frames(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg required for compositor proof")
-def test_two_selected_labels_receive_distinct_depth_colors_and_background_survives(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fill_mode", ["depth", "solid"])
+@pytest.mark.parametrize("face_mesh", [False, True])
+def test_two_selected_labels_receive_distinct_depth_colors_and_background_survives(tmp_path, monkeypatch, fill_mode, face_mesh):
     source, depth, audio, masks, output = (tmp_path / name for name in
         ("source.mp4", "depth.mp4", "audio.wav", "masks.zip", "guide.mp4"))
     for destination, color in [(source, "red"), (depth, "gray")]:
@@ -155,8 +157,16 @@ def test_two_selected_labels_receive_distinct_depth_colors_and_background_surviv
     spec = importlib.util.spec_from_file_location("multi_target_depth_composite", Path(__file__).parents[1] / "worker_patch/composite.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    result = module.compose(source, masks, audio, output, 7, "depth", depth,
-        [{"label": 7, "color": "#00DCFF"}, {"label": 40000, "color": "#FF8800"}])
+    class Painter:
+        metrics={"frames_with_mesh":0}
+        def __init__(self,**kwargs):pass
+        def apply(self,original,composed,labels,target):
+            assert original[128,128,0]>240 and original[128,128,1]<10
+            assert composed[128,128,0]<10  # Filled guide differs from source RGB.
+        def close(self):pass
+    monkeypatch.setitem(sys.modules,"face_mesh",SimpleNamespace(FaceMeshPainter=Painter))
+    result = module.compose(source, masks, audio, output, 7, fill_mode, depth if fill_mode == "depth" else None,
+        [{"label": 7, "color": "#00DCFF"}, {"label": 40000, "color": "#FF8800"}], face_mesh=face_mesh)
     assert set(result["target_coverage"]) == {"7", "40000"}
     raw = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(output), "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
     frames = np.frombuffer(raw, np.uint8).reshape(24, 256, 512, 3)
