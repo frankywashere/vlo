@@ -113,3 +113,15 @@ def test_library_character_picture_uses_the_original_selected_frame(api):
     assert "original-left.jpg" in public[0]["thumbnail_url"]
     assert "original-right.jpg" in public[1]["thumbnail_url"]
     assert "thumbnail_url" not in targets[0]
+
+
+def test_coordinate_fallback_reaches_prompt_without_calling_it_an_absence():
+    from swapmein.scene_selection import reviewed_mask_targets
+    metadata, plan, choices = setup_scene_review()
+    present = next(choice for choice in choices if not choice["absent"])
+    targets = reviewed_mask_targets(metadata, plan, choices, [{"segment_id": present["segment_id"], "coordinate_fallback": True}])
+    prompt = generation_payload(5, ["one", "two"], "guide", True, mask_style="depth_multi", targets=targets)["prompt"]
+    assert "no detected mask" in prompt and "original RGB footage" in prompt
+    assert "use the stated position and timestamp" in prompt
+    scene = next(scene for target in targets for scene in target["scenes"] if scene.get("coordinate_fallback"))
+    assert not scene["absent"] and scene["anchor"] == present["anchor"]

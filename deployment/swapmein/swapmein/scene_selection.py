@@ -45,3 +45,24 @@ def resolve(metadata: dict, plan: dict, choices: list[dict]) -> list[dict]:
     if all(scene["absent"] for target in result for scene in target["scenes"]):
         raise PublicError("Select at least one person to replace.", code="tracking_review_invalid")
     return result
+
+
+def reviewed_mask_targets(metadata: dict, plan: dict, choices: list[dict], assignments: list[dict]) -> list[dict]:
+    """Retain explicit positions/absences alongside any available depth masks."""
+    targets = plan.get("targets") or metadata.get("targets") or [{
+        "id": "selected", "name": "Person 1", "reference_index": 0, "anchor": metadata["anchor"]}]
+    selected = {choice["segment_id"]: choice for choice in choices}
+    resolved = {assignment["segment_id"]: assignment for assignment in assignments}
+    result = []
+    for target in targets:
+        scenes = []
+        for section in plan["segments"]:
+            if section.get("target_id", targets[0]["id"]) != target["id"]:
+                continue
+            choice = selected.get(section["id"])
+            absent = choice["absent"] if choice else False
+            scenes.append({"start": section["start"], "end": section["end"], "absent": absent,
+                "anchor": None if absent else choice["anchor"] if choice else target["anchor"],
+                "coordinate_fallback": bool(resolved.get(section["id"], {}).get("coordinate_fallback"))})
+        result.append({**target, "scenes": scenes})
+    return result

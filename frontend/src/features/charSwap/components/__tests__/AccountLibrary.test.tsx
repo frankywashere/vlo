@@ -265,3 +265,24 @@ describe("failed job recovery", () => {
     expect(generateLiveJob).not.toHaveBeenCalled();
   });
 });
+
+it("keeps the Library scene review free of the old warning, filename and full reference gallery", async () => {
+  const user = userEvent.setup();
+  const targets = [0, 1].map(index => ({id: `person-${index}`, name: `Person ${index + 1}`, reference_index: index,
+    anchor: {x: .5, y: .5, time: 1}, thumbnail_url: `https://storage.googleapis.com/original-${index}.jpg`}));
+  vi.mocked(loadAccountJobs).mockResolvedValue([{...job, title: "private-source.mp4", status: "tracking_review",
+    message: "We could not match an initial selection. Select each person in the scenes.",
+    source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
+    selection_targets: targets, reference_urls: ["https://storage.googleapis.com/ref-1.jpg", "https://storage.googleapis.com/ref-2.jpg"],
+    tracking_segments: targets.map((target,index) => ({id: `s${index}`, target_id: target.id, target_name: target.name,
+      scene_index: 0, start: 0, end: 4, start_frame: 0, end_frame: 96, seek_time: 1, needs_review: true, reason: "scene_cut"})),
+  }]);
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+  expect(screen.queryByText("private-source.mp4")).not.toBeInTheDocument();
+  expect(screen.queryByText(/We could not match an initial selection/)).not.toBeInTheDocument();
+  expect(screen.queryByAltText("Person 2 replacement reference")).not.toBeInTheDocument();
+  expect(screen.getByAltText("Person 1 replacement: Reference 1")).toBeVisible();
+  expect(screen.getByRole("img", {name: "Person 1"})).toBeVisible();
+  expect(screen.getByText(/Tap the person in each box below/)).toBeVisible();
+});

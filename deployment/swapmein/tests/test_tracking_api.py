@@ -400,3 +400,26 @@ def test_single_person_library_review_restores_original_character_picture(tracki
     target = response.json()["selection_targets"][0]
     assert target["id"] == "selected" and target["reference_index"] == 0
     assert "original-character.jpg" in target["thumbnail_url"]
+
+
+def test_missing_mask_review_queues_coordinates_without_starting_generation(tracking_review, monkeypatch):
+    client, records, cloud, provider, headers, job_id, _ = tracking_review
+    job = records.data[f"jobs/{job_id}.json"]
+    job["tracking_metadata"]["anchor"] = {"frame": 24, "time": 1, "x": .5, "y": .5}
+    original = gateway.resolve_tracking
+    def coordinate_result(archive, metadata, plan, choices, output):
+        assert metadata["allow_coordinate_fallback"] is True
+        result = original(archive, metadata, plan, choices, output)
+        result["coverage"] = [0] * 120
+        result["assignments"] = [{"segment_id": "segment-000", "start_frame": 0, "end_frame": 120,
+            "selected_label": None, "absent": False, "coordinate_fallback": True, "fallback_anchor": choices[0]["anchor"]}]
+        return result
+    monkeypatch.setattr(gateway, "resolve_tracking", coordinate_result)
+    response = client.post(review_endpoint(job_id), headers=headers, json=review_body())
+    assert response.status_code == 202
+    saved = records.data[f"jobs/{job_id}.json"]
+    assert saved["coordinate_fallback_sections"] == 1
+    scene = saved["normalized_targets"][0]["scenes"][0]
+    assert scene["coordinate_fallback"] and not scene["absent"]
+    assert scene["anchor"] == selected_choice()["anchor"]
+    assert cloud.enqueued == [("prepare", job_id)] and not provider.submissions

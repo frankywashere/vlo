@@ -35,7 +35,7 @@ describe("character-first scrolling scene review", () => {
     expect(screen.getByRole("heading", {name: "Character 1 of 1 · Person 1"})).toBeInTheDocument();
     expect(screen.getAllByRole("region")).toHaveLength(2);
     expect(screen.getByRole("img", {name: "Person 1"})).toHaveAttribute("src", "blob:person");
-    expect(screen.getByText(/Leave an image untapped/)).toBeInTheDocument();
+    expect(screen.getByText(/Leave it blank if/)).toBeInTheDocument();
     expect(screen.getByText(/Masking stays off/)).toBeInTheDocument();
     expect(screen.queryByRole("button", {name: "Next scene"})).not.toBeInTheDocument();
   });

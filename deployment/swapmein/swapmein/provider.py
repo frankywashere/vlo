@@ -83,6 +83,7 @@ def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: di
 
 def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_masking: bool, mask_style: str):
     instructions = []
+    has_coordinate_fallback = any(scene.get("coordinate_fallback") for target in targets for scene in target.get("scenes", []))
     for index, target in enumerate(targets):
         anchor = target.get("anchor", target)
         reference = target["reference_index"] + 1
@@ -106,14 +107,18 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
                 instructions.append(f"In the scene {interval}, identify Person {index + 1} at "
                     f"{point['time']:.2f} seconds, {point['x'] * 100:.0f}% across and {point['y'] * 100:.0f}% down "
                     f"from the top left; replace that person with reference image {reference} throughout this scene.")
+                if scene.get("coordinate_fallback"):
+                    instructions.append("This assignment has no detected mask in this interval. The selected person remains in original RGB footage; "
+                        "use the stated position and timestamp, not a depth color, to identify them. Do not substitute a different masked person.")
     return (
         "Use reference video 1 as the source scene and precise motion guide. "
         + " ".join(instructions) + " "
         "Replace each selected person's entire head, hands, body and feet. Keep these assignments separate, "
         "even when people overlap or change positions. Follow each selected person's individual motion, "
         "pose, interactions and speaking timing through scene changes. "
-        + ("The colored depth imagery identifies each selected person and describes shape and motion, not appearance. "
-           "Remove every depth-map color from the completed characters. " if enhanced_masking else "")
+        + (("Colored depth imagery marks only selections with detected masks; identify unmasked selections using their scene-specific positions and timestamps. "
+            if has_coordinate_fallback else "The colored depth imagery identifies each selected person and describes shape and motion, not appearance. ")
+           + "Remove every depth-map color from the completed characters. " if enhanced_masking else "")
         + "When a selected person is absent, preserve the scene and do not replace another person in their place. "
         "Keep all other people unchanged. Do not merge people, add extra characters or leave human body parts. "
         f"Preserve the background, camera, lighting and exact {duration}-second timing. "

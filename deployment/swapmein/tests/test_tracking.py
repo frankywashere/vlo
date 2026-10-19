@@ -344,3 +344,28 @@ def test_all_sections_cannot_be_marked_absent_and_original_archive_is_preserved(
     assert path.read_bytes() == original
     with pytest.raises(PublicError, match="separately"):
         resolve_tracking(path, info, plan, [choose(part, absent=True) for part in plan["segments"]], path)
+
+
+def test_missing_mask_can_keep_the_tap_as_a_coordinate_fallback(tmp_path):
+    path = masks(tmp_path / "masks.zip", [person()] * 8)
+    info = {**metadata(cuts=[4]), "allow_coordinate_fallback": True}
+    plan = analyze_tracking(path, info, 2)
+    choice = choose(plan["segments"][1], x=.9, y=.9)
+    output = tmp_path / "reviewed.zip"
+    result = resolve_tracking(path, info, plan, [choice], output)
+    fallback = result["assignments"][1]
+    assert not fallback["absent"] and fallback["selected_label"] is None
+    assert fallback["coordinate_fallback"] and fallback["fallback_anchor"] == choice["anchor"]
+    assert result["coverage"][:4] == [144] * 4 and result["coverage"][4:] == [0] * 4
+    with zipfile.ZipFile(output) as archive:
+        assert not np.asarray(Image.open(BytesIO(archive.read("labels/labels_00004.png")))).any()
+
+
+def test_coordinate_only_review_is_valid_but_all_absent_still_fails(tmp_path):
+    path = masks(tmp_path / "masks.zip", [person()] * 8)
+    info = {**metadata(), "review_all_scenes": True, "allow_coordinate_fallback": True}
+    plan = analyze_tracking(path, info, 2)
+    result = resolve_tracking(path, info, plan, [choose(section, x=.9, y=.9) for section in plan["segments"]], tmp_path / "fallback.zip")
+    assert not any(result["coverage"]) and all(a["coordinate_fallback"] for a in result["assignments"])
+    with pytest.raises(PublicError, match="at least one"):
+        resolve_tracking(path, info, plan, [choose(section, absent=True) for section in plan["segments"]], tmp_path / "absent.zip")
