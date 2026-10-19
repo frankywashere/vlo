@@ -72,7 +72,7 @@ export function ReferenceBackground({targetId, reference, cleanupEndpoint}: Refe
       <ToggleButton value="clean" disabled={reference.cleanup?.unsupported}>Clean background</ToggleButton>
     </ToggleButtonGroup>
     {reference.cleanup?.pending && <Stack direction="row" spacing={1} alignItems="center" role="status">
-      <CircularProgress size={14} /><Typography variant="caption">{progress.phase === "loading" ? `Loading cleanup${progress.percent === undefined ? "" : ` ${progress.percent}%`}… First use may take a moment.` : "Cleaning background…"} You can use Original while this finishes.</Typography>
+      <CircularProgress size={14} /><Typography variant="caption">{progress.phase === "loading" ? `Loading cleanup${progress.percent === undefined ? "" : ` ${progress.percent}%`}… First use downloads ${progress.downloadMB ?? 99} MB and may take a few minutes.` : "Cleaning background…"} You can use Original while this finishes.</Typography>
     </Stack>}
     {reference.cleanup?.error && <Alert severity="info">{reference.cleanup.error}</Alert>}
   </Stack>;

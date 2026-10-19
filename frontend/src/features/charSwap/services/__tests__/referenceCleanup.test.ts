@@ -4,21 +4,23 @@ class TestWorker extends EventTarget {
   static all: TestWorker[]=[];
   messages: CleanupRequest[]=[];
   terminate=vi.fn();
-  constructor(){super();TestWorker.all.push(this);}
+  url: string | URL;
+  options?: WorkerOptions;
+  constructor(url: string | URL, options?: WorkerOptions){super();this.url=url;this.options=options;TestWorker.all.push(this);}
   postMessage(message: CleanupRequest){this.messages.push(message);}
   reply(data: CleanupReply){this.dispatchEvent(new MessageEvent("message",{data}));}
 }
 const image=()=>new Blob(["photo"],{type:"image/jpeg"});
 async function settle(){for(let i=0;i<20;i++)await Promise.resolve();}
 beforeEach(()=>{
-  sessionStorage.removeItem("recastfx-cleanup-interrupted-v1");
+  sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");
   vi.resetModules();vi.useFakeTimers();TestWorker.all=[];
   vi.stubGlobal("Worker",TestWorker);vi.stubGlobal("isSecureContext",true);
   vi.stubGlobal("OffscreenCanvas",class {});vi.stubGlobal("createImageBitmap",vi.fn());
   Object.defineProperty(navigator,"gpu",{configurable:true,value:{}});
   vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:true,blob:async()=>image()}));
 });
-afterEach(()=>{sessionStorage.removeItem("recastfx-cleanup-interrupted-v1");vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();delete (navigator as unknown as {gpu?:unknown}).gpu;});
+afterEach(()=>{sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();delete (navigator as unknown as {gpu?:unknown}).gpu;});
 it("rejects unsupported browsers before reading any photo or creating a worker",async()=>{
   Object.defineProperty(navigator,"gpu",{configurable:true,value:undefined});
   const {cleanReferenceBackground}=await import("../referenceCleanup");
@@ -81,12 +83,19 @@ it.each([
   ["iPhone Safari","Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile Safari/604.1","iPhone",5],
   ["iPhone Chrome","Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 CriOS/155 Mobile Safari/604.1","iPhone",5],
   ["iPad desktop mode","Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/26.0 Safari/605.1.15","MacIntel",5],
-])("blocks %s before prewarming or starting GPU work",async(_name,userAgent,platform,maxTouchPoints)=>{
+])("routes %s to CPU without prewarming or requesting a GPU",async(_name,userAgent,platform,maxTouchPoints)=>{
   vi.stubGlobal("navigator",{userAgent,platform,maxTouchPoints,gpu:{}});
   const {warmReferenceCleanup,cleanReferenceBackground}=await import("../referenceCleanup");
   warmReferenceCleanup();
-  await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"UnsupportedCleanupError"});
-  expect(TestWorker.all).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();
+  expect(TestWorker.all).toHaveLength(0);
+  // A GPU failure from an older release must not disable the new CPU worker.
+  const result=cleanReferenceBackground("blob:a",new AbortController().signal); await settle();
+  const worker=TestWorker.all[0];
+  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v1/referenceCleanup.cpu.js");
+  expect(worker.options).toBeUndefined();
+  worker.reply({type:"ready"});await settle();
+  const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+  worker.reply({type:"result",id:request.id,image:image()});await result;
 });
 it("does not retry a model that was interrupted by a page reload",async()=>{
   sessionStorage.setItem("recastfx-cleanup-interrupted-v1","1");
@@ -94,4 +103,23 @@ it("does not retry a model that was interrupted by a page reload",async()=>{
   warmReferenceCleanup();
   await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"UnsupportedCleanupError"});
   expect(TestWorker.all).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();
+});
+
+it("allows iOS CPU cleanup without WebGPU, with a separate five-minute download limit",async()=>{
+  vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+  sessionStorage.setItem("recastfx-cleanup-interrupted-v1","1");
+  const {cleanReferenceBackground}=await import("../referenceCleanup");
+  const result=cleanReferenceBackground("blob:a",new AbortController().signal);
+  const rejected=expect(result).rejects.toThrow(/timed out/);await settle();
+  await vi.advanceTimersByTimeAsync(90_000);
+  expect(TestWorker.all[0].terminate).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(210_000);await rejected;
+  expect(TestWorker.all[0].terminate).toHaveBeenCalledOnce();
+});
+it("blocks a previously interrupted CPU runtime before downloading again",async()=>{
+  vi.stubGlobal("navigator",{userAgent:"iPhone",platform:"iPhone",maxTouchPoints:5});
+  sessionStorage.setItem("recastfx-cleanup-cpu-interrupted-v1","1");
+  const {cleanReferenceBackground}=await import("../referenceCleanup");
+  await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"UnsupportedCleanupError"});
+  expect(TestWorker.all).toHaveLength(0);
 });

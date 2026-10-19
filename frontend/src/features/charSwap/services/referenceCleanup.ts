@@ -1,5 +1,5 @@
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
-import {UnsupportedCleanupError} from "./browserCleanupProtocol";
+import {CPU_RUNTIME_PATH, UnsupportedCleanupError} from "./browserCleanupProtocol";
 import type {CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
 
 // Retained for older gateway configuration; photos are no longer sent there.
@@ -9,7 +9,9 @@ export function isReferenceCleanupEndpoint(value: unknown): value is string {
 let queue: Promise<void> = Promise.resolve();
 let worker: Worker | undefined;
 let ready: Promise<void> | undefined;
-const INTERRUPTED_KEY = "recastfx-cleanup-interrupted-v1";
+// A previous GPU interruption must not block the new CPU implementation.
+const cpuCleanup = () => isIOSCleanupDevice(navigator.userAgent,navigator.platform,navigator.maxTouchPoints);
+const INTERRUPTED_KEY = cpuCleanup() ? "recastfx-cleanup-cpu-interrupted-v1" : "recastfx-cleanup-interrupted-v1";
 function interrupted() {try {return sessionStorage.getItem(INTERRUPTED_KEY) === "1";} catch {return false;}}
 function markRunning(running: boolean) {
   try {if (running) sessionStorage.setItem(INTERRUPTED_KEY,"1"); else sessionStorage.removeItem(INTERRUPTED_KEY);} catch { /* Storage is optional. */ }
@@ -27,8 +29,8 @@ function stop() {
 }
 function releaseLater() {clearTimeout(idle); idle = setTimeout(stop, 60_000);}
 function supported() {
-  if (unsupported || isIOSCleanupDevice(navigator.userAgent,navigator.platform,navigator.maxTouchPoints) || !globalThis.isSecureContext || typeof Worker === "undefined" ||
-    !navigator.gpu || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function")
+  if (unsupported || !globalThis.isSecureContext || typeof Worker === "undefined" ||
+    (!cpuCleanup() && !navigator.gpu) || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function")
     throw new UnsupportedCleanupError();
 }
 function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefined, timeout: number): Promise<T> {
@@ -56,17 +58,19 @@ function initialize() {
   supported(); clearTimeout(idle);
   if (!ready) {
     markRunning(true);
-    lastProgress = {phase:"loading"};
-    try {worker = new Worker(new URL("../workers/referenceCleanup.worker.ts",import.meta.url),{type:"module"});}
+    lastProgress = {phase:"loading",downloadMB:cpuCleanup() ? 176 : 99};
+    try {worker = cpuCleanup()
+      ? new Worker(CPU_RUNTIME_PATH + "referenceCleanup.cpu.js")
+      : new Worker(new URL("../workers/referenceCleanup.worker.ts",import.meta.url),{type:"module"});}
     catch {markRunning(false); unsupported = true; throw new UnsupportedCleanupError();}
-    ready = waitFor(worker, reply => reply.type === "ready" ? true : undefined,90_000).then(() => undefined);
+    ready = waitFor(worker, reply => reply.type === "ready" ? true : undefined,cpuCleanup() ? 300_000 : 90_000).then(() => undefined);
     worker.postMessage({type:"initialize"} satisfies CleanupRequest);
   }
   return ready;
 }
 // Fetch and compile once while the user trims their clip, without uploading a photo.
 export function warmReferenceCleanup(): void {
-  try {void initialize().then(releaseLater, () => undefined);} catch { /* Unsupported devices keep Original. */ }
+  try {if (!cpuCleanup()) void initialize().then(releaseLater, () => undefined);} catch { /* Unsupported devices keep Original. */ }
 }
 export function cleanReferenceBackground(url: string, signal: AbortSignal, _legacyEndpoint?: string,
   onProgress?: (value: CleanupProgress) => void): Promise<Blob> {
@@ -90,7 +94,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
         if (!image.size || image.size > 5*1024*1024) throw new Error("Choose a reference smaller than 5 MiB.");
         if (signal.aborted || !worker) throw abortError();
         const id = ++sequence;
-        const result = waitFor(worker, reply => reply.type === "result" && reply.id === id ? reply.image : undefined,30_000);
+        const result = waitFor(worker, reply => reply.type === "result" && reply.id === id ? reply.image : undefined,cpuCleanup() ? 60_000 : 30_000);
         markRunning(true);
         worker.postMessage({type:"clean",id,image} satisfies CleanupRequest);
         const cleaned = await result;
