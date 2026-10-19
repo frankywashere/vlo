@@ -4,7 +4,7 @@ export const RUNTIME_PATH = "/ml/ort-1.31.0-8d85527a0/";
 export const CPU_RUNTIME_PATH = "/ml/litert-2.5.3-cpu-v2/";
 export const CPU_MODEL_CACHE = "recastfx-cpu-reference-model-v1";
 export const CPU_MODEL_PATH = "/models/ormbg/8dfdacc4ebceafd4d55195fdbd3baf8470610518/ormbg.tflite";
-export interface CleanupProgress {phase: "queued" | "loading" | "cleaning"; percent?: number; downloadMB?: number}
+export interface CleanupProgress {phase: "queued" | "loading" | "cleaning"; percent?: number; downloadMB?: number; startedAt?: number; expectedMs?: number}
 export type CleanupRequest = {type: "initialize"} | {type: "clean"; id: number; image: Blob};
 export type CleanupReply =
   | {type: "ready"}

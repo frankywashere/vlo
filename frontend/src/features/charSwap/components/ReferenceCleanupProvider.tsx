@@ -4,6 +4,7 @@ import {useCharSwapStore} from "../useCharSwapStore";
 import {cleanReferenceBackground} from "../services/referenceCleanup";
 import {CleanupSkippedError, UnsupportedCleanupError} from "../services/browserCleanupProtocol";
 import type {CleanupProgress} from "../services/browserCleanupProtocol";
+import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
 import {createLocalId} from "../utils/createLocalId";
 
 type CleanupJob = {id:string; original:string; controller:AbortController};
@@ -35,7 +36,9 @@ export function ReferenceCleanupProvider({enabled,endpoint,children}:{enabled:bo
     setProgress(previous=>({...previous,[targetId]:{phase:"queued"}}));
     useCharSwapStore.getState().assignReference(targetId,{...reference,id,cleanup:{originalUrl:original,mode:"clean",pending:true}});
     void cleanReferenceBackground(original,controller.signal,endpoint,value=>{
-      if (alive.current && current(targetId)?.id===id) setProgress(previous=>({...previous,[targetId]:value}));
+      if (alive.current && current(targetId)?.id===id) setProgress(previous=>({...previous,[targetId]:value.phase==="cleaning"
+        ?{...value,startedAt:previous[targetId]?.phase==="cleaning"?previous[targetId].startedAt:Date.now(),
+          expectedMs:isIOSCleanupDevice(navigator.userAgent,navigator.platform,navigator.maxTouchPoints)?15000:8000}:value}));
     },()=>current(targetId)?.id===id && current(targetId)?.cleanup?.mode==="clean").then(image=>{
       const asset=current(targetId);
       if (controller.signal.aborted || asset?.id!==id) return;
