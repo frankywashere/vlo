@@ -323,3 +323,12 @@ def test_poster_extracts_one_bounded_frame_without_changing_video(tmp_path):
     with Image.open(poster) as image:
         assert image.format == "JPEG" and image.size == (640, 360)
     assert hashlib.sha256(source.read_bytes()).hexdigest() == checksum
+
+@pytest.mark.parametrize("trim", [(1.1, 16.1), (1.1, 5.1)])
+def test_whole_second_trim_boundaries_accept_float_subtraction_noise(trim):
+    assert options(trim=trim, anchor={"x": .5, "y": .5, "time": 2}).trim == trim
+
+
+def test_trim_boundary_rejects_a_real_overflow():
+    with pytest.raises(ValidationError):
+        options(trim=(1.1, 16.101), anchor={"x": .5, "y": .5, "time": 2})

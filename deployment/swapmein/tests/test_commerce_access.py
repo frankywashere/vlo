@@ -316,3 +316,9 @@ def test_margin_pricing_is_server_calculated_and_keeps_history(api, monkeypatch)
             margin_credit_rate(bad)
     with pytest.raises(PublicError):
         save_catalog(records, {"email": "outsider@example.com"}, 1, packs, 195, model)
+
+def test_fifteen_second_quote_accepts_subtraction_noise_but_not_real_overflow():
+    from swapmein.commerce import generation_credit_cost
+    assert generation_credit_cost(16.1 - 1.1) == 150
+    with pytest.raises(PublicError):
+        generation_credit_cost(15.001)

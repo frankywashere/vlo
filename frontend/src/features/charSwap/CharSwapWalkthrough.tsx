@@ -1,3 +1,4 @@
+import { trimDuration } from "./utils/trimRange";
 import { warmReferenceCleanup } from "./services/referenceCleanup";
 import {
   useCallback,
@@ -249,7 +250,7 @@ export function CharSwapWalkthrough({
     skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS
   ).filter((item) => item !== "trim");
   const current = flowSteps.indexOf(clipStep ? "clip" : step);
-  const selectedDuration = trim[1] - trim[0];
+  const selectedDuration = trimDuration(trim);
   const validLiveTrim =
     selectedDuration >= 4 &&
     selectedDuration <= 15 &&

@@ -79,6 +79,8 @@ def generation_credit_cost(duration: float, credits_for_15_seconds: int = 150) -
     """Round the duration quote up to a whole credit, without float noise."""
     from decimal import Decimal, ROUND_CEILING
     import math
+    if math.isfinite(duration):
+        duration = round(duration, 6)
     if not math.isfinite(duration) or not 0 < duration <= 15 or not math.isfinite(credits_for_15_seconds) or credits_for_15_seconds <= 0:
         raise PublicError("Set a valid clip duration and credit rate.")
     return int((Decimal(str(round(duration, 6))) * Decimal(str(credits_for_15_seconds)) / Decimal(15)).to_integral_value(rounding=ROUND_CEILING))

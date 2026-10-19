@@ -1,3 +1,4 @@
+import { trimDuration } from "../utils/trimRange";
 import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES, MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
@@ -534,13 +535,13 @@ export function validateLiveSetup(state: WalkthroughState) {
       || (state.replaceAllPeople && state.targets.length !== 1))
     throw new LivePipelineError("Choose up to five people, or Replace all people with one reference.");
   const [start, end] = state.trim;
-  const duration = end - start;
+  const duration = trimDuration(state.trim);
   if (
     !Number.isFinite(state.clip.duration) ||
     !Number.isFinite(start) ||
     !Number.isFinite(end) ||
     start < 0 ||
-    end > state.clip.duration ||
+    end > state.clip.duration + 1e-6 ||
     duration < 4 ||
     duration > 15 ||
     Math.abs(duration - Math.round(duration)) > 1e-6

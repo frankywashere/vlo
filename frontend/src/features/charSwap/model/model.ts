@@ -1,3 +1,4 @@
+import { trimDuration } from "../utils/trimRange";
 import { MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 
 export type Step =
@@ -309,9 +310,9 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
         !Number.isFinite(start) ||
         !Number.isFinite(end) ||
         start < 0 ||
-        end > state.clip.duration ||
-        end - start < MIN_CLIP_SECONDS ||
-        end - start > MAX_CLIP_SECONDS
+        end > state.clip.duration + 1e-6 ||
+        trimDuration(state.trim) < MIN_CLIP_SECONDS ||
+        trimDuration(state.trim) > MAX_CLIP_SECONDS
       ) {
         return "Choose a section between 1 and 15 seconds.";
       }

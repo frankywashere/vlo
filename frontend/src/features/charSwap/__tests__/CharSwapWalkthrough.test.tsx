@@ -275,3 +275,11 @@ it("requires an explicit Original choice after a cleanup failure before advancin
  await user.click(screen.getByRole("button",{name:"Use Original"}));
  await waitFor(()=>expect(useCharSwapStore.getState().step).toBe("review"));
 });
+
+it("allows a 15-second trim moved to a fractional start to advance",async()=>{
+ const s=useCharSwapStore.getState();s.loadClip({...sample.clip,duration:20,mode:"upload"});
+ s.changeTrim([1.1,16.1]);render(<CharSwapWalkthrough/>);
+ const button=screen.getByRole("button",{name:"Select person"});
+ expect(button).toBeEnabled();await userEvent.setup().click(button);
+ expect(useCharSwapStore.getState().step).toBe("people");
+});

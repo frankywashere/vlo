@@ -63,7 +63,8 @@ class Setup(BaseModel):
     @model_validator(mode="after")
     def validate_range(self):
         start, end = self.trim
-        duration = end - start
+        # Timestamp subtraction can put an exact 15-second trim above 15.
+        duration = round(end - start, 6)
         if (start < 0 or not 4 <= duration <= 15
                 or not math.isclose(duration, round(duration), abs_tol=0.01)):
             raise ValueError("Select 4–15 seconds, with a whole-second length.")

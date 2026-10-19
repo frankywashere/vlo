@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getLiveJob, resolveLiveTracking } from "../livePipeline";
+import { getLiveJob, resolveLiveTracking, validateLiveSetup } from "../livePipeline";
 
 const requests = vi.fn<typeof fetch>();
 
@@ -198,4 +198,12 @@ describe("scene tracking review contract", () => {
     requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_choices: [{...tracking_choices[0], anchor: {x: 0.5, y: 0.4, time: 5}}]})));
     await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/saved scene matches/);
   });
+});
+
+it("accepts an exact 15-second live setup at a fractional start while rejecting real overflow",async()=>{
+ const {createInitialState}=await import("../../model/model");
+ const state={...createInitialState(),clip:{id:"clip",name:"source.mp4",url:"blob:source",duration:20,width:854,height:480,mode:"upload" as const},trim:[1.1,16.1] as [number,number],
+ targets:[{id:"a",name:"Person A",color:"red",anchor:{x:.5,y:.5,time:2}}],references:[{id:"r",name:"Photo",url:"blob:photo"}],assignments:{a:"r"}};
+ expect(()=>validateLiveSetup(state)).not.toThrow();
+ expect(()=>validateLiveSetup({...state,trim:[1.1,16.101]})).toThrow(/whole-number duration/);
 });
