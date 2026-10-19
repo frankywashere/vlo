@@ -16,6 +16,44 @@ traffic and Firebase bundle before reporting a rollout complete. The older
 [pipeline overview](../../docs/charswap-walkthrough.md) contains historical proofs;
 use the contracts below for these changes.
 
+## Watermark rewards
+
+Credit-funded accounts can opt into a lower-right RecastFX watermark at generation review.
+The offer defaults to visible with a 25-credit bonus. Admin → Watermark rewards controls
+its visibility and whole-credit amount through a revision-checked, pricing-permission endpoint.
+Hiding the offer prevents new opt-ins, including requests from stale browsers. Existing
+upload tickets/jobs retain the amount promised by the server; the client supplies only a
+quote to validate, never an authoritative reward. BYOK jobs do not earn account-credit rewards.
+
+CPU export overlays a Pillow-rendered badge in the existing FFmpeg encoding pass, with
+both original-audio restoration and returned-audio paths supported. There is no extra AI render.
+The bonus is applied only after the finished watermarked file and Library entry are saved,
+and only for a successfully charged generation. The wallet receipt `watermark:<job_id>`
+prevents duplicate rewards on task retries or operator re-exports. Failed exports and downloads
+never award additional credits. The reward is for opting into the watermark, not proof of sharing.
+
+## Stage timing logs
+
+- `stage_started` / `stage_finished`: unique attempt and parent attempt IDs, job correlation,
+  monotonic `elapsed_seconds`, and `outcome` of `returned` or `raised`. Returned means the
+  function returned, not that the job succeeded; use the durable job transition for that.
+- Coverage includes normalization, cut detection, SAM input, mask analysis/selection, scene
+  thumbnails, transfers, budget checks, backup registration, worker scale/startup, readiness,
+  authentication, depth/SAM/audio/composition requests, shutdown, missing-mask recovery,
+  reviewed guide rebuilding, provider submission/polling, silent remux, export, poster,
+  Library saving and temporary cleanup. Worker-returned numeric timing metrics are logged too.
+- `job_stage_transition` logs committed phase changes, including failed stages, with wall-clock
+  durations preserved across progress updates and instances. Human scene review and approval
+  waits are labelled separately. Unknown historical start times remain null.
+- `stage_wait_observed` records queue intervals and observed provider generation time. Provider
+  time includes status-polling lag and must not be presented as the vendor's exact inference time.
+- `client_stage_finished` records coarse, authenticated browser-reported model prefetch/load,
+  per-photo queue/inference and source/reference upload/confirmation timings. It does not send
+  photos, URLs, filenames, error messages, keys or device details. These values are client-reported,
+  often before a job exists, and correlate by account rather than proving server/GPU timings.
+- Durations are seconds. Nested timers overlap: do not add all events together. A start without
+  an end can identify an interrupted process. Error details use the existing redacted logger.
+
 ## Silent provider input
 
 “Submit without audio” is an opt-in, per-job generation option (`setup.submit_without_audio`, default false).

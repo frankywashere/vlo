@@ -10,6 +10,7 @@ from google.cloud import storage
 
 from .config import Settings
 from .errors import PublicError
+from .diagnostics import emit
 
 
 def account_review_wait(current: dict | None, updated: dict, now: float) -> dict:
@@ -32,6 +33,22 @@ def account_review_wait(current: dict | None, updated: dict, now: float) -> dict
         updated = {**updated}
         updated.pop("review_paused_at")
     return updated
+
+
+def phase(job):
+    if not isinstance(job, dict):
+        return None
+    status = job.get("status")
+    if status == "ready":
+        return "generation_queue" if job.get("review_generation_queued") else "approval_wait"
+    if status == "queued":
+        return "reviewed_guide_queue" if job.get("preparation_kind") == "tracking_rebuild" else "preparation_queue"
+    if status == "preparing":
+        return "reviewed_guide_rebuild" if job.get("preparation_kind") == "tracking_rebuild" else "preparation"
+    return {"tracking_review": "scene_review_wait", "matching": "scene_choices_validation",
+            "submitting": "provider_submission", "generating": "provider_generation",
+            "finalizing": "export_queue", "finishing": "export_processing",
+            "completed": "completed", "failed": "failed", "submission_unknown": "submission_unknown"}.get(status)
 
 
 class Records:
@@ -67,10 +84,23 @@ class Records:
         for _ in range(12):
             try:
                 current, generation = self.read(path)
+                previous_phase = phase(current)
+                previous_started = (current or {}).get("stage_started_at", (current or {}).get("created_at") if previous_phase == "preparation_queue" else None)
                 updated = mutation(current)
                 if path.startswith("jobs/") and isinstance(updated, dict):
                     updated = account_review_wait(current, updated, time.time())
+                next_phase = phase(updated)
+                now = time.time()
+                changed = path.startswith("jobs/") and next_phase is not None and previous_phase != next_phase
+                if changed:
+                    updated = {**updated, "stage_started_at": now}
                 self.write(path, updated, generation)
+                if changed:
+                    started = previous_started
+                    emit("job_stage_transition", job_id=updated.get("id"), previous_stage=previous_phase,
+                         stage=next_phase, elapsed_seconds=round(max(0, now - started), 6)
+                         if type(started) in (int, float) and math.isfinite(started) else None,
+                         timing_basis="wall_clock", human_wait=previous_phase in {"scene_review_wait", "approval_wait"})
                 return updated
             except PreconditionFailed:
                 continue

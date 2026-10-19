@@ -32,3 +32,13 @@ it("does not send diagnostic requests without a signed-in account", async () => 
   await vi.waitFor(() => expect(api.token).toHaveBeenCalled());
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("times failed stages without exposing image data or exception messages", async () => {
+  const {timeClientStage} = await import("../diagnostics");
+  await expect(timeClientStage("cleanup_inference", async () => {throw new Error("private-image-and-token");})).rejects.toThrow("private-image-and-token");
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  const [url, request] = vi.mocked(fetch).mock.calls[0];
+  expect(url).toBe("/api/diagnostics/timing");
+  expect(JSON.parse(request!.body as string)).toEqual({stage: "cleanup_inference", outcome: "raised", elapsed_seconds: expect.any(Number)});
+  expect(request!.body).not.toContain("private");
+});

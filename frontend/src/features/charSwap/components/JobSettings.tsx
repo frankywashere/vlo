@@ -12,6 +12,7 @@ export function JobSettings({ settings }: { settings?: JobSettingsUsed }) {
       ["Enhanced masking", settings.enhanced_masking],
       ["Audio processing", settings.audio_processing],
       ["Submit without audio", settings.submit_without_audio],
+      ["RecastFX watermark", settings.add_watermark],
     ] as const) if (value !== undefined) rows.push([label, value ? "On" : "Off"]);
     if (settings.replace_all_people) rows.push(["People", "Replace everyone"]);
     else if (settings.people_count !== undefined) rows.push(["People selected", String(settings.people_count)]);

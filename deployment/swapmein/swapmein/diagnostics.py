@@ -2,6 +2,12 @@
 import hashlib
 import json
 import traceback
+import time
+import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+from inspect import signature
 
 
 def emit(event, *, error=None, **fields):
@@ -57,3 +63,56 @@ def provider_billing(body: dict, provider: str) -> dict:
         "provider_cost_status": "reported" if valid else "not_reported",
         "provider_cost_source": "usage.credits" if provider == "reAPI" else "billing.cost_usd",
     }
+
+
+_timing_job = ContextVar("timing_job", default=None)
+_timing_stage = ContextVar("timing_stage", default=None)
+
+
+@contextmanager
+def timed_stage(stage, *, job_id=None, **fields):
+    """Monotonic attempt timing; never serialize arguments, keys, media paths or URLs."""
+    job_id = job_id or _timing_job.get()
+    attempt = uuid.uuid4().hex
+    parent = _timing_stage.get()
+    token = _timing_stage.set(attempt)
+    job_token = _timing_job.set(job_id)
+    started = time.monotonic()
+    info = {"stage": stage, "job_id": job_id, "attempt_id": attempt, "parent_attempt_id": parent, "timing_basis": "monotonic", **fields}
+    emit("stage_started", **info)
+    error = None
+    try:
+        yield
+    except BaseException as caught:
+        error = caught
+        raise
+    finally:
+        emit("stage_finished", **info, elapsed_seconds=round(max(0, time.monotonic() - started), 6),
+             outcome="raised" if error else "returned", error=error)
+        _timing_job.reset(job_token)
+        _timing_stage.reset(token)
+
+
+def timed(stage, *, job_arg=None):
+    def decorate(function):
+        call_signature = signature(function)
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            job_id = None
+            if job_arg:
+                value = call_signature.bind(*args, **kwargs).arguments.get(job_arg)
+                job_id = value.get("id") if isinstance(value, dict) else value
+            with timed_stage(stage, job_id=job_id):
+                return function(*args, **kwargs)
+        return wrapped
+    return decorate
+
+
+def wait_timing(stage, started_at, *, job_id, ended_at=None):
+    """Wall-clock intervals span tasks/instances; human wait is kept separate."""
+    import math
+    if type(started_at) not in (int, float) or not math.isfinite(started_at):
+        return
+    ended_at = time.time() if ended_at is None else ended_at
+    emit("stage_wait_observed", stage=stage, job_id=job_id,
+         elapsed_seconds=round(max(0, ended_at - started_at), 6), timing_basis="wall_clock")

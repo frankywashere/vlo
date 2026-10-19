@@ -50,3 +50,21 @@ def test_submission_log_preserves_actual_settings_but_removes_signed_urls(capsys
     assert record['payload']['image_with_roles'][0]['role'] == 'reference_image'
     assert 'secret-signature' not in raw and 'https://private' not in raw
     assert payload['image_with_roles'][0]['url'].startswith('https://private')
+
+
+def test_nested_timers_keep_job_correlation_and_redact_exception_details(capsys, monkeypatch):
+    import swapmein.diagnostics as module
+    import pytest
+    ticks = iter([1., 2., 5., 8.])
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(ValueError):
+        with module.timed_stage("outer", job_id="job123"):
+            with module.timed_stage("inner"):
+                raise ValueError("private-token-and-media")
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    inner, outer = records[-2:]
+    assert inner["elapsed_seconds"] == 3 and outer["elapsed_seconds"] == 7
+    assert inner["job_id"] == "job123" and inner["parent_attempt_id"] == outer["attempt_id"]
+    assert inner["outcome"] == "raised" and inner["error_type"] == "ValueError"
+    assert "private-token-and-media" not in json.dumps(records)
+    assert module._timing_job.get() is None and module._timing_stage.get() is None

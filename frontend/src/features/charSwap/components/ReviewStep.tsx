@@ -9,6 +9,7 @@ import { formatTime } from "../utils/videoGeometry";
 
 interface ReviewStepProps {
   accessMode?: "credits" | "api-key";
+  watermarkOffer?: {bonusCredits: number};
   apiKeyAllowed?: boolean;
   hasKey?: boolean;
   provider?: "reAPI" | "ToAPIs";
@@ -27,7 +28,7 @@ interface ReviewStepProps {
 }
 
 export function ReviewStep({
-  accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
+  watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
   onApiSettings, onAccessModeChange, trackingReady = false, onOptionsChange,
   live = false,
   job = null,
@@ -168,12 +169,13 @@ export function ReviewStep({
             sx={{ p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: "5px", bgcolor: "background.paper" }}>
             <Typography component="h2" variant="subtitle1" fontWeight={700}>Prepared settings</Typography>
             <Typography variant="body2">Manual scene review: On</Typography>
+            {job.settings_used?.add_watermark && <Typography variant="body2">RecastFX watermark: On · {job.settings_used.watermark_bonus_credits ?? 25} bonus credits after completion</Typography>}
             <Typography variant="body2">Submit without audio: {job.settings_used?.submit_without_audio ? "On" : "Off"}</Typography>
             <Typography variant="body2">
               Enhanced person masking: {(job.settings_used?.enhanced_masking ?? enhancedCharacterMasking) ? "On" : "Off"}
             </Typography>
           </Stack>
-        ) : <GenerationOptions disabled={busy} onChange={onOptionsChange} />}
+        ) : <GenerationOptions disabled={busy} onChange={onOptionsChange} watermarkOffer={watermarkOffer} />}
         {!!targets.length && (
           <Box
             component="section"

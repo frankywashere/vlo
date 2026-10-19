@@ -141,10 +141,14 @@ def require_permission(records, account, permission):
 
 
 def public_catalog(records) -> dict:
+    from .watermark import watermark_settings
+    offer = watermark_settings(records)
     current, _ = records.read(CATALOG_PATH)
     current = current or default_catalog()
     return {
         "currency": "usd",
+        "watermark_enabled": offer["enabled"],
+        "watermark_bonus_credits": offer["bonus_credits"],
         "packs": [dict(id=pack["id"], name=pack["name"], credits=pack["credits"],
                        price_cents=pack["price_cents"])
                   for pack in current.get("packs", []) if pack.get("active")],

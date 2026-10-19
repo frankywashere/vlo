@@ -121,6 +121,7 @@ export function CharSwapWalkthrough({
     decisions,
     easyMode,
     submitWithoutAudio,
+    addWatermark,
     enhancedCharacterMasking,
     selectionVersion,
     trackingReady,
@@ -145,6 +146,7 @@ export function CharSwapWalkthrough({
       decisions: state.decisions,
       easyMode: state.easyMode ?? true,
       submitWithoutAudio: state.submitWithoutAudio ?? false,
+      addWatermark: state.addWatermark ?? false,
       enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
       selectionVersion: state.selectionVersion,
       trackingReady: state.trackingReady,
@@ -223,8 +225,10 @@ export function CharSwapWalkthrough({
   const busy =
     locked || assets.busy || loadingDemo || assets.pendingReferences.length > 0;
   const state = {
+    watermarkBonusQuote: creditAccount.catalog?.watermark_bonus_credits,
     easyMode,
     submitWithoutAudio,
+    addWatermark: Boolean(addWatermark && creditAccount.catalog?.watermark_enabled && accessMode === "credits"),
     enhancedCharacterMasking,
     clip,
     trim,
@@ -678,6 +682,7 @@ export function CharSwapWalkthrough({
                 busy={Boolean(locked)}
                 creditBalance={balance}
                 generationCredits={generationCredits}
+                watermarkOffer={creditAccount.catalog?.watermark_enabled && accessMode === "credits" ? {bonusCredits: creditAccount.catalog.watermark_bonus_credits ?? 25} : undefined}
                 creditsAvailable={!live || accessMode === "api-key" || pipeline.creditsAvailable}
                 onGenerate={() => void generate()}
                 onCredits={onCredits}

@@ -34,3 +34,32 @@ export function installErrorReporting() {
     globalThis.removeEventListener("unhandledrejection", onRejection);
   };
 }
+
+
+export type ClientStage = "cleanup_queue" | "cleanup_model_load" | "cleanup_model_prefetch" | "cleanup_inference" | "upload_source" | "upload_reference" | "upload_confirmation";
+let timingMinute = 0;
+let timingCount = 0;
+
+export function reportClientTiming(stage: ClientStage, elapsedSeconds: number, outcome: "returned" | "raised" = "returned") {
+  if (globalThis.location?.protocol !== "https:" || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0 || elapsedSeconds > 86400) return;
+  const now = Math.floor(Date.now() / 60000);
+  if (timingMinute !== now) { timingMinute = now; timingCount = 0; }
+  if (timingCount >= 120) return;
+  timingCount += 1;
+  void (async () => {
+    const token = await accountToken();
+    if (!token) return;
+    await fetch("/api/diagnostics/timing", {method: "POST", credentials: "omit", keepalive: true,
+      headers: {"Content-Type": "application/json", "X-Firebase-Token": token},
+      body: JSON.stringify({stage, elapsed_seconds: Number(elapsedSeconds.toFixed(6)), outcome}),
+    });
+  })().catch(() => { /* Diagnostics cannot interrupt image work or uploads. */ });
+}
+
+export async function timeClientStage<T>(stage: ClientStage, action: () => Promise<T>): Promise<T> {
+  const started = performance.now();
+  let outcome: "returned" | "raised" = "returned";
+  try { return await action(); }
+  catch (error) { outcome = "raised"; throw error; }
+  finally { reportClientTiming(stage, (performance.now() - started) / 1000, outcome); }
+}

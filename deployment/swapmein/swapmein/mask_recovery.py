@@ -6,7 +6,7 @@ import tempfile
 import time
 import uuid
 
-from .diagnostics import emit
+from .diagnostics import emit, timed
 from .errors import PublicError
 from .media import sam_input_video
 from .tracking import _maps
@@ -27,6 +27,7 @@ def recovery_requests(job):
     return requests
 
 
+@timed("missing_mask_recovery", job_arg="job")
 def recover_reviewed_masks(pipeline, job, remaining):
     started = time.monotonic()
     cloud, settings = pipeline.cloud, pipeline.settings

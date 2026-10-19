@@ -72,3 +72,15 @@ it("saves silent submission independently and resets to sending audio", async ()
   useCharSwapStore.getState().reset();
   expect(useCharSwapStore.getState().submitWithoutAudio).toBe(false);
 });
+
+
+it("offers the configured watermark reward as a separate opt-in", async () => {
+  const user = userEvent.setup();
+  const view = render(<GenerationOptions watermarkOffer={{bonusCredits: 25}} />);
+  const toggle = screen.getByRole("switch", {name: "Add RecastFX watermark · earn 25 credits"});
+  expect(toggle).not.toBeChecked();
+  await user.click(toggle);
+  expect(useCharSwapStore.getState().addWatermark).toBe(true);
+  view.rerender(<GenerationOptions />);
+  expect(screen.queryByRole("switch", {name: /Add RecastFX watermark/})).not.toBeInTheDocument();
+});

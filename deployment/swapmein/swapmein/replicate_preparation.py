@@ -14,7 +14,7 @@ import uuid
 
 import httpx
 
-from .diagnostics import emit
+from .diagnostics import emit, timed
 from .errors import PublicError
 from .mask_geometry import resize_label_archive
 from .media import probe
@@ -172,6 +172,7 @@ class ReplicatePreparation:
                     self._update(operation, cancellation_unconfirmed=True)
             raise
 
+    @timed("replicate_download")
     def download(self, url, path, maximum):
         current = delivery_url(url)
         try:
@@ -201,6 +202,7 @@ class ReplicatePreparation:
             path.unlink(missing_ok=True)
             raise PublicError("Replicate's prepared asset could not be saved safely. No new prediction was submitted.", 502) from None
 
+    @timed("replicate_preparation")
     def prepare(self, root, metadata, sam_metadata, source_uri, sam_uri, remaining):
         saved = {}
         for operation, uri, working_metadata in (("sam", sam_uri, sam_metadata), ("depth", source_uri, metadata)):

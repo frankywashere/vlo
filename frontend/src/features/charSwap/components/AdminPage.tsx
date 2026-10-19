@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
-import { loadCreditAdmin, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey } from "../services/commerce";
+import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey } from "../services/commerce";
 import { AdminSection } from "./AdminSection";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
@@ -13,6 +13,8 @@ export function AdminPage() {
   const [admin, setAdmin] = useState<CreditAdmin | null>(null);
   const [packs, setPacks] = useState<CreditPack[]>([]);
   const [rate, setRate] = useState("");
+  const [watermarkVisible, setWatermarkVisible] = useState(true);
+  const [watermarkBonus, setWatermarkBonus] = useState("25");
   const [margin, setMargin] = useState<MarginModel>(DEFAULT_MARGIN_MODEL);
   const [useMargin, setUseMargin] = useState(false);
   const estimate = marginPricing(margin);
@@ -30,6 +32,8 @@ export function AdminPage() {
     void loadCreditAdmin().then((result) => {
       if (!active) return;
       setAdmin(result);
+      setWatermarkVisible(result.watermark?.enabled ?? true);
+      setWatermarkBonus(String(result.watermark?.bonus_credits ?? 25));
       setPacks(result.catalog.packs);
       setMargin(result.catalog.margin_model ?? DEFAULT_MARGIN_MODEL);
       setUseMargin(Boolean(result.catalog.margin_model));
@@ -170,6 +174,15 @@ export function AdminPage() {
           </Stack>)}
           <Stack direction="row" spacing={1}><Button disabled={busy || packs.length >= 8} onClick={() => setPacks((current) => [...current, { id: "", name: "", credits: 2000, price_cents: 2000, active: false }])}>Add pack</Button>
             <Button variant="contained" disabled={busy || (useMargin ? !estimate : !rate) || packs.length === 0} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, credits_per_generation: (useMargin ? estimate!.credits : Math.round(Number(rate) * 100)) * 15, margin_model: useMargin ? margin : null }); setAdmin({ ...admin, catalog }); setRate((catalog.credits_per_generation / 1500).toFixed(2)); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
+        </Stack></Box></AdminSection>
+        <AdminSection title="Watermark rewards"><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
+          <FormControlLabel control={<Switch checked={!watermarkVisible} onChange={(_, hidden) => setWatermarkVisible(!hidden)} />} label="Hide watermark offer for everyone" />
+          <TextField label="Watermark bonus credits" type="number" value={watermarkBonus} onChange={event => setWatermarkBonus(event.target.value)} slotProps={{htmlInput: {min: 0, max: 100000, step: 1}}} />
+          <Typography variant="body2" color="text.secondary">One bonus per completed credit-funded recast. Changes apply to new submissions; existing jobs keep their promised reward.</Typography>
+          <Button variant="contained" disabled={busy || !can("pricing") || !/^\d+$/.test(watermarkBonus) || Number(watermarkBonus) > 100000} onClick={() => void run(async () => {
+            const watermark = await saveWatermarkSettings({revision: admin.watermark?.revision ?? 0, enabled: watermarkVisible, bonus_credits: Number(watermarkBonus)});
+            setAdmin({...admin, watermark}); setMessage("Watermark rewards saved.");
+          })}>Save watermark rewards</Button>
         </Stack></Box></AdminSection>
         <AdminSection title="System API key"><Box component="fieldset" disabled={busy || !can("provider_key")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography color="text.secondary">Used to fund customer generations. Stored securely and never displayed.</Typography>

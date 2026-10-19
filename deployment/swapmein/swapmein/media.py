@@ -11,12 +11,14 @@ import warnings
 import zipfile
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .errors import PublicError
+from .diagnostics import timed
 
 
+@timed("detect_scene_cuts")
 def detect_scene_cuts(source: Path) -> list[float]:
     """Find clip-local cuts, including letterboxed footage with muted changes."""
     # The old 0.40 threshold missed real shot/reverse-shot cuts, allowing SAM
@@ -26,6 +28,7 @@ def detect_scene_cuts(source: Path) -> list[float]:
     return [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
 
 
+@timed("scene_thumbnails")
 def scene_thumbnails(source: Path, directory: Path, frames: list[int]) -> dict[int, Path]:
     """Decode bounded review thumbnails in one pass, including for mobile Safari."""
     frames = sorted(set(frames))
@@ -62,6 +65,8 @@ class Setup(BaseModel):
     enhanced_character_masking: bool = Field(default=True, strict=True)
     easy_mode: bool = Field(default=True, strict=True)
     submit_without_audio: bool = Field(default=False, strict=True)
+    add_watermark: bool = Field(default=False, strict=True)
+    watermark_bonus_quote: int | None = Field(default=None, ge=0, le=100000, strict=True)
     auto_generate: bool = Field(default=False, strict=True)
     replace_all_people: bool = Field(default=False, strict=True)
     preparation_version: Literal[1, 2] = 2
@@ -96,6 +101,7 @@ def run(command: list[str], timeout: int = 90):
         raise PublicError("The video could not be processed within the beta limits.") from None
 
 
+@timed("create_poster")
 def create_poster(source: Path, output: Path):
     """Extract a small first-frame JPEG without decoding the entire video."""
     run(["ffmpeg", "-v", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(source),
@@ -167,6 +173,7 @@ def decoded_audio_samples(path: Path, start: float = 0, duration: float | None =
     return len(pcm) // 4
 
 
+@timed("normalize")
 def normalize(source: Path, output: Path, setup: Setup):
     metadata = probe(source)
     streams = metadata.get("streams", [])
@@ -223,6 +230,7 @@ def normalize(source: Path, output: Path, setup: Setup):
             "targets": targets}
 
 
+@timed("sam_input_video")
 def sam_input_video(source: Path, output: Path):
     """Use a bounded SAM working copy while retaining the guide's frame timeline."""
     metadata = probe(source)
@@ -244,6 +252,7 @@ def sam_input_video(source: Path, output: Path):
     return {"width": width, "height": height, "frames": frames, "duration": frames / 24, "fps": 24}
 
 
+@timed("validate_guide_media")
 def validate_guide_media(path: Path, metadata: dict):
     """Check the actual provider-bound artifact, including the reference-file limit."""
     size = path.stat().st_size
@@ -261,6 +270,7 @@ def validate_guide_media(path: Path, metadata: dict):
             "frames": int(video["nb_frames"]), "fps": 24, "duration": duration}
 
 
+@timed("normalize_reference")
 def normalize_reference(raw: Path, output: Path):
     try:
         with warnings.catch_warnings():
@@ -289,6 +299,7 @@ def normalize_reference(raw: Path, output: Path):
         raise PublicError("The reference image could not be read.", code="reference_unreadable") from None
 
 
+@timed("select_label")
 def select_label(archive: Path, metadata: dict, *, require_continuous: bool = True):
     width, height, frames = metadata["width"], metadata["height"], metadata["frames"]
     anchor = metadata["anchor"]
@@ -322,6 +333,7 @@ def select_label(archive: Path, metadata: dict, *, require_continuous: bool = Tr
         raise PublicError("The tracking masks could not be read.") from None
 
 
+@timed("original_guide")
 def original_guide(source: Path, vocals: Path, output: Path, metadata: dict):
     """Keep every RGB frame without requiring a persistent mask across cuts."""
     duration = metadata["duration"]
@@ -346,6 +358,7 @@ def original_guide(source: Path, vocals: Path, output: Path, metadata: dict):
         raise PublicError("The generation guide lost vocal audio samples.")
 
 
+@timed("strip_audio")
 def strip_audio(source: Path, output: Path):
     """Remux a separate provider input without decoding or altering video frames."""
     before = probe(source)
@@ -361,8 +374,9 @@ def strip_audio(source: Path, output: Path):
         raise PublicError("The silent generation input could not be verified. No generation was submitted.")
 
 
+@timed("finish")
 def finish(raw: Path, original: Path, output: Path, duration: int,
-           audio_source: Path | None = None, audio_start: float = 0, *, restore_audio: bool = True):
+           audio_source: Path | None = None, audio_start: float = 0, *, restore_audio: bool = True, watermark: bool = False):
     metadata = probe(raw)
     length = float(metadata.get("format", {}).get("duration", 0))
     if not math.isfinite(length) or length < duration - .05:
@@ -393,11 +407,28 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
         raise PublicError("The provider changed the frame shape. The result needs manual review.")
     soundtrack_input = (["-protocol_whitelist", "file,pipe", "-ss", str(audio_start), "-i", str(soundtrack)]
                         if restore_audio else [])
+    video_filter = f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,setsar=1"
+    watermark_input = []
+    filter_options = ["-vf", video_filter]
+    video_map = "0:v:0"
+    if watermark:
+        # Rasterized locally with Pillow's bundled font; no OS font or GPU dependency.
+        font = ImageFont.load_default(size=max(10, round(width / 55)))
+        box = font.getbbox("RecastFX")
+        pad = max(4, round(width / 200))
+        badge = Image.new("RGBA", (box[2] - box[0] + pad * 2, box[3] - box[1] + pad * 2), (0, 0, 0, 130))
+        ImageDraw.Draw(badge).text((pad - box[0], pad - box[1]), "RecastFX", font=font, fill=(255, 255, 255, 245))
+        watermark_path = output.with_suffix(".watermark.png")
+        badge.save(watermark_path)
+        watermark_input = ["-i", str(watermark_path)]
+        overlay_index = 2 if restore_audio else 1
+        filter_options = ["-filter_complex", f"[0:v]{video_filter}[base];[base][{overlay_index}:v]overlay=W-w-{pad}:H-h-{pad}:format=auto[watermarked]"]
+        video_map = "[watermarked]"
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(raw),
-         *soundtrack_input,
+         *soundtrack_input, *watermark_input,
          # A global video frame cap can end muxing before an independent audio
          # input is drained. Trim inside the video filter to retain the soundtrack.
-         "-map", "0:v:0", "-map", "1:a:0" if restore_audio else "0:a:0", "-vf", f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,setsar=1",
+         "-map", video_map, "-map", "1:a:0" if restore_audio else "0:a:0", *filter_options,
          "-t", str(duration), "-c:v", "libx264", "-threads", "2",
          "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags",
          "+faststart", str(output)])

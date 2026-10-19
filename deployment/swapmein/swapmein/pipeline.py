@@ -8,7 +8,7 @@ import uuid
 from .cloud import Cloud
 from .config import Settings
 from .errors import PublicError
-from .diagnostics import emit
+from .diagnostics import emit, timed, wait_timing
 from .limits import MAX_SOURCE_BYTES
 from .media import Setup, create_poster, finish, normalize, original_guide, sam_input_video, select_label, validate_guide_media
 from .mask_geometry import resize_label_archive
@@ -18,6 +18,7 @@ from .tracking import analyze_tracking, analyze_multi_tracking, merge_all_people
 from .tracking_preview import create_selection_preview
 from .accounts import archive_completed, LIBRARY_SECONDS
 from .cleanup import cleanup_completed_media
+from .watermark import award_watermark_bonus
 from .replicate_preparation import ReplicatePreparation
 
 
@@ -31,6 +32,7 @@ class Pipeline:
             emit("job_status_changed", job_id=job_id, status=fields["status"])
         return updated
 
+    @timed("preparation_task", job_arg="job_id")
     def prepare(self, job_id: str, task_token: str | None = None):
         current, _ = self.records.read(f"jobs/{job_id}.json")
         if not current or current.get("tracking_task_token") != task_token:
@@ -62,6 +64,7 @@ class Pipeline:
             if error.status_code in {404, 409}:
                 return  # Retries never reactivate workers for a claimed task.
             raise
+        wait_timing("preparation_queue", job.get("preparation_queued_at", job.get("created_at")), job_id=job_id)
         started = time.monotonic()
         deadline = started + 1200
         def remaining():
@@ -349,6 +352,7 @@ class Pipeline:
                     return current
                 self.records.update("control/preparation.json", retain)
 
+    @timed("reviewed_guide_rebuild", job_arg="job")
     def rebuild_reviewed_guide(self, job, remaining):
         """Reuse saved assets; optionally recover missing masks before approved generation."""
         if job.get("recover_missing_masks") and not job.get("mask_recovery_completed"):
@@ -401,6 +405,7 @@ class Pipeline:
                     "message": "Your guide is ready, but automatic generation could not be queued. Continue from your Library."}
                     if current.get("status") == "ready" else current)
 
+    @timed("export_task", job_arg="job_id")
     def finalize(self, job_id: str):
         def claim_export(current):
             if current and current.get("status") == "completed":
@@ -415,6 +420,7 @@ class Pipeline:
         if job["status"] == "completed":
             self.complete_library_delivery(job)
             return
+        wait_timing("export_queue", job.get("export_queued_at"), job_id=job_id)
         try:
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -426,15 +432,18 @@ class Pipeline:
                 if restore_audio:
                     self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
                     output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded,
-                                               audio_start=job["setup"]["trim"][0])
+                                               audio_start=job["setup"]["trim"][0],
+                                               **({"watermark": True} if job.get("setup", {}).get("add_watermark") else {}))
                 else:
-                    output_dimensions = finish(raw, original, output, job["duration"], restore_audio=False)
+                    output_dimensions = finish(raw, original, output, job["duration"], restore_audio=False,
+                        **({"watermark": True} if job.get("setup", {}).get("add_watermark") else {}))
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
                 completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if restore_audio
                              else "Your video is ready at its generated resolution, with the returned audio."), output_uri=output_uri, thumbnail_uri=None,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
-                    width=output_dimensions["width"], height=output_dimensions["height"])
+                    width=output_dimensions["width"], height=output_dimensions["height"],
+                    watermark_applied=bool(job.get("setup", {}).get("add_watermark")))
                 emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=restore_audio, submit_without_audio=job.get("setup", {}).get("submit_without_audio", False), width=output_dimensions["width"], height=output_dimensions["height"],
                      **job.get("provider_billing", {}))
                 try:
@@ -452,6 +461,7 @@ class Pipeline:
             return
         self.complete_library_delivery(completed)
 
+    @timed("scene_thumbnails_save", job_arg="job_id")
     def save_scene_thumbnails(self, job_id, source, root, plan):
         from .media import scene_thumbnails
         frames = [math.floor(section["seek_time"] * 24 + 1e-7) for section in plan["segments"]]
@@ -469,6 +479,7 @@ class Pipeline:
                 for frame, image in tracking_previews.items()}
         self.update_job(job_id, scene_thumbnail_uris=uris, scene_mask_thumbnail_uris=tracking_uris)
 
+    @timed("library_poster", job_arg="job")
     def ensure_library_poster(self, job, source=None):
         if not job.get("account_id") or job.get("thumbnail_uri"):
             return job
@@ -485,12 +496,14 @@ class Pipeline:
             emit("library_poster_saved", job_id=job["id"])
             return updated
 
+    @timed("library_delivery", job_arg="job")
     def complete_library_delivery(self, job):
         # Errors here deliberately propagate to the existing Cloud Tasks retry.
         # The exported video remains completed: no regeneration or export repeats.
         try:
             job = self.ensure_library_poster(job)
             archive_completed(self.records, job)
+            award_watermark_bonus(self.records, job)
             emit("account_library_saved", job_id=job["id"])
         except Exception as error:
             emit("account_library_save_pending", error=error, job_id=job["id"])

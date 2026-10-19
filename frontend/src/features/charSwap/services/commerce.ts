@@ -19,6 +19,8 @@ export interface CreditCatalog {
   stripe_mode: "live" | "test";
   configured: boolean;
   checkout_enabled: boolean;
+  watermark_enabled?: boolean;
+  watermark_bonus_credits?: number;
 }
 
 export interface CreditWallet {
@@ -47,7 +49,14 @@ export interface StaffAccess {
   permissions: StaffPermission[];
 }
 
+export interface WatermarkSettings {
+  revision: number;
+  enabled: boolean;
+  bonus_credits: number;
+}
+
 export interface CreditAdmin {
+  watermark?: WatermarkSettings;
   permissions?: StaffPermission[];
   role: "owner" | "pricing_admin" | "viewer";
   features: CreditFeatures;
@@ -151,6 +160,10 @@ export function saveCreditFeatures(features: Pick<CreditFeatures, "revision" | "
 
 export function saveCreditCatalog(catalog: CreditAdmin["catalog"]) {
   return commerceRequest<CreditAdmin["catalog"]>("/api/commerce/admin/catalog", catalog);
+}
+
+export function saveWatermarkSettings(settings: WatermarkSettings) {
+  return commerceRequest<WatermarkSettings>("/api/commerce/admin/watermark", settings);
 }
 
 export function savePrivateProviderKey(key: string) {

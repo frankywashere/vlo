@@ -25,6 +25,7 @@ from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
 from .media import Anchor, Setup, normalize_reference, strip_audio
 from .pipeline import Pipeline
+from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .pipeline_settings import pipeline_settings, save_pipeline_settings
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
@@ -32,7 +33,7 @@ from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner,
 from .storage import (Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation,
                       check_queue_capacity, reserve_queued_preparation, claim_queued_slot)
 from .tracking import resolve_tracking
-from .diagnostics import emit, provider_billing
+from .diagnostics import emit, provider_billing, timed, timed_stage, wait_timing
 from .accounts import lookup_credit_recipient, registered_accounts, verify_account, bind_job, archive_completed, index_path
 from .job_settings import settings_used
 from .commerce import (credit_grant_history, grant_credits, generation_credit_cost, CATALOG_PATH, api_key_permission, apply_wallet_change, default_catalog, public_catalog, require_staff,
@@ -267,7 +268,7 @@ def view(job: dict):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
-    for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing"]:
+    for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing", "watermark_applied", "watermark_bonus_awarded"]:
         if field in job:
             result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
@@ -394,6 +395,28 @@ def client_diagnostic(body: ClientDiagnostic, x_firebase_token: str | None = Hea
     return {"received": True}
 
 
+class ClientTiming(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    stage: Literal["cleanup_queue", "cleanup_model_load", "cleanup_model_prefetch", "cleanup_inference", "upload_source", "upload_reference", "upload_confirmation"]
+    elapsed_seconds: float = Field(ge=0, le=86400)
+    outcome: Literal["returned", "raised"]
+
+
+@app.post("/api/diagnostics/timing", status_code=202)
+def client_timing(body: ClientTiming, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    minute = int(time.time() // 60)
+    def reserve(current):
+        count = current.get("count", 0) if current and current.get("minute") == minute else 0
+        if count >= 120:
+            raise PublicError("Timing diagnostic limit reached.", 429)
+        return {"minute": minute, "count": count + 1}
+    records.update(f"accounts/{account['account_id']}/timing-limit.json", reserve)
+    emit("client_stage_finished", account_id=account["account_id"], timing_basis="client_reported", **body.model_dump())
+    return {"received": True}
+
+
 @app.post("/api/commerce/admin/grant-credits")
 def admin_grant_credits(body: CreditGrant, x_firebase_token: str | None = Header(default=None)):
     actor = verify_account(x_firebase_token, settings.project)
@@ -504,7 +527,21 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records)}
+    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records), "watermark": watermark_settings(records)}
+
+
+class WatermarkSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: int = Field(ge=0)
+    enabled: bool
+    bonus_credits: int = Field(ge=0, le=100000)
+
+
+@app.post("/api/commerce/admin/watermark")
+def update_watermark_settings(body: WatermarkSettingsUpdate, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return save_watermark_settings(records, actor, body.revision, body.enabled, body.bonus_credits)
 
 
 class PipelineSettingsUpdate(BaseModel):
@@ -705,6 +742,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
     validate_reference_mapping(options, 1)
     check_generation_funding(records, options, active_session)
+    watermark_offer = watermark_snapshot(records, options, active_session)
     job_id = uuid.uuid4().hex
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.auto_generate and active_session.get("access_mode") == "api-key" else None)
@@ -716,9 +754,12 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, raw_reference, image = root / "source.bin", root / "reference.bin", root / "reference.jpg"
-            await save_upload(clip, source, LEGACY_SOURCE_BYTES)
-            await save_upload(reference, raw_reference, MAX_REFERENCE_BYTES)
-            reference_details = await run_in_threadpool(normalize_reference, raw_reference, image)
+            with timed_stage("receive_source_upload", job_id=job_id):
+                await save_upload(clip, source, LEGACY_SOURCE_BYTES)
+            with timed_stage("receive_reference_upload", job_id=job_id):
+                await save_upload(reference, raw_reference, MAX_REFERENCE_BYTES)
+            with timed_stage("reference_normalization", job_id=job_id):
+                reference_details = await run_in_threadpool(normalize_reference, raw_reference, image)
             emit("reference_normalized", job_id=job_id, reference_index=0, **(reference_details or {}))
             source_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/source.bin", source, "application/octet-stream")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.jpg", image, "image/jpeg")
@@ -729,6 +770,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
+               **watermark_offer,
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
@@ -821,6 +863,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
     check_generation_funding(records, options.setup, active_session)
+    watermark_offer = watermark_snapshot(records, options.setup, active_session)
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.setup.auto_generate and active_session.get("access_mode") == "api-key" else None)
     # Bound abandoned upload storage separately; no preparation slot or worker is
@@ -840,6 +883,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "raw_reference_uri": reference_uris[0], "raw_reference_uris": reference_uris,
         "source_bytes": options.source_bytes, "reference_bytes": options.reference_bytes,
         "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
+        **watermark_offer,
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
         "title": options.title,
@@ -899,7 +943,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                 image = Path(temporary) / f"reference-{index}.jpg"
                 cloud.download(uri, raw_reference, MAX_REFERENCE_BYTES)
                 try:
-                    reference_details = normalize_reference(raw_reference, image)
+                    with timed_stage("reference_normalization", job_id=job_id, reference_index=index):
+                        reference_details = normalize_reference(raw_reference, image)
                 except PublicError as error:
                     error.reference_index = index
                     raise
@@ -920,6 +965,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
+               **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
+                  if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking)}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
@@ -1007,6 +1054,7 @@ class TrackingReview(BaseModel):
 
 
 @app.post("/api/jobs/{job_id}/tracking-review", status_code=202)
+@timed("scene_review_apply", job_arg="job_id")
 def apply_tracking_review(job_id: str, review: TrackingReview,
                           authorization: str | None = Header(default=None),
                           x_reapi_key: str | None = Header(default=None)):
@@ -1113,7 +1161,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             uri = cloud.upload(settings.worker_bucket,
                 f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
         job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
-            "status": "queued", "preparation_kind": "tracking_rebuild", "reviewed_masks_uri": uri,
+            "status": "queued", "preparation_queued_at": time.time(), "preparation_kind": "tracking_rebuild", "reviewed_masks_uri": uri,
             "reviewed_coverage": resolved["coverage"], "tracking_assignments": resolved["assignments"],
             "normalized_targets": reviewed_targets, "coordinate_fallback_sections": fallback_count,
             "recover_missing_masks": recover, "mask_recovery_completed": False, "mask_recovery_conflicts": 0,
@@ -1346,6 +1394,7 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     return submit_generation(job_id, job, active_session, key)
 
 
+@timed("generation_submission", job_arg="job_id")
 def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     if job["status"] != "ready":
         # Idempotent response after any completed/claimed submission; never POST again.
@@ -1423,7 +1472,8 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
                            if current["status"] == "submitting" else current)
             raise
     try:
-        task_id = provider.submit(key, payload, job_id=job_id)
+        with timed_stage("provider_submit_request", job_id=job_id):
+            task_id = provider.submit(key, payload, job_id=job_id)
     except PublicError as error:
         status = "submission_unknown" if error.status_code >= 500 else "failed"
         if credits_mode and status == "failed":
@@ -1466,6 +1516,7 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
     return provider_status(job_id, job, key)
 
 
+@timed("provider_poll", job_arg="job_id")
 def provider_status(job_id: str, job: dict, key: str):
     if job["status"] != "generating" or not job.get("provider_task"):
         return view(job)
@@ -1511,6 +1562,7 @@ def provider_status(job_id: str, job: dict, key: str):
             "provider_state": state, "provider_checked_at": time.time()}
             if current["status"] == "generating" else current)
         return view(checked)
+    wait_timing("provider_generation_observed", job.get("generation_started_at"), job_id=job_id)
     emit("provider_generation_completed", job_id=job_id, provider=job.get("provider", "reAPI"), **billing)
     try:
         output_url = body["output"]["video_urls"][0]
@@ -1519,7 +1571,7 @@ def provider_status(job_id: str, job: dict, key: str):
         raise PublicError("The provider did not return a usable result link.", 502) from None
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {
-            **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url,
+            **claim_job(current, {"generating"}, "finalizing"), "provider_output": output_url, "export_queued_at": time.time(),
             "auto_key_ciphertext": None,
             "actual_credits": billing["provider_credits"],
             "message": "Restoring the original soundtrack and preserving the generated resolution."})

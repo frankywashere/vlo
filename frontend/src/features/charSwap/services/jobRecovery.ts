@@ -64,7 +64,7 @@ export async function restoreRetryDraft(recovery: JobRecovery, signal: AbortSign
     signal.throwIfAborted();
     const settings = recovery.settings ?? {};
     return {clip, trim: recovery.trim ?? [0, clip ? Math.min(15, Math.floor(clip.duration)) : 0], targets, references, assignments,
-      issues: [], decisions: {}, easyMode: settings.easy_mode ?? true, submitWithoutAudio: settings.submit_without_audio ?? false, enhancedCharacterMasking: settings.enhanced_masking ?? true,
+      issues: [], decisions: {}, easyMode: settings.easy_mode ?? true, submitWithoutAudio: settings.submit_without_audio ?? false, addWatermark: settings.add_watermark ?? false, enhancedCharacterMasking: settings.enhanced_masking ?? true,
       replaceAllPeople: settings.replace_all_people ?? false, retryNeedsSource: !clip,
       retryNotice: !clip ? "Upload the original clip to retry. Saved settings and available references are restored; review them before submitting."
         : "Your clip and available references are restored. Review the trim, people, references, and current credit cost before submitting again."};

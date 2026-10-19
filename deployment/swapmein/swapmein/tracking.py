@@ -16,6 +16,7 @@ import numpy as np
 from PIL import Image
 
 from .errors import PublicError
+from .diagnostics import timed
 
 
 FPS = 24
@@ -24,6 +25,7 @@ MAX_SEGMENTS = 60
 MAX_FRAME_BYTES = 8_000_000
 
 
+@timed("merge_all_people_masks")
 def merge_all_people_masks(archive: Path, output: Path, metadata: dict, *, detection_summary: dict | None = None):
     """Union every non-background SAM label per frame into the compose label 1.
 
@@ -210,6 +212,7 @@ def _compact(segments):
     return segments
 
 
+@timed("analyze_tracking")
 def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict:
     """Partition frames into confirmed-anchor and user-review sections."""
     width, height, frames, anchor_frame, cuts = _metadata(metadata)
@@ -271,6 +274,7 @@ def _selection_error(message="The tracking review does not match this clip. Chec
     return PublicError(message, code="tracking_review_invalid")
 
 
+@timed("resolve_tracking")
 def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[dict], output: Path) -> dict:
     """Apply explicit segment selections to a binary, complete mask archive."""
     width, height, frames, anchor_frame, _ = _metadata(metadata)
@@ -379,11 +383,13 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                 pass
 
 
+@timed("analyze_multi_tracking")
 def analyze_multi_tracking(archive: Path, metadata: dict, targets: list[dict] | None = None):
     from .multi_tracking import analyze
     return analyze(archive, metadata, targets)
 
 
+@timed("resolve_multi_tracking")
 def resolve_multi_tracking(archive: Path, metadata: dict, plan: dict, choices: list[dict], output: Path):
     from .multi_tracking import resolve
     return resolve(archive, metadata, plan, choices, output)

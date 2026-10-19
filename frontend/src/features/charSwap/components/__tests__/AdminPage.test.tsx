@@ -4,12 +4,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
 import type { PipelineSettings, StaffPermission } from "../../services/commerce";
 
-const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin" | "viewer", permissions: undefined as StaffPermission[] | undefined, pipelineSettings: undefined as PipelineSettings | undefined, ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn(), replicateKey: vi.fn() }));
+const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin" | "viewer", permissions: undefined as StaffPermission[] | undefined, pipelineSettings: undefined as PipelineSettings | undefined, ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn(), watermark: vi.fn(), replicateKey: vi.fn() }));
 vi.mock("../../services/commerce", () => ({
   loadCreditAdmin: async () => ({ role: api.role, permissions: api.permissions, pipeline: api.pipelineSettings, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
-  savePipelineSettings: api.pipeline, saveReplicateApiKey: api.replicateKey, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
+  saveWatermarkSettings: api.watermark, savePipelineSettings: api.pipeline, saveReplicateApiKey: api.replicateKey, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
 }));
 async function renderExpandedAdmin() {
   render(<AdminPage />);
@@ -274,4 +274,18 @@ it("saves the experimental missing-mask mode and preserves unrelated pipeline se
   await user.click(toggle);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, retry_missing_masks_with_sam: false});
   await screen.findByText(/Coordinate fallback selected for new jobs/);
+});
+
+
+it("defaults watermark rewards to 25 credits and saves the global hide setting", async () => {
+  api.watermark.mockResolvedValue({revision: 1, enabled: false, bonus_credits: 50});
+  const user = userEvent.setup();
+  render(<AdminPage />);
+  await user.click(await screen.findByRole("heading", {name: "Watermark rewards"}));
+  expect(screen.getByLabelText("Watermark bonus credits")).toHaveValue(25);
+  await user.click(screen.getByRole("switch", {name: "Hide watermark offer for everyone"}));
+  await user.clear(screen.getByLabelText("Watermark bonus credits"));
+  await user.type(screen.getByLabelText("Watermark bonus credits"), "50");
+  await user.click(screen.getByRole("button", {name: "Save watermark rewards"}));
+  await waitFor(() => expect(api.watermark).toHaveBeenCalledWith({revision: 0, enabled: false, bonus_credits: 50}));
 });
