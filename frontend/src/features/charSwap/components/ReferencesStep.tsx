@@ -53,7 +53,7 @@ function ReferenceCard({
   return (
     <Box role="group" aria-label={`Reference upload area for ${person.name}`} {...dropHandlers}
       sx={{ ...PANEL, borderLeft: `3px solid ${person.color}`, outline:dragging?"2px dashed":"none",outlineColor:"primary.main",outlineOffset:3 }}>
-      <PersonBadge person={person} subtitle={person.id === ALL_PEOPLE_TARGET_ID ? "One reference for everyone in every scene" : "Original person"} />
+      <PersonBadge person={person} imageSize={160} stackedOnMobile subtitle={person.id === ALL_PEOPLE_TARGET_ID ? "One reference for everyone in every scene" : "Original person"} />
       <Divider sx={{ my: 2 }} />
       <Box
         sx={{
