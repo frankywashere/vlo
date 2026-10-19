@@ -51,6 +51,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const refreshCount = useRef(0);
+  const savedReviewVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountJob | null>(null);
@@ -82,11 +83,12 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   );
   const controller = useRef<AbortController | null>(null);
   const refresh = useCallback(async () => {
+    const reviewVersion = savedReviewVersion.current;
     refreshCount.current += 1;
     setRefreshing(true);
     try {
       const received = await loadAccountJobs();
-      if (mounted.current) {
+      if (mounted.current && reviewVersion === savedReviewVersion.current) {
         // Renew links well before their one-hour expiry without restarting a
         // playing video on every status refresh.
         const result = received.filter((job) => !hiddenJobs.current.has(job.id)).map((job) => {
@@ -403,6 +405,10 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                         {enabled: selected.mask_style !== "none", key, generateAfterReview: true},
                       );
                       if (mounted.current) {
+                        // Publish the saved state to the list before navigation;
+                        // discard refreshes started before this acknowledgement.
+                        savedReviewVersion.current += 1;
+                        setJobs((current) => current.map((job) => job.id === selected.id ? {...job, ...result} : job));
                         setSelected({ ...selected, ...result });
                         void refresh();
                       }
