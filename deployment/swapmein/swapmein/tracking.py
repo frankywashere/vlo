@@ -324,6 +324,7 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                 selection = selections.get(segment["id"])
                 absent = bool(selection and selection["absent"])
                 selected_label = segment["selected_label"]
+                fallback_anchor = None
                 if selection and not absent:
                     anchor = selection["anchor"]
                     if not segment["start"] <= anchor["time"] < segment["end"]:
@@ -333,20 +334,25 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                         raise _selection_error(f"Choose a frame inside section {index + 1}.")
                     selected_label = _pixel_label(read, frame, anchor, width, height)
                     if selected_label == 0:
-                        error = PublicError(f"No person mask was detected at that point in section {index + 1} ({frame / FPS:.2f}s). Try inside the detected body, or use Show another frame.",
-                                            code="tracking_background")
-                        error.segment_id = segment["id"]
-                        labels = read(frame)
-                        error.tracking_diagnostics = {"frame": frame, "time": frame / FPS,
-                            "x": anchor["x"], "y": anchor["y"], "selected_label": 0,
-                            "detected_labels": [int(label) for label in np.unique(labels) if label][:100],
-                            "width": width, "height": height}
-                        raise error
-                if not absent and not _integer(selected_label, 1, 65535):
+                        if metadata.get("allow_coordinate_fallback") is True:
+                            fallback_anchor = dict(anchor)
+                            selected_label = None
+                        else:
+                            error = PublicError(f"No person mask was detected at that point in section {index + 1} ({frame / FPS:.2f}s). Try inside the detected body, or use Show another frame.",
+                                                code="tracking_background")
+                            error.segment_id = segment["id"]
+                            labels = read(frame)
+                            error.tracking_diagnostics = {"frame": frame, "time": frame / FPS,
+                                "x": anchor["x"], "y": anchor["y"], "selected_label": 0,
+                                "detected_labels": [int(label) for label in np.unique(labels) if label][:100],
+                                "width": width, "height": height}
+                            raise error
+                if not absent and fallback_anchor is None and not _integer(selected_label, 1, 65535):
                     raise _selection_error("Select a detected person or mark this section absent.")
                 assignments.append({"segment_id": segment["id"], "start_frame": segment["start_frame"],
                                     "end_frame": segment["end_frame"],
-                                    "selected_label": None if absent else selected_label, "absent": absent})
+                                    "selected_label": None if absent else selected_label, "absent": absent,
+                                    **({"coordinate_fallback": True, "fallback_anchor": fallback_anchor} if fallback_anchor else {})})
             with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as destination:
                 for assignment in assignments:
                     label = assignment["selected_label"]
@@ -357,7 +363,7 @@ def resolve_tracking(archive: Path, metadata: dict, plan: dict, choices: list[di
                         buffer = BytesIO()
                         Image.fromarray(binary).save(buffer, "PNG")
                         destination.writestr(f"labels/labels_{frame:05d}.png", buffer.getvalue())
-        if not any(coverage):
+        if not any(coverage) and not any(item.get("coordinate_fallback") for item in assignments) and not metadata.get("allow_empty_target"):
             raise _selection_error("Keep at least one section where the selected person is present.")
         temporary.replace(output)
         return {"coverage": coverage, "assignments": assignments}

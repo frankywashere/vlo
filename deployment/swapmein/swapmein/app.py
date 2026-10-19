@@ -1037,13 +1037,18 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
             cloud.download(job["tracking_masks_uri"], archive, 80 * 1024 * 1024)
             choices = [choice.model_dump() for choice in review.choices]
-            # Validate taps against the real masks before claiming compute or
-            # changing the job. A background tap stays editable in the browser.
+            # Resolve real masks and retain unmatched taps as position instructions
+            # before claiming compute or changing the job.
+            review_metadata = {**job["tracking_metadata"], "allow_coordinate_fallback": True}
             if plan.get("version") == 2:
                 from .tracking import resolve_multi_tracking
-                resolved = resolve_multi_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
+                resolved = resolve_multi_tracking(archive, review_metadata, plan, choices, reviewed)
             else:
-                resolved = resolve_tracking(archive, job["tracking_metadata"], plan, choices, reviewed)
+                resolved = resolve_tracking(archive, review_metadata, plan, choices, reviewed)
+            from .scene_selection import reviewed_mask_targets
+            fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
+            reviewed_targets = (reviewed_mask_targets(review_metadata, plan, choices, resolved["assignments"])
+                if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
             emit("tracking_review_validated", job_id=job_id, attempt_id=attempt_id,
                  revision=review.revision, assignments=resolved["assignments"])
             records.update("control/preparation.json", lambda current: reserve_preparation(
@@ -1062,6 +1067,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
         job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
             "status": "queued", "preparation_kind": "tracking_rebuild", "reviewed_masks_uri": uri,
             "reviewed_coverage": resolved["coverage"], "tracking_assignments": resolved["assignments"],
+            "normalized_targets": reviewed_targets, "coordinate_fallback_sections": fallback_count,
             "tracking_choices": choices,
             "message": "Your matches are saved. The corrected guide is queued.", "updated_at": time.time()})
         queued = True

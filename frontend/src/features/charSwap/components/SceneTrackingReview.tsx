@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Box, Button, FormControlLabel, Stack, Switch, Typography } from "@mui/material";
+import { Alert, Avatar, Box, Button, FormControlLabel, Stack, Switch, Typography } from "@mui/material";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import type { ReferenceAsset, TargetPerson } from "../model/model";
 import type { TrackingReviewChoice, TrackingReviewSegment } from "../services/livePipeline";
 import { formatTime } from "../utils/videoGeometry";
 import { reviewFrameNumbers } from "../utils/trackingReviewFrames";
 import { sceneReviewGroups } from "../utils/sceneReviewGroups";
-import { PersonBadge } from "./PersonBadge";
 import { SceneReviewFrame } from "./SceneReviewFrame";
 import { PANEL } from "./stepStyles";
 
@@ -158,15 +157,22 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
       <Typography ref={header} component="h2" variant="h6" tabIndex={-1} sx={{ mb: 2, outline: "none" }}>
         Character {activeIndex + 1} of {people.length} · {person.name}
       </Typography>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="space-between">
-        <PersonBadge person={person} subtitle="Find this person in each scene below" />
-        {reference && <Stack direction="row" spacing={1} alignItems="center">
+      <Stack direction="row" spacing={3} alignItems="flex-start">
+        <Stack spacing={1} sx={{ minWidth: 0, flex: 1 }}>
+          <Avatar variant="rounded" src={person.thumbnail} alt={person.name}
+            sx={{ width: {xs: 112, sm: 144}, height: {xs: 112, sm: 144}, border: `2px solid ${person.color}`,
+              bgcolor: `${person.color}22`, "& img": {objectFit: "contain"} }}>{person.name.charAt(0)}</Avatar>
+          <Typography fontWeight={600}>{person.name}</Typography>
+        </Stack>
+        {reference && <Stack spacing={1} sx={{ minWidth: 0, flex: 1 }}>
           <Box component="img" src={reference.url} alt={`${person.name} replacement: ${reference.name}`}
-            sx={{ width: 56, height: 56, objectFit: "contain", borderRadius: 1, border: `2px solid ${person.color}` }} />
-          <Typography variant="body2">Replaced with {reference.name}</Typography>
+            sx={{ width: {xs: 112, sm: 144}, height: {xs: 112, sm: 144}, objectFit: "contain", borderRadius: 1, border: `2px solid ${person.color}` }} />
+          <Typography variant="body2" sx={{overflowWrap: "anywhere"}}>Replaced with {reference.name}</Typography>
         </Stack>}
       </Stack>
-      <Typography sx={{ mt: 2 }}>Tap this person wherever they appear. Leave an image untapped if they’re not in that scene.</Typography>
+      <Typography component="p" variant="h6" sx={{ mt: 2, fontSize: {xs: 18, sm: 20}, fontWeight: 500 }}>
+        Tap the person in each box below. Leave it blank if they’re not there.
+      </Typography>
       {!enhancedMasking && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Masking stays off. Your selections tell the model who to replace.</Typography>}
       {trackingUrl && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
         onChange={(_event, checked) => setShowDetected(checked)} />} />}

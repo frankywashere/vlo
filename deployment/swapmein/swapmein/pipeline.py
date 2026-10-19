@@ -372,7 +372,9 @@ class Pipeline:
         guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
             f"outputs/{job_id}/guide-reviewed-{uuid.uuid4().hex}.mp4")
         self.update_job(job_id, status="ready", guide_uri=guide_uri,
-            message="Your scene matches have been applied. Review the complete guide before continuing.",
+            message=("Your scene matches have been applied. "
+                + (f"{job['coordinate_fallback_sections']} selections use position and time because SAM found no mask. " if job.get("coordinate_fallback_sections") else "")
+                + "Review the complete guide before continuing."),
             tracking_reviewed=True, review_required=True, mask_style="depth_multi" if job.get("target_styles") else "depth",
             mask_frames=job["tracking_metadata"]["frames"],
             mask_coverage_min=min(job["reviewed_coverage"]),

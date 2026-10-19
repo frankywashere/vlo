@@ -130,3 +130,30 @@ def test_reused_sam_id_across_cuts_can_belong_to_different_replacements(tmp_path
     result = resolve_multi_tracking(archive, metadata, plan, choices, tmp_path / "reviewed.zip")
     assert len(result["coverage"]) == 96 and all(result["coverage"])
     assert {item["selected_label"] for item in result["assignments"] if not item["absent"]} == {11}
+
+
+def test_one_character_can_use_coordinates_while_the_other_keeps_its_mask(tmp_path):
+    archive, metadata = fixture(tmp_path)
+    metadata.update(review_all_scenes=True, allow_coordinate_fallback=True)
+    plan = analyze_multi_tracking(archive, metadata)
+    choices = [{"segment_id": section["id"], "absent": False,
+        "anchor": {"x": .01 if section["target_id"] == "left" else .8, "y": .5, "time": section["seek_time"]}}
+        for section in plan["segments"] if section["needs_review"]]
+    result = resolve_multi_tracking(archive, metadata, plan, choices, tmp_path / "mixed.zip")
+    assert all(a.get("coordinate_fallback") for a in result["assignments"] if a["target_id"] == "left")
+    assert all(a["selected_label"] for a in result["assignments"] if a["target_id"] == "right")
+    assert all(result["coverage"])
+
+
+def test_a_character_absent_from_every_scene_does_not_block_another_character(tmp_path):
+    archive, metadata = fixture(tmp_path)
+    metadata.update(review_all_scenes=True)
+    plan = analyze_multi_tracking(archive, metadata)
+    choices = [{"segment_id": section["id"], "absent": section["target_id"] == "left",
+        "anchor": None if section["target_id"] == "left" else {"x": .8, "y": .5, "time": section["seek_time"]}}
+        for section in plan["segments"] if section["needs_review"]]
+    result = resolve_multi_tracking(archive, metadata, plan, choices, tmp_path / "absent-one.zip")
+    assert all(result["coverage"])
+    with pytest.raises(PublicError, match="at least one"):
+        resolve_multi_tracking(archive, metadata, plan,
+            [{"segment_id": c["segment_id"], "absent": True, "anchor": None} for c in choices], tmp_path / "absent-all.zip")

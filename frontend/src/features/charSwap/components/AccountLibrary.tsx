@@ -277,7 +277,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const details = (<>
         <Box sx={{px: reviewPage ? 0 : 3, pb: reviewPage ? 0 : 2}}>
           <Stack spacing={2}>
-            <Typography>{selected?.message}</Typography>
+            {(!reviewPage || selected?.status !== "tracking_review") && <Typography>{selected?.message}</Typography>}
             {checkingRecovery && <LinearProgress aria-label="Checking saved files" />}
             {recovery && <Alert severity={recovery.action === "support" ? "warning" : "info"}>
               {recovery.message}
@@ -298,7 +298,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                 sx={{ width: "100%", maxHeight: 420, bgcolor: "#211e1d" }}
               />
             )}
-            {selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
+            {!reviewPage && (selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
               {selectedTargets.map((target) => <Stack key={target.id} spacing={0.5} sx={{borderLeft: `3px solid ${target.color}`, pl: 1}}>
                 <Typography fontWeight={600}>{target.name}</Typography>
                 {selectedReferences[target.reference_index] && <Box component="img" src={selectedReferences[target.reference_index]}
@@ -311,7 +311,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                 alt="Replacement reference"
                 sx={{ maxWidth: 160, maxHeight: 160, objectFit: "contain" }}
               />
-            )}
+            ))}
             {selected?.status === "ready" && (
               <Alert severity="info">
                 {selected.easy_mode
@@ -465,7 +465,6 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     <Box component="main" sx={{maxWidth: 1120, mx: "auto", px: {xs: 2, md: 5}, py: 4}}>
       <Button onClick={close} disabled={busy} sx={{mb: 2}}>Back to Library</Button>
       <Typography component="h1" variant="h3" sx={{mb: 1}}>{selected.status === "tracking_review" ? "Check scene matches" : selected.status === "ready" ? "Review prepared clip" : "Your recast"}</Typography>
-      <Typography color="text.secondary" sx={{mb: 3}}>{selected.title}</Typography>
       {details}
     </Box>
   );

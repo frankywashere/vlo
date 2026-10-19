@@ -116,7 +116,7 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
                          for choice in choices if choice["segment_id"].startswith(prefix)]
                 selected = Path(directory) / f"target-{index}.zip"
                 try:
-                    result = resolve_tracking(archive, {**metadata, "anchor": target["anchor"]},
+                    result = resolve_tracking(archive, {**metadata, "anchor": target["anchor"], "allow_empty_target": True},
                                               expected["plans"][index]["plan"], local, selected)
                 except PublicError as error:
                     if getattr(error, "segment_id", None):
@@ -168,6 +168,8 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
                     buffer = BytesIO()
                     Image.fromarray(mapped).save(buffer, "PNG")
                     destination.writestr(name, buffer.getvalue())
+        if not any(coverage) and not any(item.get("coordinate_fallback") for item in assignments):
+            raise PublicError("Keep at least one section where a selected person is present.", code="tracking_review_invalid")
         temporary.replace(output)
         return {"coverage": coverage, "assignments": assignments}
     finally:
