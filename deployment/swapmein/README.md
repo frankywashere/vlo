@@ -554,3 +554,26 @@ Credit sessions require the current minimum four-second price; all credit-funded
 preparation requires the full selected-duration balance. Preflight checks do not
 charge or reserve credits; the existing durable generation claim still governs
 charging. Existing owner emails and secret bindings are preserved on deployment.
+
+
+### Manual scene-review handoff
+
+The scene-review POST saves the owned, revision-bound choices and generation approval,
+then queues preparation without downloading or rewriting mask media in that request.
+The response skips re-signing review thumbnails; Library navigation unlocks after the
+save acknowledgement rather than waiting for a Library refresh. The background task
+validates masks, optionally recovers missing selections under the job's pinned admin
+setting, composes the guide, and queues an approved generation. Background validation
+failures restore scene review with the saved choices and affected section; no provider
+submission occurs. Queue retries remain bound to the task token and review revision.
+
+MiniMax H3 prompts retain all scene assignments. Only prompts exceeding the limit after audio instructions use compact scene
+instructions; prompts that already fit retain their existing wording. All are checked against the [reAPI H3 documented 7,000-character prompt limit](https://reapi.ai/docs/minimax-h3)
+before a provider submission or credit charge. No scene assignments are truncated.
+New manual jobs pin `review_shots_only` in their saved tracking metadata. Each
+character gets one review section per detected camera shot; brief track-loss and
+jump events are retained privately in the plan, rather than becoming extra cards.
+Each shot uses its own selected mask label; no cross-cut identity matching is
+inferred. Existing jobs without the flag keep their original saved sections so
+old choices are never silently remapped. Mask quality and missing pixels still
+follow the existing coordinate fallback / optional SAM recovery behavior.

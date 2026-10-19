@@ -93,6 +93,7 @@ class Pipeline:
                 metadata["anchor"].setdefault("time", metadata["anchor"].get("frame", 0) / 24)
                 if not options.easy_mode:
                     metadata["review_all_scenes"] = True
+                    metadata["review_shots_only"] = True
                     if options.preparation_version >= 2:
                         metadata["allow_unmatched_anchor"] = True
                 targets = style_targets(metadata["targets"]) if metadata.get("targets") else []
@@ -332,12 +333,22 @@ class Pipeline:
                         self.update_job(job_id, message="Preparation is ready, but automatic submission could not be confirmed. Open this job in your Library to continue; do not create another swap.")
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
+            if job.get("preparation_kind") == "tracking_rebuild":
+                emit("tracking_review_rejected", job_id=job_id, error=error,
+                    attempt_id=job.get("tracking_review_attempt_id"), revision=job.get("tracking_applied_revision"),
+                    public_code=error.code, segment_id=getattr(error, "segment_id", None),
+                    selection_diagnostics=getattr(error, "tracking_diagnostics", None))
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
-                auto_key_ciphertext=None, message=error.message)
+                auto_key_ciphertext=None, generation_after_review_revision=None,
+                tracking_review_error=job.get("preparation_kind") == "tracking_rebuild",
+                tracking_error_segment_id=getattr(error, "segment_id", None), message=error.message)
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
-                auto_key_ciphertext=None, message="Preparation failed. No provider generation was submitted.")
+                auto_key_ciphertext=None, generation_after_review_revision=None,
+                tracking_review_error=job.get("preparation_kind") == "tracking_rebuild", tracking_error_segment_id=None,
+                message="Your choices are saved, but applying them failed. Review and submit them again; no generation was submitted."
+                    if job.get("preparation_kind") == "tracking_rebuild" else "Preparation failed. No provider generation was submitted.")
         finally:
             emit("preparation_cleanup", job_id=job_id, shutdown_verified=self.cloud.shutdown_verified)
             if self.cloud.shutdown_verified:
@@ -352,9 +363,42 @@ class Pipeline:
                     return current
                 self.records.update("control/preparation.json", retain)
 
+    @timed("scene_review_resolution", job_arg="job")
+    def resolve_saved_review(self, job):
+        """Validate saved choices against masks in the durable background task."""
+        from .tracking import resolve_tracking, resolve_multi_tracking
+        from .scene_selection import reviewed_mask_targets
+        job_id = job["id"]
+        plan, choices = job["tracking_plan"], job["tracking_choices"]
+        metadata = {**job["tracking_metadata"], "allow_coordinate_fallback": True}
+        with tempfile.TemporaryDirectory() as temporary:
+            archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
+            self.cloud.download(job["tracking_masks_uri"], archive, 80 * 1024 * 1024)
+            resolver = resolve_multi_tracking if plan.get("version") == 2 else resolve_tracking
+            resolved = resolver(archive, metadata, plan, choices, reviewed)
+            fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
+            recover = bool(fallback_count and job.get("tracking_recovery_requested")
+                and job.get("retry_missing_masks_with_sam") is True)
+            targets = (reviewed_mask_targets(metadata, plan, choices, resolved["assignments"])
+                if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
+            uri = self.cloud.upload(self.settings.worker_bucket,
+                f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
+        saved = self.update_job(job_id, reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"],
+            tracking_assignments=resolved["assignments"], normalized_targets=targets,
+            coordinate_fallback_sections=fallback_count, recover_missing_masks=recover,
+            tracking_resolution_pending=False, generation_after_review_revision=(job.get("generation_after_review_revision")
+                if not job.get("generation_requires_recovery") or recover else None))
+        emit("tracking_review_validated", job_id=job_id, attempt_id=job.get("tracking_review_attempt_id"),
+            revision=job["tracking_applied_revision"], assignments=resolved["assignments"],
+            missing_mask_mode="sam" if job.get("retry_missing_masks_with_sam") is True else "coordinates",
+            recover_missing_masks=recover, generation_approved=saved.get("generation_after_review_revision") is not None)
+        return saved
+
     @timed("reviewed_guide_rebuild", job_arg="job")
     def rebuild_reviewed_guide(self, job, remaining):
         """Reuse saved assets; optionally recover missing masks before approved generation."""
+        if job.get("tracking_resolution_pending"):
+            job = self.resolve_saved_review(job)
         if job.get("recover_missing_masks") and not job.get("mask_recovery_completed"):
             from .mask_recovery import recover_reviewed_masks
             job = recover_reviewed_masks(self, job, remaining)

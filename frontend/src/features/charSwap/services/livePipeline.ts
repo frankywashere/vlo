@@ -80,6 +80,8 @@ export interface LivePipelineJob {
   reference_url?: string;
   tracking_revision?: number;
   tracking_reviewed?: boolean;
+  tracking_review_error?: boolean;
+  tracking_error_segment_id?: string;
   tracking_choices?: TrackingReviewChoice[];
   guide_url?: string;
   output_url?: string;
@@ -364,6 +366,9 @@ function readJob(value: unknown): LivePipelineJob {
   if (typeof value.tracking_continuous === "boolean")
     job.tracking_continuous = value.tracking_continuous;
   if (typeof value.tracking_reviewed === "boolean") job.tracking_reviewed = value.tracking_reviewed;
+  if (typeof value.tracking_review_error === "boolean") job.tracking_review_error = value.tracking_review_error;
+  if (typeof value.tracking_error_segment_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.tracking_error_segment_id))
+    job.tracking_error_segment_id = value.tracking_error_segment_id;
   if (
     typeof value.scene_cut_count === "number" &&
     Number.isInteger(value.scene_cut_count) &&

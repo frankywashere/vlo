@@ -32,7 +32,6 @@ from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner,
                        digest, provider_key, verify_task_identity, validate_media_url)
 from .storage import (Records, check_preparation_capacity, claim_job, reserve_preparation, release_preparation,
                       check_queue_capacity, reserve_queued_preparation, claim_queued_slot)
-from .tracking import resolve_tracking
 from .diagnostics import emit, provider_billing, timed, timed_stage, wait_timing
 from .accounts import lookup_credit_recipient, registered_accounts, verify_account, bind_job, archive_completed, index_path
 from .job_settings import settings_used
@@ -210,7 +209,7 @@ def owned_job(job_id: str, authorization: str | None):
     return check_owner(job, owner), session
 
 
-def view(job: dict):
+def view(job: dict, *, review_thumbnails: bool = True):
     _, cloud, _ = services()
     status = job["status"]
     if status == "ready" and job.get("review_generation_queued"):
@@ -250,7 +249,7 @@ def view(job: dict):
             anchor = target.get("anchor", {})
             frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
             thumbnail = job.get("scene_thumbnail_uris", {}).get(str(frame))
-            if thumbnail:
+            if thumbnail and review_thumbnails:
                 public_target["thumbnail_url"] = cloud.signed_url(thumbnail)
             result["selection_targets"].append(public_target)
     reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
@@ -291,14 +290,19 @@ def view(job: dict):
                 preview["selected_label"] = None
             frame = str(math.floor(section["seek_time"] * 24 + 1e-7))
             uri = job.get("scene_thumbnail_uris", {}).get(frame)
-            if uri:
+            if uri and review_thumbnails:
                 preview["thumbnail_url"] = cloud.signed_url(uri)
             tracking_uri = job.get("scene_mask_thumbnail_uris", {}).get(frame)
-            if tracking_uri:
+            if tracking_uri and review_thumbnails:
                 preview["tracking_thumbnail_url"] = cloud.signed_url(tracking_uri)
             result["tracking_segments"].append(preview)
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]
+        if job.get("tracking_review_error"):
+            result["tracking_review_error"] = True
+            segment_id = job.get("tracking_error_segment_id")
+            if isinstance(segment_id, str) and segment_id in {section["id"] for section in job["tracking_plan"].get("segments", [])}:
+                result["tracking_error_segment_id"] = segment_id
     if job.get("normalized_uri") and temporary_media_available:
         result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
     if credits_mode and job.get("app_credits_charged") is not None:
@@ -1064,7 +1068,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     if job["status"] != "tracking_review":
         if (job.get("tracking_applied_revision") == review.revision
                 and job["status"] in {"matching", "queued", "preparing", "ready", "generating", "finalizing", "finishing", "completed"}):
-            return view(job)  # A lost reply cannot create another task or charge.
+            return view(job, review_thumbnails=False)  # A lost reply cannot create another task or charge.
         raise PublicError(invalid, 409, code="tracking_review_invalid")
     plan = job.get("tracking_plan", {})
     expected = {section["id"] for section in plan.get("segments", []) if section["needs_review"]}
@@ -1110,7 +1114,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                 job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
                     "message": "Your scene choices are saved. Generation is queued."}
                     if current.get("status") == "ready" else current)
-        return view(job)
+        return view(job, review_thumbnails=False)
     current, _ = records.read("control/preparation.json")
     check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
     reserved = claimed = queued = False
@@ -1121,55 +1125,40 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
          revision=review.revision, plan_version=plan.get("version"),
          selections=[{"segment_id": choice["segment_id"], "absent": choice["absent"],
              "anchor": choice["anchor"]} for choice in choices])
+    # Save the small, owned selection list before any mask archive I/O. The
+    # authenticated preparation task resolves masks after the browser can leave.
+    sections = {section["id"]: section for section in plan.get("segments", [])}
+    for choice in choices:
+        anchor = choice["anchor"]
+        section = sections[choice["segment_id"]]
+        if anchor is not None and not section["start"] <= anchor["time"] < section["end"]:
+            raise PublicError(invalid, 400, code="tracking_review_invalid")
+    auto_submit = bool(review.generate_after_review or (review.recover_missing_masks
+        and review.generate_after_recovery and job.get("retry_missing_masks_with_sam") is True))
+    auto_key = approved_review_key() if auto_submit else job.get("auto_key_ciphertext")
     try:
-        with tempfile.TemporaryDirectory() as temporary:
-            archive, reviewed = Path(temporary) / "masks.zip", Path(temporary) / "reviewed.zip"
-            cloud.download(job["tracking_masks_uri"], archive, 80 * 1024 * 1024)
-            choices = [choice.model_dump() for choice in review.choices]
-            # Resolve real masks and retain unmatched taps as position instructions
-            # before claiming compute or changing the job.
-            review_metadata = {**job["tracking_metadata"], "allow_coordinate_fallback": True}
-            if plan.get("version") == 2:
-                from .tracking import resolve_multi_tracking
-                resolved = resolve_multi_tracking(archive, review_metadata, plan, choices, reviewed)
-            else:
-                resolved = resolve_tracking(archive, review_metadata, plan, choices, reviewed)
-            from .scene_selection import reviewed_mask_targets
-            fallback_count = sum(bool(item.get("coordinate_fallback")) for item in resolved["assignments"])
-            recover = bool(fallback_count and review.recover_missing_masks and job.get("retry_missing_masks_with_sam") is True)
-            auto_submit = bool(review.generate_after_review or (recover and review.generate_after_recovery))
-            auto_key = job.get("auto_key_ciphertext")
-            if auto_submit:
-                auto_key = approved_review_key()
-            reviewed_targets = (reviewed_mask_targets(review_metadata, plan, choices, resolved["assignments"])
-                if fallback_count or job.get("coordinate_fallback_sections") else job.get("normalized_targets"))
-            emit("tracking_review_validated", job_id=job_id, attempt_id=attempt_id,
-                 revision=review.revision, assignments=resolved["assignments"],
-                 missing_mask_mode="sam" if job.get("retry_missing_masks_with_sam") is True else "coordinates",
-                 recover_missing_masks=recover, generation_approved=auto_submit)
-            records.update("control/preparation.json", lambda current: reserve_preparation(
-                current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
-            reserved = True
-            task_token = uuid.uuid4().hex
-            def claim(current):
-                if current.get("tracking_revision") != review.revision:
-                    raise PublicError(invalid, 409, code="tracking_review_invalid")
-                return {**claim_job(current, {"tracking_review"}, "matching"),
-                    "tracking_applied_revision": review.revision, "tracking_task_token": task_token}
-            records.update(f"jobs/{job_id}.json", claim)
-            claimed = True
-            uri = cloud.upload(settings.worker_bucket,
-                f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
-        job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
-            "status": "queued", "preparation_queued_at": time.time(), "preparation_kind": "tracking_rebuild", "reviewed_masks_uri": uri,
-            "reviewed_coverage": resolved["coverage"], "tracking_assignments": resolved["assignments"],
-            "normalized_targets": reviewed_targets, "coordinate_fallback_sections": fallback_count,
-            "recover_missing_masks": recover, "mask_recovery_completed": False, "mask_recovery_conflicts": 0,
-            "review_generation_queued": False,
-            "generation_after_review_revision": review.revision if auto_submit else None,
-            "auto_key_ciphertext": auto_key,
-            "tracking_choices": choices,
-            "message": "Your matches are saved. The corrected guide is queued.", "updated_at": time.time()})
+        records.update("control/preparation.json", lambda current: reserve_preparation(
+            current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+        reserved = True
+        task_token = uuid.uuid4().hex
+        def claim(current):
+            if current.get("tracking_revision") != review.revision:
+                raise PublicError(invalid, 409, code="tracking_review_invalid")
+            return {**claim_job(current, {"tracking_review"}, "queued"),
+                "tracking_applied_revision": review.revision, "tracking_task_token": task_token,
+                "preparation_queued_at": time.time(), "preparation_kind": "tracking_rebuild",
+                "tracking_resolution_pending": True, "tracking_review_error": False, "tracking_error_segment_id": None,
+                "tracking_review_attempt_id": attempt_id,
+                "tracking_recovery_requested": review.recover_missing_masks,
+                "generation_requires_recovery": not review.generate_after_review,
+                "recover_missing_masks": False, "mask_recovery_completed": False, "mask_recovery_conflicts": 0,
+                "review_generation_queued": False,
+                "generation_after_review_revision": review.revision if auto_submit else None,
+                "auto_key_ciphertext": auto_key, "tracking_choices": choices,
+                "message": "Your scene choices are saved. You can leave this page while we apply them.",
+                "updated_at": time.time()}
+        job = records.update(f"jobs/{job_id}.json", claim)
+        claimed = True
         queued = True
         try:
             cloud.enqueue("prepare", job_id, task_token=task_token)
@@ -1179,7 +1168,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             } if current["status"] == "queued" else current)
         emit("tracking_matches_applied", job_id=job_id, section_count=len(choices),
             absent_sections=sum(choice["absent"] for choice in choices))
-        return view(job)
+        return view(job, review_thumbnails=False)
     except Exception as error:
         if claimed and not queued:
             records.update(f"jobs/{job_id}.json", lambda current: {**current,

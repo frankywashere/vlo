@@ -153,6 +153,7 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
   }
 
   return <Stack spacing={2.5}>
+    {errorMessage && !errorSegmentId && <Alert severity="error">{errorMessage}</Alert>}
     <Box sx={PANEL}>
       <Typography ref={header} component="h2" variant="h6" tabIndex={-1} sx={{ mb: 2, outline: "none" }}>
         Character {activeIndex + 1} of {people.length} · {person.name}

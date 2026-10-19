@@ -246,11 +246,22 @@ def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict
                 boundaries[index] = "tracking_reappeared" if after[0] else "missing_mask"
             elif _jump(before, after, width, height):
                 boundaries[index] = "tracking_jump"
-        ordered = [*sorted(boundaries), end]
-        for first, last in zip(ordered, ordered[1:]):
-            reason = boundaries[first] if statistics[first][0] else "missing_mask"
-            segments.append({"start_frame": first, "end_frame": last, "reason": reason,
-                             "scene": scene, "merged": False})
+        if metadata.get("review_shots_only") is True and metadata.get("review_all_scenes") is True:
+            # New manual jobs use real camera cuts as review boundaries. Keep
+            # track-loss/jump evidence internal instead of asking for near-
+            # duplicate selections a few frames apart. The flag is saved with
+            # metadata so older in-progress plans retain their original bounds.
+            segments.append({"start_frame": start, "end_frame": end,
+                "reason": boundaries[start] if statistics[start][0] else "missing_mask",
+                "scene": scene, "merged": False,
+                "tracking_events": [{"frame": frame, "reason": reason}
+                    for frame, reason in sorted(boundaries.items()) if frame != start]})
+        else:
+            ordered = [*sorted(boundaries), end]
+            for first, last in zip(ordered, ordered[1:]):
+                reason = boundaries[first] if statistics[first][0] else "missing_mask"
+                segments.append({"start_frame": first, "end_frame": last, "reason": reason,
+                                 "scene": scene, "merged": False})
     segments = _compact(segments)
     result = []
     for index, segment in enumerate(segments):
@@ -262,7 +273,8 @@ def analyze_tracking(archive: Path, metadata: dict, selected_label: int) -> dict
         result.append({"id": f"segment-{index:03d}", "start_frame": start, "end_frame": end,
                        "start": start / FPS, "end": end / FPS, "seek_time": seek_frame / FPS,
                        "reason": segment["reason"], "needs_review": not healthy_anchor,
-                       "selected_label": selected_label if contains_anchor else None})
+                       "selected_label": selected_label if contains_anchor else None,
+                       **({"tracking_events": segment["tracking_events"]} if "tracking_events" in segment else {})})
     plan = {"version": 1, "segments": result,
             "review_required": any(segment["needs_review"] for segment in result)}
     if unresolved:

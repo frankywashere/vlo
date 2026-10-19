@@ -152,3 +152,57 @@ def test_scene_review_can_approve_generation_once_without_masking_or_another_pre
     for _ in range(2):
         assert client.post("/internal/generate", json={"job_id": job_id}).status_code == 200
     assert len(provider.submissions) == 1
+
+
+@pytest.mark.parametrize("silent", [False, True])
+def test_large_multi_character_prompt_preserves_all_scenes_under_provider_limit(silent):
+    targets = [{"id": f"person-{i}", "reference_index": i,
+        "anchor": {"x": .2 + i * .1, "y": .5, "time": .5},
+        "scenes": [{"start": n, "end": n + 1, "absent": n % 3 == 0,
+            "anchor": None if n % 3 == 0 else {"x": .2 + i * .1, "y": .5, "time": n + .5},
+            "coordinate_fallback": n % 3 == 1} for n in range(15)]} for i in range(5)]
+    payload = generation_payload(15, [f"ref{i}.jpg" for i in range(5)], "guide.mp4", True,
+        mask_style="depth_multi", targets=targets, submit_without_audio=silent)
+    prompt = payload["prompt"]
+    assert len(prompt) <= 7000
+    assert prompt.count(": absent.") == 25
+    assert prompt.count("; no mask, identify from original pixels") == 25
+    for i in range(5):
+        assert f"reference image {i + 1}" in prompt
+        for n in range(15):
+            assert f"{n:.2f}-{n+1:.2f}s:" in prompt
+            if n % 3:
+                assert f"at {n+.5:.2f}s x={(.2+i*.1)*100:.0f}% y=50%" in prompt
+    assert "source background" in prompt
+    assert ("reference video is silent" in prompt) is silent
+
+
+def test_impossibly_large_prompt_is_rejected_without_truncating_assignments():
+    targets = [{"id": f"person-{i}", "reference_index": i,
+        "anchor": {"x": .5, "y": .5, "time": .5},
+        "scenes": [{"start": n/24, "end": (n+1)/24, "absent": False,
+            "anchor": {"x": .5, "y": .5, "time": n/24}, "coordinate_fallback": True}
+            for n in range(60)]} for i in range(5)]
+    with pytest.raises(PublicError) as rejected:
+        generation_payload(15, [f"ref{i}.jpg" for i in range(5)], "guide.mp4", targets=targets)
+    assert rejected.value.code == "provider_prompt_too_long"
+
+
+@pytest.mark.parametrize("silent", [False, True])
+def test_existing_prompt_wording_is_identical_when_final_prompt_fits(silent):
+    from swapmein.provider import audio_prompt, multi_replacement_prompt
+    target = {"id": "person", "reference_index": 0, "anchor": {"x": .5, "y": .5, "time": .5}}
+    # Exercise the former 6800-character threshold too: the final provider
+    # limit, not a conservative estimate, decides whether compaction applies.
+    tested_near_limit = False
+    for count in range(20, 85):
+        target["scenes"] = [{"start": n*15/count, "end": (n+1)*15/count, "absent": True,
+            "anchor": None} for n in range(count)]
+        standard = audio_prompt(multi_replacement_prompt(15, [target], True, "depth_multi"), True, silent)
+        if len(standard) > 7000:
+            break
+        payload = generation_payload(15, "ref.jpg", "guide.mp4", True,
+            mask_style="depth_multi", targets=[target], submit_without_audio=silent)
+        assert payload["prompt"] == standard
+        tested_near_limit |= len(standard) > 6800
+    assert tested_near_limit

@@ -384,8 +384,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                       (!apiKeyAllowed || !key.trim()))
                   }
                   initialChoices={selected.tracking_choices}
-                  errorSegmentId={trackingErrorSegmentId}
-                  errorMessage={error}
+                  errorSegmentId={trackingErrorSegmentId ?? selected.tracking_error_segment_id}
+                  errorMessage={error ?? (selected.tracking_review_error ? selected.message : undefined)}
                   onRefresh={() => void refresh()}
                   onApply={async (choices) => {
                     setBusy(true);
@@ -404,7 +404,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                       );
                       if (mounted.current) {
                         setSelected({ ...selected, ...result });
-                        await refresh();
+                        void refresh();
                       }
                       return true;
                     } catch (cause) {

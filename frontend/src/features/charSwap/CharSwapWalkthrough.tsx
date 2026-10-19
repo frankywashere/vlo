@@ -623,8 +623,8 @@ export function CharSwapWalkthrough({
                     width={pipeline.job.width ?? clip?.width ?? 854}
                     height={pipeline.job.height ?? clip?.height ?? 480}
                     busy={pipeline.busy}
-                    errorSegmentId={pipeline.trackingErrorSegmentId}
-                    errorMessage={pipeline.error}
+                    errorSegmentId={pipeline.trackingErrorSegmentId ?? pipeline.job.tracking_error_segment_id}
+                    errorMessage={pipeline.error ?? (pipeline.job.tracking_review_error ? pipeline.job.message : undefined)}
                     message={pipeline.job.message}
                     initialChoices={pipeline.job.tracking_choices}
                     onApply={pipeline.resolveTracking}

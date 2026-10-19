@@ -157,3 +157,39 @@ def test_a_character_absent_from_every_scene_does_not_block_another_character(tm
     with pytest.raises(PublicError, match="at least one"):
         resolve_multi_tracking(archive, metadata, plan,
             [{"segment_id": c["segment_id"], "absent": True, "anchor": None} for c in choices], tmp_path / "absent-all.zip")
+
+
+
+def test_manual_five_character_review_has_one_selection_per_actual_shot(tmp_path):
+    from test_tracking import masks
+    from swapmein.multi_tracking import analyze, resolve
+    frames = []
+    for frame in range(12):
+        image = np.zeros((64, 64), dtype=np.uint16)
+        for index in range(5):
+            if index == 4 and frame in {2, 6, 7, 10}:
+                continue
+            label = index + 1 if frame < 4 else index + 11 if frame < 8 else index + 21
+            image[20:26, 2+index*12:8+index*12] = label
+        frames.append(image)
+    archive = masks(tmp_path / "raw.zip", frames)
+    targets = [{"id": f"p{i}", "name": f"Person {i+1}", "reference_index": i,
+        "anchor": {"x": (4+i*12)/64, "y": 22/64, "time": 1/24, "frame": 1}} for i in range(5)]
+    info = {"width": 64, "height": 64, "frames": 12, "duration": .5,
+        "anchor": targets[0]["anchor"], "targets": targets, "scene_cuts": [4/24, 8/24],
+        "review_all_scenes": True, "review_shots_only": True}
+    plan = analyze(archive, info)
+    assert len(plan["segments"]) == 15
+    for target in targets:
+        assert [(s["start_frame"], s["end_frame"]) for s in plan["segments"] if s["target_id"] == target["id"]] == [(0,4), (4,8), (8,12)]
+    # Select a visible frame in each shot. IDs change at cuts, so each shot
+    # must use its own explicit tap rather than assuming cross-cut identity.
+    choices = []
+    for section in plan["segments"]:
+        target = next(t for t in targets if t["id"] == section["target_id"])
+        choices.append({"segment_id": section["id"], "absent": False,
+            "anchor": {"x": target["anchor"]["x"], "y": target["anchor"]["y"],
+                "time": (section["start_frame"]+1)/24}})
+    result = resolve(archive, info, plan, choices, tmp_path / "reviewed.zip")
+    assert len(result["assignments"]) == 15
+    assert {a["selected_label"] for a in result["assignments"]} == set(range(1,6)) | set(range(11,16)) | set(range(21,26))

@@ -128,6 +128,55 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
     )
 
 
+def compact_multi_scene_prompt(duration: int, targets: list[dict], enhanced_masking: bool, mask_style: str):
+    """Keep every assignment while removing repeated prose from large reviews."""
+    lines = ["Use reference video 1 as the source scene and precise motion guide.",
+        "All times are seconds in that video; x/y are percentages across/down from the top left. "
+        "Scene entries are authoritative. Replace the identified person throughout each listed interval. "
+        "Absent intervals mean do not replace anyone for that assignment."]
+    for index, target in enumerate(targets):
+        marker = f" ({TARGET_COLORS[index][1]} depth)" if enhanced_masking and mask_style == "depth_multi" else ""
+        lines.append(f"Person {index + 1}{marker} -> reference image {target['reference_index'] + 1}.")
+        scenes = target.get("scenes", [])
+        if not scenes:
+            point = target.get("anchor", target)
+            lines.append(f"Identify at {point['time']:.2f}s, x={point['x'] * 100:.0f}%, y={point['y'] * 100:.0f}%; follow through the clip.")
+        for scene in scenes:
+            interval = f"{scene['start']:.2f}-{scene['end']:.2f}s"
+            if scene["absent"]:
+                lines.append(f"{interval}: absent.")
+            else:
+                point = scene["anchor"]
+                lines.append(f"{interval}: at {point['time']:.2f}s x={point['x'] * 100:.0f}% y={point['y'] * 100:.0f}%"
+                    + ("; no mask, identify from original pixels, not another masked person." if scene.get("coordinate_fallback") else "."))
+    lines.append("Replace each selected person's entire head, hands, body and feet. Keep assignments separate through overlaps and cuts. "
+        "Follow original motion, pose, interactions, expressions and speaking timing. Keep all other people unchanged; "
+        "do not merge people, add characters, or leave human body parts. Reference images supply appearance only; "
+        f"preserve the source background, camera, lighting and exact {duration}-second timing.")
+    if enhanced_masking:
+        lines.append("Depth colors describe shape and motion, not appearance. Remove all depth colors. "
+            "Unmasked selections use their listed position and time; never substitute a different masked person.")
+    lines.append("Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.")
+    return " ".join(lines)
+
+
+def audio_prompt(prompt: str, audio_processing: bool, submit_without_audio: bool):
+    if submit_without_audio:
+        for instruction in (
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
+            "The video contains isolated vocals pitched up three semitones. Use these embedded vocals for performance and mouth synchronization, without extra dialogue.",
+        ):
+            prompt = prompt.replace(instruction, "The reference video is silent. Preserve its exact visual timing, mouth movements, expressions, and performance. The original soundtrack will be restored after generation.")
+    elif not audio_processing:
+        prompt = prompt.replace(
+            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
+            "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")
+        prompt = prompt.replace(
+            "The video contains isolated vocals pitched up three semitones. Use these embedded vocals for performance and mouth synchronization, without extra dialogue.",
+            "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")
+    return prompt
+
+
 def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None):
     images = [image_url] if isinstance(image_url, str) else image_url
     if (not isinstance(images, list) or not 1 <= len(images) <= 5
@@ -149,19 +198,13 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         prompt = multi_replacement_prompt(duration, targets, enhanced_masking, mask_style)
     else:
         prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
-    if submit_without_audio:
-        for instruction in (
-            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
-            "The video contains isolated vocals pitched up three semitones. Use these embedded vocals for performance and mouth synchronization, without extra dialogue.",
-        ):
-            prompt = prompt.replace(instruction, "The reference video is silent. Preserve its exact visual timing, mouth movements, expressions, and performance. The original soundtrack will be restored after generation.")
-    elif not audio_processing:
-        prompt = prompt.replace(
-            "Use the embedded isolated vocals, pitched up three semitones, for mouth synchronization without extra dialogue.",
-            "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")
-        prompt = prompt.replace(
-            "The video contains isolated vocals pitched up three semitones. Use these embedded vocals for performance and mouth synchronization, without extra dialogue.",
-            "Use the original soundtrack embedded in the reference video for audio and performance timing. Preserve its dialogue, music, and sound effects without adding dialogue.")
+    prompt = audio_prompt(prompt, audio_processing, submit_without_audio)
+    if len(prompt) > 7000 and targets:
+        prompt = audio_prompt(compact_multi_scene_prompt(duration, targets, enhanced_masking, mask_style),
+            audio_processing, submit_without_audio)
+    if len(prompt) > 7000:
+        raise PublicError("This clip has too many scene assignments for the provider prompt limit. Use a shorter clip or fewer replacements. No generation was submitted.",
+            400, code="provider_prompt_too_long")
     return {"model": "minimax-h3", "prompt": prompt, "duration": duration,
             "resolution": "768P", "aspect_ratio": "adaptive", "content_filter": False,
             "reference_image_urls": images, "reference_video_urls": [video_url]}
