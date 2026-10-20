@@ -15,6 +15,7 @@ import tempfile
 import deploy
 
 ORIGINS = ["https://recastfx-franky.web.app", "https://recastfx-franky.firebaseapp.com",
+           "https://recastfx-polished-preview.web.app", "https://recastfx-polished-preview.firebaseapp.com",
            "https://recastfx.com", "https://www.recastfx.com"]
 ORIGINAL_ORIGINS = [f"https://{deploy.PROJECT}.web.app", f"https://{deploy.PROJECT}.firebaseapp.com"]
 RENDER_QUEUE = "recastfx-renders"

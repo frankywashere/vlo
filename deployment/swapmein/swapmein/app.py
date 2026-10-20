@@ -305,7 +305,9 @@ def view(job: dict, *, review_thumbnails: bool = True):
             segment_id = job.get("tracking_error_segment_id")
             if isinstance(segment_id, str) and segment_id in {section["id"] for section in job["tracking_plan"].get("segments", [])}:
                 result["tracking_error_segment_id"] = segment_id
-    if job.get("normalized_uri") and temporary_media_available:
+    if job.get("before_uri") and job.get("library_expires_at", 0) > time.time():
+        result["source_preview_url"] = cloud.signed_url(job["before_uri"])
+    elif job.get("normalized_uri") and temporary_media_available:
         result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
     if credits_mode and job.get("app_credits_charged") is not None:
         result["app_credits_charged"] = job["app_credits_charged"]
@@ -1267,6 +1269,8 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
                               message="Your saved video is ready.")
                 if item.get("thumbnail_uri"):
                     public["thumbnail_url"] = cloud.signed_url(item["thumbnail_uri"])
+                if item.get("before_uri"):
+                    public["source_preview_url"] = cloud.signed_url(item["before_uri"])
             elif item.get("status") == "completed":
                 public.update(status="expired", message="The 30-day video retention period has ended.")
             else:

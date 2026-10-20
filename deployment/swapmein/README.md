@@ -427,7 +427,11 @@ update/impersonation as a substitute for those bindings.
 
 App uploads/outputs/sessions/jobs have short retention; permanent control,
 commerce and account ledgers must remain. Completed Library outputs retain their
-separate 30-day policy. Worker inputs/outputs and Artifact Registry images can
+separate 30-day policy. New completed account jobs also keep the trimmed original
+RGB video and original soundtrack in that private Library namespace for 30 days.
+Delivery verifies this copy before temporary cleanup; retries reuse the saved
+copy without regenerating the render. Previously deleted originals cannot be
+recovered. Worker inputs/outputs and Artifact Registry images can
 continue incurring storage cost while compute is off. Any worker lifecycle cleanup
 must be restricted to the gateway's prefixes and preserve earlier proofs/models.
 A deploy must not globally delete worker assets or unpause/reconfigure queues.
