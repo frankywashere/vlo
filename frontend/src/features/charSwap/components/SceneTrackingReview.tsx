@@ -100,6 +100,9 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
 export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackingUrl, segments,
   target: fallbackTarget, targets = [], references = [], width, height, busy, errorSegmentId,
   errorMessage, initialChoices = [], onApply, onRefresh }: SceneTrackingReviewProps) {
+  // Single-person plans omit target_id; bind those sections to the supplied
+  // person rather than the Library's generic fallback placeholder.
+  const implicitTargetId = targets.length === 1 ? targets[0].id : fallbackTarget.id;
   const suppliedPeople = [...(targets.length ? targets : [fallbackTarget])];
   for (const section of segments) {
     if (section.target_id && !suppliedPeople.some((person) => person.id === section.target_id)) {
@@ -109,14 +112,14 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
   }
   const scenes = sceneReviewGroups(segments, suppliedPeople.map((person) => person.id));
   const sections = scenes.flatMap((scene) => scene.sections);
-  const people = suppliedPeople.filter((person) => sections.some((section) => (section.target_id ?? fallbackTarget.id) === person.id));
+  const people = suppliedPeople.filter((person) => sections.some((section) => (section.target_id ?? implicitTargetId) === person.id));
   const [navigation, setNavigation] = useState({ index: 0, acknowledgedError: null as string | null });
   const [choices, setChoices] = useState<Record<string, TrackingReviewChoice>>(() => Object.fromEntries(initialChoices.map((choice) => [choice.segment_id, choice])));
   const [showDetected, setShowDetected] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const header = useRef<HTMLHeadingElement>(null);
   const rejected = sections.find((section) => section.id === errorSegmentId);
-  const rejectedIndex = rejected ? people.findIndex((person) => person.id === (rejected.target_id ?? fallbackTarget.id)) : -1;
+  const rejectedIndex = rejected ? people.findIndex((person) => person.id === (rejected.target_id ?? implicitTargetId)) : -1;
   const activeIndex = errorSegmentId && navigation.acknowledgedError !== errorSegmentId && rejectedIndex >= 0 ? rejectedIndex : navigation.index;
   const person = people[Math.min(activeIndex, people.length - 1)];
   const locked = busy || submitting;
@@ -128,7 +131,7 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
     }
   }, [activeIndex, errorSegmentId, navigation.acknowledgedError]);
   if (!person) return null;
-  const personSections = sections.filter((section) => (section.target_id ?? fallbackTarget.id) === person.id);
+  const personSections = sections.filter((section) => (section.target_id ?? implicitTargetId) === person.id);
   const reference = references.find((item) => item.targetId === person.id)?.asset;
   const last = activeIndex === people.length - 1;
 
@@ -180,7 +183,7 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
         onChange={(_event, checked) => setShowDetected(checked)} />} />}
     </Box>
     {scenes.map((scene, index) => {
-      const checks = scene.sections.filter((section) => (section.target_id ?? fallbackTarget.id) === person.id);
+      const checks = scene.sections.filter((section) => (section.target_id ?? implicitTargetId) === person.id);
       if (!checks.length) return null;
       return <Stack key={`${person.id}:${scene.id}`} spacing={2}>
         {checks.map((section, checkIndex) => <SceneChoiceCard key={`${person.id}:${section.id}`} section={section}
