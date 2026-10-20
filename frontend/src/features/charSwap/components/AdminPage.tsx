@@ -143,7 +143,6 @@ export function AdminPage() {
                   setMessage("Face-mesh settings saved for new jobs. Existing jobs keep their saved mode.");
                 });
               }} />} label={label} />)}
-          <Typography color="text.secondary">Enable face mesh is the global control for new jobs. When off, user and admin overrides cannot enable it. Existing jobs keep their saved mode. When enabled, defaults apply when the user switch is hidden or unchanged. When shown, users can turn face mesh on or off for their run, overriding either default. May take extra time.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.depth_guidance ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
@@ -154,7 +153,6 @@ export function AdminPage() {
                 setMessage(`Depth guidance ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved mode.`);
               });
             }} />} label="Add depth to person masks" />
-          <Typography color="text.secondary">On by default. Turn off to use flat person masks without running Depth Anything. Enhanced person masking still runs SAM. Applies to new jobs only.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.retry_missing_masks_with_sam ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

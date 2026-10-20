@@ -213,7 +213,7 @@ export function GenerationCard({ job, onOpen, onRemove, removing = false }: Gene
         {(stageCopy || manualPreparing) && <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {stageCopy?.detail ?? "Processing scenes. Come back to choose people in each scene when this clip needs attention."}
         </Typography>}
-        <Box sx={{ mt: 1.5 }}><JobSettings settings={job.settings_used} /></Box>
+        <Box sx={{ mt: 1.5 }}><JobSettings settings={job.settings_used} creditsUsed={job.consumer_credits_used} creditsReturned={job.consumer_credits_returned} accessMode={job.access_mode} /></Box>
         {(job.status === "failed" || job.status === "expired") && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
             {job.message}
