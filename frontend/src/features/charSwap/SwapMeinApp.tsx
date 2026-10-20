@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Box,
   Button,
+  Checkbox,
+  FormControlLabel,
+  Link,
   CssBaseline,
   Dialog,
   DialogActions,
@@ -12,6 +15,7 @@ import {
   LinearProgress,
   Stack,
   Typography,
+  useMediaQuery,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
 import Google from "@mui/icons-material/Google";
@@ -23,13 +27,27 @@ import { AccountLibrary } from "./components/AccountLibrary";
 import { SettingsPage } from "./components/SettingsPage";
 import type { SettingsTab } from "./components/SettingsPage";
 import { AdminPage } from "./components/AdminPage";
+import { MobileNavigation } from "./components/MobileNavigation";
+import { TemplatesPage } from "./components/TemplatesPage";
+import { LegalPage } from "./components/LegalPage";
+import { usePwaSetup, disableNotifications } from "./hooks/usePwa";
+import { useTemplateImport } from "./hooks/useTemplateImport";
+import type { TemplateDraft } from "./services/templates";
 import { loadAccountAccess } from "./services/commerce";
 import { useAccount } from "./hooks/useAccount";
 import { useLiveCredits } from "./hooks/useLiveCredits";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
 
-type AppView = "home" | "create" | "library" | "settings" | "admin";
+type AppView =
+  | "home"
+  | "create"
+  | "library"
+  | "settings"
+  | "admin"
+  | "templates"
+  | "privacy"
+  | "terms";
 type AccountState = ReturnType<typeof useAccount>;
 
 function readDestination(): AppView {
@@ -40,12 +58,16 @@ function readDestination(): AppView {
   return page === "create" ||
     page === "library" ||
     page === "settings" ||
-    page === "admin"
+    page === "admin" ||
+    page === "templates" ||
+    page === "privacy" ||
+    page === "terms"
     ? page
     : "home";
 }
 
 export function SwapMeinApp() {
+  usePwaSetup();
   const account = useAccount();
   const [destination, setDestination] = useState<AppView>(readDestination);
   const [colorMode, setColorMode] = useState<"light" | "dark">(() => {
@@ -131,12 +153,15 @@ function AccountWorkspace({
   destination,
   onDestination,
 }: AccountWorkspaceProps) {
+  const mobile = useMediaQuery("(max-width:899.95px)");
   const [homeRequested, setHomeRequested] = useState(false);
   const view = account.user
     ? destination === "home" && !homeRequested
       ? "library"
       : destination
-    : "home";
+    : ["privacy", "terms", "templates"].includes(destination)
+      ? destination
+      : "home";
   const [started, setStarted] = useState(
     Boolean(account.user) && destination === "create",
   );
@@ -144,7 +169,11 @@ function AccountWorkspace({
   const [authMode, setAuthMode] = useState<"sign-in" | "create">("sign-in");
   const [busy, setBusy] = useState(false);
   const creationRef = useRef<CharSwapWalkthroughHandle>(null);
+  const [templateId, setTemplateId] = useState<string | null>(() =>
+    new URL(globalThis.location.href).searchParams.get("template"),
+  );
   const [authBusy, setAuthBusy] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
   const [staffRole, setStaffRole] = useState<string | null>(null);
   const [appError, setAppError] = useState("");
   const [jobStatus, setJobStatus] = useState("");
@@ -153,7 +182,7 @@ function AccountWorkspace({
     const tab = query.get("tab");
     return query.has("checkout") || tab === "credits"
       ? "credits"
-      : tab === "generation"
+      : tab === "generation" || tab === "library"
         ? tab
         : "account";
   });
@@ -162,6 +191,44 @@ function AccountWorkspace({
     jobStatus,
     account.user?.email,
   );
+  const applyTemplate = useCallback((draft: TemplateDraft) => {
+    if (!creationRef.current?.applyTemplate(draft))
+      throw new Error(
+        "Your current submission is still being saved. Try the template again shortly.",
+      );
+    setTemplateId(null);
+    const url = new URL(globalThis.location.href);
+    url.searchParams.delete("template");
+    globalThis.history.replaceState(null, "", url);
+  }, []);
+  const templateImport = useTemplateImport({
+    id: templateId,
+    enabled: Boolean(account.user) && view === "create",
+    blocked: busy,
+    balance: credits.wallet?.balance,
+    catalog: credits.catalog,
+    creditError: credits.error,
+    onReady: applyTemplate,
+  });
+  function chooseTemplate(id: string) {
+    if (busy) {
+      setAppError(
+        "Wait for your current upload or submission before choosing a template.",
+      );
+      return;
+    }
+    setTemplateId(id);
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set("template", id);
+    globalThis.history.replaceState(null, "", url);
+    navigate("create");
+  }
+  function cancelTemplate() {
+    setTemplateId(null);
+    const url = new URL(globalThis.location.href);
+    url.searchParams.delete("template");
+    globalThis.history.replaceState(null, "", url);
+  }
   useEffect(() => {
     if (!account.user) return;
     let active = true;
@@ -193,7 +260,10 @@ function AccountWorkspace({
       creationRef.current?.startAnotherIfSaved();
     }
     onDestination(next);
-    if (!account.user && next !== "home") {
+    if (
+      !account.user &&
+      !["home", "privacy", "terms", "templates"].includes(next)
+    ) {
       setAuthMode("create");
       setAccountOpen(true);
     }
@@ -207,6 +277,7 @@ function AccountWorkspace({
   }
   async function signOut() {
     try {
+      await disableNotifications().catch(() => undefined);
       await account.signOut();
       onDestination("home");
     } catch {
@@ -222,7 +293,16 @@ function AccountWorkspace({
     }
   }
   return (
-    <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
+    <Box
+      sx={{
+        minHeight: "100dvh",
+        bgcolor: "background.default",
+        pb:
+          account.user && mobile
+            ? "calc(100px + env(safe-area-inset-bottom, 0px))"
+            : 0,
+      }}
+    >
       {account.loading && (
         <LinearProgress aria-label="Restoring your account" />
       )}
@@ -231,9 +311,10 @@ function AccountWorkspace({
         active={view}
         colorMode={colorMode}
         onToggleAppearance={toggleAppearance}
-        onHome={() => navigate("home")}
+        onHome={() => navigate(account.user ? "library" : "home")}
         onCreate={() => navigate("create")}
         onLibrary={() => navigate("library")}
+        onTemplates={() => navigate("templates")}
         onAdmin={staffRole ? () => navigate("admin") : undefined}
         onSettings={() => showSettings("account")}
         locked={account.loading}
@@ -256,8 +337,49 @@ function AccountWorkspace({
         </Alert>
       )}
       {view === "home" && <LandingPage onStart={() => navigate("create")} />}
+      {view === "templates" && (
+        <TemplatesPage onSelect={chooseTemplate} disabled={busy} />
+      )}
+      {view === "create" && templateId && account.user && (
+        <Box component="main" sx={{ maxWidth: 800, mx: "auto", px: 3, py: 6 }}>
+          <Typography component="h1" variant="h4" fontWeight={750}>
+            {templateImport.error
+              ? "Your template is saved."
+              : "Opening your scene…"}
+          </Typography>
+          {templateImport.error ? (
+            <Alert severity="info" sx={{ mt: 3 }}>
+              {templateImport.error}
+            </Alert>
+          ) : (
+            <LinearProgress aria-label="Opening template" sx={{ mt: 3 }} />
+          )}
+          <Stack direction="row" gap={1.5} sx={{ mt: 3 }}>
+            {templateImport.needsCredits && (
+              <Button
+                variant="contained"
+                onClick={() => showSettings("credits")}
+              >
+                Add credits
+              </Button>
+            )}
+            {templateImport.error && !templateImport.needsCredits && (
+              <Button variant="contained" onClick={templateImport.retry}>
+                Try again
+              </Button>
+            )}
+            <Button onClick={cancelTemplate}>Cancel</Button>
+          </Stack>
+        </Box>
+      )}
+      {(view === "privacy" || view === "terms") && (
+        <LegalPage
+          document={view}
+          onBack={() => navigate(account.user ? "library" : "home")}
+        />
+      )}
       {account.user && (started || view === "create") && (
-        <Box hidden={view !== "create"}>
+        <Box hidden={view !== "create" || Boolean(templateId)}>
           <CharSwapWalkthrough
             ref={creationRef}
             credits={credits}
@@ -269,11 +391,15 @@ function AccountWorkspace({
         </Box>
       )}
       {view === "library" && account.user && (
-        <AccountLibrary retryDisabled={busy} onCreate={() => navigate("create")} onRetry={(draft) => {
-          setStarted(true);
-          useCharSwapStore.getState().restoreRetry(draft);
-          onDestination("create");
-        }} />
+        <AccountLibrary
+          retryDisabled={busy}
+          onCreate={() => navigate("create")}
+          onRetry={(draft) => {
+            setStarted(true);
+            useCharSwapStore.getState().restoreRetry(draft);
+            onDestination("create");
+          }}
+        />
       )}
       {view === "settings" && account.user && (
         <SettingsPage
@@ -293,6 +419,49 @@ function AccountWorkspace({
         />
       )}
       {view === "admin" && account.user && staffRole && <AdminPage />}
+      {account.user && mobile && (
+        <MobileNavigation
+          active={
+            view === "settings" && settingsTab === "credits" ? "credits" : view
+          }
+          credits={credits.wallet?.balance}
+          onLibrary={() => navigate("library")}
+          onTemplates={() => navigate("templates")}
+          onCreate={() => navigate("create")}
+          onCredits={() => showSettings("credits")}
+          onSettings={() => showSettings("account")}
+        />
+      )}
+      <Stack
+        component="footer"
+        direction="row"
+        justifyContent="center"
+        gap={3}
+        sx={{ px: 2, py: 3 }}
+      >
+        <Link
+          href="/?page=privacy"
+          color="text.secondary"
+          variant="caption"
+          onClick={(event) => {
+            event.preventDefault();
+            navigate("privacy");
+          }}
+        >
+          Privacy Policy
+        </Link>
+        <Link
+          href="/?page=terms"
+          color="text.secondary"
+          variant="caption"
+          onClick={(event) => {
+            event.preventDefault();
+            navigate("terms");
+          }}
+        >
+          Terms of Service
+        </Link>
+      </Stack>
       <Dialog
         open={accountOpen && !account.user}
         onClose={() => {
@@ -316,11 +485,51 @@ function AccountWorkspace({
             <Button
               startIcon={<Google />}
               variant="contained"
-              disabled={authBusy || account.loading}
+              disabled={
+                authBusy ||
+                account.loading ||
+                (authMode === "create" && !legalAccepted)
+              }
               onClick={() => void login()}
             >
               Continue with Google
             </Button>
+            {authMode === "create" ? (
+              <FormControlLabel
+                sx={{ alignItems: "flex-start" }}
+                control={
+                  <Checkbox
+                    checked={legalAccepted}
+                    onChange={(_, checked) => setLegalAccepted(checked)}
+                  />
+                }
+                label={
+                  <Typography variant="body2" sx={{ pt: 1 }}>
+                    I agree to the{" "}
+                    <Link href="/?page=terms" target="_blank" rel="noopener">
+                      Terms of Service
+                    </Link>{" "}
+                    and acknowledge the{" "}
+                    <Link href="/?page=privacy" target="_blank" rel="noopener">
+                      Privacy Policy
+                    </Link>
+                    , including how my uploads are processed.
+                  </Typography>
+                }
+              />
+            ) : (
+              <Typography variant="caption" color="text.secondary">
+                By continuing, you agree to the{" "}
+                <Link href="/?page=terms" target="_blank" rel="noopener">
+                  Terms of Service
+                </Link>{" "}
+                and acknowledge the{" "}
+                <Link href="/?page=privacy" target="_blank" rel="noopener">
+                  Privacy Policy
+                </Link>
+                .
+              </Typography>
+            )}
             <Typography variant="caption" color="text.secondary">
               Your finished videos are saved to your account for 30 days.
             </Typography>

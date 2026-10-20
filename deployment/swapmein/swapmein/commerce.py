@@ -121,7 +121,7 @@ def require_staff(records, account: dict, roles: set[str]) -> str:
     return role
 
 
-STAFF_PERMISSIONS = {"pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"}
+STAFF_PERMISSIONS = {"pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access", "manage_templates"}
 
 
 def staff_permissions(records, account):

@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "RecastFX — Any clip. Any face.",
+  "short_name": "RecastFX",
+  "description": "Any clip. Any face. Create character swaps and keep them in your library.",
+  "start_url": "/?page=library&source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#cc3f37",
+  "icons": [
+    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Create a recast", "url": "/?page=create"},
+    {"name": "Your library", "url": "/?page=library"}
+  ]
+}

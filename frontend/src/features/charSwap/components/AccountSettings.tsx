@@ -10,7 +10,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useLibraryExport } from "../hooks/useLibraryExport";
+import { AppInstallation } from "./AppInstallation";
 
 interface AccountSettingsProps {
   name?: string | null;
@@ -43,14 +43,12 @@ export function AccountSettings({
   createdAt,
   lastSignInAt,
   onUpdateName,
-  onLibrary,
   onSignOut,
 }: AccountSettingsProps) {
   const [draft, setDraft] = useState(name ?? "");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const exportData = useLibraryExport();
   const clean = draft.trim();
   async function save() {
     if (!onUpdateName || saving || !clean || clean.length > 80) return;
@@ -210,46 +208,7 @@ export function AccountSettings({
           </Box>
         )}
       </Box>
-      <Box
-        sx={{
-          p: { xs: 2.5, sm: 3 },
-          border: "1px solid",
-          borderColor: "divider",
-          borderRadius: "5px",
-        }}
-      >
-        <Typography component="h2" variant="h6">
-          Your library & data
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Finished videos stay in your library for 30 days. Download the ones
-          you want to keep.
-        </Typography>
-        <Stack direction={{ xs: "column", sm: "row" }} gap={1.5} sx={{ mt: 2 }}>
-          <Button variant="outlined" onClick={onLibrary}>
-            Manage your library
-          </Button>
-          <Button
-            variant="outlined"
-            disabled={exportData.busy}
-            onClick={() => void exportData.download()}
-          >
-            {exportData.busy ? "Preparing download…" : "Export library details"}
-          </Button>
-        </Stack>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", mt: 1.5 }}
-        >
-          Export a JSON file with details of your latest 50 generations.
-        </Typography>
-        {exportData.error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {exportData.error}
-          </Alert>
-        )}
-      </Box>
+      <AppInstallation />
       <Stack
         direction={{ xs: "column", sm: "row" }}
         justifyContent="space-between"

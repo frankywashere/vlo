@@ -41,7 +41,7 @@ export interface MarginModel {
   reference_seconds: number;
 }
 
-export type StaffPermission = "pricing" | "grant_credits" | "manage_staff" | "service_controls" | "pipeline_settings" | "provider_key" | "api_key_access";
+export type StaffPermission = "pricing" | "grant_credits" | "manage_staff" | "service_controls" | "pipeline_settings" | "provider_key" | "api_key_access" | "manage_templates";
 export interface StaffAccess {
   email: string;
   role: "owner" | "pricing_admin" | "viewer";
@@ -133,7 +133,11 @@ async function commerceRequest<T>(path: string, body?: unknown): Promise<T> {
       typeof result.message === "string" ? result.message : "Credits are unavailable right now.";
     throw new CommerceRequestError(message, response.status);
   }
-  return (await response.json()) as T;
+  const result: unknown = await response.json().catch(() => null);
+  if (!result || typeof result !== "object") {
+    throw new CommerceRequestError("The account service returned an unexpected response. Refresh and try again.", 502);
+  }
+  return result as T;
 }
 
 export function loadCreditCatalog() {

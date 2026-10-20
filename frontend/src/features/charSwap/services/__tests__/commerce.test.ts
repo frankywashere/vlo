@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { savePipelineSettings, saveReplicateApiKey } from "../commerce";
+import { loadCreditAdmin, savePipelineSettings, saveReplicateApiKey } from "../commerce";
 
 const api = vi.hoisted(() => ({token: vi.fn()}));
 vi.mock("../accountContext", () => ({accountToken: api.token}));
@@ -12,6 +12,11 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("translates an HTML fallback into an actionable admin error", async () => {
+  requests.mockResolvedValue(new Response("<!doctype html><html>app shell</html>", {headers: {"content-type": "text/html"}}));
+  await expect(loadCreditAdmin()).rejects.toThrow("The account service returned an unexpected response");
+});
 
 it("sends the Replicate key only in an authenticated no-store POST body", async () => {
   await expect(saveReplicateApiKey("test-private-key")).resolves.toEqual({configured: true});

@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import type { Ref } from "react";
+import type { TemplateDraft } from "./services/templates";
 import { useShallow } from "zustand/react/shallow";
 import {
   Alert,
@@ -60,7 +61,7 @@ import {
 const STEP_INFO = {
   clip: {
     title: "Start with a clip.",
-    description: "Upload your video or choose a sample below.",
+    description: "Upload your video to get started.",
   },
   trim: {
     title: "Find your moment.",
@@ -88,6 +89,7 @@ const STEP_INFO = {
 
 export interface CharSwapWalkthroughHandle {
   startAnotherIfSaved: () => void;
+  applyTemplate: (draft: TemplateDraft) => boolean;
 }
 
 interface CharSwapWalkthroughProps {
@@ -129,7 +131,6 @@ export function CharSwapWalkthrough({
     error,
     next,
     visit,
-    loadClip,
     reviewTracking,
     invalidateTracking,
     reset,
@@ -155,18 +156,17 @@ export function CharSwapWalkthrough({
       error: state.error,
       next: state.next,
       visit: state.visit,
-      loadClip: state.loadClip,
       reviewTracking: state.reviewTracking,
       invalidateTracking: state.invalidateTracking,
       reset: state.reset,
       setError: state.setError,
     })),
   );
-  const [demo, setDemo] = useState<DemoManifest | null>(null);
-  const [loadingDemo, setLoadingDemo] = useState(false);
+  const [demoManifest, setDemo] = useState<DemoManifest | null>(null);
+  const demo = clip?.mode === "demo" ? demoManifest : null;
   const retryNotice = useCharSwapStore((state) => state.retryNotice);
+  const clipRightsConfirmed = useCharSwapStore((state) => state.clipRightsConfirmed);
   const [resetDialog, setResetDialog] = useState(false);
-  const sampleRequest = useRef(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const assets = useLocalAssets();
   const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
@@ -227,7 +227,7 @@ export function CharSwapWalkthrough({
     message: pipeline.job?.message ?? "Preparing the scenes for your review…",
   } : null);
   const busy =
-    locked || assets.busy || loadingDemo || assets.pendingReferences.length > 0;
+    locked || assets.busy || assets.pendingReferences.length > 0;
   const state = {
     watermarkBonusQuote: creditAccount.catalog?.watermark_bonus_credits,
     easyMode,
@@ -261,6 +261,7 @@ export function CharSwapWalkthrough({
   const skipMaskReview =
     easyMode || noFlaggedSections;
   const clipStep = step === "clip" || step === "trim";
+  const clipPermissionBlocked = clipStep && clip?.mode !== "demo" && !clipRightsConfirmed;
   const flowSteps = (
     skipMaskReview ? STEPS.filter((item) => item !== "matches") : STEPS
   ).filter((item) => item !== "trim");
@@ -273,6 +274,7 @@ export function CharSwapWalkthrough({
   const singleCharacterBlocked = live && (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) && pipeline.multiCharacters === false && (targets.length > 1 || replaceAllPeople);
   const continueDisabled =
     busy ||
+    clipPermissionBlocked ||
     !(step === "references" ? canContinue(state,"people") && hasAssignedReferenceImages(state) : canContinue(state, clipStep ? "trim" : step)) ||
     (live && clipStep && !validLiveTrim) ||
     (singleCharacterBlocked && ["people", "references", "review"].includes(step)) ||
@@ -295,8 +297,6 @@ export function CharSwapWalkthrough({
   const { reset: resetPipeline } = pipeline;
   const cancelPending = assets.cancelPending;
   const startNewSwap = useCallback(() => {
-    sampleRequest.current += 1;
-    setLoadingDemo(false);
     cancelPending();
     reset();
     resetPipeline();
@@ -307,6 +307,12 @@ export function CharSwapWalkthrough({
   useImperativeHandle(
     ref,
     () => ({
+      applyTemplate: (draft) => {
+        if (locked && !renderCanContinueInLibrary) return false;
+        startNewSwap();
+        useCharSwapStore.getState().loadTemplate(draft);
+        return true;
+      },
       startAnotherIfSaved: () => {
         if (renderCanContinueInLibrary) startNewSwap();
         else if (pipeline.job || locked) setPendingCreate(true);
@@ -350,34 +356,14 @@ export function CharSwapWalkthrough({
     headingRef.current?.focus();
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [step]);
-  useEffect(
-    () => () => {
-      sampleRequest.current += 1;
-    },
-    [],
-  );
-
-  async function openSample() {
-    if (!entryFunded || busy) return;
-    const request = ++sampleRequest.current;
-    cancelPending();
-    setLoadingDemo(true);
-    setError(null);
-    try {
-      const manifest = demo ?? (await loadDemo());
-      if (request === sampleRequest.current) {
-        setDemo(manifest);
-        loadClip(manifest.clip);
-      }
-    } catch {
-      if (request === sampleRequest.current)
-        setError(
-          "The sample could not open. Upload a clip or choose a template.",
-        );
-    } finally {
-      if (request === sampleRequest.current) setLoadingDemo(false);
-    }
-  }
+  useEffect(() => {
+    if (clip?.mode !== "demo") return;
+    // Keep already-open sample sessions usable after removing the sample shortcut.
+    let active = true;
+    void loadDemo().then(manifest => { if (active) setDemo(manifest); })
+      .catch(() => { if (active) setError("The sample could not open. Upload your own clip to continue."); });
+    return () => { active = false; };
+  }, [clip?.mode, setError]);
   function fundingReady() {
     if (!fullyFunded) {
       setError("Add enough credits for this clip before continuing.");
@@ -437,7 +423,7 @@ export function CharSwapWalkthrough({
     if (
       item !== "clip" &&
       item !== "trim" &&
-      (!fullyFunded || (live && !validLiveTrim))
+      (!fullyFunded || clipPermissionBlocked || (live && !validLiveTrim))
     )
       return false;
     if (!canVisitStep(state, item)) return false;
@@ -576,7 +562,6 @@ export function CharSwapWalkthrough({
                 demo={demo}
                 estimatedCredits={trimCredits}
                 creditBalance={balance}
-                sampleAvailable={!secureSite}
                 busy={Boolean(busy || !entryFunded)}
                 onImport={(file) => {
                   if (!entryFunded || busy) return;
@@ -586,7 +571,6 @@ export function CharSwapWalkthrough({
                   }
                   void assets.importClip(file);
                 }}
-                onDemo={() => void openSample()}
               />
             )}
             {step === "people" && (
@@ -678,6 +662,7 @@ export function CharSwapWalkthrough({
             {step === "review" && (
               <ReviewStep
                 live={live}
+                unavailableReason={clip?.mode === "demo" ? "The sample is for trying the steps. Upload your own clip to generate." : !secureSite ? "Generation needs the secure app. Your localhost test balance cannot fund a live video." : "The generation service could not connect. Refresh and try again."}
                 accessMode={accessMode}
                 apiKeyAllowed={apiKeyAllowed}
                 hasKey={hasKey}
@@ -722,7 +707,7 @@ export function CharSwapWalkthrough({
               sx={{
                 mt: 3,
                 pt: 2,
-                pb: { xs: "max(16px, env(safe-area-inset-bottom))", md: 0 },
+                pb: { xs: 4.5, md: 0 },
                 borderTop: "1px solid",
                 borderColor: "divider",
                 display: "flex",
@@ -730,7 +715,7 @@ export function CharSwapWalkthrough({
                 alignItems: "center",
                 gap: 2,
                 position: { xs: "fixed", md: "sticky" },
-                bottom: 0,
+                bottom: {xs: "calc(72px + env(safe-area-inset-bottom, 0px))", md: 0},
                 left: 0,
                 right: 0,
                 zIndex: 10,
@@ -756,7 +741,9 @@ export function CharSwapWalkthrough({
                     sx={{ display: { xs: "none", sm: "block" }, maxWidth: 260 }}
                     aria-live="polite"
                   >
-                    {step === "matches" && !trackingReady
+                    {clip && clipPermissionBlocked
+                      ? "Confirm your clip permissions to continue."
+                      : step === "matches" && !trackingReady
                       ? "Check the selected person to continue."
                       : getStepBlocker(state, clipStep ? "trim" : step)}
                   </Typography>

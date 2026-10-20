@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
 import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey } from "../services/commerce";
 import { AdminSection } from "./AdminSection";
+import { AdminTemplatesPanel } from "./AdminTemplatesPanel";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
 import { CreditGrantPanel } from "./CreditGrantPanel";
@@ -19,7 +20,7 @@ export function AdminPage() {
   const [useMargin, setUseMargin] = useState(false);
   const estimate = marginPricing(margin);
   const [selectedEmail, setSelectedEmail] = useState("");
-  const permissions: StaffPermission[] = admin?.permissions ?? (admin?.role === "owner" ? ["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"] : admin?.role === "pricing_admin" ? ["pricing"] : []);
+  const permissions: StaffPermission[] = admin?.permissions ?? (admin?.role === "owner" ? ["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access", "manage_templates"] : admin?.role === "pricing_admin" ? ["pricing"] : []);
   const can = (permission: StaffPermission) => permissions.includes(permission);
   const [privateKey, setPrivateKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
@@ -79,6 +80,7 @@ export function AdminPage() {
         {permissions.length === 0 && <Alert severity="info">Read-only admin access. You can view all sections, but cannot change settings or grant credits.</Alert>}
         <AccountDirectory selectedEmail={selectedEmail} onSelect={setSelectedEmail} />
         {selectedEmail && <AccountAccessPanel key={selectedEmail} email={selectedEmail} grantable={permissions} onClose={() => setSelectedEmail("")} />}
+        <AdminSection title="Templates"><AdminTemplatesPanel canEdit={admin.role === "owner" || can("manage_templates")} /></AdminSection>
         <AdminSection title="Service controls"><Stack spacing={2}>
           <Typography>Stripe mode: {admin.features.stripe_mode === "live" ? "Live payments (USD)" : "Sandbox"}</Typography>
           <Typography color="text.secondary">Requires service-control permission. Turning a service off stops new requests; it does not cancel work already submitted.</Typography>

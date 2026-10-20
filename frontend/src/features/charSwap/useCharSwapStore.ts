@@ -32,6 +32,8 @@ export const STEPS: Step[] = [
   "generation",
 ];
 interface CharSwapStore extends WalkthroughState {
+  clipRightsConfirmed: boolean;
+  setClipRightsConfirmed: (confirmed: boolean) => void;
   retryNotice?: string;
   retryNeedsSource?: boolean;
   restoreRetry: (draft: import("./services/jobRecovery").RetryDraft) => void;
@@ -46,6 +48,7 @@ interface CharSwapStore extends WalkthroughState {
   setAddWatermark: (enabled: boolean) => void;
   setEnhancedCharacterMasking: (enabled: boolean) => void;
   loadClip: (clip: ClipAsset) => void;
+  loadTemplate: (draft: import("./services/templates").TemplateDraft) => void;
   changeTrim: (trim: [number, number]) => void;
   selectTarget: (person: TargetPerson) => void;
   renameTarget: (id: string, name: string) => void;
@@ -62,11 +65,17 @@ interface CharSwapStore extends WalkthroughState {
 
 export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   ...createInitialState(),
+  clipRightsConfirmed: false,
+  setClipRightsConfirmed: (confirmed) => set({ clipRightsConfirmed: confirmed }),
   faceMesh: undefined,
   step: "clip",
   selectionVersion: 0,
   trackingReady: false,
   error: null,
+  loadTemplate: (draft) => set(state => ({...createInitialState(), clipRightsConfirmed: false, clip: draft.clip, trim: draft.trim,
+    targets: draft.target ? [draft.target] : [], step: draft.target ? "references" : "clip",
+    selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null,
+    retryNotice: undefined, retryNeedsSource: false})),
   setReplaceAllPeople: (enabled) => set((state) => {
     const updated = setReplaceAllPeople(state, enabled);
     return updated === state ? state : {...updated,
@@ -117,7 +126,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
               : state.step,
           },
     ),
-  restoreRetry: (draft) => set((state) => ({...createInitialState(),
+  restoreRetry: (draft) => set((state) => ({...createInitialState(), clipRightsConfirmed: false,
     faceMesh: undefined, ...draft, step: "clip",
     selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null})),
   loadClip: (clip) =>
@@ -127,6 +136,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
         ...(state.trim[1] <= clip.duration ? {} : {targets: [], assignments: {}, replaceAllPeople: false}),
       } : {...setClip(state, clip), retryNotice: undefined}),
       selectionVersion: state.selectionVersion + 1,
+      clipRightsConfirmed: false,
       step: "clip",
       trackingReady: false,
       error: null,
@@ -236,6 +246,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   reset: () =>
     set({
       ...createInitialState(),
+      clipRightsConfirmed: false,
       faceMesh: undefined,
       retryNotice: undefined, retryNeedsSource: false,
       selectionVersion: get().selectionVersion + 1,

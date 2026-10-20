@@ -34,8 +34,8 @@ it("saves a valid display name and exposes useful account controls", async () =>
     screen.getByRole("link", { name: "Manage Google account" }),
   ).toHaveAttribute("href", "https://myaccount.google.com/");
   expect(screen.getByText("Email verified")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Manage your library" }));
-  expect(library).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Your library & data")).not.toBeInTheDocument();
+  expect(screen.getByRole("region", {name: "App and notifications"})).toBeInTheDocument();
 });
 
 it("shows a useful error when profile saving fails", async () => {

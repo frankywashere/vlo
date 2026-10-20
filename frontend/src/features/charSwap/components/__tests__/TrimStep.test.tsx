@@ -187,7 +187,7 @@ describe("trim step", () => {
     const user = userEvent.setup();
     useCharSwapStore.getState().changeTrim([3, 8]);
     render(
-      <ClipStep demo={null} busy={false} onImport={vi.fn()} onDemo={vi.fn()} />,
+      <ClipStep demo={null} busy={false} onImport={vi.fn()} />,
     );
 
     expect(screen.getByLabelText("Preview range")).toHaveTextContent("3,8");

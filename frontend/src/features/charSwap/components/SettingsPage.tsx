@@ -7,8 +7,9 @@ import {
 import { CreditsPanel } from "./CreditsPanel";
 import type { useLiveCredits } from "../hooks/useLiveCredits";
 import { AccountSettings } from "./AccountSettings";
+import { LibrarySettings } from "./LibrarySettings";
 
-export type SettingsTab = "account" | "credits" | "generation";
+export type SettingsTab = "account" | "library" | "credits" | "generation";
 
 interface SettingsPageProps {
   credits: ReturnType<typeof useLiveCredits>;
@@ -59,7 +60,7 @@ export function SettingsPage({
         Settings
       </Typography>
       <Typography color="text.secondary" sx={{ mt: 1, mb: 3 }}>
-        Your account and credits.
+        Make yourself at home.
       </Typography>
       <Tabs
         value={activeTab}
@@ -75,6 +76,7 @@ export function SettingsPage({
           id="settings-account"
           aria-controls="settings-panel-account"
         />
+        <Tab value="library" label="Library" id="settings-library" aria-controls="settings-panel-library" />
         <Tab
           value="credits"
           label="Credits"
@@ -101,6 +103,7 @@ export function SettingsPage({
             onSignOut={onSignOut}
           />
         )}
+        {activeTab === "library" && <LibrarySettings onLibrary={onLibrary} />}
         {activeTab === "credits" && <CreditsPanel credits={credits} />}
       </Box>
     </Box>

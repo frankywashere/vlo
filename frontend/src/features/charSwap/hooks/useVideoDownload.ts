@@ -5,7 +5,7 @@ export function useVideoDownload() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => () => request.current?.abort(), []);
-  async function download(source: string) {
+  async function download(source: string, filename = "recastfx-video.mp4") {
     if (request.current) return;
     const controller = new AbortController();
     request.current = controller;
@@ -21,7 +21,7 @@ export function useVideoDownload() {
       const url = URL.createObjectURL(file);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "recastfx-video.mp4";
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();

@@ -8,6 +8,7 @@ const OPTIONS: [StaffPermission, string][] = [
   ["manage_staff", "Manage staff permissions"], ["service_controls", "Change payment and generation switches"],
   ["pipeline_settings", "Change audio and preparation routing settings"], ["provider_key", "Replace system and Replicate API keys"],
   ["api_key_access", "Enable personal API-key access for users"],
+  ["manage_templates", "Upload, categorize and publish templates"],
 ];
 
 export function StaffAccessPanel({ canManage, grantable, selectedEmail, refreshRevision = 0, onBusyChange }: { canManage: boolean; grantable: StaffPermission[]; selectedEmail: string; refreshRevision?: number; onBusyChange?: (busy: boolean) => void }) {

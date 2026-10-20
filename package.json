@@ -19,6 +19,7 @@
     "test:updater": "node --test scripts/update.test.mjs",
     "frontend": "cd frontend && npm run dev",
     "backend": "node scripts/run-backend.js --reload",
+    "dev:templates": "node scripts/start-template-server.mjs",
     "dev": "concurrently \"npm run backend\" \"npm run frontend\""
   },
   "engines": {

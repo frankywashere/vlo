@@ -1,16 +1,29 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Alert, Avatar, Box, Button, Stack, Typography, RadioGroup, Radio, FormControlLabel } from "@mui/material";
+import {
+  Alert,
+  Avatar,
+  Box,
+  Button,
+  Stack,
+  Typography,
+  RadioGroup,
+  Radio,
+  FormControlLabel,
+} from "@mui/material";
 import { referenceCleanupBlocker } from "../model/model";
 import { useCharSwapStore } from "../useCharSwapStore";
-import type { FaceMeshOptions, LivePipelineJob } from "../services/livePipeline";
+import type {
+  FaceMeshOptions,
+  LivePipelineJob,
+} from "../services/livePipeline";
 import { VideoPreview } from "./VideoPreview";
 import { GenerationOptions } from "./GenerationOptions";
 import { formatTime } from "../utils/videoGeometry";
 
 interface ReviewStepProps {
   accessMode?: "credits" | "api-key";
-  watermarkOffer?: {bonusCredits: number};
+  watermarkOffer?: { bonusCredits: number };
   faceMeshOptions?: FaceMeshOptions;
   hideAudioToggle?: boolean;
   isAdmin?: boolean;
@@ -27,35 +40,55 @@ interface ReviewStepProps {
   creditBalance?: number;
   generationCredits: number;
   creditsAvailable?: boolean;
+  unavailableReason?: string;
   onGenerate?: () => void;
   onCredits?: () => void;
 }
 
 export function ReviewStep({
-  isAdmin, faceMeshOptions, hideAudioToggle, watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
-  onApiSettings, onAccessModeChange, trackingReady = false, onOptionsChange,
+  isAdmin,
+  faceMeshOptions,
+  hideAudioToggle,
+  watermarkOffer,
+  accessMode = "credits",
+  apiKeyAllowed = false,
+  hasKey = false,
+  provider = "reAPI",
+  onApiSettings,
+  onAccessModeChange,
+  trackingReady = false,
+  onOptionsChange,
   live = false,
   job = null,
   busy = false,
   creditBalance,
   generationCredits,
   creditsAvailable = true,
+  unavailableReason,
   onGenerate,
   onCredits,
 }: ReviewStepProps) {
-  const { clip, trim, targets, references, assignments, easyMode, enhancedCharacterMasking, visit } =
-    useCharSwapStore(
-      useShallow((state) => ({
-        clip: state.clip,
-        trim: state.trim,
-        targets: state.targets,
-        references: state.references,
-        assignments: state.assignments,
-        easyMode: state.easyMode ?? true,
-        enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
-        visit: state.visit,
-      })),
-    );
+  const {
+    clip,
+    trim,
+    targets,
+    references,
+    assignments,
+    easyMode,
+    enhancedCharacterMasking,
+    visit,
+  } = useCharSwapStore(
+    useShallow((state) => ({
+      clip: state.clip,
+      trim: state.trim,
+      targets: state.targets,
+      references: state.references,
+      assignments: state.assignments,
+      easyMode: state.easyMode ?? true,
+      enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
+      visit: state.visit,
+    })),
+  );
   const [playableGuide, setPlayableGuide] = useState<string | null>(null);
   if (!clip) return null;
   const guideIdentity = String(job?.id) + ":" + String(job?.guide_url);
@@ -64,20 +97,39 @@ export function ReviewStep({
       ? job.guide_url
       : null;
   const enoughCredits =
-    accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits;
+    accessMode === "api-key"
+      ? hasKey
+      : creditBalance !== undefined && creditBalance >= generationCredits;
   const needsPreparation = !job || ["failed", "completed"].includes(job.status);
-  const manualPreparationComplete = live && !easyMode && !!job && (job.status === "ready" || trackingReady);
-  const cleanupIssue = targets.map(target => references.find(reference => reference.id === assignments[target.id]))
-    .map(reference => reference && referenceCleanupBlocker(reference)).find(Boolean);
-  const canSubmit = !cleanupIssue && enoughCredits && !busy && creditsAvailable && (
-    live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && playableGuide === guideIdentity)
-    : !easyMode && enhancedCharacterMasking && !trackingReady
-  );
+  const manualPreparationComplete =
+    live && !easyMode && !!job && (job.status === "ready" || trackingReady);
+  const cleanupIssue = targets
+    .map((target) =>
+      references.find((reference) => reference.id === assignments[target.id]),
+    )
+    .map((reference) => reference && referenceCleanupBlocker(reference))
+    .find(Boolean);
+  const canSubmit =
+    !cleanupIssue &&
+    enoughCredits &&
+    !busy &&
+    creditsAvailable &&
+    (live
+      ? easyMode
+        ? needsPreparation
+        : needsPreparation ||
+          (job?.status === "ready" &&
+            trackingReady &&
+            playableGuide === guideIdentity)
+      : !easyMode && enhancedCharacterMasking && !trackingReady);
   return (
     <Box
       sx={{
         display: "grid",
-        gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) 340px" },
+        gridTemplateColumns: {
+          xs: "1fr",
+          md: "minmax(0, .95fr) minmax(0, 1.05fr)",
+        },
         gap: 2.5,
         alignItems: "start",
       }}
@@ -155,34 +207,27 @@ export function ReviewStep({
             </Typography>
           </Stack>
         </Box>
-        <Typography variant="body2" color="text.secondary" role="status">
-          {!enhancedCharacterMasking ? easyMode ? "Masking is off; your selections guide the model after submission." : "Masking is off; check each person's scene selections before generation." : easyMode
-            ? !job || job.status === "failed" ? "Automatic preparation after submission."
-              : ["queued", "preparing"].includes(job.status) ? "Automatic preparation in progress; no scene matching."
-              : "Easy mode: automatic tracking, no scene matching."
-            : "Review scene matches before generation."}
-        </Typography>
+        {(!easyMode || job || !enhancedCharacterMasking) && (
+          <Typography variant="body2" color="text.secondary" role="status">
+            {!enhancedCharacterMasking
+              ? easyMode
+                ? "Masking is off; your selections guide the model after submission."
+                : "Masking is off; check each person's scene selections before generation."
+              : easyMode
+                ? !job || job.status === "failed"
+                  ? ""
+                  : ["queued", "preparing"].includes(job.status)
+                    ? "Automatic preparation in progress; no scene matching."
+                    : "Easy mode: automatic tracking, no scene matching."
+                : "Review scene matches before generation."}
+          </Typography>
+        )}
         {guide && (
           <Typography variant="body2" color="text.secondary">
             Watch the prepared clip and check the selected person before
             generating.
           </Typography>
         )}
-      </Stack>
-      <Stack spacing={2.5} sx={{ minWidth: 0 }}>
-        {cleanupIssue && <Alert severity="info">{cleanupIssue}</Alert>}
-        {manualPreparationComplete ? (
-          <Stack component="section" aria-label="Prepared settings" spacing={1}
-            sx={{ p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: "5px", bgcolor: "background.paper" }}>
-            <Typography component="h2" variant="subtitle1" fontWeight={700}>Prepared settings</Typography>
-            <Typography variant="body2">Manual scene review: On</Typography>
-            {job.settings_used?.add_watermark && <Typography variant="body2">RecastFX watermark: On · {job.settings_used.watermark_bonus_credits ?? 25} bonus credits after completion</Typography>}
-            <Typography variant="body2">Submit without audio: {job.settings_used?.submit_without_audio ? "On" : "Off"}</Typography>
-            <Typography variant="body2">
-              Enhanced person masking: {(job.settings_used?.enhanced_masking ?? enhancedCharacterMasking) ? "On" : "Off"}
-            </Typography>
-          </Stack>
-        ) : <GenerationOptions hideAudioToggle={hideAudioToggle} disabled={busy} onChange={onOptionsChange} watermarkOffer={watermarkOffer} faceMeshOptions={faceMeshOptions} isAdmin={isAdmin} />}
         {!!targets.length && (
           <Box
             component="section"
@@ -289,12 +334,14 @@ export function ReviewStep({
             </Stack>
           </Box>
         )}
+      </Stack>
+      <Stack spacing={2} sx={{ minWidth: 0 }}>
         <Stack
           component="section"
           aria-label="Generation summary"
-          spacing={2.5}
+          spacing={1.5}
           sx={{
-            p: { xs: 2.5, sm: 3 },
+            p: 2,
             bgcolor: "background.paper",
             border: "1px solid",
             borderColor: "divider",
@@ -303,86 +350,130 @@ export function ReviewStep({
             borderRadius: "5px",
           }}
         >
-          {apiKeyAllowed && <Box>
-            <RadioGroup aria-label="Generation access" value={accessMode}
-              onChange={(_, value) => { if (value === "credits" || value === "api-key") onAccessModeChange?.(value); }}>
-              <FormControlLabel disabled={busy} value="credits" control={<Radio />} label="recastfx credits" />
-              <FormControlLabel disabled={busy} value="api-key" control={<Radio />} label="Use my API key" />
-            </RadioGroup>
-            {accessMode === "api-key" && <Button disabled={busy} onClick={onApiSettings}>{hasKey ? "Edit API key" : "Add API key"}</Button>}
-          </Box>}
-          {accessMode === "credits" ? <>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              Generation cost
-            </Typography>
-            <Typography
-              role="status"
-              aria-label="Generation cost"
-              sx={{
-                mt: 1,
-                fontSize: 52,
-                fontWeight: 750,
-                letterSpacing: "-.045em",
-                lineHeight: 1.1,
-              }}
-            >
-              {generationCredits.toLocaleString()}
-              <Box
-                component="span"
-                sx={{
-                  fontSize: 16,
-                  letterSpacing: 0,
-                  fontWeight: 500,
-                  color: "text.secondary",
+          {apiKeyAllowed && (
+            <Box>
+              <RadioGroup
+                aria-label="Generation access"
+                value={accessMode}
+                onChange={(_, value) => {
+                  if (value === "credits" || value === "api-key")
+                    onAccessModeChange?.(value);
                 }}
               >
-                {" "}
-                credits
-              </Box>
-            </Typography>
-          </Box>
-          <Stack
-            spacing={1.25}
-            sx={{ p: 1.5, bgcolor: "action.hover", borderRadius: "5px" }}
-          >
-            <Stack direction="row" justifyContent="space-between" gap={2}>
-              <Typography variant="body2" color="text.secondary">
-                Your balance
-              </Typography>
-              <Typography variant="body2" fontWeight={650}>
-                {creditBalance === undefined
-                  ? "—"
-                  : creditBalance.toLocaleString()}
-              </Typography>
-            </Stack>
-            {creditBalance !== undefined && (
-              <Stack direction="row" justifyContent="space-between" gap={2}>
-                <Typography variant="body2" color="text.secondary">
-                  {enoughCredits ? "After generation" : "Credits needed"}
-                </Typography>
-                <Typography
-                  component="output"
-                  aria-label={
-                    enoughCredits
-                      ? "Balance after generation"
-                      : "Credits needed"
-                  }
-                  variant="body2"
-                  fontWeight={650}
-                  color={enoughCredits ? "text.primary" : "primary.main"}
-                >
-                  {Math.abs(creditBalance - generationCredits).toLocaleString()}
-                </Typography>
-              </Stack>
-            )}
-          </Stack>
-          {!enoughCredits && (
-            <Button variant="outlined" onClick={onCredits}>
-              Add credits
-            </Button>
+                <FormControlLabel
+                  disabled={busy}
+                  value="credits"
+                  control={<Radio />}
+                  label="recastfx credits"
+                />
+                <FormControlLabel
+                  disabled={busy}
+                  value="api-key"
+                  control={<Radio />}
+                  label="Use my API key"
+                />
+              </RadioGroup>
+              {accessMode === "api-key" && (
+                <Button disabled={busy} onClick={onApiSettings}>
+                  {hasKey ? "Edit API key" : "Add API key"}
+                </Button>
+              )}
+            </Box>
           )}
-          </> : <Typography>Generation uses your {provider} account.</Typography>}
+          {accessMode === "credits" ? (
+            <>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: {
+                    xs: "1fr",
+                    sm: "minmax(0, .8fr) minmax(0, 1.2fr)",
+                  },
+                  gap: 2,
+                  alignItems: "center",
+                }}
+              >
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Generation cost
+                  </Typography>
+                  <Typography
+                    role="status"
+                    aria-label="Generation cost"
+                    sx={{
+                      mt: 1,
+                      fontSize: 34,
+                      fontWeight: 750,
+                      letterSpacing: "-.045em",
+                      lineHeight: 1.1,
+                    }}
+                  >
+                    {generationCredits.toLocaleString()}
+                    <Box
+                      component="span"
+                      sx={{
+                        fontSize: 16,
+                        letterSpacing: 0,
+                        fontWeight: 500,
+                        color: "text.secondary",
+                      }}
+                    >
+                      {" "}
+                      credits
+                    </Box>
+                  </Typography>
+                </Box>
+                <Stack
+                  spacing={1.25}
+                  sx={{ p: 1.5, bgcolor: "action.hover", borderRadius: "5px" }}
+                >
+                  <Stack direction="row" justifyContent="space-between" gap={2}>
+                    <Typography variant="body2" color="text.secondary">
+                      Your balance
+                    </Typography>
+                    <Typography variant="body2" fontWeight={650}>
+                      {creditBalance === undefined
+                        ? "—"
+                        : creditBalance.toLocaleString()}
+                    </Typography>
+                  </Stack>
+                  {creditBalance !== undefined && (
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      gap={2}
+                    >
+                      <Typography variant="body2" color="text.secondary">
+                        {enoughCredits ? "After generation" : "Credits needed"}
+                      </Typography>
+                      <Typography
+                        component="output"
+                        aria-label={
+                          enoughCredits
+                            ? "Balance after generation"
+                            : "Credits needed"
+                        }
+                        variant="body2"
+                        fontWeight={650}
+                        color={enoughCredits ? "text.primary" : "primary.main"}
+                      >
+                        {Math.abs(
+                          creditBalance - generationCredits,
+                        ).toLocaleString()}
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              </Box>
+              {!enoughCredits && (
+                <Button variant="outlined" onClick={onCredits}>
+                  Add credits
+                </Button>
+              )}
+            </>
+          ) : (
+            <Typography>Generation uses your {provider} account.</Typography>
+          )}
           {live && !creditsAvailable && (
             <Alert severity="warning">
               Credit generation is unavailable right now. Your setup is kept
@@ -395,12 +486,90 @@ export function ReviewStep({
             disabled={!canSubmit}
             onClick={onGenerate}
           >
-            {busy ? "Preparing…" : !easyMode && needsPreparation && !trackingReady ? "Prepare and review" : "Generate video"}
+            {busy
+              ? "Preparing…"
+              : !easyMode && needsPreparation && !trackingReady
+                ? "Prepare and review"
+                : "Generate video"}
           </Button>
+          {!canSubmit && !busy && !cleanupIssue && (
+            <Typography role="status" variant="body2" color="text.secondary">
+              {cleanupIssue ||
+                (!enoughCredits
+                  ? accessMode === "api-key"
+                    ? "Add your API key to continue."
+                    : "Add credits to cover this clip."
+                  : !live
+                    ? (unavailableReason ??
+                      "Live generation is unavailable on this address.")
+                    : !creditsAvailable
+                      ? "Generation is paused by the service. Try again shortly."
+                      : !easyMode &&
+                          job?.status === "ready" &&
+                          (!trackingReady || playableGuide !== guideIdentity)
+                        ? "Review the selected person and play the prepared clip to continue."
+                        : "Your current job is still being prepared.")}
+              {!live && (
+                <Box
+                  component="a"
+                  href="https://recastfx.com/"
+                  sx={{ display: "block", color: "primary.main", mt: 0.5 }}
+                >
+                  Open recastfx.com
+                </Box>
+              )}
+            </Typography>
+          )}
           <Typography variant="caption" color="text.secondary">
             Your video will appear in your library.
           </Typography>
         </Stack>
+        {cleanupIssue && <Alert severity="info">{cleanupIssue}</Alert>}
+        {manualPreparationComplete ? (
+          <Stack
+            component="section"
+            aria-label="Prepared settings"
+            spacing={1}
+            sx={{
+              p: 2.5,
+              border: "1px solid",
+              borderColor: "divider",
+              borderRadius: "5px",
+              bgcolor: "background.paper",
+            }}
+          >
+            <Typography component="h2" variant="subtitle1" fontWeight={700}>
+              Prepared settings
+            </Typography>
+            <Typography variant="body2">Manual scene review: On</Typography>
+            {job.settings_used?.add_watermark && (
+              <Typography variant="body2">
+                RecastFX watermark: On ·{" "}
+                {job.settings_used.watermark_bonus_credits ?? 25} bonus credits
+                after completion
+              </Typography>
+            )}
+            <Typography variant="body2">
+              Submit without audio:{" "}
+              {job.settings_used?.submit_without_audio ? "On" : "Off"}
+            </Typography>
+            <Typography variant="body2">
+              Enhanced person masking:{" "}
+              {(job.settings_used?.enhanced_masking ?? enhancedCharacterMasking)
+                ? "On"
+                : "Off"}
+            </Typography>
+          </Stack>
+        ) : (
+          <GenerationOptions
+            hideAudioToggle={hideAudioToggle}
+            disabled={busy}
+            onChange={onOptionsChange}
+            watermarkOffer={watermarkOffer}
+            faceMeshOptions={faceMeshOptions}
+            isAdmin={isAdmin}
+          />
+        )}
       </Stack>
     </Box>
   );

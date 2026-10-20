@@ -130,7 +130,8 @@ async function clickCreate(entry: Entry, user: ReturnType<typeof userEvent.setup
   if (entry === "library") {
     await user.click(screen.getByRole("button", { name: "Library" }));
     await screen.findByRole("heading", { name: "Your library" });
-    await user.click(screen.getByRole("button", { name: "Create a swap" }));
+    expect(screen.queryByRole("button", { name: "Create a swap" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create" }));
   } else {
     await user.click(screen.getByRole("button", { name: "Create" }));
   }

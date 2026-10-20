@@ -369,7 +369,11 @@ def test_watermark_also_works_when_retaining_provider_audio(tmp_path):
         "-f", "lavfi", "-i", "sine=frequency=880:duration=4", "-c:v", "libx264", "-c:a", "aac", str(raw)], check=True)
     finish(raw, raw, output, 4, restore_audio=False, watermark=True)
     pixels = np.frombuffer(subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]), dtype=np.uint8).reshape(240, 320, 3)
-    assert pixels[220:, 240:, 0].max() > 200  # White lettering is in the lower-right corner.
+    badge = pixels[-60:, -100:].astype(np.int16)
+    assert (badge.max(axis=2) < 80).any()  # Black "recast" survives H.264 encoding.
+    assert ((badge[:, :, 0] > 120) & (badge[:, :, 0] > badge[:, :, 1] + 35)
+            & (badge[:, :, 0] > badge[:, :, 2] + 35)).any()  # Red "fx" stays distinct.
+    assert (badge.min(axis=2) > 225).any()  # Light backing protects contrast.
     assert decoded_audio_samples(output) >= 3.95 * 44100
 
 

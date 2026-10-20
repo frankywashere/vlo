@@ -42,12 +42,55 @@ function createSwapMeinTheme(mode: "light" | "dark") {
       MuiButton: {
         defaultProps: { disableElevation: true },
         styleOverrides: {
-          root: { minHeight: 44, borderRadius: 5, paddingInline: 20 },
+          root: {
+            minHeight: 44,
+            borderRadius: 6,
+            padding: "10px 22px",
+            gap: 6,
+            lineHeight: 1.4,
+            transition:
+              "background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease",
+            "&:active": { transform: "translateY(1px)" },
+          },
+          sizeSmall: { minHeight: 36, padding: "8px 14px" },
+          sizeLarge: { minHeight: 48, padding: "12px 26px" },
+          contained: {
+            "@media (hover: hover)": {
+              "&:hover": {
+                boxShadow: dark ? "0 4px 14px #0004" : "0 4px 14px #cc3f3720",
+              },
+            },
+          },
+          outlined: {
+            "@media (hover: hover)": {
+              "&:hover": {
+                borderColor: dark ? "#ff8177" : "#cc3f37",
+                backgroundColor: dark ? "#35272b" : "#fff4f1",
+              },
+            },
+          },
         },
       },
-      MuiIconButton: { styleOverrides: { root: { borderRadius: 5 } } },
+      MuiIconButton: {
+        styleOverrides: {
+          root: {
+            borderRadius: 6,
+            padding: 10,
+            transition: "background-color 160ms ease, transform 160ms ease",
+            "&:active": { transform: "scale(.96)" },
+          },
+        },
+      },
       MuiChip: {
-        styleOverrides: { root: { borderRadius: 5, fontWeight: 600 } },
+        styleOverrides: {
+          root: {
+            borderRadius: 6,
+            fontWeight: 600,
+            minHeight: 34,
+            transition: "background-color 160ms ease, box-shadow 160ms ease",
+          },
+          label: { paddingInline: 13 },
+        },
       },
       MuiDialog: {
         styleOverrides: { paper: { backgroundImage: "none", borderRadius: 8 } },

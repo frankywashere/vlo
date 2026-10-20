@@ -64,11 +64,28 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   localStorage.removeItem("recastfx:appearance");
   globalThis.history.replaceState(null, "", "/");
 });
 
 describe("recastfx workspace", () => {
+  it("uses five mobile destinations and keeps desktop creation links out of the mobile header", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({matches: query.includes("max-width"), media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn()})));
+    const user = userEvent.setup();
+    render(<SwapMeinApp />);
+    const top = screen.getByRole("navigation", {name: "Main navigation"});
+    expect(within(top).queryByRole("button", {name: "Create"})).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", {name: "Mobile navigation"});
+    expect(within(nav).getAllByRole("button").map(button => button.textContent)).toEqual(["Library", "Templates", "Create", "Credits", "Settings"]);
+    await user.click(within(nav).getByRole("button", {name: "Templates"}));
+    expect(screen.getByRole("heading", {name: "Find your next scene."})).toBeVisible();
+    await user.click(within(nav).getByRole("button", {name: "Credits"}));
+    expect(screen.getByRole("tab", {name: "Credits"})).toHaveAttribute("aria-selected", "true");
+    await user.click(within(nav).getByRole("button", {name: "Settings"}));
+    await user.click(screen.getByRole("tab", {name: "Library"}));
+    expect(screen.getByRole("heading", {name: "Your library & data"})).toBeVisible();
+  });
   it("shows only sign-in, registration, and appearance to signed-out visitors", async () => {
     auth.user = null;
     const user = userEvent.setup();
@@ -82,7 +99,7 @@ describe("recastfx workspace", () => {
         ),
     ).toEqual(["Sign in", "Create account", "Switch to dark mode"]);
     expect(
-      screen.getByRole("heading", { name: /Same scene.*New you/ }),
+      screen.getByRole("heading", { name: /Any clip.*Any face/ }),
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText("Before and after character replacement video"),
@@ -94,20 +111,22 @@ describe("recastfx workspace", () => {
     expect(
       screen.queryByRole("button", { name: "Upload your clip" }),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Continue with Google"})).toBeDisabled();
+    await user.click(screen.getByRole("checkbox"));
     await user.click(
       screen.getByRole("button", { name: "Continue with Google" }),
     );
     expect(auth.signIn).toHaveBeenCalledOnce();
   });
 
-  it("opens the library after sign-in and links the logo to the landing page", async () => {
+  it("opens the library after sign-in and keeps it as the signed-in homepage", async () => {
     const user = userEvent.setup();
     render(<SwapMeinApp />);
     expect(
       screen.getByRole("heading", { name: "Your library" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: /Same scene/ }),
+      screen.queryByRole("heading", { name: /Any clip/ }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create" }));
     expect(
@@ -119,7 +138,7 @@ describe("recastfx workspace", () => {
       within(steps).queryByRole("button", { name: "Access" }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "recastfx home" }));
-    expect(screen.getByRole("heading", {name: /Same scene.*New you/})).toBeVisible();
+    expect(screen.getByRole("heading", {name: "Your library"})).toBeVisible();
   });
 
   it("opens Settings as a page from the avatar and keeps a single shared header", async () => {
@@ -146,6 +165,7 @@ describe("recastfx workspace", () => {
     );
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Account",
+      "Library",
       "Credits",
     ]);
     expect(screen.queryByRole("tab", { name: "Generation" })).not.toBeInTheDocument();
@@ -241,11 +261,11 @@ it("opens home from both signed-in and signed-out logos", async () => {
   const mounted = render(<SwapMeinApp />);
   await screen.findByRole("heading", {name: "Your library"});
   await user.click(screen.getByRole("button", {name: "recastfx home"}));
-  expect(new URL(location.href).searchParams.has("page")).toBe(false);
+  expect(new URL(location.href).searchParams.get("page")).toBe("library");
   mounted.unmount();
   auth.user = null;
   render(<SwapMeinApp />);
   await user.click(screen.getByRole("button", {name: "recastfx home"}));
   expect(new URL(location.href).searchParams.has("page")).toBe(false);
-  expect(screen.getByRole("heading", {name: /Same scene.*New you/})).toBeVisible();
+  expect(screen.getByRole("heading", {name: /Any clip.*Any face/})).toBeVisible();
 });

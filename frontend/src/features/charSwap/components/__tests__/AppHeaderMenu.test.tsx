@@ -29,6 +29,22 @@ installMenuContributions((menuId) =>
 afterEach(cleanup);
 
 describe("account menu shared shell contract", () => {
+  it("shows Admin only in the account dropdown", () => {
+    render(
+      <AppHeader
+        signedIn
+        active="library"
+        onHome={() => {}}
+        onCreate={() => {}}
+        onAdmin={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Admin" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(screen.getByRole("menuitem", { name: "Admin" })).toBeInTheDocument();
+  });
   it("runs native and contributed actions through the same menu and closes after either", async () => {
     const native = vi.fn();
     const contributed = vi.fn();

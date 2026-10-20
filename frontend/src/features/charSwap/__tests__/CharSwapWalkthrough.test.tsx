@@ -92,16 +92,17 @@ describe("CharSwap walkthrough", () => {
   });
   it("takes two selected people through assignment and review without submitting a paid job", async () => {
     const user = userEvent.setup();
+    useCharSwapStore.getState().loadClip(sample.clip);
     render(<CharSwapWalkthrough />);
-    expect(
-      screen.getByRole("button", { name: "Select person" }),
-    ).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Try sample clip" }));
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Select person" }),
       ).toBeEnabled(),
     );
+    if (useCharSwapStore.getState().clip?.mode === "upload") {
+      expect(screen.getByRole("button", { name: "Select person" })).toBeDisabled();
+      await user.click(screen.getByRole("checkbox", {name: /I own this clip/}));
+    }
     await user.click(screen.getByRole("button", { name: "Select person" }));
     await user.click(screen.getByRole("button", { name: "Select Person 1" }));
     await user.click(screen.getByRole("button", { name: "Select Person 2" }));
@@ -166,13 +167,17 @@ describe("CharSwap walkthrough", () => {
 
   it("clears dependent choices when a reviewed clip is retrimmed", async () => {
     const user = userEvent.setup();
+    useCharSwapStore.getState().loadClip(sample.clip);
     render(<CharSwapWalkthrough />);
-    await user.click(screen.getByRole("button", { name: "Try sample clip" }));
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Select person" }),
       ).toBeEnabled(),
     );
+    if (useCharSwapStore.getState().clip?.mode === "upload") {
+      expect(screen.getByRole("button", { name: "Select person" })).toBeDisabled();
+      await user.click(screen.getByRole("checkbox", {name: /I own this clip/}));
+    }
     await user.click(screen.getByRole("button", { name: "Select person" }));
     await user.click(screen.getByRole("button", { name: "Select Person 1" }));
     const navigation = screen.getByRole("navigation", {
@@ -234,6 +239,10 @@ describe("CharSwap walkthrough", () => {
     expect(
       screen.getByRole("status", { name: "Credit estimate" }),
     ).toHaveTextContent("65 credits");
+    if (useCharSwapStore.getState().clip?.mode === "upload") {
+      expect(screen.getByRole("button", { name: "Select person" })).toBeDisabled();
+      await user.click(screen.getByRole("checkbox", {name: /I own this clip/}));
+    }
     await user.click(screen.getByRole("button", { name: "Select person" }));
     expect(useCharSwapStore.getState().step).toBe("people");
     expect(
@@ -280,6 +289,27 @@ it("allows a 15-second trim moved to a fractional start to advance",async()=>{
  const s=useCharSwapStore.getState();s.loadClip({...sample.clip,duration:20,mode:"upload"});
  s.changeTrim([1.1,16.1]);render(<CharSwapWalkthrough/>);
  const button=screen.getByRole("button",{name:"Select person"});
+  await userEvent.setup().click(screen.getByRole("checkbox", {name: /I own this clip/}));
  expect(button).toBeEnabled();await userEvent.setup().click(button);
  expect(useCharSwapStore.getState().step).toBe("people");
+});
+
+
+it("requires permission after upload before button or progress navigation to people", async () => {
+  const user = userEvent.setup();
+  useCharSwapStore.getState().loadClip({...sample.clip, mode: "upload"});
+  render(<CharSwapWalkthrough />);
+  const next = screen.getByRole("button", {name: "Select person"});
+  const progress = screen.getByRole("navigation", {name: "Replacement steps"});
+  expect(next).toBeDisabled();
+  expect(within(progress).getByRole("button", {name: "People"})).toBeDisabled();
+  await user.click(screen.getByRole("checkbox", {name: /I own this clip/}));
+  expect(next).toBeEnabled();
+  await user.click(next);
+  expect(useCharSwapStore.getState().step).toBe("people");
+  await user.click(screen.getByRole("button", {name: "Back"}));
+  expect(screen.getByRole("checkbox", {name: /I own this clip/})).toBeChecked();
+  await user.click(screen.getByRole("button", {name: "Change clip"}));
+  expect(screen.getByRole("button", {name: "Upload your clip"})).toBeEnabled();
+  expect(screen.getByRole("button", {name: "Select person"})).toBeDisabled();
 });

@@ -11,11 +11,12 @@ import warnings
 import zipfile
 
 import numpy as np
-from PIL import Image, ImageOps, ImageDraw, ImageFont
+from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .errors import PublicError
 from .diagnostics import timed
+from .watermark_artwork import create_watermark
 
 
 @timed("detect_scene_cuts")
@@ -421,17 +422,12 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
     filter_options = ["-vf", video_filter]
     video_map = "0:v:0"
     if watermark:
-        # Rasterized locally with Pillow's bundled font; no OS font or GPU dependency.
-        font = ImageFont.load_default(size=max(10, round(width / 55)))
-        box = font.getbbox("RecastFX")
-        pad = max(4, round(width / 200))
-        badge = Image.new("RGBA", (box[2] - box[0] + pad * 2, box[3] - box[1] + pad * 2), (0, 0, 0, 130))
-        ImageDraw.Draw(badge).text((pad - box[0], pad - box[1]), "RecastFX", font=font, fill=(255, 255, 255, 245))
+        badge, margin = create_watermark(width, height)
         watermark_path = output.with_suffix(".watermark.png")
         badge.save(watermark_path)
         watermark_input = ["-i", str(watermark_path)]
         overlay_index = 2 if restore_audio else 1
-        filter_options = ["-filter_complex", f"[0:v]{video_filter}[base];[base][{overlay_index}:v]overlay=W-w-{pad}:H-h-{pad}:format=auto[watermarked]"]
+        filter_options = ["-filter_complex", f"[0:v]{video_filter}[base];[base][{overlay_index}:v]overlay=W-w-{margin}:H-h-{margin}:format=auto[watermarked]"]
         video_map = "[watermarked]"
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(raw),
          *soundtrack_input, *watermark_input,

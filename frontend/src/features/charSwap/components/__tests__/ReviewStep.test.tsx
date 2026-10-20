@@ -44,7 +44,7 @@ describe("truthful preparation status at final review", () => {
   it("does not claim tracking completed before an Easy-mode job has been submitted", () => {
     expect(useCharSwapStore.getState().trackingReady).toBe(false);
     render(<ReviewStep {...properties()} />);
-    expect(screen.getByText(/Automatic preparation after submission/)).toBeInTheDocument();
+    expect(screen.queryByText(/Automatic preparation after submission/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Tracking checks completed|Tracking guide prepared/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Easy mode: automatic tracking, no scene matching/)).not.toBeInTheDocument();
   });

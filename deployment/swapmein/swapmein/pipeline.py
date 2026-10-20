@@ -18,8 +18,10 @@ from .storage import Records, claim_job, release_preparation
 from .tracking import analyze_tracking, analyze_multi_tracking, merge_all_people_masks
 from .tracking_preview import create_selection_preview
 from .accounts import archive_completed, LIBRARY_SECONDS
+from .notifications import deliver_ready_notification
 from .cleanup import cleanup_completed_media
 from .watermark import award_watermark_bonus
+from .comparison import preserve_library_comparison
 from .replicate_preparation import ReplicatePreparation
 
 
@@ -579,10 +581,15 @@ class Pipeline:
             archive_completed(self.records, job)
             award_watermark_bonus(self.records, job)
             emit("account_library_saved", job_id=job["id"])
+            deliver_ready_notification(self.records, job)
         except Exception as error:
             emit("account_library_save_pending", error=error, job_id=job["id"])
             raise
         try:
+            companions = preserve_library_comparison(self.settings, self.cloud, job)
+            if companions:
+                job = self.update_job(job["id"], **companions)
+                archive_completed(self.records, job)
             cleanup_completed_media(self.settings, self.records, self.cloud, job["id"])
         except Exception as error:
             emit("account_library_cleanup_retry", error=error, job_id=job["id"])

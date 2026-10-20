@@ -43,9 +43,12 @@ from .job_key import protect_key, recover_key
 from .provider_credentials import server_provider_key, save_server_provider_key
 from .preparation_credentials import save_server_replicate_key
 from .replicate_preparation import preparation_snapshot
+from .notifications import push_config, save_subscription
+from .template_api import router as template_router, MAX_TEMPLATE_BYTES, authorize as authorize_templates
 
 settings = Settings.from_env()
 app = FastAPI(title="recastfx character replacement", docs_url=None, redoc_url=None, openapi_url=None)
+app.include_router(template_router)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins),
     allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key", "X-Firebase-Token"], max_age=600)
 
@@ -59,7 +62,8 @@ class BodyLimitMiddleware:
             return await self.application(scope, receive, send)
         total = 0
         path = scope.get("path", "")
-        maximum = (31 * 1024 * 1024 if path == "/api/jobs" else
+        maximum = (MAX_TEMPLATE_BYTES + 16384 if path == "/api/commerce/admin/templates" else
+                   31 * 1024 * 1024 if path == "/api/jobs" else
                    100 * 1024 if path == "/api/commerce/stripe-webhook" else
                    128 * 1024 if path.endswith("/tracking-review") else 8192)
         async def bounded_receive():
@@ -80,9 +84,15 @@ async def protect_requests(request: Request, call_next):
     origin = request.headers.get("origin")
     if request.url.path.startswith("/api/") and origin and origin not in settings.allowed_origins:
         return JSONResponse({"message": "Unexpected website origin."}, status_code=403)
+    if request.method == "POST" and request.url.path == "/api/commerce/admin/templates":
+        try:
+            request.state.template_actor = await run_in_threadpool(authorize_templates, request.headers.get("x-firebase-token"), write=True)
+        except PublicError as error:
+            return JSONResponse({"message": error.message}, status_code=error.status_code, headers={"Cache-Control": "no-store"})
     length = request.headers.get("content-length")
     try:
-        if length and int(length) > 31 * 1024 * 1024:
+        maximum = MAX_TEMPLATE_BYTES + 16384 if request.url.path == "/api/commerce/admin/templates" else 31 * 1024 * 1024
+        if length and int(length) > maximum:
             return JSONResponse({"message": "Upload exceeds the beta size limit."}, status_code=413)
     except ValueError:
         return JSONResponse({"message": "Invalid request length."}, status_code=400)
@@ -254,9 +264,11 @@ def view(job: dict, *, review_thumbnails: bool = True):
             if thumbnail and review_thumbnails:
                 public_target["thumbnail_url"] = cloud.signed_url(thumbnail)
             result["selection_targets"].append(public_target)
-    reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
+    library_media_available = job.get("status") == "completed" and (job.get("library_expires_at") or 0) > time.time()
+    saved_references = job.get("library_reference_uris") if library_media_available else []
+    reference_uris = saved_references or job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
     temporary_media_available = not job.get("temporary_media_cleanup_started_at")
-    if reference_uris and temporary_media_available:
+    if reference_uris and (saved_references or temporary_media_available):
         result["reference_urls"] = [cloud.signed_url(uri) for uri in reference_uris]
         result["reference_url"] = result["reference_urls"][0]
     if "duration" in job:
@@ -307,6 +319,10 @@ def view(job: dict, *, review_thumbnails: bool = True):
                 result["tracking_error_segment_id"] = segment_id
     if job.get("normalized_uri") and temporary_media_available:
         result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
+    if library_media_available:
+        for field, public in [("library_source_uri", "source_preview_url"), ("comparison_uri", "comparison_url")]:
+            if job.get(field):
+                result[public] = cloud.signed_url(job[field])
     if credits_mode and job.get("app_credits_charged") is not None:
         result["app_credits_charged"] = job["app_credits_charged"]
     if not credits_mode and job.get("actual_credits") is not None:
@@ -495,7 +511,7 @@ class StaffUpdate(BaseModel):
     email: str
     role: Literal["pricing_admin", "viewer"]
     active: bool
-    permissions: list[Literal["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"]] | None = Field(default=None, max_length=7)
+    permissions: list[Literal["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access", "manage_templates"]] | None = Field(default=None, max_length=8)
 
 
 class ApiKeyAccessUpdate(BaseModel):
@@ -509,6 +525,31 @@ def valid_account_email(value: str) -> str:
     if len(email) > 254 or not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.-]+\.[a-z]{2,}", email):
         raise PublicError("Enter a valid account email.")
     return email
+
+
+class NotificationSubscription(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subscription: dict | None = None
+    remove_endpoint: str | None = Field(default=None, max_length=2048)
+
+    @model_validator(mode="after")
+    def one_operation(self):
+        if (self.subscription is None) == (self.remove_endpoint is None):
+            raise ValueError("Choose one subscription operation.")
+        return self
+
+
+@app.get("/api/account/notifications")
+def notification_configuration(x_firebase_token: str | None = Header(default=None)):
+    verify_account(x_firebase_token, settings.project)
+    return push_config()
+
+
+@app.post("/api/account/notifications")
+def update_notification_subscription(body: NotificationSubscription, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return save_subscription(records, account["account_id"], body.subscription, body.remove_endpoint)
 
 
 @app.get("/api/account/access")
@@ -1265,6 +1306,15 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
                               message="Your saved video is ready.")
                 if item.get("thumbnail_uri"):
                     public["thumbnail_url"] = cloud.signed_url(item["thumbnail_uri"])
+                for field, key in [("library_source_uri", "source_preview_url"), ("comparison_uri", "comparison_url")]:
+                    if item.get(field):
+                        public[key] = cloud.signed_url(item[field])
+                if item.get("library_reference_uris"):
+                    public["reference_urls"] = [cloud.signed_url(uri) for uri in item["library_reference_uris"]]
+                    public["reference_url"] = public["reference_urls"][0]
+                for field in ("duration", "width", "height"):
+                    if item.get(field) is not None:
+                        public[field] = item[field]
             elif item.get("status") == "completed":
                 public.update(status="expired", message="The 30-day video retention period has ended.")
             else:

@@ -67,7 +67,7 @@ def archive_completed(records, job: dict):
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),
         "selection_targets": job.get("normalized_targets") or job.get("setup", {}).get("targets"),
         "review_wait_seconds": job.get("review_wait_seconds", 0),
-        **{key: job[key] for key in ("provider_task", "provider_billing", "app_credits_charged", "generation_credits", "audio_processing") if key in job},
+        **{key: job[key] for key in ("provider_task", "provider_billing", "app_credits_charged", "generation_credits", "audio_processing", "library_source_uri", "library_reference_uris", "comparison_uri") if key in job},
     })
 
 

@@ -1,5 +1,6 @@
 """Explicit person-to-reference tracks; no identity inference across cuts."""
 from io import BytesIO
+from contextlib import ExitStack
 from pathlib import Path
 import re
 import tempfile
@@ -133,7 +134,8 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
     temporary = output.with_name(output.name + ".partial")
     assignments, coverage, previews = [], [], []
     try:
-        with tempfile.TemporaryDirectory() as directory:
+        # Windows requires archive handles closed before the directory is removed.
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as archives:
             for index, target in enumerate(expected["targets"]):
                 prefix = f"t{index}-"
                 local = [{**choice, "segment_id": choice["segment_id"][len(prefix):]}
@@ -151,7 +153,7 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
                 assignments.extend({**item, "segment_id": prefix + item["segment_id"],
                                     "target_id": target["id"], "reference_index": target["reference_index"]}
                                    for item in result["assignments"])
-                previews.append(zipfile.ZipFile(selected))
+                previews.append(archives.enter_context(zipfile.ZipFile(selected)))
             with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as destination:
                 for frame in range(frames):
                     name = f"labels/labels_{frame:05d}.png"
@@ -197,6 +199,4 @@ def resolve(archive: Path, metadata: dict, plan: dict, choices: list[dict], outp
         temporary.replace(output)
         return {"coverage": coverage, "assignments": assignments}
     finally:
-        for archive_handle in previews:
-            archive_handle.close()
         temporary.unlink(missing_ok=True)

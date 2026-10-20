@@ -58,11 +58,11 @@ export function LandingPage({ onStart }: LandingPageProps) {
             }}
           >
             <Box component="span" sx={{ whiteSpace: "nowrap" }}>
-              Same scene.
+              Any clip.
             </Box>
             <br />
             <Box component="span" sx={{ color: "primary.main" }}>
-              New you.
+              Any face.
             </Box>
           </Typography>
           <Typography
