@@ -12,14 +12,16 @@ CURRENT = "current"
 FAVORITE_V2 = "favorite_v2"
 STRUCTURED_V1 = "structured_v1"
 PROMPT_VARIANTS = (CURRENT, FAVORITE_V2, STRUCTURED_V1)
-DEFAULT_PROMPT_VARIANT = CURRENT
+DEFAULT_PROMPT_VARIANT = STRUCTURED_V1
 MAX_PROMPT_LENGTH = 7000
 SAME_CAMERA_SENTENCE = "All replacement performers should look as though they were filmed in the original scene with the same camera."
 
 
 def normalize_prompt_variant(value):
     if value is None:
-        return DEFAULT_PROMPT_VARIANT
+        # Legacy jobs may have no stored version. New uploads snapshot the
+        # global default explicitly, so changing it must not rewrite old jobs.
+        return CURRENT
     if not isinstance(value, str) or value not in PROMPT_VARIANTS:
         raise PublicError("Choose a valid generation prompt version.", code="prompt_variant_invalid")
     return value

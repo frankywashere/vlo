@@ -47,6 +47,11 @@ def test_variant_names_are_explicit_and_unknown_values_are_rejected(variant):
         assert error.value.code == "prompt_variant_invalid"
 
 
+def test_null_legacy_provider_variant_stays_current_when_global_default_changes():
+    assert normalize_prompt_variant(None) == CURRENT
+    assert generation_payload(5, "ref", "video", prompt_variant=None) == generation_payload(5, "ref", "video", prompt_variant=CURRENT)
+
+
 @pytest.mark.parametrize("style", ["none", "cyan_overlay_20", "depth", "gray", "depth_multi", "solid_multi"])
 @pytest.mark.parametrize("mesh", [False, True])
 @pytest.mark.parametrize("processed,silent", [(False, False), (True, False), (True, True)])

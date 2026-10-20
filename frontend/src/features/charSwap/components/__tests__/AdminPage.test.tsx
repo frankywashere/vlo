@@ -356,10 +356,10 @@ it("exposes the face-mesh master separately from public switch visibility",async
   expect(master).not.toBeChecked();
 });
 
-it("defaults to current prompts and saves each alternate version without changing other settings", async () => {
+it("defaults to the newest prompt and saves each alternate version without changing other settings", async () => {
   api.pipelineSettings = {revision: 7, audio_processing: false, depth_guidance: true, face_mesh_enabled: false};
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Current prompts"})).toBeChecked();
+  expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked();
   await userEvent.clear(screen.getByLabelText("Pack name"));
   await userEvent.type(screen.getByLabelText("Pack name"), "Unsaved pack name");
   await userEvent.click(screen.getByRole("radio", {name: "Favorite prompt across modes"}));

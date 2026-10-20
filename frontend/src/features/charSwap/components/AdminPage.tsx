@@ -108,7 +108,7 @@ export function AdminPage() {
         <AdminSection title="Experimental"><Stack spacing={2}>
           <FormControl disabled={busy || !can("pipeline_settings")}>
             <FormLabel id="prompt-variant-label">Generation prompts</FormLabel>
-            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "current"} onChange={(event) => {
+            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "structured_v1"} onChange={(event) => {
               const variant = event.target.value;
               if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1") || !can("pipeline_settings")) return;
               void run(async () => {

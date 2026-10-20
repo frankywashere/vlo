@@ -999,7 +999,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
-               "prompt_variant": manifest.get("prompt_variant", "current"),
+               "prompt_variant": manifest.get("prompt_variant") or "current",
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
@@ -1469,7 +1469,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
         job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
         replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio, face_mesh=job.get("face_mesh", False),
-        prompt_variant=job.get("prompt_variant", "current"))
+        prompt_variant=job.get("prompt_variant") or "current")
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)
@@ -1490,7 +1490,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
             return view(current)
         raise
     emit("generation_prompt_selected", job_id=job_id,
-         prompt_variant=job.get("prompt_variant", "current"), prompt_characters=len(payload["prompt"]),
+         prompt_variant=job.get("prompt_variant") or "current", prompt_characters=len(payload["prompt"]),
          mask_style=job.get("mask_style", "none"), face_mesh=job.get("face_mesh", False),
          tracking_reviewed=job.get("tracking_reviewed", False))
     if credits_mode:

@@ -16,7 +16,7 @@ from test_staff_permissions import setup_staff
 @pytest.mark.parametrize("permissions", [[], ["provider_key"], ["pipeline_settings"]])
 def test_prompt_selector_requires_pipeline_permission(api, monkeypatch, permissions):
     client, records = setup_staff(api, monkeypatch, permissions)
-    assert pipeline_settings(records)["prompt_variant"] == "current"
+    assert pipeline_settings(records)["prompt_variant"] == "structured_v1"
     response = client.post("/api/commerce/admin/pipeline", json={"revision": 0, "prompt_variant": "structured_v1"})
     assert response.status_code == (200 if "pipeline_settings" in permissions else 403)
 
@@ -40,12 +40,13 @@ def test_prompt_selector_validates_revision_and_preserves_other_settings(api, mo
     assert client.get("/api/commerce/admin").json()["pipeline"]["prompt_variant"] == "favorite_v2"
 
 
-@pytest.mark.parametrize("variant", PROMPT_VARIANTS)
+@pytest.mark.parametrize("variant", [None, *PROMPT_VARIANTS])
 @pytest.mark.parametrize("direct", [False, True])
 def test_both_upload_paths_pin_prompt_and_keep_it_when_defaults_change(api, variant, direct):
     client, records, *_ = api
     headers, _ = authenticated(api)
-    records.data[PATH] = {"revision": 1, "prompt_variant": variant}
+    if variant:
+        records.data[PATH] = {"revision": 1, "prompt_variant": variant}
     if direct:
         ticket = client.post("/api/uploads", headers=headers, json=upload_options()).json()
         # The job captures the version at ticket creation, even if upload is slow.
@@ -61,24 +62,27 @@ def test_both_upload_paths_pin_prompt_and_keep_it_when_defaults_change(api, vari
     assert response.status_code == 202, response.text
     job_id = response.json()["id"]
     records.data[PATH] = {"revision": 3, "prompt_variant": "structured_v1"}
-    assert records.data[f"jobs/{job_id}.json"]["prompt_variant"] == variant
-    assert client.get(f"/api/jobs/{job_id}", headers=headers).json()["settings_used"]["prompt_variant"] == variant
+    assert records.data[f"jobs/{job_id}.json"]["prompt_variant"] == (variant or "structured_v1")
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).json()["settings_used"]["prompt_variant"] == (variant or "structured_v1")
 
 
-def test_old_upload_ticket_stays_on_current_after_admin_switch(api):
+@pytest.mark.parametrize("null_version", [False, True])
+def test_old_upload_ticket_stays_on_current_after_admin_switch(api, null_version):
     client, records, *_ = api
     headers, _ = authenticated(api)
     ticket = client.post("/api/uploads", headers=headers, json=upload_options()).json()
     manifests = [data for data in records.data.values() if data.get("id") == ticket["id"] and "source_bytes" in data]
     assert len(manifests) == 1
     manifests[0].pop("prompt_variant")
+    if null_version:
+        manifests[0]["prompt_variant"] = None
     records.data[PATH] = {"revision": 1, "prompt_variant": "structured_v1"}
     response = client.post(f"/api/uploads/{ticket['id']}/complete", headers=headers)
     assert response.status_code == 202, response.text
     assert records.data[f"jobs/{ticket['id']}.json"]["prompt_variant"] == "current"
 
 
-@pytest.mark.parametrize("variant", [None, *PROMPT_VARIANTS])
+@pytest.mark.parametrize("variant", [None, "null", *PROMPT_VARIANTS])
 @pytest.mark.parametrize("provider_name", ["reAPI", "ToAPIs"])
 def test_generation_uses_saved_prompt_and_logs_safe_version_metadata(api, capsys, monkeypatch, variant, provider_name):
     client, records, _, provider = api
@@ -87,7 +91,9 @@ def test_generation_uses_saved_prompt_and_logs_safe_version_metadata(api, capsys
     job = records.data[f"jobs/{job_id}.json"]
     job["provider"] = provider_name
     monkeypatch.setattr(gateway, "selected_provider", lambda name: provider)
-    if variant:
+    if variant == "null":
+        job["prompt_variant"] = None
+    elif variant:
         job["prompt_variant"] = variant
     records.data[PATH] = {"revision": 9, "prompt_variant": "structured_v1" if variant != "structured_v1" else "current"}
     response = client.post(f"/api/jobs/{job_id}/generate", headers=headers, json={"approved": True})
@@ -96,7 +102,7 @@ def test_generation_uses_saved_prompt_and_logs_safe_version_metadata(api, capsys
     assert ("subject_definitions" in prompt) is (variant == "structured_v1")
     logs = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
     event = next(event for event in logs if event.get("event") == "generation_prompt_selected")
-    assert event["prompt_variant"] == (variant or "current")
+    assert event["prompt_variant"] == (variant if variant and variant != "null" else "current")
     assert event["prompt_characters"] == len(prompt)
     assert not {"prompt", "key", "reference_urls", "video_url"} & event.keys()
 
@@ -142,7 +148,7 @@ def test_durable_settings_validate_prompt_version_and_preserve_archived_version(
     assert settings_used({"settings_used": {"prompt_variant": {"not": "a version"}}}) == {}
 
 
-def test_invalid_stored_global_mode_falls_back_to_current(api):
+def test_invalid_stored_global_mode_falls_back_to_newest(api):
     _, records, *_ = api
     records.data[PATH] = {"prompt_variant": "untrusted"}
-    assert pipeline_settings(records)["prompt_variant"] == "current"
+    assert pipeline_settings(records)["prompt_variant"] == "structured_v1"
