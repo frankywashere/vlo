@@ -427,3 +427,27 @@ def test_transparent_reference_rotates_and_removes_metadata(tmp_path):
         assert not result.getexif()
         assert result.getpixel((150,150))[3]==128
     assert b"private-metadata" not in output.read_bytes()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for audio repair")
+def test_normalize_repairs_early_audio_end_without_changing_trim_or_video(tmp_path, monkeypatch):
+    import swapmein.media as media
+    source, output = tmp_path / "source.mp4", tmp_path / "normalized.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=blue:s=160x120:r=24:d=6", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=6", "-c:v", "libx264", "-c:a", "aac", str(source)], check=True)
+    real_probe = media.probe
+    def early_audio(path):
+        result = real_probe(path)
+        if path == output:
+            for stream in result["streams"]:
+                if stream["codec_type"] == "audio":
+                    stream["duration"] = "3.930431"
+        return result
+    monkeypatch.setattr(media, "probe", early_audio)
+    metadata = normalize(source, output, options(trim=[1, 5], anchor={"x": .5, "y": .5, "time": 2}))
+    checked = real_probe(output)
+    assert metadata["duration"] == 4
+    assert next(s for s in checked["streams"] if s["codec_type"] == "video")["nb_frames"] == "96"
+    assert float(next(s for s in checked["streams"] if s["codec_type"] == "audio")["duration"]) == pytest.approx(4, abs=.01)
+    assert decoded_audio_samples(output) >= 4 * 44100
