@@ -224,3 +224,14 @@ it("requests point recovery and subsequent generation explicitly, with a key onl
     recover_missing_masks: true, generate_after_review: true});
   expect(requests.mock.calls[0][1]?.headers).toMatchObject({"X-Reapi-Key": "private-test-key"});
 });
+
+it.each(["current", "favorite_v2", "structured_v1"])("retains the saved %s prompt version", async (prompt_variant) => {
+  requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "completed", settings_used: {prompt_variant}})));
+  expect((await getLiveJob("job-1", "session", new AbortController().signal)).settings_used?.prompt_variant).toBe(prompt_variant);
+});
+
+it.each([undefined, null, "unknown", {}, []])("omits an unknown or unsaved prompt version (%j)", async (prompt_variant) => {
+  requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "completed", settings_used: {prompt_variant, easy_mode: true}})));
+  const settings = (await getLiveJob("job-1", "session", new AbortController().signal)).settings_used;
+  expect(settings).toEqual({easy_mode: true});
+});

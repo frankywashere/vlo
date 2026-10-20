@@ -9,6 +9,12 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
   if (creditsReturned) rows.push(["Credits refunded", creditsReturned.toLocaleString()]);
   const seconds = (value: number) => `${Number(value.toFixed(2))}s`;
   if (settings) {
+    const promptLabels = {
+      current: "Current prompts",
+      favorite_v2: "Favorite prompt across modes",
+      structured_v1: "Structured prompt with same-camera guidance",
+    };
+    if (settings.prompt_variant) rows.push(["Generation prompts", promptLabels[settings.prompt_variant]]);
     if (settings.trim?.length === 2) rows.push(["Source section", `${seconds(settings.trim[0])}–${seconds(settings.trim[1])}`]);
     if (settings.duration !== undefined) rows.push(["Clip length", seconds(settings.duration)]);
     if (settings.depth_guidance && settings.depth_overlay_opacity !== undefined)

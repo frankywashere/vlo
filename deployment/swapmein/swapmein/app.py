@@ -570,6 +570,7 @@ class PipelineSettingsUpdate(BaseModel):
     hide_audio_toggle: bool | None = None
     multi_characters: bool | None = None
     face_mesh_enabled: bool | None = None
+    prompt_variant: Literal["current", "favorite_v2", "structured_v1"] | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
@@ -578,7 +579,7 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
     records, _, _ = services()
     return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
-                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled)
+                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant)
 
 
 @app.post("/api/commerce/admin/features")
@@ -794,6 +795,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "source_uri": source_uri, "reference_uri": reference_uri, "reference_uris": [reference_uri],
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
+               "prompt_variant": defaults["prompt_variant"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
@@ -911,6 +913,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "raw_reference_uri": reference_uris[0], "raw_reference_uris": reference_uris,
         "source_bytes": options.source_bytes, "reference_bytes": options.reference_bytes,
         "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
+        "prompt_variant": pipeline_settings(records)["prompt_variant"],
         **watermark_offer,
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
@@ -996,6 +999,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
+               "prompt_variant": manifest.get("prompt_variant", "current"),
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
@@ -1464,7 +1468,8 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         raise PublicError("This clip's person assignments have changed. Prepare it again before generating.", 409)
     payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
         job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
-        replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio, face_mesh=job.get("face_mesh", False))
+        replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio, face_mesh=job.get("face_mesh", False),
+        prompt_variant=job.get("prompt_variant", "current"))
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)
@@ -1484,6 +1489,10 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
             current, _ = records.read(f"jobs/{job_id}.json")
             return view(current)
         raise
+    emit("generation_prompt_selected", job_id=job_id,
+         prompt_variant=job.get("prompt_variant", "current"), prompt_characters=len(payload["prompt"]),
+         mask_style=job.get("mask_style", "none"), face_mesh=job.get("face_mesh", False),
+         tracking_reviewed=job.get("tracking_reviewed", False))
     if credits_mode:
         debited = False
         try:
