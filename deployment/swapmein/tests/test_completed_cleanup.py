@@ -178,3 +178,50 @@ def test_poster_retry_reads_saved_final_and_never_calls_provider(prepared, monke
     assert saved["thumbnail_uri"].endswith(".jpg")
     pipeline.ensure_library_poster(saved)
     assert downloads == [OUTPUT]
+
+
+def test_before_is_archived_before_cleanup_and_survives_repeated_delivery(prepared):
+    records, storage, cloud, _ = prepared
+    source = f"gs://app/uploads/{JOB}/source.bin"
+    records.data[f"jobs/{JOB}.json"].update(normalized_uri=source, library_expires_at=2592200)
+    copied = []
+    def copy_before(uri, bucket, key):
+        assert uri == source and ("app", f"uploads/{JOB}/source.bin") in storage.objects
+        copied.append(key)
+        storage.add(bucket, key)
+    cloud.copy = copy_before
+    pipeline = Pipeline(SETTINGS, records, cloud)
+    pipeline.finalize(JOB)
+    before = f"library/{ACCOUNT}/{JOB}/before.mp4"
+    assert ("app", before) in storage.objects
+    assert ("app", f"uploads/{JOB}/source.bin") not in storage.objects
+    saved = records.data[index_path(ACCOUNT, JOB)]
+    assert saved["before_uri"] == "gs://app/" + before
+    assert saved["expires_at"] == 2592200
+    pipeline.finalize(JOB)
+    assert copied == [before]
+
+
+def test_before_copy_failure_preserves_scratch_for_delivery_retry(prepared):
+    records, storage, cloud, _ = prepared
+    records.data[f"jobs/{JOB}.json"]["normalized_uri"] = f"gs://app/uploads/{JOB}/source.bin"
+    def unavailable(*_):
+        raise RuntimeError("copy unavailable")
+    cloud.copy = unavailable
+    with pytest.raises(RuntimeError):
+        Pipeline(SETTINGS, records, cloud).finalize(JOB)
+    assert not storage.deleted
+    assert not records.data[f"jobs/{JOB}.json"].get("temporary_media_cleanup_started_at")
+
+
+def test_before_copy_retry_accepts_existing_verified_object(prepared):
+    records, storage, cloud, _ = prepared
+    records.data[f"jobs/{JOB}.json"]["normalized_uri"] = f"gs://app/uploads/{JOB}/source.bin"
+    before = f"library/{ACCOUNT}/{JOB}/before.mp4"
+    storage.add("app", before)
+    def already_copied(*_):
+        raise PreconditionFailed("already exists")
+    cloud.copy = already_copied
+    Pipeline(SETTINGS, records, cloud).finalize(JOB)
+    assert records.data[index_path(ACCOUNT, JOB)]["before_uri"] == "gs://app/" + before
+    assert ("app", before) in storage.objects

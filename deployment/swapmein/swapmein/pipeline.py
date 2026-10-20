@@ -5,6 +5,8 @@ import tempfile
 import time
 import uuid
 
+from google.api_core.exceptions import PreconditionFailed
+
 from .cloud import Cloud
 from .config import Settings
 from .guide_style import guide_style, compose_styles
@@ -574,11 +576,32 @@ class Pipeline:
             emit("library_poster_saved", job_id=job["id"])
             return updated
 
+    @timed("library_before", job_arg="job")
+    def ensure_library_before(self, job):
+        if (not job.get("account_id") or job.get("before_uri") or not job.get("normalized_uri")
+                or job.get("temporary_media_cleanup_started_at")):
+            return job
+        # A deterministic key makes retries safe if copying succeeds before the
+        # job record is updated. Keep the original RGB and unchanged soundtrack.
+        key = f"library/{job['account_id']}/{job['id']}/before.mp4"
+        try:
+            self.cloud.copy(job["normalized_uri"], self.settings.app_bucket, key)
+        except PreconditionFailed:
+            pass
+        blob = self.cloud.blob(self.settings.app_bucket, key)
+        blob.reload(timeout=20, retry=None)
+        if not blob.size or not blob.generation:
+            raise PublicError("The original video could not be saved to your Library.", 503)
+        updated = self.update_job(job["id"], before_uri=f"gs://{self.settings.app_bucket}/{key}")
+        emit("library_before_saved", job_id=job["id"], retention_days=30)
+        return updated
+
     @timed("library_delivery", job_arg="job")
     def complete_library_delivery(self, job):
         # Errors here deliberately propagate to the existing Cloud Tasks retry.
         # The exported video remains completed: no regeneration or export repeats.
         try:
+            job = self.ensure_library_before(job)
             job = self.ensure_library_poster(job)
             archive_completed(self.records, job)
             award_watermark_bonus(self.records, job)

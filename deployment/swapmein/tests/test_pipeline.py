@@ -14,6 +14,7 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     # This test isolates export/re-export. Cleanup safety is covered separately.
     monkeypatch.setattr("swapmein.pipeline.cleanup_completed_media", lambda *_: None)
     monkeypatch.setattr(Pipeline, "ensure_library_poster", lambda self, job, source=None: job)
+    monkeypatch.setattr(Pipeline, "ensure_library_before", lambda self, job: job)
     job_id = "a" * 32
     path = f"jobs/{job_id}.json"
     class Records:
