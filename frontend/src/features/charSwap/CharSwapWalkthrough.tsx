@@ -42,6 +42,7 @@ import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
 import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
 import { loadAccountAccess } from "./services/commerce";
 import { MAX_SOURCE_BYTES } from "./limits";
+import { isLocalPreviewMode } from "./services/localPreview";
 import { ReferenceCleanupProvider } from "./components/ReferenceCleanupProvider";
 import { ReferenceCleanupWait } from "./components/ReferenceCleanupWait";
 import { CreationProgress } from "./components/CreationProgress";
@@ -396,6 +397,11 @@ export function CharSwapWalkthrough({
     if (step === "matches") { visit("review"); return; }
     next();
   }
+  async function loadSampleClip() {
+    const sample = await loadDemo();
+    setDemo(sample);
+    useCharSwapStore.getState().loadClip(sample.clip);
+  }
   async function generate() {
     if (locked || !fundingReady()) return;
     if (!live) {
@@ -560,6 +566,8 @@ export function CharSwapWalkthrough({
             {clipStep && (
               <ClipStep
                 demo={demo}
+                previewMode={isLocalPreviewMode}
+                onLoadSample={() => void loadSampleClip()}
                 estimatedCredits={trimCredits}
                 creditBalance={balance}
                 busy={Boolean(busy || !entryFunded)}

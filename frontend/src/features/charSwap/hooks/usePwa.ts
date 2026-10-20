@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { accountToken } from "../services/accountContext";
+import { isLocalPreviewMode } from "../services/localPreview";
 
 interface InstallPrompt extends Event {
   prompt: () => Promise<void>;
@@ -19,6 +20,7 @@ export const usePwaStore = create<PwaState>(() => ({
 
 export function usePwaSetup() {
   useEffect(() => {
+    if (isLocalPreviewMode) return;
     const install = (event: Event) => {
       event.preventDefault();
       usePwaStore.setState({ prompt: event as InstallPrompt });

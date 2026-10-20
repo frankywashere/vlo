@@ -16,6 +16,8 @@ import { TrimStep } from "./TrimStep";
 
 interface ClipStepProps {
   demo: DemoManifest | null;
+  previewMode?: boolean;
+  onLoadSample?: () => void;
   estimatedCredits?: number;
   creditBalance?: number;
   busy: boolean;
@@ -24,6 +26,8 @@ interface ClipStepProps {
 
 export function ClipStep({
   demo,
+  previewMode = false,
+  onLoadSample,
   busy,
   onImport,
   estimatedCredits,
@@ -160,6 +164,11 @@ export function ClipStep({
             >
               {locked ? "Opening clip…" : "Upload your clip"}
             </Button>
+            {previewMode && onLoadSample && (
+              <Button variant="text" disabled={locked} onClick={onLoadSample}>
+                Use sample clip
+              </Button>
+            )}
             <Typography variant="caption" color="text.secondary">
               MP4, MOV or WebM · up to 100 MiB
             </Typography>

@@ -3,7 +3,9 @@ import { installErrorReporting } from "./services/diagnostics";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { SwapMeinApp } from "./SwapMeinApp";
+import { installLocalPreviewApi } from "./services/localPreview";
 
+installLocalPreviewApi();
 installErrorReporting();
 
 createRoot(document.getElementById("root")!).render(

@@ -38,6 +38,7 @@ import { useAccount } from "./hooks/useAccount";
 import { useLiveCredits } from "./hooks/useLiveCredits";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
+import { isLocalPreviewMode } from "./services/localPreview";
 
 type AppView =
   | "home"
@@ -54,7 +55,7 @@ function readDestination(): AppView {
   const query = new URL(globalThis.location.href).searchParams;
   if (["success", "cancelled"].includes(query.get("checkout") ?? ""))
     return "settings";
-  const page = query.get("page");
+  const page = query.get("page") ?? (isLocalPreviewMode ? "library" : null);
   return page === "create" ||
     page === "library" ||
     page === "settings" ||
@@ -331,6 +332,11 @@ function AccountWorkspace({
         }}
         onCreateAccount={() => navigate("create")}
       />
+      {isLocalPreviewMode && (
+        <Alert severity="info" icon={false} sx={{ borderRadius: 0 }}>
+          Local preview · sample account and Library data. Actions are simulated; no requests are sent to RecastFX.
+        </Alert>
+      )}
       {appError && (
         <Alert severity="error" onClose={() => setAppError("")}>
           {appError}

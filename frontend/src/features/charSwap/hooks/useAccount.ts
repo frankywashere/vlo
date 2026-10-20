@@ -10,26 +10,38 @@ import {
 } from "firebase/auth";
 import type { User } from "firebase/auth";
 import { setAccountTokenSupplier } from "../services/accountContext";
+import { isLocalPreviewMode } from "../services/localPreview";
 import {
   getSignInErrorCode,
   getSignInErrorMessage,
 } from "../utils/signInErrors";
 
 // Firebase web configuration identifies the app; it is public, not a provider key.
-const firebase = initializeApp({
-  projectId: "charswap-franky-20261013",
-  appId: "1:634011479314:web:dcb75b9cbeeb4b260a97cb",
-  apiKey: "AIzaSyAeeNhm75jLmCizILz4P0y8oYXR4qTHuys",
-  authDomain: "recastfx.com",
+const firebase = isLocalPreviewMode
+  ? null
+  : initializeApp({
+      projectId: "charswap-franky-20261013",
+      appId: "1:634011479314:web:dcb75b9cbeeb4b260a97cb",
+      apiKey: "AIzaSyAeeNhm75jLmCizILz4P0y8oYXR4qTHuys",
+      authDomain: "recastfx.com",
+    });
+const auth = firebase ? getAuth(firebase) : null;
+const previewUser = {
+  uid: "recastfx-local-preview",
+  displayName: "Preview account",
+  email: "preview@localhost",
+  emailVerified: true,
+  photoURL: null,
+  metadata: { creationTime: "2026-01-01T00:00:00.000Z", lastSignInTime: "2026-01-01T00:00:00.000Z" },
+} as User;
+setAccountTokenSupplier(async () => {
+  if (isLocalPreviewMode) return "local-preview-token";
+  return auth?.currentUser ? auth.currentUser.getIdToken() : null;
 });
-const auth = getAuth(firebase);
-setAccountTokenSupplier(async () =>
-  auth.currentUser ? auth.currentUser.getIdToken() : null,
-);
 
 export function useAccount() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(isLocalPreviewMode ? previewUser : null);
+  const [loading, setLoading] = useState(!isLocalPreviewMode);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<{
@@ -37,8 +49,9 @@ export function useAccount() {
     name: string;
   } | null>(null);
   useEffect(
-    () =>
-      onAuthStateChanged(
+    () => {
+      if (isLocalPreviewMode || !auth) return;
+      return onAuthStateChanged(
         auth,
         (value) => {
           setUser(value);
@@ -50,10 +63,12 @@ export function useAccount() {
           );
           setLoading(false);
         },
-      ),
+      );
+    },
     [],
   );
   async function signIn() {
+    if (isLocalPreviewMode || !auth) return;
     setError(null);
     setErrorCode(null);
     try {
@@ -69,15 +84,21 @@ export function useAccount() {
     }
   }
   async function signOut() {
+    if (isLocalPreviewMode || !auth) return;
     await firebaseSignOut(auth);
   }
   async function updateName(name: string) {
-    const current = auth.currentUser;
     const clean = name.trim();
-    if (!current || !clean || clean.length > 80)
+    if ((!auth?.currentUser && !isLocalPreviewMode) || !clean || clean.length > 80)
       throw new Error("Enter a name between 1 and 80 characters.");
+    if (isLocalPreviewMode) {
+      setProfileName({ uid: previewUser.uid, name: clean });
+      return;
+    }
+    const current = auth?.currentUser;
+    if (!current) throw new Error("Sign in to update your account name.");
     await updateProfile(current, { displayName: clean });
-    if (auth.currentUser?.uid === current.uid)
+    if (auth?.currentUser?.uid === current.uid)
       setProfileName({ uid: current.uid, name: clean });
   }
   const displayName =
