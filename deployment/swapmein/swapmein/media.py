@@ -5,7 +5,9 @@ import json
 import math
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import tempfile
 from typing import Literal
 import warnings
 import zipfile
@@ -15,7 +17,7 @@ from PIL import Image, ImageOps, ImageDraw, ImageFont
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .errors import PublicError
-from .diagnostics import timed
+from .diagnostics import emit, timed
 
 
 @timed("detect_scene_cuts")
@@ -210,7 +212,27 @@ def normalize(source: Path, output: Path, setup: Setup):
     normalized_video = next(s for s in normalized["streams"] if s["codec_type"] == "video")
     if int(normalized_video.get("nb_frames", 0)) != duration * 24:
         raise PublicError("The source does not contain every requested frame.")
-    require_audio_duration(normalized, duration)
+    try:
+        require_audio_duration(normalized, duration)
+    except PublicError:
+        # FFmpeg 5.1 can stop audio encoding early when the video filter ends.
+        # Encode the same source interval independently, then copy both streams
+        # without another video encode. Keep the strict duration check afterward.
+        with tempfile.TemporaryDirectory() as temporary:
+            audio = Path(temporary) / "audio.m4a"
+            repaired = Path(temporary) / "normalized.mp4"
+            run(["ffmpeg", "-v", "error", "-y", "-protocol_whitelist", "file,pipe",
+                 "-ss", str(start), "-i", str(source), "-t", str(duration), "-vn",
+                 "-af", f"apad,atrim=duration={duration},asetpts=PTS-STARTPTS",
+                 "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k", str(audio)])
+            run(["ffmpeg", "-v", "error", "-y", "-i", str(output), "-i", str(audio),
+                 "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", str(repaired)])
+            checked = probe(repaired)
+            require_audio_duration(checked, duration)
+            shutil.copyfile(repaired, output)
+        emit("normalization_audio_repaired", duration_seconds=duration,
+             previous_audio_seconds=next((s.get("duration") for s in normalized["streams"]
+                                          if s.get("codec_type") == "audio"), None))
     scene_cuts = detect_scene_cuts(output)
     # Group mode needs no user tap. The normalized metadata still carries a
     # valid frame origin for media validation; it is never used to select an ID.
