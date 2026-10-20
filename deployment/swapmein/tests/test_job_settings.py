@@ -1,4 +1,5 @@
 from swapmein.job_settings import settings_used
+import pytest
 
 
 def test_settings_use_job_snapshot_not_current_defaults_and_exclude_private_data():
@@ -21,3 +22,11 @@ def test_settings_use_job_snapshot_not_current_defaults_and_exclude_private_data
 def test_missing_legacy_settings_are_not_invented_and_saved_settings_survive():
     assert settings_used({'status': 'completed', 'width': 854}) == {'width': 854}
     assert settings_used({'settings_used': {'easy_mode': False, 'audio_processing': True}}) == {'easy_mode': False, 'audio_processing': True}
+
+
+@pytest.mark.parametrize("style", ["identity_overlay_20", "identity_overlay_multi_20", "identity_depth",
+                                 "identity_depth_multi", "shared_depth", "shared_depth_multi"])
+def test_identity_color_and_shared_depth_methods_survive_archival(style):
+    saved = settings_used({"mask_style": style, "prompt_variant": "identity_colors_v1"})
+    assert saved == {"mask_style": style, "enhanced_masking": True, "prompt_variant": "identity_colors_v1"}
+    assert settings_used({"settings_used": saved}) == saved

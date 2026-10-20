@@ -13,6 +13,7 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
       current: "Current prompts",
       favorite_v2: "Favorite prompt across modes",
       structured_v1: "Structured prompt with same-camera guidance",
+      identity_colors_v1: "Structured with identity colors",
     };
     if (settings.prompt_variant) rows.push(["Generation prompts", promptLabels[settings.prompt_variant]]);
     if (settings.trim?.length === 2) rows.push(["Source section", `${seconds(settings.trim[0])}–${seconds(settings.trim[1])}`]);
@@ -31,7 +32,14 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
     if (settings.replace_all_people) rows.push(["People", "Replace everyone"]);
     else if (settings.people_count !== undefined) rows.push(["People selected", String(settings.people_count)]);
     if (settings.reference_count !== undefined) rows.push(["References", String(settings.reference_count)]);
-    const styles: Record<string, string> = { depth: "Depth guidance", depth_multi: "Depth guidance", cyan_overlay: "Cyan overlay", gray: "Gray silhouette", solid_multi: "Flat colored masks" };
+    const styles: Record<string, string> = {
+      depth: "Depth guidance", depth_multi: "Depth guidance", cyan_overlay: "Cyan overlay",
+      cyan_overlay_20: "Shared cyan overlay · 20%", cyan_overlay_multi_20: "Shared cyan overlay · 20%",
+      gray: "Gray silhouette", solid_multi: "Flat colored masks",
+      identity_overlay_20: "Identity colors · 20%", identity_overlay_multi_20: "Identity colors · 20%",
+      identity_depth: "Depth with identity colors", identity_depth_multi: "Depth with identity colors",
+      shared_depth: "Shared depth guidance", shared_depth_multi: "Shared depth guidance",
+    };
     if (settings.mask_style && styles[settings.mask_style]) rows.push(["Mask method", styles[settings.mask_style]]);
     if (settings.prep_width && settings.prep_height) rows.push(["Prepared video", `${settings.prep_width} × ${settings.prep_height}${settings.prep_fps ? ` · ${settings.prep_fps} fps` : ""}`]);
     if (settings.model) rows.push(["Model", settings.model]);

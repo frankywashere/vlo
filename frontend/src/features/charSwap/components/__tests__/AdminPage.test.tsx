@@ -371,6 +371,12 @@ it("defaults to the newest prompt and saves each alternate version without chang
   await userEvent.click(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"}));
   await waitFor(() => expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, prompt_variant: "structured_v1"});
+  await userEvent.click(screen.getByRole("radio", {name: "Structured with identity colors"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Structured with identity colors"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 9, prompt_variant: "identity_colors_v1"});
+  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).not.toBeChecked();
+  expect(screen.getByLabelText("Pack name")).toHaveValue("Unsaved pack name");
 });
 
 it("keeps the saved prompt version if a change fails", async () => {
@@ -388,7 +394,7 @@ it("keeps the saved prompt version if a change fails", async () => {
 it("requires pipeline permission to change any prompt version", async () => {
   api.permissions = ["pricing"];
   await renderExpandedAdmin();
-  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance"]) {
+  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance", "Structured with identity colors"]) {
     expect(screen.getByRole("radio", {name})).toBeDisabled();
   }
   expect(api.pipeline).not.toHaveBeenCalled();

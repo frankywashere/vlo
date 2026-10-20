@@ -8,7 +8,7 @@ from .errors import PublicError
 from .diagnostics import emit, submission_event
 from .multi_tracking import TARGET_COLORS
 from .guide_style import SHARED_CYAN_STYLES
-from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, normalize_prompt_variant, structured_prompt
+from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, identity_colors_prompt, normalize_prompt_variant, structured_prompt
 
 BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -244,8 +244,9 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         prompt = multi_replacement_prompt(duration, targets, enhanced_masking, mask_style)
     else:
         prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
-    if prompt_variant == STRUCTURED_V1:
-        prompt = structured_prompt(duration, enhanced_masking=enhanced_masking, anchor=anchor, mask_style=mask_style,
+    if prompt_variant in {STRUCTURED_V1, IDENTITY_COLORS_V1}:
+        builder = identity_colors_prompt if prompt_variant == IDENTITY_COLORS_V1 else structured_prompt
+        prompt = builder(duration, enhanced_masking=enhanced_masking, anchor=anchor, mask_style=mask_style,
             audio_processing=audio_processing, submit_without_audio=submit_without_audio, replace_all_people=replace_all_people,
             targets=targets, face_mesh=face_mesh)
     else:

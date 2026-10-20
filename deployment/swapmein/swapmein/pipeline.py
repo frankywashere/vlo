@@ -260,7 +260,7 @@ class Pipeline:
                                     "fill_mode": fill_mode, "run_id": guide_run,
                                     "face_mesh": job.get("face_mesh", False), "mesh_all_people": options.replace_all_people}
                                 if multi:
-                                    compose_payload["target_styles"] = compose_styles(fill_mode, targets)
+                                    compose_payload["target_styles"] = compose_styles(fill_mode, targets, mask_style)
                                 if fill_mode == "depth" and "depth_overlay_opacity" in job:
                                     compose_payload["depth_opacity"] = job["depth_overlay_opacity"]
                                 composed = invoke("/compose", compose_payload, remaining())
@@ -434,7 +434,7 @@ class Pipeline:
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
         self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")
-        fill_mode, mask_style = guide_style(job, job.get("setup", {}).get("enhanced_character_masking", True), bool(job.get("target_styles")))
+        fill_mode, mask_style = guide_style(job, job.get("setup", {}).get("enhanced_character_masking", True), bool(job.get("target_styles")), reviewed=True)
         with self.cloud.worker("audio") as invoke:
             payload = {"input_uri": job["normalized_uri"],
                 "masks_uri": job["reviewed_masks_uri"], "guide_audio_uri": job["tracking_vocals_uri"],
@@ -442,7 +442,7 @@ class Pipeline:
                 "fill_mode": fill_mode, "run_id": run_id,
                 "face_mesh": job.get("face_mesh", False), "mesh_all_people": job.get("replace_all_people", False)}
             if job.get("target_styles"):
-                payload["target_styles"] = compose_styles(fill_mode, job["target_styles"])
+                payload["target_styles"] = compose_styles(fill_mode, job["target_styles"], mask_style)
             if fill_mode == "depth" and "depth_overlay_opacity" in job:
                 payload["depth_opacity"] = job["depth_overlay_opacity"]
             composed = invoke("/compose", payload, remaining())

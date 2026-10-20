@@ -21,23 +21,24 @@ def test_prompt_selector_requires_pipeline_permission(api, monkeypatch, permissi
     assert response.status_code == (200 if "pipeline_settings" in permissions else 403)
 
 
-def test_prompt_selector_validates_revision_and_preserves_other_settings(api, monkeypatch):
+@pytest.mark.parametrize("variant", ["favorite_v2", "identity_colors_v1"])
+def test_prompt_selector_validates_revision_and_preserves_other_settings(api, monkeypatch, variant):
     client, records = setup_staff(api, monkeypatch, ["pipeline_settings"])
     url = "/api/commerce/admin/pipeline"
     records.data[PATH] = {"revision": 3, "audio_processing": True, "depth_guidance": False,
                           "face_mesh_masked_default": True}
     for bad in ("unknown", True, 1, [], {}):
         assert client.post(url, json={"revision": 3, "prompt_variant": bad}).status_code == 422
-    response = client.post(url, json={"revision": 3, "prompt_variant": "favorite_v2"})
+    response = client.post(url, json={"revision": 3, "prompt_variant": variant})
     assert response.status_code == 200, response.text
-    assert response.json()["prompt_variant"] == "favorite_v2"
+    assert response.json()["prompt_variant"] == variant
     assert response.json()["audio_processing"] is True
     assert response.json()["depth_guidance"] is False
     assert response.json()["face_mesh_masked_default"] is True
     assert client.post(url, json={"revision": 3, "prompt_variant": "current"}).status_code == 409
     response = client.post(url, json={"revision": 4, "hide_audio_toggle": True})
-    assert response.json()["prompt_variant"] == "favorite_v2"
-    assert client.get("/api/commerce/admin").json()["pipeline"]["prompt_variant"] == "favorite_v2"
+    assert response.json()["prompt_variant"] == variant
+    assert client.get("/api/commerce/admin").json()["pipeline"]["prompt_variant"] == variant
 
 
 @pytest.mark.parametrize("variant", [None, *PROMPT_VARIANTS])
@@ -99,7 +100,7 @@ def test_generation_uses_saved_prompt_and_logs_safe_version_metadata(api, capsys
     response = client.post(f"/api/jobs/{job_id}/generate", headers=headers, json={"approved": True})
     assert response.status_code == 200, response.text
     prompt = provider.submissions[0]["prompt"]
-    assert ("subject_definitions" in prompt) is (variant == "structured_v1")
+    assert ("subject_definitions" in prompt) is (variant in {"structured_v1", "identity_colors_v1"})
     logs = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
     event = next(event for event in logs if event.get("event") == "generation_prompt_selected")
     assert event["prompt_variant"] == (variant if variant and variant != "null" else "current")
@@ -136,13 +137,15 @@ def test_automatic_credit_generation_and_review_resume_use_the_pinned_variant(ap
         response = client.post("/internal/generate", json={"job_id": job_id})
         assert response.status_code == 200, response.text
     assert len(provider.submissions) == 1
-    assert ("subject_definitions" in provider.submissions[0]["prompt"]) is (variant == "structured_v1")
+    assert ("subject_definitions" in provider.submissions[0]["prompt"]) is (variant in {"structured_v1", "identity_colors_v1"})
     assert records.data[f"jobs/{job_id}.json"]["prompt_variant"] == variant
 
 
 def test_durable_settings_validate_prompt_version_and_preserve_archived_version():
     assert settings_used({}) == {}
     assert settings_used({"prompt_variant": "structured_v1"}) == {"prompt_variant": "structured_v1"}
+    assert settings_used({"prompt_variant": "identity_colors_v1"}) == {"prompt_variant": "identity_colors_v1"}
+    assert settings_used({"settings_used": {"prompt_variant": "identity_colors_v1"}}) == {"prompt_variant": "identity_colors_v1"}
     assert settings_used({"settings_used": {"prompt_variant": "favorite_v2"}}) == {"prompt_variant": "favorite_v2"}
     assert settings_used({"settings_used": {"prompt_variant": "untrusted"}}) == {}
     assert settings_used({"settings_used": {"prompt_variant": {"not": "a version"}}}) == {}

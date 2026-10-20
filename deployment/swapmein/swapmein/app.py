@@ -570,7 +570,7 @@ class PipelineSettingsUpdate(BaseModel):
     hide_audio_toggle: bool | None = None
     multi_characters: bool | None = None
     face_mesh_enabled: bool | None = None
-    prompt_variant: Literal["current", "favorite_v2", "structured_v1"] | None = None
+    prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1"] | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")

@@ -25,10 +25,21 @@ describe("saved clip settings", () => {
     ["current", "Current prompts"],
     ["favorite_v2", "Favorite prompt across modes"],
     ["structured_v1", "Structured prompt with same-camera guidance"],
+    ["identity_colors_v1", "Structured with identity colors"],
   ] as const)("shows the saved %s prompt version in settings", async (prompt_variant, label) => {
     render(<JobSettings settings={{prompt_variant}} />);
     await userEvent.click(screen.getByText("Settings used"));
     expect(screen.getByText("Generation prompts")).toBeVisible();
+    expect(screen.getByText(label)).toBeVisible();
+  });
+  it.each([
+    ["identity_overlay_multi_20", "Identity colors · 20%"],
+    ["identity_depth_multi", "Depth with identity colors"],
+    ["shared_depth_multi", "Shared depth guidance"],
+  ])("shows the actual %s mask method", async (mask_style, label) => {
+    render(<JobSettings settings={{mask_style, prompt_variant: "identity_colors_v1"}} />);
+    await userEvent.click(screen.getByText("Settings used"));
+    expect(screen.getByText("Mask method")).toBeVisible();
     expect(screen.getByText(label)).toBeVisible();
   });
 });

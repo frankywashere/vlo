@@ -72,7 +72,7 @@ export interface CreditAdmin {
 
 export type PreparationProvider = "workers" | "replicate";
 
-export type PromptVariant = "current" | "favorite_v2" | "structured_v1";
+export type PromptVariant = "current" | "favorite_v2" | "structured_v1" | "identity_colors_v1";
 
 export interface PipelineSettings {
   revision: number;
