@@ -383,6 +383,39 @@ def strip_audio(source: Path, output: Path):
         raise PublicError("The silent generation input could not be verified. No generation was submitted.")
 
 
+def watermark_layer(width: int, height: int) -> Image.Image:
+    """Large, inset domain wordmark matching the dark website logo accent."""
+    text = "recastfx.com"
+    # Liberation Sans is Arial-compatible and installed in the gateway image.
+    # The macOS path keeps local export proofs visually aligned with production.
+    font_path = next((path for path in (
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    ) if Path(path).is_file()), None)
+    def font_at(size):
+        return ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default(size=size)
+    low, high = 1, width
+    while low < high:
+        middle = (low + high + 1) // 2
+        if font_at(middle).getlength(text) <= width * .46:
+            low = middle
+        else:
+            high = middle - 1
+    font = font_at(low)
+    stroke = max(1, round(width / 512))
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    bounds = draw.textbbox((0, 0), text, font=font, stroke_width=stroke)
+    x = width - round(width * .04) - bounds[2]
+    y = height - round(height * .045) - bounds[3]
+    for prefix, segment, color in (("", "recast", (255, 255, 255, 230)),
+                                    ("recast", "fx", (255, 129, 119, 230)),
+                                    ("recastfx", ".com", (255, 255, 255, 230))):
+        draw.text((x + font.getlength(prefix), y), segment, font=font, fill=color,
+                  stroke_width=stroke, stroke_fill=(0, 0, 0, 150))
+    return layer
+
+
 @timed("finish")
 def finish(raw: Path, original: Path, output: Path, duration: int,
            audio_source: Path | None = None, audio_start: float = 0, *, restore_audio: bool = True, watermark: bool = False):
@@ -421,17 +454,11 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
     filter_options = ["-vf", video_filter]
     video_map = "0:v:0"
     if watermark:
-        # Rasterized locally with Pillow's bundled font; no OS font or GPU dependency.
-        font = ImageFont.load_default(size=max(10, round(width / 55)))
-        box = font.getbbox("RecastFX")
-        pad = max(4, round(width / 200))
-        badge = Image.new("RGBA", (box[2] - box[0] + pad * 2, box[3] - box[1] + pad * 2), (0, 0, 0, 130))
-        ImageDraw.Draw(badge).text((pad - box[0], pad - box[1]), "RecastFX", font=font, fill=(255, 255, 255, 245))
         watermark_path = output.with_suffix(".watermark.png")
-        badge.save(watermark_path)
+        watermark_layer(width, height).save(watermark_path)
         watermark_input = ["-i", str(watermark_path)]
         overlay_index = 2 if restore_audio else 1
-        filter_options = ["-filter_complex", f"[0:v]{video_filter}[base];[base][{overlay_index}:v]overlay=W-w-{pad}:H-h-{pad}:format=auto[watermarked]"]
+        filter_options = ["-filter_complex", f"[0:v]{video_filter}[base];[base][{overlay_index}:v]overlay=0:0:format=auto[watermarked]"]
         video_map = "[watermarked]"
     run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(raw),
          *soundtrack_input, *watermark_input,
