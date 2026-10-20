@@ -8,7 +8,7 @@ from .errors import PublicError
 from .diagnostics import emit, submission_event
 from .multi_tracking import TARGET_COLORS
 from .guide_style import SHARED_CYAN_STYLES
-from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, adapt_favorite_prompt, normalize_prompt_variant, structured_prompt
+from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, normalize_prompt_variant, structured_prompt
 
 BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -255,11 +255,13 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
             targets=targets, replace_all_people=replace_all_people)
         if prompt_variant == FAVORITE_V2:
             prompt = adapt_favorite_prompt(prompt, **favorite_options)
+        prompt += " " + SAME_CAMERA_SENTENCE
         if len(prompt) > 7000 and targets:
             prompt = audio_prompt(mask_prompt(compact_multi_scene_prompt(duration, targets, enhanced_masking, mask_style), mask_style),
                 audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + " " + PERFORMANCE_GUIDANCE
             if prompt_variant == FAVORITE_V2:
                 prompt = adapt_favorite_prompt(prompt, **favorite_options)
+            prompt += " " + SAME_CAMERA_SENTENCE
     if len(prompt) > 7000:
         raise PublicError("This clip has too many scene assignments for the provider prompt limit. Use a shorter clip or fewer replacements. No generation was submitted.",
             400, code="provider_prompt_too_long")

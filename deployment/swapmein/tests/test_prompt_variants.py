@@ -56,11 +56,11 @@ def test_null_legacy_provider_variant_stays_current_when_global_default_changes(
 @pytest.mark.parametrize("mesh", [False, True])
 @pytest.mark.parametrize("processed,silent", [(False, False), (True, False), (True, True)])
 @pytest.mark.parametrize("manual", [False, True])
-def test_current_default_remains_byte_identical_across_routes(style, mesh, processed, silent, manual):
+def test_current_adds_only_same_camera_sentence_across_routes(style, mesh, processed, silent, manual):
     enhanced = style != "none"
     targets = targets_with_reviews() if manual else None
     anchor = {"x": .23, "y": .67, "time": 3.25}
-    expected = legacy_prompt(6, enhanced, anchor, style, targets, mesh, processed, silent, False)
+    expected = legacy_prompt(6, enhanced, anchor, style, targets, mesh, processed, silent, False) + " " + SAME_CAMERA_SENTENCE
     options = dict(enhanced_masking=enhanced, anchor=anchor, mask_style=style, targets=targets,
         face_mesh=mesh, audio_processing=processed, submit_without_audio=silent)
     images = ["ref-one", "ref-two"] if manual else "ref"
@@ -228,3 +228,14 @@ def test_structured_accepts_legacy_top_level_target_anchor_shape():
     prompt = generation_payload(6, "ref", "video", targets=[{"reference_index": 0,
         "x": .3, "y": .4, "time": 2}], prompt_variant=STRUCTURED_V1)["prompt"]
     assert "2.00 seconds, 30% across and 40% down" in prompt
+
+
+@pytest.mark.parametrize("variant", [CURRENT, FAVORITE_V2, STRUCTURED_V1])
+@pytest.mark.parametrize("style", ["none", "cyan_overlay_20", "depth", "gray", "depth_multi", "solid_multi"])
+@pytest.mark.parametrize("processed,silent", [(False, False), (True, False), (True, True)])
+def test_same_camera_sentence_occurs_once_for_every_prompt_mode_and_media_path(variant, style, processed, silent):
+    prompt = generation_payload(6, ["ref-one", "ref-two"], "video", enhanced_masking=style != "none",
+        mask_style=style, targets=targets_with_reviews(), face_mesh=True, audio_processing=processed,
+        submit_without_audio=silent, prompt_variant=variant)["prompt"]
+    assert prompt.count(SAME_CAMERA_SENTENCE) == 1
+    assert len(prompt) <= 7000
