@@ -49,14 +49,19 @@ const job = {
 };
 
 describe("private account library", () => {
-  it("shows actual consumer credits and refunds in clip details", async () => {
+  it("shows actual consumer credits and refunds on completed cards without opening a dialog", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "completed", access_mode: "credits",
+      output_url: "https://storage.googleapis.com/result.mp4",
       consumer_credits_used: 58, consumer_credits_returned: 20, generation_credits: 999}]);
     render(<AccountLibrary onCreate={vi.fn()} />);
-    await userEvent.click(await screen.findByRole("button", {name: "View details"}));
-    expect(screen.getByText("Credits used: 58")).toBeVisible();
-    expect(screen.getByText("20 credits refunded")).toBeVisible();
-    expect(screen.queryByText("Credits used: 999")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", {name: "Download video"})).toBeVisible();
+    expect(screen.queryByRole("button", {name: "View details"})).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Settings used"));
+    expect(screen.getByText("Credits used")).toBeVisible();
+    expect(screen.getByText("58")).toBeVisible();
+    expect(screen.getByText("Credits refunded")).toBeVisible();
+    expect(screen.getByText("20")).toBeVisible();
+    expect(screen.queryByText("999")).not.toBeInTheDocument();
   });
   it("shows processing and finished videos in one grid with an inline processing count", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([

@@ -1,8 +1,12 @@
 import { Box, Typography } from "@mui/material";
 import type { JobSettingsUsed } from "../services/livePipeline";
 
-export function JobSettings({ settings }: { settings?: JobSettingsUsed }) {
+export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode }: {
+  settings?: JobSettingsUsed; creditsUsed?: number; creditsReturned?: number; accessMode?: string;
+}) {
   const rows: [string, string][] = [];
+  if (creditsUsed !== undefined) rows.push(["Credits used", creditsUsed.toLocaleString()]);
+  if (creditsReturned) rows.push(["Credits refunded", creditsReturned.toLocaleString()]);
   const seconds = (value: number) => `${Number(value.toFixed(2))}s`;
   if (settings) {
     if (settings.trim?.length === 2) rows.push(["Source section", `${seconds(settings.trim[0])}–${seconds(settings.trim[1])}`]);
@@ -40,6 +44,7 @@ export function JobSettings({ settings }: { settings?: JobSettingsUsed }) {
           </Box>
         ))}
       </Box>
+      {accessMode === "api-key" && <Typography variant="caption" color="text.secondary">Provider API key used; no site credits charged.</Typography>}
       {incomplete && <Typography variant="caption" color="text.secondary">Some settings weren’t saved for this older clip.</Typography>}
     </Box>
   );
