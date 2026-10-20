@@ -72,11 +72,14 @@ export interface CreditAdmin {
 
 export type PreparationProvider = "workers" | "replicate";
 
+export type PromptVariant = "current" | "favorite_v2" | "structured_v1";
+
 export interface PipelineSettings {
   revision: number;
   audio_processing: boolean;
   hide_audio_toggle?: boolean;
   multi_characters?: boolean;
+  prompt_variant?: PromptVariant;
   preparation_provider?: PreparationProvider;
   retry_missing_masks_with_sam?: boolean;
   depth_guidance?: boolean;
@@ -87,7 +90,7 @@ export interface PipelineSettings {
   replicate_api_key_configured?: boolean;
 }
 
-export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "multi_characters" | "hide_audio_toggle" | "audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_enabled" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
+export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "multi_characters" | "prompt_variant" | "hide_audio_toggle" | "audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_enabled" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
   return commerceRequest<PipelineSettings>("/api/commerce/admin/pipeline", settings);
 }
 

@@ -19,5 +19,16 @@ describe("saved clip settings", () => {
     await userEvent.click(screen.getByText("Settings used"));
     expect(screen.getByText(/Some settings weren’t saved/)).toBeVisible();
     expect(screen.queryByText("Off")).not.toBeInTheDocument();
+    expect(screen.queryByText("Generation prompts")).not.toBeInTheDocument();
+  });
+  it.each([
+    ["current", "Current prompts"],
+    ["favorite_v2", "Favorite prompt across modes"],
+    ["structured_v1", "Structured prompt with same-camera guidance"],
+  ] as const)("shows the saved %s prompt version in settings", async (prompt_variant, label) => {
+    render(<JobSettings settings={{prompt_variant}} />);
+    await userEvent.click(screen.getByText("Settings used"));
+    expect(screen.getByText("Generation prompts")).toBeVisible();
+    expect(screen.getByText(label)).toBeVisible();
   });
 });

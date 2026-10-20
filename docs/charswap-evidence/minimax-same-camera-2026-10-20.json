@@ -1,0 +1,95 @@
+{
+  "status": "completed; user positive audiovisual review",
+  "production_changed": false,
+  "authorized_max_new_submissions": 1,
+  "accepted_submissions": 1,
+  "pairings": {
+    "A": 4,
+    "B": 5,
+    "C": 1,
+    "D": 3,
+    "E": 2
+  },
+  "settings": {
+    "baseline": "02-refs34-white",
+    "prompt_changed": true,
+    "face_mesh": true,
+    "overlay_color": "cyan",
+    "overlay_opacity": 0.2,
+    "depth": false,
+    "duration": 15,
+    "resolution": "768P",
+    "references": "exact prior test 02 assets, including white refs 3 and 4",
+    "original_soundtrack": true,
+    "production_changed": false,
+    "prompt_sha256": "26df6fca75a76af080fa7f1331abad5104bc8af91cc91659974ddcaf876cb417",
+    "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+    "reference_sha256": [
+      "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+      "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+      "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+      "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+      "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+    ],
+    "reference_preprocessing": "References 3 and 4 white, remaining exact original test 02 inputs (transparent).",
+    "intervention": "User-reassigned references plus one final same-camera sentence; all guide/media settings unchanged.",
+    "pairings": {
+      "A": 4,
+      "B": 5,
+      "C": 1,
+      "D": 3,
+      "E": 2
+    },
+    "added_sentence": "All replacement performers should look as though they were filmed in the original scene with the same camera.",
+    "watermark": {
+      "text": "recastfx.com",
+      "location": "bottom center to right",
+      "width_fraction": 0.46,
+      "right_margin_fraction": 0.04,
+      "bottom_margin_fraction": 0.045,
+      "applied_after_generation": true,
+      "fx_color": "#ff8177"
+    }
+  },
+  "prompt": "subject_definitions:\n<Video 1> is the original source footage being edited, including its existing shots and camera rendering. The shared cyan tint and face-mesh lines are selection and motion annotations, not the target visual style.\n<Audio 1> is the synchronized soundtrack embedded in <Video 1>.\n<Subject 1> is the source performer selected in <Video 1> at 0.00 seconds, 61% across and 50% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 6> is the replacement character whose identity, hair and clothing come from <Picture 4>. The photo defines the character, not a target frame or pose.\n<Subject 2> is the source performer selected in <Video 1> at 3.21 seconds, 52% across and 54% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 7> is the replacement character whose identity, hair and clothing come from <Picture 5>. The photo defines the character, not a target frame or pose.\n<Subject 3> is the source performer selected in <Video 1> at 6.50 seconds, 40% across and 47% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 8> is the replacement character whose identity, hair and clothing come from <Picture 1>. The photo defines the character, not a target frame or pose.\n<Subject 4> is the source performer selected in <Video 1> at 8.72 seconds, 35% across and 44% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 9> is the replacement character whose identity, hair and clothing come from <Picture 3>. The photo defines the character, not a target frame or pose.\n<Subject 5> is the source performer selected in <Video 1> at 11.03 seconds, 57% across and 45% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 10> is the replacement character whose identity, hair and clothing come from <Picture 2>. The photo defines the character, not a target frame or pose.\n\nsummary:\n[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1>. Change only the selected performers: <Subject 1> becomes <Subject 6>, <Subject 2> becomes <Subject 7>, <Subject 3> becomes <Subject 8>, <Subject 4> becomes <Subject 9>, <Subject 5> becomes <Subject 10>. Keep every original shot and the source performance.\n\nretention_analysis:\n<Video 1>: partially_preserved - retain the source environment, unselected people, framing, camera work, timing and photographic treatment. Only the selected identities and clothing change, and guide annotations are removed.\n<Audio 1>: fully_copy - retain the original embedded soundtrack without added dialogue or music.\n<Subject 1>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 6>.\n<Subject 6>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 1> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 2>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 7>.\n<Subject 7>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 2> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 3>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 8>.\n<Subject 8>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 3> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 4>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 9>.\n<Subject 9>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 4> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 5>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 10>.\n<Subject 10>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 5> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n\ndetailed_description:\nThe source video governs how the whole scene is photographed, including the replacement people. Render their appearance within that same source-shot lighting and image texture. Identity comes from the pictures; photographic rendering comes from <Video 1>.\nFollow all existing shots, cuts, actions and interactions in <Video 1> over its exact 15-second timeline. Keep the five pairings separate through cuts and overlaps. A replacement appears only where its corresponding source performer is present; do not insert it elsewhere or replace an unselected bystander.\nPreserve each source performer's continuous movement and visible mouth performance, not the still pose or expression in the photograph. Keep a listener listening when somebody else speaks. Replace the entire selected character, including head, hands, body and feet, consistently with its reference identity and clothing.\nAll selected performers share the same cyan overlay at 20% opacity. The color marks selection, not identity; use the defined position/time anchors for identity. Face-mesh lines describe facial motion only. Remove all cyan and mesh marks from the finished footage.\nAll replacement performers should look as though they were filmed in the original scene with the same camera.\noverall_soundscape: Reuse the original dialogue, ambience, laughter and effects from <Audio 1>, retaining their source timing and speaker associations.\nnon_diegetic_music: Retain only music already present in <Audio 1>; add none.\n",
+  "supplier_cost_usd": 1.097,
+  "elapsed_seconds": 673.7,
+  "result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_same_camera_v1/01-same-camera-reassigned/result.mp4",
+  "watermarked_result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_same_camera_v1/01-same-camera-reassigned/result-watermarked-brand.mp4",
+  "watermark": {
+    "text": "recastfx.com",
+    "fx_color": "#ff8177",
+    "color_source": "Website dark-theme primary.main used by the header logo",
+    "frame_width": 1024,
+    "frame_height": 768,
+    "fontsize": 76,
+    "text_width_fraction": 0.46,
+    "right_margin": 41,
+    "bottom_margin": 35,
+    "input_unchanged": true
+  },
+  "technical_qa": {
+    "full_decode_passed": true,
+    "audio_preserved": true,
+    "dimensions": [
+      1024,
+      768
+    ],
+    "duration": 15.083333,
+    "watermarked_sha256": "2833101feb08ac9d6c4fb7f97be4fae483baf81c04cfd870b12486396af1cf52"
+  },
+  "limitations": [
+    "Reference assignments also changed at user request, so this is not an isolated prompt-only comparison.",
+    "One unseeded sample does not establish generalization."
+  ],
+  "user_review": {
+    "date": "2026-10-20",
+    "feedback": "it looks actually pretty good",
+    "assessment": "Positive user review of the same-camera test; no global prompt change requested."
+  },
+  "submitted_guide": {
+    "path": "/Users/frank/Desktop/Coding/CharSwap/experiments/translucent_current_clip_15s_v1/easy-uniform-guide.mp4",
+    "sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+    "verified_matches_submitted_asset": true
+  }
+}

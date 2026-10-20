@@ -106,6 +106,23 @@ export function AdminPage() {
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
+          <FormControl disabled={busy || !can("pipeline_settings")}>
+            <FormLabel id="prompt-variant-label">Generation prompts</FormLabel>
+            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "structured_v1"} onChange={(event) => {
+              const variant = event.target.value;
+              if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1") || !can("pipeline_settings")) return;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, prompt_variant: variant});
+                setAdmin((current) => current ? {...current, pipeline} : current);
+                setMessage("Generation prompts saved for new jobs. Existing jobs keep their saved prompt version.");
+              });
+            }}>
+              <FormControlLabel value="current" control={<Radio />} label="Current prompts" />
+              <FormControlLabel value="favorite_v2" control={<Radio />} label="Favorite prompt across modes" />
+              <FormControlLabel value="structured_v1" control={<Radio />} label="Structured prompt with same-camera guidance" />
+            </RadioGroup>
+          </FormControl>
+          <Typography variant="body2" color="text.secondary">Applies to new jobs in every mode. Existing jobs keep their saved prompt version.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.multi_characters ?? true}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

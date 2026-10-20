@@ -355,3 +355,41 @@ it("exposes the face-mesh master separately from public switch visibility",async
   await waitFor(()=>expect(api.pipeline).toHaveBeenLastCalledWith({revision:1,face_mesh_user_control:true}));
   expect(master).not.toBeChecked();
 });
+
+it("defaults to the newest prompt and saves each alternate version without changing other settings", async () => {
+  api.pipelineSettings = {revision: 7, audio_processing: false, depth_guidance: true, face_mesh_enabled: false};
+  await renderExpandedAdmin();
+  expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked();
+  await userEvent.clear(screen.getByLabelText("Pack name"));
+  await userEvent.type(screen.getByLabelText("Pack name"), "Unsaved pack name");
+  await userEvent.click(screen.getByRole("radio", {name: "Favorite prompt across modes"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Favorite prompt across modes"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 7, prompt_variant: "favorite_v2"});
+  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).not.toBeChecked();
+  expect(screen.getByLabelText("Pack name")).toHaveValue("Unsaved pack name");
+  await userEvent.click(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, prompt_variant: "structured_v1"});
+});
+
+it("keeps the saved prompt version if a change fails", async () => {
+  api.pipelineSettings = {revision: 3, audio_processing: false, prompt_variant: "structured_v1"};
+  api.pipeline.mockRejectedValueOnce(new Error("Pipeline settings changed. Reload and try again."));
+  await renderExpandedAdmin();
+  await userEvent.click(screen.getByRole("radio", {name: "Current prompts"}));
+  await screen.findByText("Pipeline settings changed. Reload and try again.");
+  expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked();
+  expect(screen.getByRole("radio", {name: "Current prompts"})).not.toBeChecked();
+  expect(screen.getByRole("radio", {name: "Current prompts"})).toBeEnabled();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, prompt_variant: "current"});
+});
+
+it("requires pipeline permission to change any prompt version", async () => {
+  api.permissions = ["pricing"];
+  await renderExpandedAdmin();
+  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance"]) {
+    expect(screen.getByRole("radio", {name})).toBeDisabled();
+  }
+  expect(api.pipeline).not.toHaveBeenCalled();
+});

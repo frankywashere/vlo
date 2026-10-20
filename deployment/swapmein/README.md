@@ -25,7 +25,9 @@ Hiding the offer prevents new opt-ins, including requests from stale browsers. E
 upload tickets/jobs retain the amount promised by the server; the client supplies only a
 quote to validate, never an authoritative reward. BYOK jobs do not earn account-credit rewards.
 
-CPU export overlays a Pillow-rendered badge in the existing FFmpeg encoding pass, with
+The watermark reads `recastfx.com`, with white lettering and coral `fx`, spans about
+46% of the frame width, and sits 4% in from the right and 4.5% above the bottom.
+CPU export overlays the transparent Pillow-rendered wordmark in the existing FFmpeg encoding pass, with
 both original-audio restoration and returned-audio paths supported. There is no extra AI render.
 The bonus is applied only after the finished watermarked file and Library entry are saved,
 and only for a successfully charged generation. The wallet receipt `watermark:<job_id>`

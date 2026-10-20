@@ -11,7 +11,7 @@ from pydantic import ValidationError
 import pytest
 
 from swapmein.errors import PublicError
-from swapmein.media import Setup, decoded_audio_samples, dimensions, finish, normalize, normalize_reference, original_guide, probe, select_label
+from swapmein.media import Setup, decoded_audio_samples, dimensions, finish, normalize, normalize_reference, original_guide, probe, select_label, watermark_layer
 
 
 def options(**updates):
@@ -370,7 +370,22 @@ def test_watermark_also_works_when_retaining_provider_audio(tmp_path):
     finish(raw, raw, output, 4, restore_audio=False, watermark=True)
     pixels = np.frombuffer(subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(output), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]), dtype=np.uint8).reshape(240, 320, 3)
     assert pixels[220:, 240:, 0].max() > 200  # White lettering is in the lower-right corner.
+    coral = (pixels[:, :, 0] > 180) & (pixels[:, :, 1] > 50) & (pixels[:, :, 1] < 180) & (pixels[:, :, 2] > 50) & (pixels[:, :, 2] < 180)
+    assert coral.sum() > 4
     assert decoded_audio_samples(output) >= 3.95 * 44100
+
+
+@pytest.mark.parametrize("width,height", [(320,240), (1024,768), (1920,1080), (768,1344)])
+def test_domain_watermark_is_large_inset_and_uses_logo_accent(width, height):
+    layer = watermark_layer(width, height)
+    left, top, right, bottom = layer.getbbox()
+    assert width * .48 <= left <= width * .53
+    assert width * .95 <= right <= width * .97
+    assert height * .94 <= bottom <= height * .97
+    assert top > height * .70
+    colors = np.asarray(layer)
+    assert np.any(np.all(colors == (255, 129, 119, 230), axis=2))
+    assert np.any(np.all(colors == (255, 255, 255, 230), axis=2))
 
 
 @pytest.mark.parametrize("source_format", ["PNG", "WEBP"])

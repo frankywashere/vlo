@@ -7,6 +7,7 @@ import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 import { reportClientError, timeClientStage } from "./diagnostics";
 import { accountToken } from "./accountContext";
 import { isReferenceCleanupEndpoint } from "./referenceCleanup";
+import type { PromptVariant } from "./commerce";
 
 export type GenerationProvider = "reAPI" | "ToAPIs";
 export type GenerationAccessMode = "api-key" | "credits";
@@ -45,6 +46,7 @@ export type LiveJobStatus =
   | "submission_unknown";
 
 export interface JobSettingsUsed {
+  prompt_variant?: PromptVariant;
   depth_overlay_opacity?: number;
   easy_mode?: boolean;
   submit_without_audio?: boolean;
@@ -356,6 +358,9 @@ function readJob(value: unknown): LivePipelineJob {
   };
   if (isRecord(value.settings_used)) {
     const saved: JobSettingsUsed = {};
+    const promptVariant = value.settings_used.prompt_variant;
+    if (promptVariant === "current" || promptVariant === "favorite_v2" || promptVariant === "structured_v1")
+      saved.prompt_variant = promptVariant;
     for (const field of ["easy_mode", "enhanced_masking", "depth_guidance", "face_mesh", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
       if (typeof value.settings_used[field] === "boolean") saved[field] = value.settings_used[field];
     for (const field of ["depth_overlay_opacity", "watermark_bonus_credits", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps"] as const) {
