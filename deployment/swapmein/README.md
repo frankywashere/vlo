@@ -651,7 +651,7 @@ submission off by default. Existing job snapshots are not rewritten.
 
 ### Versioned generation prompts
 
-Admin → Experimental → **Generation prompts** offers five saved prompt families:
+Admin → Experimental → **Generation prompts** offers six saved prompt families:
 
 | Option | Saved value | Behavior |
 | --- | --- | --- |
@@ -660,6 +660,7 @@ Admin → Experimental → **Generation prompts** offers five saved prompt famil
 | Structured prompt with same-camera guidance | `structured_v1` | Structured subject, retention and photographic instructions. |
 | Structured with identity colors | `identity_colors_v1` | Reviewed Manual guides can use distinct identity colors; Easy guides use shared markers and timed positions. |
 | Structured with Easy Mode tint tracking | `identity_tint_tracking_v1` | Copies option 4, adding temporal marker-following guidance only when the saved setup uses Easy Mode. |
+| Cloudflare character matching | `cloudflare_identity_v1` | Easy Mode matches original-source crops across shots, remaps SAM IDs to stable reference slots, and uses the Manual identity/scene prompt. |
 
 Option 5's shared-cyan Easy prompt reproduces the chosen
 `02-explicit-tint-tracking` experiment. It follows the tinted person while the
@@ -672,7 +673,39 @@ include the guidance before enforcing the 7,000-character limit.
 The selector applies to new jobs in both upload paths. Existing jobs, recovery
 and review resumes retain their saved variant and Easy Mode setting. Adding an
 option does not rewrite the selected global setting. The fallback for new jobs
-is `identity_tint_tracking_v1`; no automatic cross-cut character recognition is introduced.
+is `cloudflare_identity_v1`; options 1–5 retain their prior matching behavior.
+
+Option 6 uses one original RGB frame per detected shot and the user's initial
+source-person crops, never the replacement photographs or depth guide. It assigns
+SAM tracks with partial one-to-one maximum-total-score matching at the exploratory
+`0.0446` score cutoff. The remapped per-shot masks, positions and absences supply
+the existing Manual prompt and identity colors. No opaque or distinct-color claim
+is made for a guide that actually uses shared depth tint; the saved guide style
+still controls that wording. Unmasked Easy jobs run SAM internally but compose
+original pixels (and face mesh only if selected). Manual review and Replace Everyone
+keep their existing routes. Fragmented/unsupported scenes, missing credentials,
+network failures or spending limits return the preserved job to scene review;
+provider generation is blocked until matching or review completes.
+
+These are uncalibrated model scores. At this low cutoff, the offline three-clip
+benchmark recovered all known-present pairings but accepted two absent-person
+false matches. The benchmark used manually cropped people; automatic SAM candidate
+extraction still needs a real end-to-end pilot. Option 6 is the default for new jobs.
+
+Admin → System API key also contains the Cloudflare account ID, token and required
+AI Gateway ID. The token is kept in the `recastfx-cloudflare-key` Secret Manager
+bundle and is never returned to the browser, jobs or logs. Saving validates account
+access through a free model-catalog request. The launch script provisions only the
+secret/IAM/environment; an administrator must save credentials before selecting
+Option 6. Local env fallback is `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and
+`CLOUDFLARE_GATEWAY_ID`. Cloudflare calls always name that gateway, skip caches and
+have no automatic retries. The service additionally uses a durable $9 lifetime
+matching allowance: reserve $0.02 per attempt, reconcile successful returned usage
+at 2× published input-token cost (not a verified invoice), retain unknown costs in
+full, and carry a $0.10 initial allowance for earlier experiments. Up to 120 calls
+and four in flight are permitted per job, with a 180-second matching deadline.
+Safe job-correlated diagnostics retain request counts, scores/assignments, timing
+and usage estimates without photographs, tokens or signed URLs.
 
 Library provider failures retain an allowlisted reason: reAPI workflow error `80006`
 shows “Content rejected”; an explicit face-rejection signal shows “Face rejected”.

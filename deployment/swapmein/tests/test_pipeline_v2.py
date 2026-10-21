@@ -177,7 +177,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
     cloud.replicate_calls = []
     class HostedPreparation:
         def __init__(self, saved_records, saved_cloud, job):
-            assert enhanced and saved_records is records and saved_cloud is cloud
+            assert (enhanced or face_mesh or prompt_variant == "cloudflare_identity_v1") and saved_records is records and saved_cloud is cloud
             assert job["preparation_provider"] == "replicate"
         def prepare(self, root, checked, sam_metadata, source_uri, sam_uri, remaining):
             assert cloud.objects[source_uri] == media["working"].read_bytes()

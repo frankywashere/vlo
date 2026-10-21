@@ -11,7 +11,7 @@ def settings_used(job):
     setup = job.get("setup") or {}
     variant = job.get("prompt_variant", result.get("prompt_variant"))
     result.pop("prompt_variant", None)
-    if isinstance(variant, str) and variant in {"current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1"}:
+    if isinstance(variant, str) and variant in {"current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"}:
         result["prompt_variant"] = variant
     for key in ("easy_mode", "replace_all_people", "audio_processing", "submit_without_audio", "add_watermark", "depth_guidance", "face_mesh"):
         value = job.get(key, setup.get(key))

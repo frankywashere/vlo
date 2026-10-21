@@ -15,6 +15,7 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
       structured_v1: "Structured prompt with same-camera guidance",
       identity_colors_v1: "Structured with identity colors",
       identity_tint_tracking_v1: "Structured with Easy Mode tint tracking",
+      cloudflare_identity_v1: "Cloudflare character matching",
     };
     if (settings.prompt_variant) rows.push(["Generation prompts", promptLabels[settings.prompt_variant]]);
     if (settings.trim?.length === 2) rows.push(["Source section", `${seconds(settings.trim[0])}–${seconds(settings.trim[1])}`]);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
-import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey } from "../services/commerce";
+import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey, saveCloudflareApiKey } from "../services/commerce";
 import { AdminSection } from "./AdminSection";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
@@ -23,6 +23,9 @@ export function AdminPage() {
   const can = (permission: StaffPermission) => permissions.includes(permission);
   const [privateKey, setPrivateKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
+  const [cloudflareKey, setCloudflareKey] = useState("");
+  const [cloudflareAccountId, setCloudflareAccountId] = useState("");
+  const [cloudflareGatewayId, setCloudflareGatewayId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -32,6 +35,8 @@ export function AdminPage() {
     void loadCreditAdmin().then((result) => {
       if (!active) return;
       setAdmin(result);
+      setCloudflareAccountId(result.cloudflare_key?.account_id ?? "");
+      setCloudflareGatewayId(result.cloudflare_key?.gateway_id ?? "");
       setWatermarkVisible(result.watermark?.enabled ?? true);
       setWatermarkBonus(String(result.watermark?.bonus_credits ?? 25));
       setPacks(result.catalog.packs);
@@ -108,9 +113,9 @@ export function AdminPage() {
         <AdminSection title="Experimental"><Stack spacing={2}>
           <FormControl disabled={busy || !can("pipeline_settings")}>
             <FormLabel id="prompt-variant-label">Generation prompts</FormLabel>
-            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "identity_tint_tracking_v1"} onChange={(event) => {
+            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "cloudflare_identity_v1"} onChange={(event) => {
               const variant = event.target.value;
-              if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1" && variant !== "identity_colors_v1" && variant !== "identity_tint_tracking_v1") || !can("pipeline_settings")) return;
+              if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1" && variant !== "identity_colors_v1" && variant !== "identity_tint_tracking_v1" && variant !== "cloudflare_identity_v1") || !can("pipeline_settings")) return;
               void run(async () => {
                 const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, prompt_variant: variant});
                 setAdmin((current) => current ? {...current, pipeline} : current);
@@ -122,6 +127,7 @@ export function AdminPage() {
               <FormControlLabel value="structured_v1" control={<Radio />} label="Structured prompt with same-camera guidance" />
               <FormControlLabel value="identity_colors_v1" control={<Radio />} label="Structured with identity colors" />
               <FormControlLabel value="identity_tint_tracking_v1" control={<Radio />} label="Structured with Easy Mode tint tracking" />
+              <FormControlLabel value="cloudflare_identity_v1" control={<Radio />} label="Cloudflare character matching" />
             </RadioGroup>
           </FormControl>
           <Typography variant="body2" color="text.secondary">Applies to new jobs in every mode. Existing jobs keep their saved prompt version.</Typography>
@@ -257,6 +263,19 @@ export function AdminPage() {
             await savePrivateProviderKey(privateKey.trim()); setPrivateKey("");
             setAdmin(await loadCreditAdmin()); setMessage("System API key saved securely. You can now enable credit-funded generation.");
           })}>Save system key</Button>
+          <Typography fontWeight={600}>Cloudflare character matching</Typography>
+          <Typography variant="body2">Cloudflare API key: {admin.cloudflare_key?.configured ? "Configured" : "Not configured"}</Typography>
+          <TextField label="Cloudflare account ID" required value={cloudflareAccountId} onChange={event => setCloudflareAccountId(event.target.value)} autoComplete="off" />
+          <TextField label="Cloudflare API key" type="password" value={cloudflareKey} onChange={event => setCloudflareKey(event.target.value)} autoComplete="off" helperText={admin.cloudflare_key?.configured ? "Leave blank to keep the saved key." : "Stored securely and never displayed."} />
+          <TextField label="Cloudflare Gateway ID" required value={cloudflareGatewayId} onChange={event => setCloudflareGatewayId(event.target.value)} autoComplete="off" />
+          <Button variant="outlined" disabled={busy || !can("provider_key") || !/^[a-fA-F0-9]{32}$/.test(cloudflareAccountId.trim()) || !/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(cloudflareGatewayId.trim()) || (!cloudflareKey.trim() && !admin.cloudflare_key?.configured)} onClick={() => void run(async () => {
+            const cloudflare_key = await saveCloudflareApiKey({key: cloudflareKey.trim(), account_id: cloudflareAccountId.trim(), gateway_id: cloudflareGatewayId.trim()});
+            setCloudflareKey("");
+            setCloudflareAccountId(cloudflare_key.account_id);
+            setCloudflareGatewayId(cloudflare_key.gateway_id);
+            setAdmin(current => current ? {...current, cloudflare_key} : current);
+            setMessage("Cloudflare credentials saved securely.");
+          })}>Save Cloudflare key</Button>
         </Stack></Box></AdminSection>
         <CreditGrantPanel readOnly={!can("grant_credits")} />
       </>}

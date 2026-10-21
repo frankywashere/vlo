@@ -57,6 +57,7 @@ export interface WatermarkSettings {
 
 export interface CreditAdmin {
   watermark?: WatermarkSettings;
+  cloudflare_key?: CloudflareKeySettings;
   permissions?: StaffPermission[];
   role: "owner" | "pricing_admin" | "viewer";
   features: CreditFeatures;
@@ -72,7 +73,7 @@ export interface CreditAdmin {
 
 export type PreparationProvider = "workers" | "replicate";
 
-export type PromptVariant = "current" | "favorite_v2" | "structured_v1" | "identity_colors_v1" | "identity_tint_tracking_v1";
+export type PromptVariant = "current" | "favorite_v2" | "structured_v1" | "identity_colors_v1" | "identity_tint_tracking_v1" | "cloudflare_identity_v1";
 
 export interface PipelineSettings {
   revision: number;
@@ -96,6 +97,16 @@ export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"
 
 export function saveReplicateApiKey(key: string) {
   return commerceRequest<{configured: boolean}>("/api/commerce/admin/replicate-key", {key});
+}
+
+export interface CloudflareKeySettings {
+  configured: boolean;
+  account_id: string;
+  gateway_id: string;
+}
+
+export function saveCloudflareApiKey(settings: {key: string; account_id: string; gateway_id: string}) {
+  return commerceRequest<CloudflareKeySettings>("/api/commerce/admin/cloudflare-key", settings);
 }
 
 export interface CreditFeatures {

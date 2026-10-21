@@ -22,10 +22,11 @@ RENDER_QUEUE = "recastfx-renders"
 JOB_KEY_SECRET = "recastfx-job-key"
 PROVIDER_KEY_SECRET = "recastfx-provider-key"
 REPLICATE_KEY_SECRET = "recastfx-replicate-key"
+CLOUDFLARE_KEY_SECRET = "recastfx-cloudflare-key"
 
 
 def ensure_private_provider_secret():
-    for secret in (PROVIDER_KEY_SECRET, REPLICATE_KEY_SECRET):
+    for secret in (PROVIDER_KEY_SECRET, REPLICATE_KEY_SECRET, CLOUDFLARE_KEY_SECRET):
         existing = deploy.gcloud("secrets", "describe", secret, optional=True)
         if not existing:
             deploy.gcloud("secrets", "create", secret, "--replication-policy=automatic")
@@ -37,7 +38,7 @@ def ensure_private_provider_secret():
 def runtime_settings(current: dict, live_account: str | None = None):
     env = current.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])
     values = {item["name"]: item["value"] for item in env
-              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID", "COMMERCE_OWNER_EMAILS", "REFERENCE_CLEANUP_URL", "REPLICATE_SECRET_NAME"} and "value" in item}
+              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID", "COMMERCE_OWNER_EMAILS", "REFERENCE_CLEANUP_URL", "REPLICATE_SECRET_NAME", "CLOUDFLARE_SECRET_NAME"} and "value" in item}
     bindings = {}
     for item in env:
         ref = item.get("valueFrom", {}).get("secretKeyRef")
@@ -110,6 +111,7 @@ def main():
         "REAPI_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{PROVIDER_KEY_SECRET}",
         "REFERENCE_CLEANUP_URL": "https://reference-cleanup-63lqoskl5q-uk.a.run.app",
         "REPLICATE_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{REPLICATE_KEY_SECRET}",
+        "CLOUDFLARE_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{CLOUDFLARE_KEY_SECRET}",
         **runtime_env,
     }
     project = deploy.gcloud("projects", "describe", deploy.PROJECT)

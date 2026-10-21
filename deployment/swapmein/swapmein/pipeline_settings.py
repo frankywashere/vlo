@@ -36,6 +36,10 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
     require_permission(records, actor, "pipeline_settings")
     if prompt_variant is not None and prompt_variant not in PROMPT_VARIANTS:
         raise PublicError("Choose a supported generation prompt.")
+    if prompt_variant == "cloudflare_identity_v1":
+        from .cloudflare_credentials import cloudflare_key_ready
+        if not cloudflare_key_ready():
+            raise PublicError("Save Cloudflare credentials and a capped Gateway ID before enabling Cloudflare character matching.", 409)
     if preparation_provider is not None and preparation_provider not in {"workers", "replicate"}:
         raise PublicError("Choose a supported preparation provider.")
     if preparation_provider == "replicate" and not replicate_key_ready():

@@ -8,10 +8,11 @@ IDENTITY_DEPTH_STYLES = {"identity_depth", "identity_depth_multi"}
 def guide_style(job, enhanced, multi, *, reviewed=False):
     if not enhanced:
         return "original", "none"
-    if job.get("prompt_variant") in {"identity_colors_v1", "identity_tint_tracking_v1"}:
+    if job.get("prompt_variant") in {"identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"}:
         setup = job.get("setup", {})
-        manual = not job.get("easy_mode", setup.get("easy_mode", False))
-        identity = (manual and (reviewed or job.get("tracking_reviewed"))
+        manual = (not job.get("easy_mode", setup.get("easy_mode", False))
+                  or job.get("prompt_variant") == "cloudflare_identity_v1")
+        identity = (manual and (reviewed or job.get("tracking_reviewed") or job.get("identity_matching_completed"))
                     and not job.get("replace_all_people", setup.get("replace_all_people", False)))
         if job.get("depth_guidance", True):
             # The translucent-depth renderer uses a shared magenta tint. Only

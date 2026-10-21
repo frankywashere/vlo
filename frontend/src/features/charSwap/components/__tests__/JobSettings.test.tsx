@@ -27,6 +27,7 @@ describe("saved clip settings", () => {
     ["structured_v1", "Structured prompt with same-camera guidance"],
     ["identity_colors_v1", "Structured with identity colors"],
     ["identity_tint_tracking_v1", "Structured with Easy Mode tint tracking"],
+    ["cloudflare_identity_v1", "Cloudflare character matching"],
   ] as const)("shows the saved %s prompt version in settings", async (prompt_variant, label) => {
     render(<JobSettings settings={{prompt_variant}} />);
     await userEvent.click(screen.getByText("Settings used"));

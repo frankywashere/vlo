@@ -2,14 +2,14 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
-import type { PipelineSettings, StaffPermission } from "../../services/commerce";
+import type { CloudflareKeySettings, PipelineSettings, StaffPermission } from "../../services/commerce";
 
-const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin" | "viewer", permissions: undefined as StaffPermission[] | undefined, pipelineSettings: undefined as PipelineSettings | undefined, ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn(), watermark: vi.fn(), replicateKey: vi.fn() }));
+const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin" | "viewer", permissions: undefined as StaffPermission[] | undefined, pipelineSettings: undefined as PipelineSettings | undefined, cloudflareSettings: undefined as CloudflareKeySettings | undefined, cloudflareKey: vi.fn(), ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn(), watermark: vi.fn(), replicateKey: vi.fn() }));
 vi.mock("../../services/commerce", () => ({
-  loadCreditAdmin: async () => ({ role: api.role, permissions: api.permissions, pipeline: api.pipelineSettings, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
+  loadCreditAdmin: async () => ({ role: api.role, permissions: api.permissions, pipeline: api.pipelineSettings, cloudflare_key: api.cloudflareSettings, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
-  saveWatermarkSettings: api.watermark, savePipelineSettings: api.pipeline, saveReplicateApiKey: api.replicateKey, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
+  saveWatermarkSettings: api.watermark, savePipelineSettings: api.pipeline, saveReplicateApiKey: api.replicateKey, saveCloudflareApiKey: api.cloudflareKey, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
 }));
 async function renderExpandedAdmin() {
   render(<AdminPage />);
@@ -20,6 +20,8 @@ async function renderExpandedAdmin() {
 }
 beforeEach(() => {
   api.pipelineSettings = undefined;
+  api.cloudflareSettings = undefined;
+  api.cloudflareKey.mockReset().mockImplementation(async ({account_id, gateway_id}) => ({configured: true, account_id, gateway_id}));
   api.permissions = undefined;
   api.ready = false;
   api.pipeline.mockReset().mockImplementation(async (settings) => {
@@ -356,10 +358,10 @@ it("exposes the face-mesh master separately from public switch visibility",async
   expect(master).not.toBeChecked();
 });
 
-it("defaults to Easy Mode tint tracking and saves each alternate version without changing other settings", async () => {
+it("defaults to Cloudflare matching and saves each alternate version without changing other settings", async () => {
   api.pipelineSettings = {revision: 7, audio_processing: false, depth_guidance: true, face_mesh_enabled: false};
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked();
+  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
   await userEvent.clear(screen.getByLabelText("Pack name"));
   await userEvent.type(screen.getByLabelText("Pack name"), "Unsaved pack name");
   await userEvent.click(screen.getByRole("radio", {name: "Favorite prompt across modes"}));
@@ -386,13 +388,14 @@ it("loads the saved Easy Mode tint tracking option without changing it", async (
   api.pipelineSettings = {revision: 4, audio_processing: false, prompt_variant: "identity_tint_tracking_v1"};
   await renderExpandedAdmin();
   expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked();
-  expect(within(screen.getByRole("radiogroup", {name: "Generation prompts"})).getAllByRole("radio")).toHaveLength(5);
+  expect(within(screen.getByRole("radiogroup", {name: "Generation prompts"})).getAllByRole("radio")).toHaveLength(6);
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 
 it.each([
   ["Current prompts", "current"],
   ["Structured with Easy Mode tint tracking", "identity_tint_tracking_v1"],
+  ["Cloudflare character matching", "cloudflare_identity_v1"],
 ] as const)("keeps the saved prompt version if changing to %s fails", async (label, variant) => {
   api.pipelineSettings = {revision: 3, audio_processing: false, prompt_variant: "structured_v1"};
   api.pipeline.mockRejectedValueOnce(new Error("Pipeline settings changed. Reload and try again."));
@@ -408,8 +411,65 @@ it.each([
 it("requires pipeline permission to change any prompt version", async () => {
   api.permissions = ["pricing"];
   await renderExpandedAdmin();
-  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance", "Structured with identity colors", "Structured with Easy Mode tint tracking"]) {
+  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance", "Structured with identity colors", "Structured with Easy Mode tint tracking", "Cloudflare character matching"]) {
     expect(screen.getByRole("radio", {name})).toBeDisabled();
   }
   expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+
+it("saves the Cloudflare prompt option with a revision while preserving manual-mode settings", async () => {
+  api.pipelineSettings = {revision: 11, audio_processing: true, prompt_variant: "identity_tint_tracking_v1", depth_guidance: false, face_mesh_enabled: true};
+  await renderExpandedAdmin();
+  await userEvent.click(screen.getByRole("radio", {name: "Cloudflare character matching"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 11, prompt_variant: "cloudflare_identity_v1"});
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).toBeChecked();
+});
+
+it("saves Cloudflare credentials without exposing the token or changing the prompt version", async () => {
+  await renderExpandedAdmin();
+  const token = screen.getByLabelText("Cloudflare API key");
+  expect(token).toHaveAttribute("type", "password");
+  expect(token).toHaveValue("");
+  expect(screen.getByText("Cloudflare API key: Not configured")).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
+  await userEvent.type(screen.getByLabelText(/Cloudflare account ID/), "52b56b12e8c965d69f81d15dbb4e5f52");
+  await userEvent.type(token, "test-cloudflare-secret");
+  expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
+  await userEvent.type(screen.getByLabelText(/Cloudflare Gateway ID/), "recastfx-matching-test");
+  await userEvent.click(screen.getByRole("button", {name: "Save Cloudflare key"}));
+  await screen.findByText("Cloudflare credentials saved securely.");
+  expect(api.cloudflareKey).toHaveBeenCalledWith({key: "test-cloudflare-secret", account_id: "52b56b12e8c965d69f81d15dbb4e5f52", gateway_id: "recastfx-matching-test"});
+  expect(token).toHaveValue("");
+  expect(screen.getByText("Cloudflare API key: Configured")).toBeInTheDocument();
+  expect(screen.queryByText("test-cloudflare-secret")).not.toBeInTheDocument();
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+it("loads Cloudflare metadata without a token and keeps the stored token when editing its gateway", async () => {
+  api.cloudflareSettings = {configured: true, account_id: "52b56b12e8c965d69f81d15dbb4e5f52", gateway_id: "old-gateway"};
+  await renderExpandedAdmin();
+  expect(screen.getByLabelText("Cloudflare API key")).toHaveValue("");
+  expect(screen.getByLabelText(/Cloudflare account ID/)).toHaveValue(api.cloudflareSettings.account_id);
+  await userEvent.clear(screen.getByLabelText(/Cloudflare Gateway ID/));
+  await userEvent.type(screen.getByLabelText(/Cloudflare Gateway ID/), "new-gateway");
+  await userEvent.click(screen.getByRole("button", {name: "Save Cloudflare key"}));
+  await screen.findByText("Cloudflare credentials saved securely.");
+  expect(api.cloudflareKey).toHaveBeenCalledWith({key: "", account_id: api.cloudflareSettings.account_id, gateway_id: "new-gateway"});
+});
+
+it("requires provider-key permission to edit Cloudflare credentials", async () => {
+  api.role = "viewer";
+  api.permissions = ["pipeline_settings"];
+  api.cloudflareSettings = {configured: true, account_id: "52b56b12e8c965d69f81d15dbb4e5f52", gateway_id: "recastfx-matching-test"};
+  await renderExpandedAdmin();
+  expect(screen.getByLabelText("Cloudflare API key")).toHaveValue("");
+  expect(screen.getByLabelText("Cloudflare API key")).toBeDisabled();
+  expect(screen.getByLabelText(/Cloudflare account ID/)).toBeDisabled();
+  expect(screen.getByLabelText(/Cloudflare Gateway ID/)).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
+  expect(api.cloudflareKey).not.toHaveBeenCalled();
 });

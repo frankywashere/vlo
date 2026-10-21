@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, File, Form, Header, Query, Request, UploadFil
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
@@ -42,6 +42,7 @@ from .stripe_billing import create_checkout, fulfill_checkout, verified_event
 from .job_key import protect_key, recover_key
 from .provider_credentials import server_provider_key, save_server_provider_key
 from .preparation_credentials import save_server_replicate_key
+from .cloudflare_credentials import cloudflare_credential_view, save_server_cloudflare_key
 from .replicate_preparation import preparation_snapshot
 
 settings = Settings.from_env()
@@ -487,6 +488,13 @@ class PrivateProviderKey(BaseModel):
     key: str = Field(min_length=8, max_length=512)
 
 
+class CloudflareKey(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    key: SecretStr = Field(default=SecretStr(""), max_length=256)
+    account_id: str = Field(min_length=1, max_length=64)
+    gateway_id: str = Field(min_length=1, max_length=64)
+
+
 class CheckoutRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     pack_id: str
@@ -540,7 +548,7 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records), "watermark": watermark_settings(records)}
+    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records), "watermark": watermark_settings(records), "cloudflare_key": cloudflare_credential_view()}
 
 
 class WatermarkSettingsUpdate(BaseModel):
@@ -570,7 +578,7 @@ class PipelineSettingsUpdate(BaseModel):
     hide_audio_toggle: bool | None = None
     multi_characters: bool | None = None
     face_mesh_enabled: bool | None = None
-    prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1"] | None = None
+    prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"] | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
@@ -616,6 +624,16 @@ def update_private_provider_key(body: PrivateProviderKey, x_firebase_token: str 
     save_server_provider_key(key)
     emit("private_provider_key_saved", actor_id=digest(account["email"]))
     return {"configured": True, "balance_usd": round(balance / 1000, 3)}
+
+
+@app.post("/api/commerce/admin/cloudflare-key")
+def update_cloudflare_key(body: CloudflareKey, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_permission(records, actor, "provider_key")
+    result = save_server_cloudflare_key(body.key.get_secret_value(), body.account_id, body.gateway_id)
+    emit("cloudflare_matching_key_saved", actor_id=digest(actor["email"]))
+    return result
 
 
 @app.get("/api/commerce/admin/accounts")
@@ -800,7 +818,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **watermark_offer,
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"])}
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
@@ -1005,7 +1023,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"])}
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         if manifest.get("generation_credits") is not None:
@@ -1432,6 +1450,11 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
     options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True, **job["setup"]})
+    if (job.get("prompt_variant") == "cloudflare_identity_v1" and options.easy_mode
+            and not options.replace_all_people and not job.get("identity_matching_completed")
+            and not job.get("tracking_reviewed")):
+        raise PublicError("Complete automatic matching or check scene matches before generating.", 409,
+                          code="cloudflare_matching_required")
     reference_uris = job.get("reference_uris") or [job["reference_uri"]]
     validate_reference_mapping(options, len(reference_uris))
     enforce_character_limit(options, len(reference_uris), job.get("multi_characters", True))
