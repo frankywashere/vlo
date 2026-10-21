@@ -5,8 +5,8 @@
   "traffic_percent": 100,
   "prompt_variant": "cloudflare_identity_v1",
   "pipeline_revision": 12,
-  "frontend_asset": "/assets/charswap-Bb39322L.js",
-  "frontend_sha256": "0739303197dd6441db19c215aafe96715fa60879df452c9270e76bddc28fe37c",
+  "frontend_asset": "/assets/charswap-CwKB6dj-.js",
+  "frontend_sha256": "edf5df7877a18a94c9673eeb1a77066aaa8c67875d572ac7048968dcf4a14e57",
   "cloudflare_secret_configured": true,
   "inference_submitted": false,
   "worker_details": {
@@ -132,5 +132,7 @@
       ]
     }
   },
-  "verification": "live API config, credential route availability, exact frontend bundle bytes, immutable revision, saved control record, secret metadata"
+  "verification": "live API config, credential route availability, exact frontend bundle bytes, immutable revision, saved control record, secret metadata",
+  "frontend_followup_commit": "b9b3b208",
+  "frontend_followup": "Verified attention message and Library handoff; 549 frontend tests, backend fallback-to-review-to-generation check passed."
 }
