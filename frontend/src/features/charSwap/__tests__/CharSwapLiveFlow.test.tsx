@@ -461,3 +461,31 @@ describe("explicit generation approval", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+
+it("hands an Easy Mode scene review to Library without restarting the saved job", async () => {
+  const easy = true;
+  const store = useCharSwapStore.getState();
+  store.setEasyMode(easy);
+  store.visit("generation");
+  live.job = {id: "saved-option-six", status: "tracking_review", easy_mode: easy,
+    settings_used: {prompt_variant: "cloudflare_identity_v1"},
+    message: "Check the selected people in these scenes before continuing.",
+    source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 5,
+    tracking_revision: 1, tracking_segments: [{id: "s0", start_frame: 0, end_frame: 120,
+      start: 0, end: 5, seek_time: 1, reason: "scene_selection", needs_review: true}]};
+  const onLibrary = vi.fn();
+  render(<CharSwapWalkthrough onLibrary={onLibrary} />);
+  expect(screen.getByRole("heading", {name: "Your clip needs attention"})).toBeVisible();
+  expect(screen.getByText(/Your clip and reference photos are saved/)).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Check the selected people in these scenes");
+  expect(screen.queryByRole("progressbar", {name: "Generation in progress"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Start a new recast"})).toBeVisible();
+  const resetCallsBeforeNavigation = live.reset.mock.calls.length;
+  await userEvent.click(screen.getByRole("button", {name: "Open your library"}));
+  expect(onLibrary).toHaveBeenCalledTimes(1);
+  expect(live.prepare).not.toHaveBeenCalled();
+  expect(live.generate).not.toHaveBeenCalled();
+  expect(live.reset).toHaveBeenCalledTimes(resetCallsBeforeNavigation);
+  expect(useCharSwapStore.getState().easyMode).toBe(easy);
+});

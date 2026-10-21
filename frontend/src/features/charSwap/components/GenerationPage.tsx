@@ -60,6 +60,7 @@ export function GenerationPage({
   const complete = job?.status === "completed";
   const failed = job?.status === "failed" || Boolean(error && !job);
   const unknown = job?.status === "submission_unknown";
+  const needsReview = job?.status === "tracking_review";
   const stage = complete
     ? 3
     : job?.status === "finalizing"
@@ -68,7 +69,7 @@ export function GenerationPage({
         ? 1
         : 0;
   const stageCopy = processingStageCopy(job);
-  const title = stageCopy?.title ?? (complete
+  const title = needsReview ? "Your clip needs attention" : stageCopy?.title ?? (complete
     ? "Your recast is ready."
     : unknown
       ? "Checking your submission"
@@ -101,7 +102,11 @@ export function GenerationPage({
           >
             {title}
           </Typography>
-          {uploadSaved && !complete && !stageCopy ? <UploadSavedNotice /> : (
+          {needsReview ? (
+            <Typography color="text.secondary" sx={{ mt: 1 }}>
+              Your clip and reference photos are saved. Open your library and choose “Check scene matches” to continue.
+            </Typography>
+          ) : uploadSaved && !complete && !stageCopy ? <UploadSavedNotice /> : (
             <Typography color="text.secondary" sx={{ mt: 1 }}>
               {complete ? "Watch it, save it, and make another."
                 : stageCopy ? stageCopy.detail : "Keep this tab open until your upload is confirmed."}
@@ -221,7 +226,7 @@ export function GenerationPage({
               </Stack>
             ))}
           </Stack>
-          {!complete && !failed && (
+          {!complete && !failed && !needsReview && (
             <LinearProgress
               aria-label="Generation in progress"
               variant={
@@ -257,8 +262,9 @@ export function GenerationPage({
               {download.busy ? "Downloading…" : "Download video"}
             </Button>
           )}
-          {job && !canCreateAnother && !complete && (
-            <Button variant="outlined" onClick={onLibrary}>
+          {needsReview && job.message && <Alert severity="warning">{job.message}</Alert>}
+          {job && (needsReview || !canCreateAnother) && !complete && (
+            <Button variant={needsReview ? "contained" : "outlined"} onClick={onLibrary}>
               Open your library
             </Button>
           )}
@@ -269,7 +275,7 @@ export function GenerationPage({
           )}
           {failed && <Button onClick={onReview}>Review setup</Button>}
           {(complete || canCreateAnother) && (
-            <Button variant="contained" onClick={onNew}>Start a new recast</Button>
+            <Button variant={needsReview ? "outlined" : "contained"} onClick={onNew}>Start a new recast</Button>
           )}
         </Stack>
       </Box>

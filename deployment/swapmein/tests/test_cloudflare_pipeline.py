@@ -55,6 +55,28 @@ def test_matcher_failure_preserves_inputs_and_routes_manual_scene_review(monkeyp
     assert job['tracking_masks_uri'] and job['normalized_uri']
     assert job['tracking_plan']['review_required']
     assert not any(kind=='generate' for kind,_ in cloud.enqueued)
+    # The same Easy job can complete the existing manual-review rebuild.
+    from dataclasses import replace
+    from swapmein.config import Settings
+    choices=[{'segment_id':section['id'],'absent':False,'anchor':{
+        'x':.75 if section['target_id']=='person-2' else .25,'y':.5,'time':section['seek_time']}}
+        for section in job['tracking_plan']['segments'] if section['needs_review']]
+    job.update(tracking_choices=choices,tracking_resolution_pending=True,tracking_applied_revision=1,
+        generation_after_review_revision=1,tracking_recovery_requested=True,tracking_task_token='saved-review-task')
+    def enqueue(kind,job_id,task_token=None):
+        assert task_token=='saved-review-task'
+        cloud.enqueued.append((kind,job_id))
+    cloud.enqueue=enqueue
+    class Saved:
+        data=copy.deepcopy(job)
+        def update(self,path,fn):self.data=fn(copy.deepcopy(self.data));return copy.deepcopy(self.data)
+    saved=Saved()
+    Pipeline(replace(Settings(),app_bucket='app',worker_bucket='workers'),saved,cloud).rebuild_reviewed_guide(job,lambda:60)
+    assert saved.data['id']==job['id'] and saved.data['easy_mode'] is True
+    assert saved.data['status']=='ready' and saved.data['tracking_reviewed']
+    assert saved.data['review_generation_queued']
+    assert all(t['scenes'] for t in saved.data['normalized_targets'])
+    assert any(kind=='generate' for kind,_ in cloud.enqueued)
 
 
 @pytest.mark.parametrize('easy,selection',[(False,'multi'),(True,'all')])

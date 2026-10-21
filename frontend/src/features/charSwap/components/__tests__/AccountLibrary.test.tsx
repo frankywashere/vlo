@@ -368,3 +368,36 @@ it("shows the saved background validation error when Library reopens scene revie
   await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
   expect(await screen.findByText("Choose the matching person again.")).toBeVisible();
 });
+
+
+it("opens and saves Option 6 fallback scene review while keeping Easy Mode and the existing job", async () => {
+  const review = {...job, id: "f".repeat(32), status: "tracking_review" as const, access_mode: "credits" as const,
+    easy_mode: true, mask_style: "identity_overlay_20" as const, settings_used: {prompt_variant: "cloudflare_identity_v1" as const, face_mesh: true},
+    source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4, tracking_revision: 2,
+    selection_targets: [{id: "person-1", name: "Person 1", reference_index: 0,
+      anchor: {x: .4, y: .5, time: 1}, thumbnail_url: "https://storage.googleapis.com/person-1.jpg"}],
+    tracking_segments: [{id: "s0", target_id: "person-1", start: 0, end: 4, start_frame: 0, end_frame: 96,
+      seek_time: 1, needs_review: true, reason: "scene_selection"}],
+    tracking_choices: [{segment_id: "s0", absent: false, anchor: {x: .4, y: .5, time: 1}}]};
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([review]);
+  vi.mocked(loadAccountJobs).mockImplementation(() => new Promise(() => {}));
+  vi.mocked(resumeAccountJob).mockResolvedValue({token: "saved-session", expires_at: 2000000});
+  vi.mocked(resolveLiveTracking).mockResolvedValue({id: review.id, status: "queued", processing_stage: "guide_rebuild"});
+  const onCreate = vi.fn();
+  const user = userEvent.setup();
+  render(<AccountLibrary onCreate={onCreate} />);
+  expect(await screen.findByText("Needs attention")).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Check scene matches"}));
+  expect(screen.getByRole("heading", {name: "Check scene matches", level: 1})).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("img", {name: "Person 1"})).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Submit and generate"}));
+  await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledTimes(1));
+  expect(resumeAccountJob).toHaveBeenCalledWith(review.id, "");
+  expect(vi.mocked(resolveLiveTracking).mock.calls[0].slice(0, 4)).toEqual([
+    review.id, "saved-session", 2, review.tracking_choices,
+  ]);
+  expect(vi.mocked(resolveLiveTracking).mock.calls[0][5]).toMatchObject({enabled: true, generateAfterReview: true});
+  expect(onCreate).not.toHaveBeenCalled();
+  expect(generateLiveJob).not.toHaveBeenCalled();
+});
