@@ -23,10 +23,10 @@ from .diagnostics import emit, timed
 @timed("detect_scene_cuts")
 def detect_scene_cuts(source: Path) -> list[float]:
     """Find clip-local cuts, including letterboxed footage with muted changes."""
-    # The old 0.40 threshold missed real shot/reverse-shot cuts, allowing SAM
-    # IDs reused across shots to become conflicting person assignments.
+    # 0.40 missed real shot/reverse-shot cuts; 0.15 also split movement inside
+    # shots. The reviewed alt.mov comparison retained all 23 shots at 0.25.
     cuts = run(["ffmpeg", "-hide_banner", "-loglevel", "info", "-protocol_whitelist", "file,pipe", "-i", str(source), "-an",
-                "-vf", "select='gt(scene,0.15)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
+                "-vf", "select='gt(scene,0.25)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
     return [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
 
 

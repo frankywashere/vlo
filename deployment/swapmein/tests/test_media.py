@@ -335,12 +335,27 @@ def test_trim_boundary_rejects_a_real_overflow():
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for cut detection")
-def test_letterboxed_camera_cuts_do_not_reuse_one_tracking_section(tmp_path):
+@pytest.mark.parametrize("first_color,expected", [("white", [2.0]), ("red", [])])
+def test_letterboxed_cut_sensitivity_at_stricter_threshold(tmp_path, first_color, expected):
     from swapmein.media import detect_scene_cuts
     source = tmp_path / "letterboxed.mp4"
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:r=24:d=2",
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={first_color}:s=320x240:r=24:d=2",
         "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=24:d=2", "-filter_complex",
         "[0:v][1:v]concat=n=2:v=1:a=0,pad=480:360:80:60:black[v]", "-map", "[v]",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)], check=True)
+    # Heavy black borders dilute the change score: the muted red/blue cut was
+    # detected at 0.15 but is deliberately below 0.25. Clear cuts still register.
+    assert detect_scene_cuts(source) == expected
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for cut detection")
+def test_mild_brightness_change_does_not_add_a_scene_boundary(tmp_path):
+    from swapmein.media import detect_scene_cuts
+    source = tmp_path / "brightness-step.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x303030:s=320x240:r=24:d=1",
+        "-f", "lavfi", "-i", "color=c=0x444444:s=320x240:r=24:d=1",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=24:d=1", "-filter_complex",
+        "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)], check=True)
     assert detect_scene_cuts(source) == [2.0]
 

@@ -170,6 +170,12 @@ and absences for the provider prompt. The user chooses each person or **Not in
 this scene**. Two replacements cannot share the same detected person in one
 scene. Group mode requires no individual scene matching.
 
+Shot boundaries use FFmpeg's visual-change score on the prepared clip, with a
+threshold of 0.25. The reviewed `alt.mov` comparison found 23 shots at 0.25,
+versus 25 at 0.15. This reduces movement-related false cuts, but subtle changes
+inside heavy letterboxing can fall below the stricter threshold. Cut detection
+does not establish character identity across shots.
+
 The initial person picker accepts taps only after its displayed video frame has
 settled. An initial unmatched tap in manual enhanced mode requires correction in
 scene review before generation; it does not silently select a nearby person.
