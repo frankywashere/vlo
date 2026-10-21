@@ -131,6 +131,17 @@ export function AdminPage() {
             </RadioGroup>
           </FormControl>
           <Typography variant="body2" color="text.secondary">Applies to new jobs in every mode. Existing jobs keep their saved prompt version.</Typography>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.matching_no_review ?? false}
+            disabled={busy || !can("pipeline_settings")}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, matching_no_review: enabled});
+                setAdmin(current => current ? {...current, pipeline} : current);
+                setMessage(`Automatic matching failure review ${enabled ? "disabled" : "enabled"} for new jobs.`);
+              });
+            }} />} label="No review on automatic matching failure" />
+          <Typography variant="body2" color="text.secondary">If Cloudflare matching cannot complete, continue with Option 5 Easy Mode instead of asking for scene review. Applies to new jobs.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.multi_characters ?? true}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

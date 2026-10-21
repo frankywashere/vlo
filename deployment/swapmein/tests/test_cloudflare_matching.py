@@ -170,6 +170,17 @@ def test_track_fragment_outside_sample_routes_to_review_before_paid_call(tmp_pat
     assert not (tmp_path / "identity-masks.zip").exists()
 
 
+def test_corrupt_sam_archive_keeps_tracking_error_instead_of_matcher_fallback_code(tmp_path, monkeypatch):
+    archive, metadata, targets, _ = fixture(tmp_path)
+    archive.write_bytes(b"broken archive")
+    monkeypatch.setattr(matching.requests, "post", lambda *args, **kwargs: pytest.fail("Unexpected API call"))
+    with pytest.raises(PublicError) as error:
+        matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                              credentials=CREDENTIALS, workdir=tmp_path)
+    assert error.value.code == "tracking_invalid"
+    assert not (tmp_path / "identity-masks.zip").exists()
+
+
 @pytest.mark.parametrize("credentials", [{}, {**CREDENTIALS, "gateway_id": ""}, {**CREDENTIALS, "api_token": ""},
                                          {**CREDENTIALS, "account_id": "../../elsewhere"}])
 def test_missing_credentials_or_gateway_cannot_make_uncapped_call(tmp_path, monkeypatch, credentials):

@@ -60,3 +60,10 @@ it("refuses a Cloudflare credential change when signed out", async () => {
   await expect(saveCloudflareApiKey({key: "test-secret", account_id: "account", gateway_id: "test"})).rejects.toThrow("Sign in");
   expect(requests).not.toHaveBeenCalled();
 });
+
+
+it.each([true, false])("saves matching_no_review=%s without changing the selected prompt", async (matching_no_review) => {
+  await savePipelineSettings({revision: 9, matching_no_review});
+  expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");
+  expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 9, matching_no_review});
+});

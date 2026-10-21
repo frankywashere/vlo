@@ -45,7 +45,11 @@ def setup(tmp_path, retry=True):
     class Records:
         def read(self, path):
             return {**job, "normalized_uri": "gs://normalized-rgb"}, 1
-    pipeline = SimpleNamespace(cloud=Cloud(), records=Records(), settings=SimpleNamespace(worker_bucket="worker"))
+    def update_job(job_id, **fields):
+        assert job_id == job['id']
+        job.update(fields)
+        return dict(job)
+    pipeline = SimpleNamespace(cloud=Cloud(), records=Records(), settings=SimpleNamespace(worker_bucket="worker"), update_job=update_job)
     return pipeline, job, masks, metadata, targets, maps, objects, uploads
 
 
@@ -63,6 +67,7 @@ def test_existing_worker_receives_empty_labels_and_merge_preserves_every_raw_id(
     pipeline, job, masks, metadata, targets, maps, objects, _ = setup(tmp_path)
     original_bytes = masks.read_bytes()
     def run(pipeline_arg, recovery_job, requests, remaining):
+        assert job['identity_anchor_recovery_attempted'] is True
         assert pipeline_arg is pipeline
         assert recovery_job["normalized_uri"] == "gs://normalized-rgb"
         assert recovery_job["recovery_entry_point"] == "automatic_identity_anchor"

@@ -25,6 +25,7 @@ def pipeline_settings(records):
             "face_mesh_unmasked_default": current.get("face_mesh_unmasked_default") is True,
             "face_mesh_user_control": current.get("face_mesh_user_control") is True,
             "retry_missing_masks_with_sam": current.get("retry_missing_masks_with_sam") is True,
+            "matching_no_review": current.get("matching_no_review") is True,
             "preparation_provider": provider if provider in {"workers", "replicate"} else "workers",
             "prompt_variant": current.get("prompt_variant") if current.get("prompt_variant") in PROMPT_VARIANTS else DEFAULT_PROMPT_VARIANT,
             "replicate_api_key_configured": replicate_key_ready()}
@@ -32,8 +33,10 @@ def pipeline_settings(records):
 
 def save_pipeline_settings(records, actor, revision, audio_processing=None, preparation_provider=None,
                            retry_missing_masks_with_sam=None, depth_guidance=None,
-                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None):
+                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None, matching_no_review=None):
     require_permission(records, actor, "pipeline_settings")
+    if matching_no_review is not None and type(matching_no_review) is not bool:
+        raise PublicError("Choose whether automatic matching may continue without scene review.")
     if prompt_variant is not None and prompt_variant not in PROMPT_VARIANTS:
         raise PublicError("Choose a supported generation prompt.")
     if prompt_variant == "cloudflare_identity_v1":
@@ -54,6 +57,8 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
                 "depth_guidance": current.get("depth_guidance", False) is not False if depth_guidance is None else depth_guidance,
                 "retry_missing_masks_with_sam": (current.get("retry_missing_masks_with_sam") is True
                     if retry_missing_masks_with_sam is None else retry_missing_masks_with_sam),
+                "matching_no_review": (current.get("matching_no_review") is True
+                    if matching_no_review is None else matching_no_review),
                 "preparation_provider": preparation_provider or current.get("preparation_provider", "workers"),
                 "prompt_variant": (prompt_variant if prompt_variant is not None else
                     current.get("prompt_variant") if current.get("prompt_variant") in PROMPT_VARIANTS else DEFAULT_PROMPT_VARIANT),
@@ -70,6 +75,7 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
     emit("admin_audio_processing_changed", actor_id=digest(actor["email"]),
          revision=saved["revision"], depth_guidance=saved["depth_guidance"], audio_processing=saved["audio_processing"], preparation_provider=saved["preparation_provider"],
          retry_missing_masks_with_sam=saved["retry_missing_masks_with_sam"],
+         matching_no_review=saved["matching_no_review"],
          face_mesh_enabled=saved["face_mesh_enabled"], face_mesh_masked_default=saved["face_mesh_masked_default"],
          face_mesh_unmasked_default=saved["face_mesh_unmasked_default"],
          face_mesh_user_control=saved["face_mesh_user_control"], hide_audio_toggle=saved["hide_audio_toggle"], multi_characters=saved["multi_characters"], prompt_variant=saved["prompt_variant"])

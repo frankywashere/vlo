@@ -473,3 +473,32 @@ it("requires provider-key permission to edit Cloudflare credentials", async () =
   expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
   expect(api.cloudflareKey).not.toHaveBeenCalled();
 });
+
+
+it("defaults matching failure review on and toggles no-review without changing Option 6 or other settings", async () => {
+  api.pipelineSettings = {revision: 4, audio_processing: true, prompt_variant: "cloudflare_identity_v1", depth_guidance: true};
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "No review on automatic matching failure"});
+  expect(toggle).not.toBeChecked();
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, matching_no_review: true});
+  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, matching_no_review: false});
+  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
+});
+
+it("shows a saved no-review setting and requires pipeline permission to edit it", async () => {
+  api.pipelineSettings = {revision: 2, audio_processing: false, prompt_variant: "cloudflare_identity_v1", matching_no_review: true};
+  api.role = "viewer";
+  api.permissions = ["provider_key"];
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "No review on automatic matching failure"});
+  expect(toggle).toBeChecked();
+  expect(toggle).toBeDisabled();
+  expect(api.pipeline).not.toHaveBeenCalled();
+});

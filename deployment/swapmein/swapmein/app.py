@@ -571,6 +571,7 @@ class PipelineSettingsUpdate(BaseModel):
     audio_processing: bool | None = None
     preparation_provider: Literal["workers", "replicate"] | None = None
     retry_missing_masks_with_sam: bool | None = None
+    matching_no_review: bool | None = None
     depth_guidance: bool | None = None
     face_mesh_masked_default: bool | None = None
     face_mesh_unmasked_default: bool | None = None
@@ -587,7 +588,7 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
     records, _, _ = services()
     return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
-                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant)
+                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant, body.matching_no_review)
 
 
 @app.post("/api/commerce/admin/features")
@@ -814,6 +815,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
                "prompt_variant": defaults["prompt_variant"],
+               "matching_no_review": defaults["matching_no_review"],
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
@@ -907,7 +909,8 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
                  x_reapi_key: str | None = Header(default=None)):
     owner, active_session = authenticate(authorization)
     records, cloud, _ = services()
-    enforce_character_limit(options.setup, len(options.reference_sizes), pipeline_settings(records)["multi_characters"])
+    defaults = pipeline_settings(records)
+    enforce_character_limit(options.setup, len(options.reference_sizes), defaults["multi_characters"])
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
     check_generation_funding(records, options.setup, active_session)
@@ -931,7 +934,8 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "raw_reference_uri": reference_uris[0], "raw_reference_uris": reference_uris,
         "source_bytes": options.source_bytes, "reference_bytes": options.reference_bytes,
         "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
-        "prompt_variant": pipeline_settings(records)["prompt_variant"],
+        "prompt_variant": defaults["prompt_variant"],
+        "matching_no_review": defaults["matching_no_review"],
         **watermark_offer,
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
@@ -1018,6 +1022,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
                "prompt_variant": manifest.get("prompt_variant") or "current",
+               "matching_no_review": manifest.get("matching_no_review") is True,
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),

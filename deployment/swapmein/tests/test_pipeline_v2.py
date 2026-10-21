@@ -63,7 +63,7 @@ def image_at(archive_bytes, index=24):
 
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
-            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None):
+            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -121,7 +121,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         def __init__(self):
             self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/upload.bin",
                                "setup": options, "audio_processing": audio_processing,
-                               "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh, "guide_style_version": guide_style_version, "prompt_variant": prompt_variant},
+                               "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh, "guide_style_version": guide_style_version, "prompt_variant": prompt_variant, "matching_no_review": matching_no_review},
                 "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
         def read(self, key):
             return copy.deepcopy(self.data.get(key)), 1

@@ -62,7 +62,9 @@ def recover_identity_anchors(pipeline, job, masks, metadata, targets, root, rema
     saved, _ = pipeline.records.read(f"jobs/{job['id']}.json")
     recovery_job = {**job, **(saved or {}), "reviewed_masks_uri": empty_uri,
                     "tracking_metadata": metadata, "recovery_entry_point": "automatic_identity_anchor"}
+    pipeline.update_job(job['id'], identity_anchor_recovery_attempted=True)
     recovered_uri, _, report = run_mask_recovery(pipeline, recovery_job, requests, remaining)
+    pipeline.update_job(job['id'], identity_anchor_recovery_report=report)
     if (len(report) != len(requests) or {item.get("segment_id") for item in report}
             != {item["segment_id"] for item in requests}
             or any(item.get("outcome") != "recovered" for item in report)):
