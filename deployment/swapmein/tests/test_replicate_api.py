@@ -66,24 +66,31 @@ def create_job(api, headers, direct, enhanced):
         data={"setup": json.dumps(options["setup"])})
 
 
+@pytest.mark.parametrize("variant", ["identity_tint_tracking_v1", "cloudflare_identity_v1"])
 @pytest.mark.parametrize("direct", [True, False])
 @pytest.mark.parametrize("enhanced", [True, False])
-def test_new_job_snapshots_route_and_versions_without_exposing_secret_resource(api, monkeypatch, direct, enhanced):
+def test_new_job_snapshots_route_and_versions_without_exposing_secret_resource(api, monkeypatch, direct, enhanced, variant):
     client, records, *_ = api
     headers, _ = authenticated(api)
-    records.data[PATH] = {"revision": 1, "preparation_provider": "replicate", "audio_processing": True}
-    monkeypatch.setattr("swapmein.pipeline_settings.replicate_key_ready", lambda: enhanced)
+    # Matching needs SAM even with visual masking and face mesh disabled.
+    needs_sam = enhanced or variant == "cloudflare_identity_v1"
+    records.data[PATH] = {"revision": 1, "preparation_provider": "replicate", "audio_processing": True,
+                          "prompt_variant": variant, "face_mesh_enabled": False}
+    monkeypatch.setattr("swapmein.pipeline_settings.replicate_key_ready", lambda: needs_sam)
     version = "projects/project/secrets/recastfx-replicate-key/versions/2"
-    if enhanced:
+    if needs_sam:
         monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version", lambda: version)
     else:
-        monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version", lambda: pytest.fail("Masking-off does not need a key"))
+        monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version", lambda: pytest.fail("Unmasked Option 5 without face mesh does not need a key"))
     response = create_job(api, headers, direct, enhanced)
     assert response.status_code == 202, response.text
     job_id = response.json()["id"]
     job = records.data[f"jobs/{job_id}.json"]
     assert job["preparation_provider"] == "replicate" and job["audio_processing"]
-    if enhanced:
+    assert job["setup"]["easy_mode"] is True
+    assert job["face_mesh"] is False
+    assert job["prompt_variant"] == variant
+    if needs_sam:
         assert job["replicate_model_versions"] == MODELS
         assert job["replicate_credential_version"] == version
     else:
