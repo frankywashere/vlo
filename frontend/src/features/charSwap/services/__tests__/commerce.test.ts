@@ -36,7 +36,7 @@ it("updates only preparation routing without resubmitting unrelated pipeline set
   expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 7, preparation_provider: "replicate"});
 });
 
-it.each(["current", "favorite_v2", "structured_v1", "identity_colors_v1"] as const)("updates only the %s prompt version with its revision", async (prompt_variant) => {
+it.each(["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1"] as const)("updates only the %s prompt version with its revision", async (prompt_variant) => {
   await savePipelineSettings({revision: 8, prompt_variant});
   expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");
   expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 8, prompt_variant});

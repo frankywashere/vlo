@@ -12,13 +12,36 @@ CURRENT = "current"
 FAVORITE_V2 = "favorite_v2"
 STRUCTURED_V1 = "structured_v1"
 IDENTITY_COLORS_V1 = "identity_colors_v1"
-PROMPT_VARIANTS = (CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1)
-DEFAULT_PROMPT_VARIANT = STRUCTURED_V1
+IDENTITY_TINT_TRACKING_V1 = "identity_tint_tracking_v1"
+PROMPT_VARIANTS = (CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1)
+DEFAULT_PROMPT_VARIANT = IDENTITY_TINT_TRACKING_V1
 MAX_PROMPT_LENGTH = 7000
 SAME_CAMERA_SENTENCE = "All replacement performers should look as though they were filmed in the original scene with the same camera."
 IDENTITY_OVERLAY_STYLES = frozenset({"identity_overlay_20", "identity_overlay_multi_20"})
 IDENTITY_DEPTH_STYLES = frozenset({"identity_depth", "identity_depth_multi"})
 SHARED_DEPTH_STYLES = frozenset({"shared_depth", "shared_depth_multi"})
+EASY_TINT_TRACKING_GUIDANCE = (
+    "Use the tinted region to help follow the identified source person's movement and performance while it remains attached to that person. "
+    "If the tint disappears or switches to someone else, use the visible source person and the timestamp/position assignments. "
+    "Keep the same replacement identity across cuts.")
+
+
+def _easy_tracking_guidance(enhanced_masking, mask_style, replace_all_people):
+    if not enhanced_masking:
+        return ("Follow each source person's movement and performance using the visible source people; "
+                "keep each person's performance separate through cuts and use the same replacement reference for everyone."
+                if replace_all_people else
+                "Follow the identified source person's movement and performance using the visible source person and the "
+                "timestamp/position assignments. Keep the same replacement identity across cuts.")
+    if replace_all_people:
+        return ("Use the marked regions to help follow each source person's movement and performance while they remain "
+                "attached to that person. If a marker disappears or switches people, follow the visible source person. "
+                "Keep each person's performance separate through cuts and use the same replacement reference for everyone.")
+    if mask_style in SHARED_CYAN_STYLES or mask_style == "cyan_overlay":
+        return EASY_TINT_TRACKING_GUIDANCE
+    return ("Use the marked region to help follow the identified source person's movement and performance while it remains "
+            "attached to that person. If the marker disappears or switches to someone else, use the visible source person "
+            "and the timestamp/position assignments. Keep the same replacement identity across cuts.")
 
 
 def normalize_prompt_variant(value):
@@ -139,10 +162,12 @@ def _target_color_name(target, index):
     return TARGET_COLORS[index - 1][1]
 
 
-def _identity_guide_description(enhanced_masking, mask_style, face_mesh, has_fallback, replace_all_people):
-    """The fourth family follows saved guide pixels, never automatic track IDs."""
+def _identity_guide_description(enhanced_masking, mask_style, face_mesh, has_fallback, replace_all_people,
+                                *, tint_tracking=False):
+    """Identity families follow saved guide pixels, never automatic track IDs."""
     if not enhanced_masking:
-        return _guide_description(False, mask_style, face_mesh, has_fallback, replace_all_people)
+        visual = _guide_description(False, mask_style, face_mesh, has_fallback, replace_all_people)
+        return visual + (" " + _easy_tracking_guidance(False, mask_style, replace_all_people) if tint_tracking else "")
     if mask_style in IDENTITY_OVERLAY_STYLES:
         if replace_all_people:
             visual = ("Detected source people have 20%-opacity selection tints; every source person uses <Picture 1>. "
@@ -179,6 +204,8 @@ def _identity_guide_description(enhanced_masking, mask_style, face_mesh, has_fal
         visual = ("Flat opaque silhouettes mark detected selected people, not their appearance or depth. "
             + ("Every source person uses <Picture 1>." if replace_all_people else
                "Use the listed flat-mask colors where provided and position/time assignments to identify each source performer."))
+    if tint_tracking:
+        visual += " " + _easy_tracking_guidance(True, mask_style, replace_all_people)
     if has_fallback:
         visual += (" Assignments marked no mask remain in original visible footage. Identify them from their listed "
             "position and timestamp; never substitute a different masked person.")
@@ -212,11 +239,13 @@ def _scene_lines(index, target, *, compact):
 
 
 def _structured_prompt(duration, targets, enhanced_masking, mask_style, audio_processing,
-                       submit_without_audio, replace_all_people, face_mesh, *, compact, identity_colors=False):
+                       submit_without_audio, replace_all_people, face_mesh, *, compact, identity_colors=False,
+                       tint_tracking=False):
     audio_definition, audio_retention, soundscape, music = _audio_sections(audio_processing, submit_without_audio)
     has_fallback = _fallbacks(targets)
-    guide_builder = _identity_guide_description if identity_colors else _guide_description
-    guide = guide_builder(enhanced_masking, mask_style, face_mesh, has_fallback, replace_all_people)
+    guide = (_identity_guide_description(enhanced_masking, mask_style, face_mesh, has_fallback,
+                replace_all_people, tint_tracking=tint_tracking) if identity_colors else
+             _guide_description(enhanced_masking, mask_style, face_mesh, has_fallback, replace_all_people))
     definitions = ["<Video 1> is the original source footage being edited, including its existing shots and camera rendering."]
     if enhanced_masking and mask_style in SHARED_CYAN_STYLES:
         definitions[0] += (" The shared cyan tint and face-mesh lines are selection and motion annotations, not the target visual style."
@@ -331,7 +360,7 @@ def structured_prompt(duration, *, enhanced_masking=False, anchor=None, mask_sty
 
 def identity_colors_prompt(duration, *, enhanced_masking=False, anchor=None, mask_style="cyan_overlay",
                            audio_processing=True, submit_without_audio=False, replace_all_people=False,
-                           targets=None, face_mesh=False):
+                           targets=None, face_mesh=False, tint_tracking=False):
     """Color identities for reviewed guides, timed shared selection for Easy Mode.
 
     The guide style is the saved description of what the compositor produced.
@@ -343,7 +372,8 @@ def identity_colors_prompt(duration, *, enhanced_masking=False, anchor=None, mas
             "anchor": anchor or {"x": .5, "y": .5, "time": 0}}])
     kwargs = dict(enhanced_masking=enhanced_masking, mask_style=mask_style,
         audio_processing=audio_processing, submit_without_audio=submit_without_audio,
-        replace_all_people=replace_all_people, face_mesh=face_mesh, identity_colors=True)
+        replace_all_people=replace_all_people, face_mesh=face_mesh, identity_colors=True,
+        tint_tracking=tint_tracking)
     prompt = _structured_prompt(duration, normalized_targets, **kwargs, compact=False)
     if len(prompt) > MAX_PROMPT_LENGTH:
         prompt = _structured_prompt(duration, normalized_targets, **kwargs, compact=True)

@@ -8,7 +8,7 @@ IDENTITY_DEPTH_STYLES = {"identity_depth", "identity_depth_multi"}
 def guide_style(job, enhanced, multi, *, reviewed=False):
     if not enhanced:
         return "original", "none"
-    if job.get("prompt_variant") == "identity_colors_v1":
+    if job.get("prompt_variant") in {"identity_colors_v1", "identity_tint_tracking_v1"}:
         setup = job.get("setup", {})
         manual = not job.get("easy_mode", setup.get("easy_mode", False))
         identity = (manual and (reviewed or job.get("tracking_reviewed"))

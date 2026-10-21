@@ -364,7 +364,7 @@ function readJob(value: unknown): LivePipelineJob {
   if (isRecord(value.settings_used)) {
     const saved: JobSettingsUsed = {};
     const promptVariant = value.settings_used.prompt_variant;
-    if (promptVariant === "current" || promptVariant === "favorite_v2" || promptVariant === "structured_v1" || promptVariant === "identity_colors_v1")
+    if (promptVariant === "current" || promptVariant === "favorite_v2" || promptVariant === "structured_v1" || promptVariant === "identity_colors_v1" || promptVariant === "identity_tint_tracking_v1")
       saved.prompt_variant = promptVariant;
     for (const field of ["easy_mode", "enhanced_masking", "depth_guidance", "face_mesh", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
       if (typeof value.settings_used[field] === "boolean") saved[field] = value.settings_used[field];

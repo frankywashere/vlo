@@ -8,7 +8,7 @@ from .errors import PublicError
 from .diagnostics import emit, submission_event
 from .multi_tracking import TARGET_COLORS
 from .guide_style import SHARED_CYAN_STYLES
-from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, identity_colors_prompt, normalize_prompt_variant, structured_prompt
+from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, identity_colors_prompt, normalize_prompt_variant, structured_prompt
 
 BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -222,7 +222,7 @@ def shared_cyan_guidance(mask_style, face_mesh, replace_all_people):
                else "Remove all overlay colors from the finished video."))
 
 
-def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT):
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False):
     prompt_variant = normalize_prompt_variant(prompt_variant)
     images = [image_url] if isinstance(image_url, str) else image_url
     if (not isinstance(images, list) or not 1 <= len(images) <= 5
@@ -244,11 +244,12 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         prompt = multi_replacement_prompt(duration, targets, enhanced_masking, mask_style)
     else:
         prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
-    if prompt_variant in {STRUCTURED_V1, IDENTITY_COLORS_V1}:
-        builder = identity_colors_prompt if prompt_variant == IDENTITY_COLORS_V1 else structured_prompt
+    if prompt_variant in {STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1}:
+        builder = structured_prompt if prompt_variant == STRUCTURED_V1 else identity_colors_prompt
+        tracking_options = ({"tint_tracking": easy_mode} if prompt_variant == IDENTITY_TINT_TRACKING_V1 else {})
         prompt = builder(duration, enhanced_masking=enhanced_masking, anchor=anchor, mask_style=mask_style,
             audio_processing=audio_processing, submit_without_audio=submit_without_audio, replace_all_people=replace_all_people,
-            targets=targets, face_mesh=face_mesh)
+            targets=targets, face_mesh=face_mesh, **tracking_options)
     else:
         mesh_note = (" Facial mesh lines in the reference video mark detected facial motion only. Use them as expression and mouth-motion guidance; remove every mesh line from all faces in the final video. Keep speaker assignments and dialogue timing tied to the original people, including across cuts." if face_mesh else "")
         prompt = audio_prompt(mask_prompt(prompt, mask_style), audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + " " + PERFORMANCE_GUIDANCE

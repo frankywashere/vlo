@@ -3,7 +3,7 @@ import pytest
 
 from swapmein.errors import PublicError
 from swapmein.prompt_variants import (
-    CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, PROMPT_VARIANTS, SAME_CAMERA_SENTENCE,
+    CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1, PROMPT_VARIANTS, SAME_CAMERA_SENTENCE,
     normalize_prompt_variant,
 )
 from swapmein.provider import (
@@ -161,7 +161,7 @@ def test_all_people_uses_one_reference_without_assuming_a_fixed_number(variant):
     prompt = generation_payload(6, "ref", "video", True, mask_style="cyan_overlay_20",
         replace_all_people=True, face_mesh=True, audio_processing=False,
         prompt_variant=variant)["prompt"]
-    if variant in {STRUCTURED_V1, IDENTITY_COLORS_V1}:
+    if variant in {STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1}:
         assert "not a fixed list or limited number of performers" in prompt
         assert "every source person in every scene with a separate instance" in prompt
         assert "<Picture 1>" in prompt and "<Picture 2>" not in prompt

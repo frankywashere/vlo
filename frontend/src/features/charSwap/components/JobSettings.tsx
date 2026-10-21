@@ -14,6 +14,7 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
       favorite_v2: "Favorite prompt across modes",
       structured_v1: "Structured prompt with same-camera guidance",
       identity_colors_v1: "Structured with identity colors",
+      identity_tint_tracking_v1: "Structured with Easy Mode tint tracking",
     };
     if (settings.prompt_variant) rows.push(["Generation prompts", promptLabels[settings.prompt_variant]]);
     if (settings.trim?.length === 2) rows.push(["Source section", `${seconds(settings.trim[0])}–${seconds(settings.trim[1])}`]);

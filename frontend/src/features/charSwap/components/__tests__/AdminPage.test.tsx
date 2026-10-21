@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
@@ -356,10 +356,10 @@ it("exposes the face-mesh master separately from public switch visibility",async
   expect(master).not.toBeChecked();
 });
 
-it("defaults to the newest prompt and saves each alternate version without changing other settings", async () => {
+it("defaults to Easy Mode tint tracking and saves each alternate version without changing other settings", async () => {
   api.pipelineSettings = {revision: 7, audio_processing: false, depth_guidance: true, face_mesh_enabled: false};
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked();
+  expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked();
   await userEvent.clear(screen.getByLabelText("Pack name"));
   await userEvent.type(screen.getByLabelText("Pack name"), "Unsaved pack name");
   await userEvent.click(screen.getByRole("radio", {name: "Favorite prompt across modes"}));
@@ -374,27 +374,41 @@ it("defaults to the newest prompt and saves each alternate version without chang
   await userEvent.click(screen.getByRole("radio", {name: "Structured with identity colors"}));
   await waitFor(() => expect(screen.getByRole("radio", {name: "Structured with identity colors"})).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 9, prompt_variant: "identity_colors_v1"});
+  await userEvent.click(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 10, prompt_variant: "identity_tint_tracking_v1"});
   expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Enable face mesh"})).not.toBeChecked();
   expect(screen.getByLabelText("Pack name")).toHaveValue("Unsaved pack name");
 });
 
-it("keeps the saved prompt version if a change fails", async () => {
+it("loads the saved Easy Mode tint tracking option without changing it", async () => {
+  api.pipelineSettings = {revision: 4, audio_processing: false, prompt_variant: "identity_tint_tracking_v1"};
+  await renderExpandedAdmin();
+  expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked();
+  expect(within(screen.getByRole("radiogroup", {name: "Generation prompts"})).getAllByRole("radio")).toHaveLength(5);
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["Current prompts", "current"],
+  ["Structured with Easy Mode tint tracking", "identity_tint_tracking_v1"],
+] as const)("keeps the saved prompt version if changing to %s fails", async (label, variant) => {
   api.pipelineSettings = {revision: 3, audio_processing: false, prompt_variant: "structured_v1"};
   api.pipeline.mockRejectedValueOnce(new Error("Pipeline settings changed. Reload and try again."));
   await renderExpandedAdmin();
-  await userEvent.click(screen.getByRole("radio", {name: "Current prompts"}));
+  await userEvent.click(screen.getByRole("radio", {name: label}));
   await screen.findByText("Pipeline settings changed. Reload and try again.");
   expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Current prompts"})).not.toBeChecked();
-  expect(screen.getByRole("radio", {name: "Current prompts"})).toBeEnabled();
-  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, prompt_variant: "current"});
+  expect(screen.getByRole("radio", {name: label})).not.toBeChecked();
+  expect(screen.getByRole("radio", {name: label})).toBeEnabled();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, prompt_variant: variant});
 });
 
 it("requires pipeline permission to change any prompt version", async () => {
   api.permissions = ["pricing"];
   await renderExpandedAdmin();
-  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance", "Structured with identity colors"]) {
+  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance", "Structured with identity colors", "Structured with Easy Mode tint tracking"]) {
     expect(screen.getByRole("radio", {name})).toBeDisabled();
   }
   expect(api.pipeline).not.toHaveBeenCalled();

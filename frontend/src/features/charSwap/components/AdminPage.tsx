@@ -108,9 +108,9 @@ export function AdminPage() {
         <AdminSection title="Experimental"><Stack spacing={2}>
           <FormControl disabled={busy || !can("pipeline_settings")}>
             <FormLabel id="prompt-variant-label">Generation prompts</FormLabel>
-            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "structured_v1"} onChange={(event) => {
+            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "identity_tint_tracking_v1"} onChange={(event) => {
               const variant = event.target.value;
-              if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1" && variant !== "identity_colors_v1") || !can("pipeline_settings")) return;
+              if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1" && variant !== "identity_colors_v1" && variant !== "identity_tint_tracking_v1") || !can("pipeline_settings")) return;
               void run(async () => {
                 const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, prompt_variant: variant});
                 setAdmin((current) => current ? {...current, pipeline} : current);
@@ -121,6 +121,7 @@ export function AdminPage() {
               <FormControlLabel value="favorite_v2" control={<Radio />} label="Favorite prompt across modes" />
               <FormControlLabel value="structured_v1" control={<Radio />} label="Structured prompt with same-camera guidance" />
               <FormControlLabel value="identity_colors_v1" control={<Radio />} label="Structured with identity colors" />
+              <FormControlLabel value="identity_tint_tracking_v1" control={<Radio />} label="Structured with Easy Mode tint tracking" />
             </RadioGroup>
           </FormControl>
           <Typography variant="body2" color="text.secondary">Applies to new jobs in every mode. Existing jobs keep their saved prompt version.</Typography>

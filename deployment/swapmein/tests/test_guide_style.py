@@ -8,8 +8,9 @@ TARGETS = [{"label": 1, "color": "#00dcff"}, {"label": 2, "color": "#ff4fd8"}]
 @pytest.mark.parametrize("depth", [False, True])
 @pytest.mark.parametrize("multi", [False, True])
 @pytest.mark.parametrize("opacity", [.2, 1])
-def test_fourth_colors_match_actual_review_and_depth_rendering(easy, reviewed, depth, multi, opacity):
-    job = {"prompt_variant": "identity_colors_v1", "setup": {"easy_mode": easy},
+@pytest.mark.parametrize("variant", ["identity_colors_v1", "identity_tint_tracking_v1"])
+def test_identity_family_colors_match_actual_review_and_depth_rendering(easy, reviewed, depth, multi, opacity, variant):
+    job = {"prompt_variant": variant, "setup": {"easy_mode": easy},
            "depth_guidance": depth, "depth_overlay_opacity": opacity}
     fill, style = guide_style(job, True, multi, reviewed=reviewed)
     assert fill == ("depth" if depth else "translucent")
@@ -31,7 +32,8 @@ def test_existing_variants_keep_shared_translucency_and_saved_depth_colors(varia
     assert compose_styles(fill, TARGETS, style)[1]["color"] == "#ff4fd8"
 
 
-def test_replace_everyone_never_claims_individual_identity_colors():
-    job = {"prompt_variant": "identity_colors_v1", "setup": {"easy_mode": False, "replace_all_people": True},
+@pytest.mark.parametrize("variant", ["identity_colors_v1", "identity_tint_tracking_v1"])
+def test_replace_everyone_never_claims_individual_identity_colors(variant):
+    job = {"prompt_variant": variant, "setup": {"easy_mode": False, "replace_all_people": True},
            "depth_guidance": False}
     assert guide_style(job, True, False, reviewed=True) == ("translucent", "cyan_overlay_20")

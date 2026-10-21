@@ -467,10 +467,11 @@ def test_new_shared_cyan_initial_preparation_reuses_labels_and_original_audio(mo
 @pytest.mark.parametrize("easy", [False, True])
 @pytest.mark.parametrize("depth", [False, True])
 @pytest.mark.parametrize("selection", ["single", "multi"])
-def test_fourth_prompt_routes_easy_shared_and_reviewed_identity_guides(monkeypatch, media, tmp_path, provider, easy, depth, selection):
+@pytest.mark.parametrize("variant", ["identity_colors_v1", "identity_tint_tracking_v1"])
+def test_identity_prompt_routes_easy_shared_and_reviewed_guides(monkeypatch, media, tmp_path, provider, easy, depth, selection, variant):
     job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
         selection=selection, audio_processing=False, preparation_provider=provider,
-        depth_guidance=depth, guide_style_version=2, prompt_variant="identity_colors_v1")
+        depth_guidance=depth, guide_style_version=2, prompt_variant=variant)
     if not easy:
         choices = [{"segment_id": section["id"], "absent": False,
             "anchor": {"x": .75 if section.get("target_id") == "person-2" else .25,

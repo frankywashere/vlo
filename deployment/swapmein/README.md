@@ -643,6 +643,31 @@ default off and masked face-mesh default on, then publish the matching frontend.
 Keep Easy Mode and Enhanced Masking on, source audio processing off, and silent
 submission off by default. Existing job snapshots are not rewritten.
 
+### Versioned generation prompts
+
+Admin → Experimental → **Generation prompts** offers five saved prompt families:
+
+| Option | Saved value | Behavior |
+| --- | --- | --- |
+| Current prompts | `current` | Compatibility wording with same-camera guidance. |
+| Favorite prompt across modes | `favorite_v2` | Favorite wording adapted to each guide path. |
+| Structured prompt with same-camera guidance | `structured_v1` | Structured subject, retention and photographic instructions. |
+| Structured with identity colors | `identity_colors_v1` | Reviewed Manual guides can use distinct identity colors; Easy guides use shared markers and timed positions. |
+| Structured with Easy Mode tint tracking | `identity_tint_tracking_v1` | Copies option 4, adding temporal marker-following guidance only when the saved setup uses Easy Mode. |
+
+Option 5's shared-cyan Easy prompt reproduces the chosen
+`02-explicit-tint-tracking` experiment. It follows the tinted person while the
+marker remains attached, then falls back to the visible person and timed position
+if the tint disappears or switches people. Unmasked, depth and Replace Everyone
+paths describe their actual guide and selection scope. Manual prompts and all
+guide pixels remain identical to option 4. Both full and compact prompt forms
+include the guidance before enforcing the 7,000-character limit.
+
+The selector applies to new jobs in both upload paths. Existing jobs, recovery
+and review resumes retain their saved variant and Easy Mode setting. Adding an
+option does not rewrite the selected global setting. The fallback for new jobs
+is `identity_tint_tracking_v1`; no automatic cross-cut character recognition is introduced.
+
 Library provider failures retain an allowlisted reason: reAPI workflow error `80006`
 shows “Content rejected”; an explicit face-rejection signal shows “Face rejected”.
 Other failures remain generic. Logs retain only the numeric error code and category,

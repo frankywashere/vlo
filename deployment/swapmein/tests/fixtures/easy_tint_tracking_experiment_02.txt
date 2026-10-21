@@ -1,0 +1,33 @@
+subject_definitions:
+<Video 1> is the source footage, with its existing shots and camera rendering.
+<Audio 1> is the synchronized soundtrack embedded in <Video 1>.
+<Subject 1>: source performer at 0.00 seconds, 61% across and 50% down from the top-left corner. <Subject 6>: identity, hair and clothing from <Picture 4> only.
+<Subject 2>: source performer at 3.21 seconds, 52% across and 54% down from the top-left corner. <Subject 7>: identity, hair and clothing from <Picture 5> only.
+<Subject 3>: source performer at 6.50 seconds, 40% across and 47% down from the top-left corner. <Subject 8>: identity, hair and clothing from <Picture 1> only.
+<Subject 4>: source performer at 8.72 seconds, 35% across and 44% down from the top-left corner. <Subject 9>: identity, hair and clothing from <Picture 3> only.
+<Subject 5>: source performer at 11.03 seconds, 57% across and 45% down from the top-left corner. <Subject 10>: identity, hair and clothing from <Picture 2> only.
+
+summary:
+[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1>. Change only the selected performers: <Subject 1> becomes <Subject 6>, <Subject 2> becomes <Subject 7>, <Subject 3> becomes <Subject 8>, <Subject 4> becomes <Subject 9>, <Subject 5> becomes <Subject 10>. Keep every original shot and the source performance.
+
+retention_analysis:
+<Video 1>: partially_preserved - retain the source environment, unselected people, framing, camera work, timing and photographic treatment. Only the selected identities and clothing change, and guide annotations are removed.
+<Audio 1>: fully_copy - retain the original embedded soundtrack without added dialogue or music.
+<Subject 1>: preserve source performance; transfer identity, hair and clothing from <Subject 6> (<Picture 4>) only.
+<Subject 2>: preserve source performance; transfer identity, hair and clothing from <Subject 7> (<Picture 5>) only.
+<Subject 3>: preserve source performance; transfer identity, hair and clothing from <Subject 8> (<Picture 1>) only.
+<Subject 4>: preserve source performance; transfer identity, hair and clothing from <Subject 9> (<Picture 3>) only.
+<Subject 5>: preserve source performance; transfer identity, hair and clothing from <Subject 10> (<Picture 2>) only.
+
+detailed_description:
+Pictures supply identity, hair and clothing only. <Video 1> supplies shot lighting, camera texture, performance and photographic rendering.
+Follow every existing shot, cut and interaction over the exact 15-second timeline. Keep pairings separate through overlaps and cuts; replace only present source performers, never bystanders.
+Follow visible facial expressions, mouth movements and speaking turns; keep listeners' mouths at rest. Replace entire head, hands, body and feet; preserve source performance, never photograph pose.
+Selected performers with detected masks share the same cyan tint at 20% opacity. The shared color marks selection, not identity. For each reference assignment, identify the tinted source person at the listed timestamp and position. If no tint is available there, use the visible source person at that same anchor, never another tinted person. Coordinates identify a person at that timestamp; they are not a fixed screen position to follow throughout the video. Use the tinted region to help follow the identified source person's movement and performance while it remains attached to that person. If the tint disappears or switches to someone else, use the visible source person and the timestamp/position assignments. Keep the same replacement identity across cuts. Face-mesh lines describe facial motion only. Remove all color and mesh marks from the finished footage.
+All replacement performers should look as though they were filmed in the original scene with the same camera.
+
+overall_soundscape:
+Reuse the original dialogue, ambience, laughter and effects from <Audio 1>, retaining their source timing and speaker associations.
+
+non_diegetic_music:
+Retain only music already present in <Audio 1>; add none.

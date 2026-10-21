@@ -570,7 +570,7 @@ class PipelineSettingsUpdate(BaseModel):
     hide_audio_toggle: bool | None = None
     multi_characters: bool | None = None
     face_mesh_enabled: bool | None = None
-    prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1"] | None = None
+    prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1"] | None = None
 
 
 @app.post("/api/commerce/admin/pipeline")
@@ -1469,7 +1469,7 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
         job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
         replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio, face_mesh=job.get("face_mesh", False),
-        prompt_variant=job.get("prompt_variant") or "current")
+        prompt_variant=job.get("prompt_variant") or "current", easy_mode=options.easy_mode)
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         catalog = public_catalog(records)

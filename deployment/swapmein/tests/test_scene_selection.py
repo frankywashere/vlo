@@ -191,6 +191,7 @@ def test_impossibly_large_prompt_is_rejected_without_truncating_assignments():
 @pytest.mark.parametrize("silent", [False, True])
 def test_scene_wording_is_preserved_with_performance_guidance_when_prompt_fits(silent):
     from swapmein.provider import audio_prompt, multi_replacement_prompt, PERFORMANCE_GUIDANCE
+    from swapmein.prompt_variants import SAME_CAMERA_SENTENCE
     target = {"id": "person", "reference_index": 0, "anchor": {"x": .5, "y": .5, "time": .5}}
     # Exercise the former 6800-character threshold too: the final provider
     # limit, not a conservative estimate, decides whether compaction applies.
@@ -198,7 +199,7 @@ def test_scene_wording_is_preserved_with_performance_guidance_when_prompt_fits(s
     for count in range(20, 85):
         target["scenes"] = [{"start": n*15/count, "end": (n+1)*15/count, "absent": True,
             "anchor": None} for n in range(count)]
-        standard = audio_prompt(multi_replacement_prompt(15, [target], True, "depth_multi"), True, silent) + " " + PERFORMANCE_GUIDANCE
+        standard = audio_prompt(multi_replacement_prompt(15, [target], True, "depth_multi"), True, silent) + " " + PERFORMANCE_GUIDANCE + " " + SAME_CAMERA_SENTENCE
         if len(standard) > 7000:
             break
         payload = generation_payload(15, "ref.jpg", "guide.mp4", True,
