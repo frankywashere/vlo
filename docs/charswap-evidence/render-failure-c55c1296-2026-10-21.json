@@ -97,7 +97,7 @@
     1344,
     768
   ],
-  "production_changed": false,
+  "production_changed": true,
   "test_plan": [
     "Replay this saved single-shot archive with paid calls blocked; stable selected label must not be rejected solely for an unrelated label fragment.",
     "Exercise absent selected person, selected ID fragmentation, duplicate assignments, single-shot and multi-shot fixtures; only unrelated fragments should be ignored.",
@@ -121,7 +121,8 @@
     "recovered_export_duration_seconds": 15,
     "recovered_export_has_audio": true,
     "extension_surface": "no contract changes",
-    "broader_pipeline_tests_passed": 283
+    "broader_pipeline_tests_passed": 283,
+    "final_relevant_tests_passed": 337
   },
   "dimension_policy": "Accept provider aspect ratio, preserve returned canvas; retain media integrity, duration, audio and maximum dimension checks.",
   "selected_track_continuity": {
@@ -161,5 +162,34 @@
     "changes_routing": false,
     "submits_model_requests": false,
     "test_cases_passed": 10
+  },
+  "deployment": {
+    "service": "recastfx-api",
+    "ready_revision": "recastfx-api-00064-jlz",
+    "traffic": [
+      {
+        "percent": 100,
+        "revisionName": "recastfx-api-00064-jlz"
+      }
+    ],
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:81e663feea3df094f234c823413ea6e832ef960d0ab2c00eeefe0717115b8b5a",
+    "source_fingerprint": "ddf7a57218c6222f",
+    "build_id": "1137f9e5-2c33-4c5a-97bf-f1230ecb27e9",
+    "code_commit": "aa599272",
+    "site_config": {
+      "available": true,
+      "live": true
+    },
+    "global_settings_preserved": {
+      "revision": 14,
+      "preparation_provider": "replicate",
+      "depth_guidance": false,
+      "prompt_variant": "cloudflare_identity_v1",
+      "matching_no_review": true,
+      "retry_missing_masks_with_sam": true
+    },
+    "tests_passed": 337,
+    "scope": "Single-shot logging only; preserve provider output dimensions",
+    "no_new_render_submitted": true
   }
 }
