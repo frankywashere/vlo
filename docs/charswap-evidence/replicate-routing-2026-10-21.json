@@ -1,6 +1,6 @@
 {
   "feature": "Replicate SAM and depth routing",
-  "implementation_status": "local changes; not deployed",
+  "implementation_status": "Deployed and verified; global provider remains workers until the Experimental switch is enabled",
   "admin": {
     "experimental_switch": "Use Replicate for SAM and depth",
     "setting": "preparation_provider",
@@ -28,7 +28,9 @@
       "face_mesh": true,
       "automatic_identity": "either",
       "depth_toggle": "either",
-      "inference": ["SAM"],
+      "inference": [
+        "SAM"
+      ],
       "guide": "Original RGB with selected-person mesh; masks used internally"
     },
     {
@@ -36,7 +38,9 @@
       "face_mesh": false,
       "automatic_identity": true,
       "depth_toggle": "either",
-      "inference": ["SAM"],
+      "inference": [
+        "SAM"
+      ],
       "guide": "Original RGB; Option 6 uses masks internally for cross-shot matching"
     },
     {
@@ -44,7 +48,9 @@
       "face_mesh": "either",
       "automatic_identity": "either",
       "depth_toggle": false,
-      "inference": ["SAM"],
+      "inference": [
+        "SAM"
+      ],
       "guide": "Existing 20 percent overlay and optional face mesh"
     },
     {
@@ -52,16 +58,36 @@
       "face_mesh": "either",
       "automatic_identity": "either",
       "depth_toggle": true,
-      "inference": ["SAM", "Depth Anything"],
+      "inference": [
+        "SAM",
+        "Depth Anything"
+      ],
       "guide": "Existing depth compositor and optional face mesh"
     }
   ],
   "route_dimensions": {
-    "selection": ["single character", "multiple characters", "replace all people"],
-    "review": ["Easy", "Manual"],
-    "prompt_options": ["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"],
+    "selection": [
+      "single character",
+      "multiple characters",
+      "replace all people"
+    ],
+    "review": [
+      "Easy",
+      "Manual"
+    ],
+    "prompt_options": [
+      "current",
+      "favorite_v2",
+      "structured_v1",
+      "identity_colors_v1",
+      "identity_tint_tracking_v1",
+      "cloudflare_identity_v1"
+    ],
     "automatic_identity": "Option 6 + Easy + not replace-all; manual choices otherwise remain authoritative",
-    "automatic_matching_failure": ["Needs attention / scene review", "saved no-review fallback to Option 5"]
+    "automatic_matching_failure": [
+      "Needs attention / scene review",
+      "saved no-review fallback to Option 5"
+    ]
   },
   "later_routes": [
     {
@@ -133,5 +159,6 @@
       "commerce.test.ts"
     ]
   },
-  "extension_surface": "No supported extension surface changed; the existing RecastFX domain adapter remains shared by all native preparation entry points."
+  "extension_surface": "No supported extension surface changed; the existing RecastFX domain adapter remains shared by all native preparation entry points.",
+  "release_evidence": "recastfx-replicate-routing-release-2026-10-21.json"
 }
