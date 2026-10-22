@@ -383,8 +383,9 @@ class CreditGrant(BaseModel):
 
 class ClientDiagnostic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_video_decode", "library_auth", "cleanup_previous_interruption", "cleanup_retry_after_interruption", "cleanup_cpu_unsupported", "cleanup_gpu_unsupported"]
+    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_video_decode", "library_auth", "cleanup_previous_interruption", "cleanup_retry_after_interruption", "cleanup_cpu_unsupported", "cleanup_gpu_unsupported", "cleanup_runtime"]
     error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError", "Unknown"] = "Unknown"
+    cleanup_reason: Literal["previous_interruption", "insecure_context", "worker_api_missing", "webgpu_api_missing", "canvas_api_missing", "bitmap_api_missing", "worker_start_failed", "worker_crash", "worker_error", "model_load_timeout", "inference_timeout", "gpu_adapter_request", "gpu_adapter_missing", "gpu_f16_missing", "model_download", "model_integrity", "gpu_session_create", "cpu_runtime_load", "cpu_model_compile", "image_decode", "canvas_context", "gpu_inference", "cpu_inference", "model_output_invalid", "image_encode", "model_not_ready", "runtime_unavailable"] | None = None
     http_status: int | None = Field(default=None, ge=400, le=599)
     job_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
@@ -405,7 +406,7 @@ def client_diagnostic(body: ClientDiagnostic, x_firebase_token: str | None = Hea
         job, _ = records.read(f"jobs/{body.job_id}.json")
         if not job or job.get("account_id") != account["account_id"]:
             raise PublicError("Clip not found.", 404)
-    emit("frontend_error", severity="ERROR", account_id=account["account_id"], **body.model_dump())
+    emit("frontend_error", severity="ERROR", account_id=account["account_id"], **body.model_dump(exclude_none=True))
     return {"received": True}
 
 

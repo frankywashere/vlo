@@ -1,7 +1,7 @@
 import { reportClientError, reportClientTiming, timeClientStage } from "./diagnostics";
 import {isIOSCleanupDevice} from "../utils/browserCleanupSupport";
 import {CPU_MODEL_CACHE, CPU_MODEL_PATH, CPU_RUNTIME_PATH, CleanupSkippedError, InterruptedCleanupError, UnsupportedCleanupError} from "./browserCleanupProtocol";
-import type {CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
+import type {CleanupFailureReason, CleanupProgress, CleanupReply, CleanupRequest} from "./browserCleanupProtocol";
 
 // Retained for older gateway configuration; photos are no longer sent there.
 export function isReferenceCleanupEndpoint(value: unknown): value is string {
@@ -17,12 +17,14 @@ function interrupted() {try {return sessionStorage.getItem(INTERRUPTED_KEY) === 
 function markRunning(active: boolean) {
   try {if (active) sessionStorage.setItem(INTERRUPTED_KEY,"1"); else sessionStorage.removeItem(INTERRUPTED_KEY);} catch { /* Storage is optional. */ }
 }
-const RECOVERY_KEY = "recastfx-cleanup-cpu-recovery-v1";
+const RECOVERY_KEY = cpuCleanup() ? "recastfx-cleanup-cpu-recovery-v1" : "recastfx-cleanup-gpu-recovery-v1";
 function recoveryAttempted() {try {return sessionStorage.getItem(RECOVERY_KEY) === "1";} catch {return false;}}
 function clearRecovery() {try {sessionStorage.removeItem(RECOVERY_KEY);} catch { /* Storage is optional. */ }}
 const previousInterruption = interrupted();
-const repeatedCPUInterruption = cpuCleanup() && previousInterruption && recoveryAttempted();
-let unsupported = !cpuCleanup() && previousInterruption;
+const repeatedInterruption = previousInterruption && recoveryAttempted();
+// Interrupted work is not evidence that the hardware lacks cleanup support.
+let unsupported = false;
+let unsupportedReason: CleanupFailureReason = "runtime_unavailable";
 let running = false;
 // Normal navigation is not evidence of a WebKit crash. Preserve the in-memory
 // worker on bfcache restores, but do not leave a crash marker after a clean exit.
@@ -42,28 +44,37 @@ function stop() {
 }
 function releaseLater() {clearTimeout(idle); idle = setTimeout(stop, 60_000);}
 function supported() {
-  if (repeatedCPUInterruption) {
-    reportClientError("cleanup_previous_interruption", undefined);
+  if (repeatedInterruption) {
+    reportClientError("cleanup_previous_interruption", undefined, undefined, "previous_interruption");
     throw new InterruptedCleanupError();
   }
-  if (unsupported || !globalThis.isSecureContext || typeof Worker === "undefined" ||
-    (!cpuCleanup() && !navigator.gpu) || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function")
-    { reportClientError(cpuCleanup() ? "cleanup_cpu_unsupported" : "cleanup_gpu_unsupported", undefined); throw new UnsupportedCleanupError(); }
+  const reason: CleanupFailureReason | undefined = unsupported ? unsupportedReason
+    : !globalThis.isSecureContext ? "insecure_context" : typeof Worker === "undefined" ? "worker_api_missing"
+    : !cpuCleanup() && !navigator.gpu ? "webgpu_api_missing"
+    : typeof OffscreenCanvas === "undefined" ? "canvas_api_missing"
+    : typeof createImageBitmap !== "function" ? "bitmap_api_missing" : undefined;
+  if (reason) {
+    reportClientError(cpuCleanup() ? "cleanup_cpu_unsupported" : "cleanup_gpu_unsupported", undefined, undefined, reason);
+    throw new UnsupportedCleanupError();
+  }
 }
-function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefined, timeout: number): Promise<T> {
+function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefined, timeout: number, timeoutReason: CleanupFailureReason): Promise<T> {
   return new Promise((resolve,reject) => {
-    const timer = setTimeout(() => fail(new Error("Background cleanup timed out. You can use Original.")),timeout);
+    const timer = setTimeout(() => fail(new Error("Background cleanup timed out. You can use Original."),timeoutReason),timeout);
     const cancel = () => {finish(); reject(abortError());};
     waiting.add(cancel);
     function finish() {waiting.delete(cancel); clearTimeout(timer); target.removeEventListener("message",message); target.removeEventListener("error",crash);}
-    function fail(error: Error) {finish(); stop(); reject(error);}
-    function crash() {fail(new Error("Background cleanup stopped unexpectedly. You can use Original."));}
+    function fail(error: Error, reason: CleanupFailureReason) {
+      reportClientError(error instanceof UnsupportedCleanupError ? (cpuCleanup() ? "cleanup_cpu_unsupported" : "cleanup_gpu_unsupported") : "cleanup_runtime", error, undefined, reason);
+      finish(); stop(); reject(error);
+    }
+    function crash() {fail(new Error("Background cleanup stopped unexpectedly. You can use Original."),"worker_crash");}
     function message(event: MessageEvent<CleanupReply>) {
       const reply = event.data;
       if (reply.type === "progress") {lastProgress = reply.progress; progress?.(reply.progress); return;}
       if (reply.type === "error") {
-        if (reply.kind === "unsupported") unsupported = true;
-        fail(reply.kind === "unsupported" ? new UnsupportedCleanupError() : new Error(reply.message)); return;
+        if (reply.kind === "unsupported") {unsupported = true;unsupportedReason = reply.reason ?? "runtime_unavailable";}
+        fail(reply.kind === "unsupported" ? new UnsupportedCleanupError() : new Error(reply.message),reply.reason ?? "worker_error"); return;
       }
       const value = match(reply);
       if (value !== undefined) {running = false; markRunning(false); if (reply.type === "result") clearRecovery(); finish(); resolve(value);}
@@ -74,8 +85,8 @@ function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefine
 function initialize() {
   supported(); clearTimeout(idle);
   if (!ready) {
-    if (cpuCleanup() && previousInterruption) {
-      reportClientError("cleanup_retry_after_interruption", undefined);
+    if (previousInterruption) {
+      reportClientError("cleanup_retry_after_interruption", undefined, undefined, "previous_interruption");
       try {sessionStorage.setItem(RECOVERY_KEY,"1");} catch { /* Storage is optional. */ }
     }
     running = true; markRunning(true);
@@ -87,8 +98,8 @@ function initialize() {
       if (generation!==epoch) throw abortError();
       try {worker=cpuCleanup()?new Worker(CPU_RUNTIME_PATH+"referenceCleanup.cpu.js")
         :new Worker(new URL("../workers/referenceCleanup.worker.ts",import.meta.url),{type:"module"});}
-      catch {running = false; markRunning(false);unsupported=true;throw new UnsupportedCleanupError();}
-      const loaded=waitFor(worker,reply=>reply.type==="ready"?true:undefined,cpuCleanup()?300_000:90_000);
+      catch (error) {running = false;markRunning(false);reportClientError("cleanup_runtime",error,undefined,"worker_start_failed");throw new Error("Background cleanup could not start. You can use Original.");}
+      const loaded=waitFor(worker,reply=>reply.type==="ready"?true:undefined,cpuCleanup()?300_000:90_000,"model_load_timeout");
       worker.postMessage({type:"initialize"} satisfies CleanupRequest);
       await loaded;
     });
@@ -161,7 +172,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
         if (!image.size || image.size > 5*1024*1024) throw new Error("Choose a reference smaller than 5 MiB.");
         if (signal.aborted || !worker) throw abortError();
         const id = ++sequence;
-        const result = waitFor(worker, reply => reply.type === "result" && reply.id === id ? reply.image : undefined,cpuCleanup() ? 60_000 : 30_000);
+        const result = waitFor(worker, reply => reply.type === "result" && reply.id === id ? reply.image : undefined,cpuCleanup() ? 60_000 : 30_000,"inference_timeout");
         running = true; markRunning(true);
         worker.postMessage({type:"clean",id,image} satisfies CleanupRequest);
         const cleaned = await timeClientStage("cleanup_inference", () => result);

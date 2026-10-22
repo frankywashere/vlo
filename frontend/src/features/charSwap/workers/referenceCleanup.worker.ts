@@ -1,7 +1,7 @@
 import {applyCleanupWhite, encodeCleanupPng} from "./cleanupImage";
 import * as ort from "onnxruntime-web/webgpu";
 import {MODEL_PATH, RUNTIME_PATH, UNSUPPORTED_CLEANUP} from "../services/browserCleanupProtocol";
-import type {CleanupRequest, CleanupReply} from "../services/browserCleanupProtocol";
+import type {CleanupFailureReason, CleanupRequest, CleanupReply} from "../services/browserCleanupProtocol";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 let session: ort.InferenceSession | null = null;
@@ -9,8 +9,11 @@ let initializing: Promise<void> | null = null;
 const send = (message: CleanupReply) => scope.postMessage(message);
 class Unsupported extends Error {}
 class DownloadFailed extends Error {}
+class RuntimeFailed extends Error {}
+let failureReason: CleanupFailureReason = "runtime_unavailable";
 
 async function modelBytes() {
+  failureReason = "model_download";
   // Cache Storage is optional (private mode/quota pressure must not break cleanup).
   let cache: Cache | undefined;
   try {cache = await caches.open("recastfx-reference-model-v1");} catch { /* HTTP caching remains available. */ }
@@ -37,6 +40,7 @@ async function modelBytes() {
   }
   if (length !== 98_484_532) {void cache?.delete(MODEL_PATH); throw new DownloadFailed();}
   // Also validate cached bytes before executing them as a graph.
+  failureReason = "model_integrity";
   const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(n => n.toString(16).padStart(2,"0")).join("");
   if (hash !== "eff9216bb2f9d3f023d9c2b7196845a7485739ab1f231593633e4d2344ffc516") {
     void cache?.delete(MODEL_PATH); throw new DownloadFailed();
@@ -46,9 +50,13 @@ async function modelBytes() {
 
 async function initialize() {
   if (session) return;
-  if (!navigator.gpu || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function") throw new Unsupported();
+  if (!navigator.gpu) {failureReason="webgpu_api_missing";throw new Unsupported();}
+  if (typeof OffscreenCanvas === "undefined") {failureReason="canvas_api_missing";throw new Unsupported();}
+  if (typeof createImageBitmap !== "function") {failureReason="bitmap_api_missing";throw new Unsupported();}
+  failureReason="gpu_adapter_request";
   const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter || !adapter.features.has("shader-f16")) throw new Unsupported();
+  if (!adapter) {failureReason="gpu_adapter_missing";throw new Unsupported();}
+  if (!adapter.features.has("shader-f16")) {failureReason="gpu_f16_missing";throw new Unsupported();}
   ort.env.wasm.numThreads = 1;
   ort.env.wasm.proxy = false;
   ort.env.wasm.wasmPaths = {
@@ -56,13 +64,15 @@ async function initialize() {
     wasm: new URL(RUNTIME_PATH + "ort-wasm-simd-threaded.asyncify.wasm", location.origin).href,
   };
   const bytes = await modelBytes();
+  failureReason="gpu_session_create";
   try {session = await ort.InferenceSession.create(bytes, {executionProviders: ["webgpu"], graphOptimizationLevel: "all"});}
-  catch {throw new Unsupported();}
+  catch {throw new RuntimeFailed();}
 }
 
 async function clean(image: Blob) {
   if (!image.size || image.size > 5*1024*1024) throw new Error("Choose a reference smaller than 5 MiB.");
   let bitmap: ImageBitmap;
+  failureReason="image_decode";
   try {bitmap = await createImageBitmap(image);} catch {throw new Error("That reference could not be opened. Use the original or another image.");}
   const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale), height = Math.round(bitmap.height * scale);
@@ -71,6 +81,7 @@ async function clean(image: Blob) {
   const context = original.getContext("2d", {willReadFrequently: true});
   const small = new OffscreenCanvas(512, 512);
   const smallContext = small.getContext("2d", {willReadFrequently: true});
+  failureReason="canvas_context";
   if (!context || !smallContext) {bitmap.close(); throw new Unsupported();}
   context.drawImage(bitmap, 0, 0, width, height); bitmap.close();
   smallContext.fillStyle = "#808080"; smallContext.fillRect(0,0,512,512); smallContext.drawImage(original,0,0,512,512);
@@ -80,10 +91,12 @@ async function clean(image: Blob) {
   for (let i=0;i<512*512;i++) for (let c=0;c<3;c++) input[c*512*512+i]=(rgba[i*4+c]/255-mean[c])/std[c];
   const tensor = new ort.Tensor("float32", input, [1,3,512,512]);
   let outputs: ort.InferenceSession.ReturnType;
+  failureReason="gpu_inference";
   try {outputs = await session!.run({input_image: tensor});}
-  catch {throw new Unsupported();}
+  catch {throw new RuntimeFailed();}
   finally {tensor.dispose();}
   try {
+    failureReason="model_output_invalid";
     const output = outputs[session!.outputNames[0]];
     if (output.type !== "float32" || output.size !== 512*512) throw new Unsupported();
     const logits = await output.getData() as Float32Array;
@@ -99,12 +112,14 @@ async function clean(image: Blob) {
     smallContext.putImageData(matte,0,0);
     const mask = new OffscreenCanvas(width,height);
     const maskContext = mask.getContext("2d", {willReadFrequently:true});
+    failureReason="canvas_context";
     if (!maskContext) throw new Unsupported();
     maskContext.drawImage(small,0,0,width,height);
     const alpha = maskContext.getImageData(0,0,width,height).data;
     const pixels = context.getImageData(0,0,width,height);
     applyCleanupWhite(pixels.data, alpha);
     context.putImageData(pixels,0,0);
+    failureReason="image_encode";
     return await encodeCleanupPng(original);
   } finally {for (const output of Object.values(outputs)) output.dispose();}
 }
@@ -114,12 +129,12 @@ scope.onmessage = async ({data}: MessageEvent<CleanupRequest>) => {
     if (data.type === "initialize") {
       initializing ??= initialize(); await initializing; send({type:"ready"});
     } else {
-      if (!session) throw new Unsupported();
+      if (!session) {failureReason="model_not_ready";throw new RuntimeFailed();}
       send({type:"progress",progress:{phase:"cleaning"}});
       send({type:"result",id:data.id,image:await clean(data.image)});
     }
   } catch (error) {
-    const kind = error instanceof Unsupported ? "unsupported" : error instanceof DownloadFailed ? "download" : "image";
-    send({type:"error", id:data.type==="clean"?data.id:undefined,kind,message:kind==="unsupported"?UNSUPPORTED_CLEANUP:kind==="download"?"The cleanup model could not be downloaded. Use Original or try again.":error instanceof Error?error.message:"Cleanup failed. Use the original image."});
+    const kind = error instanceof Unsupported ? "unsupported" : error instanceof DownloadFailed ? "download" : error instanceof RuntimeFailed ? "runtime" : "image";
+    send({type:"error", id:data.type==="clean"?data.id:undefined,kind,reason:failureReason,message:kind==="unsupported"?UNSUPPORTED_CLEANUP:kind==="download"?"The cleanup model could not be downloaded. Use Original or try again.":kind==="runtime"?"Background cleanup could not run. You can use Original.":error instanceof Error?error.message:"Cleanup failed. Use the original image."});
   }
 };

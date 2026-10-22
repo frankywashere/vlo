@@ -57,6 +57,12 @@ never award additional credits. The reward is for opting into the watermark, not
   and authentication failures. Raw browser messages are replaced with controlled retry guidance.
   `library_request` client timings measure the authenticated Library API request; error messages,
   filenames, request paths and credentials are excluded from these diagnostic payloads.
+- Cleanup errors include an allowlisted `cleanup_reason` to distinguish interrupted sessions,
+  missing browser APIs/GPU adapters/features, GPU session creation, CPU runtime/model compilation,
+  model download/integrity, worker startup/crash/timeouts, inference, and image encoding.
+  Transient GPU session/inference failures use `cleanup_runtime`; they do not permanently mark
+  the hardware unsupported. No raw driver errors, adapter identifiers, photos, or credentials are
+  transmitted. Deploy the backend schema before the frontend when releasing these fields.
 - Durations are seconds. Nested timers overlap: do not add all events together. A start without
   an end can identify an interrupted process. Error details use the existing redacted logger.
 

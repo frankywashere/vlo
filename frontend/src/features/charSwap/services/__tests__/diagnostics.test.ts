@@ -51,3 +51,14 @@ it("records Library aborts by type without sending Safari's message or private U
   expect(JSON.parse(request!.body as string)).toEqual({category: "library_aborted", error_type: "AbortError"});
   expect(request!.body).not.toContain("private-photo");
 });
+
+it("records only allowlisted cleanup failure reasons", async () => {
+  const {reportClientError}=await import("../diagnostics");
+  reportClientError("cleanup_runtime",new Error("private image or token"),undefined,"gpu_session_create");
+  reportClientError("cleanup_runtime",undefined,undefined,"private-url-or-key" as never);
+  await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(2));
+  const bodies=vi.mocked(fetch).mock.calls.map(([,request])=>JSON.parse(request!.body as string));
+  expect(bodies[0]).toEqual({category:"cleanup_runtime",error_type:"Error",cleanup_reason:"gpu_session_create"});
+  expect(bodies[1]).not.toHaveProperty("cleanup_reason");
+  expect(JSON.stringify(bodies)).not.toContain("private");
+});
