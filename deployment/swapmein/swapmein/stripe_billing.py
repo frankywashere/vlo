@@ -120,7 +120,7 @@ def fulfill_checkout(records, event) -> bool:
         raise PublicError("The credit purchase needs reconciliation with its saved order.", 503)
     apply_wallet_change(records, account_id, "purchase:" + order_ref, credits, "purchase")
     funded = records.update(order_path, lambda current: {**current, "status": "fulfilled",
-        "session_id": session["id"], "fulfilled_at": time.time()})
+        "session_id": session["id"], "payment_intent": session.get("payment_intent"), "fulfilled_at": current.get("fulfilled_at", time.time())})
     _apply_refund_operations(records, funded)
     emit("stripe_credits_fulfilled", order_ref=order_ref, account_id=account_id, credits=credits, event_id=event.get("id"), replayed=order.get("status") == "fulfilled")
     return True
@@ -154,7 +154,7 @@ def reverse_refunded_credits(records, event) -> bool:
         previous = current.get("refund_target", 0)
         if refunded <= previous:
             return current
-        operation = {"reference": f"payment-refund:{order_ref}:{refunded}", "credits": refunded - previous}
+        operation = {"reference": f"payment-refund:{order_ref}:{refunded}", "credits": refunded - previous, "at": event.get("created", time.time())}
         return {**current, "refund_target": refunded,
                 "refund_operations": [*current.get("refund_operations", []), operation]}
 

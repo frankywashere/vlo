@@ -1,5 +1,6 @@
 """V2 orchestration proof using real FFmpeg geometry and real categorical SAM maps."""
 import copy
+import json
 from contextlib import contextmanager
 from dataclasses import replace
 from io import BytesIO
@@ -62,8 +63,18 @@ def image_at(archive_bytes, index=24):
         return np.array(Image.open(BytesIO(archive.read(f"labels/labels_{index:05d}.png"))))
 
 
+def assert_no_tracking_preview(job, cloud, previews):
+    """Easy preparation must not depend on its unused viewing-only artifact."""
+    assert not previews
+    assert job["tracking_uri"] is None
+    assert "sam_preview.mp4" not in cloud.worker_outputs
+    assert not any(uri.endswith("/tracking.mp4") for uri in cloud.uploads)
+    assert not any(key.endswith("/tracking.mp4") for _, key in cloud.copies)
+    assert not job.get("scene_mask_thumbnail_uris")
+
+
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
-            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False):
+            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False, preview_available=True):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -105,6 +116,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
     monkeypatch.setattr("swapmein.pipeline.sam_input_video", low_copy)
     previews = []
     def selection_preview(source, masks, output, checked):
+        assert preview_available, "The viewing-only preview cannot be rendered"
         assert checked["width"] == (600 if legacy else 960)
         labels = image_at(masks.read_bytes())
         assert labels.shape == (checked["height"], checked["width"])
@@ -132,6 +144,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         shutdown_verified = True
         def __init__(self):
             self.calls, self.enqueued, self.copies, self.uploads = [], [], [], []
+            self.worker_outputs = []
             self.cap_checks = 0
             self.objects = {"gs://app/upload.bin": media["working"].read_bytes()}
         def check_cap(self):
@@ -153,6 +166,9 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
             self.objects[result] = self.objects[uri]
             return result
         def worker_output(self, _result, run, filename):
+            self.worker_outputs.append(filename)
+            if filename == "sam_preview.mp4":
+                assert preview_available, "This worker has no viewing-only preview output"
             uri = f"gs://worker/{run}/{filename}"
             if uri not in self.objects:
                 self.objects[uri] = (media["empty_masks" if no_people else "masks"].read_bytes() if filename == "masks.zip" else
@@ -208,13 +224,18 @@ def test_replicate_routing_preserves_each_mode_without_starting_our_gpu(monkeypa
     assert sam_inputs == (["normalized.mp4"] if enhanced else [])
     assert cloud.enqueued == ([("generate", job["id"])] if easy else [])
     assert sum(endpoint == "/benchmark" for _, endpoint, _ in cloud.calls) == (1 if audio_processing else 0)
+    if easy:
+        assert_no_tracking_preview(job, cloud, previews)
     if not enhanced:
         assert not job["tracking_performed"] and not previews
         return
-    assert previews and job["tracking_performed"]
+    assert job["tracking_performed"]
+    assert bool(previews) is (not easy)
     compose = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]
     assert len(compose) == (0 if review else 1)
     if review:
+        assert job["tracking_uri"] in cloud.objects
+        assert job["scene_mask_thumbnail_uris"]
         assert job["tracking_depth_uri"] in cloud.objects and job["tracking_masks_uri"] in cloud.objects
         assert job["tracking_vocals_uri"] in cloud.objects
         assert set(np.unique(image_at(cloud.objects[job["tracking_masks_uri"]]))) == {0, 7, 40000}
@@ -285,6 +306,8 @@ def test_v2_keeps_high_resolution_depth_and_per_person_reference_mapping(monkeyp
     assert sam_inputs == (["normalized.mp4"] if enhanced else [])
     assert cloud.enqueued == ([("generate", job["id"])] if easy else [])
     assert originals == ([True] if not enhanced and audio_processing else [])
+    if easy:
+        assert_no_tracking_preview(job, cloud, previews)
     if selection == "multi":
         assert [(target["id"], target["reference_index"], target["label"]) for target in job["normalized_targets"]] == [
             ("person-1", 0, 1), ("person-2", 1, 2)]
@@ -300,6 +323,8 @@ def test_v2_keeps_high_resolution_depth_and_per_person_reference_mapping(monkeyp
     assert len(composed) == (0 if needs_review else 1)
     if needs_review:
         assert "guide_uri" not in job
+        assert job["tracking_uri"] in cloud.objects
+        assert job["scene_mask_thumbnail_uris"]
         assert job["tracking_metadata"]["width"] == 960
         assert job["tracking_metadata"]["height"] == 768
         raw = image_at(cloud.objects[job["tracking_masks_uri"]])
@@ -338,26 +363,43 @@ def test_sam_working_copy_keeps_rgb_pixels_distinct_from_full_resolution_depth(m
 
 
 def test_saved_legacy_single_keeps_the_original_combined_gpu_operation(monkeypatch, media):
-    job, cloud, sam_inputs, _, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+    job, cloud, sam_inputs, previews, _ = harness(monkeypatch, media, easy=True, enhanced=True,
         selection="single", audio_processing=False, legacy=True)
     assert job["status"] == "ready", job.get("message")
     assert job["preparation_version"] == 1
     assert [payload["operation"] for kind, _, payload in cloud.calls if kind == "gpu"] == ["both"]
     assert not sam_inputs
+    assert_no_tracking_preview(job, cloud, previews)
     payload = next(payload for _, endpoint, payload in cloud.calls if endpoint == "/compose")
     assert payload["selected_label"] == 7 and "target_styles" not in payload
     assert image_at(cloud.objects[payload["masks_uri"]]).shape == (480, 600)
+
+
+@pytest.mark.parametrize("provider,legacy", [("workers", False), ("workers", True), ("replicate", False)])
+def test_successful_easy_preparation_does_not_require_a_preview_output(monkeypatch, media, capsys, provider, legacy):
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+        selection="single", audio_processing=False, preparation_provider=provider,
+        legacy=legacy, preview_available=False)
+    assert job["status"] == "ready", job.get("message")
+    assert_no_tracking_preview(job, cloud, previews)
+    assert len([payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]) == 1
+    assert cloud.enqueued == [("generate", job["id"])]
+    skipped = [record for line in capsys.readouterr().out.splitlines()
+        if (record := json.loads(line)).get("event") == "tracking_preview_skipped"]
+    assert skipped == [{"severity": "INFO", "event": "tracking_preview_skipped", "job_id": job["id"],
+        "reason": "easy_mode_no_review", "preparation_provider": provider, "matching_fallback_used": False}]
 
 
 @pytest.mark.parametrize("selection", ["single", "multi"])
 @pytest.mark.parametrize("easy", [False, True])
 def test_v2_background_anchor_requires_explicit_manual_matches_without_rerunning_sam(
         monkeypatch, media, tmp_path, selection, easy):
-    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
         selection=selection, audio_processing=False, background_tap=True)
     assert [payload["operation"] for kind, _, payload in cloud.calls if kind == "gpu"] == ["depth", "sam"]
     if easy:
         assert job["status"] == "ready", job.get("message")
+        assert_no_tracking_preview(job, cloud, previews)
         assert job["coordinate_fallback_sections"] == 1
         assert job["normalized_targets"][0]["coordinate_fallback"]
         assert cloud.enqueued and any(endpoint == "/compose" for _, endpoint, _ in cloud.calls)
@@ -412,10 +454,12 @@ def test_saved_legacy_manual_background_anchor_keeps_existing_failure_policy(mon
 @pytest.mark.parametrize("selection", ["single", "multi", "all"])
 @pytest.mark.parametrize("preparation_provider", ["workers", "replicate"])
 def test_depth_disabled_skips_depth_inference_and_keeps_masks(monkeypatch, media, easy, selection, preparation_provider):
-    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
         selection=selection, audio_processing=False, preparation_provider=preparation_provider, depth_guidance=False)
     review = not easy and selection != "all"
     assert job["status"] == ("tracking_review" if review else "ready"), job.get("message")
+    if easy:
+        assert_no_tracking_preview(job, cloud, previews)
     assert job["mask_style"] == ("solid_multi" if selection == "multi" else "gray")
     assert not any(payload.get("operation") in {"depth", "both"} for _, _, payload in cloud.calls)
     assert not any(name.endswith("depth.mp4") for _, name in cloud.copies)
@@ -429,12 +473,16 @@ def test_depth_disabled_skips_depth_inference_and_keeps_masks(monkeypatch, media
 @pytest.mark.parametrize("enhanced", [False, True])
 @pytest.mark.parametrize("selection", ["single", "multi", "all"])
 def test_mesh_uses_internal_sam_even_without_visible_mask_fill(monkeypatch, media, easy, enhanced, selection):
-    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=enhanced,
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=easy, enhanced=enhanced,
         selection=selection, audio_processing=False, depth_guidance=True, face_mesh=True)
     review = not easy and selection != "all"
     assert job["status"] == ("tracking_review" if review else "ready"), job.get("message")
     assert any(payload.get("operation") == "sam" for _, _, payload in cloud.calls)
     assert job["tracking_performed"]
+    if easy:
+        assert_no_tracking_preview(job, cloud, previews)
+    elif review:
+        assert previews and job["tracking_uri"]
     if not enhanced:
         assert not any(payload.get("operation") in {"depth", "both"} for _, _, payload in cloud.calls)
         assert job["mask_style"] == "none"
@@ -448,10 +496,11 @@ def test_mesh_uses_internal_sam_even_without_visible_mask_fill(monkeypatch, medi
 @pytest.mark.parametrize("provider", ["workers", "replicate"])
 @pytest.mark.parametrize("selection", ["single", "multi", "all"])
 def test_new_shared_cyan_initial_preparation_reuses_labels_and_original_audio(monkeypatch, media, provider, selection):
-    job, cloud, _, _, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=True, enhanced=True,
         selection=selection, audio_processing=False, depth_guidance=False, face_mesh=True,
         preparation_provider=provider, guide_style_version=2)
     assert job["status"] == "ready", job.get("message")
+    assert_no_tracking_preview(job, cloud, previews)
     assert job["mask_style"] == ("cyan_overlay_multi_20" if selection == "multi" else "cyan_overlay_20")
     composed = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"]
     assert len(composed) == 1
@@ -469,9 +518,11 @@ def test_new_shared_cyan_initial_preparation_reuses_labels_and_original_audio(mo
 @pytest.mark.parametrize("selection", ["single", "multi"])
 @pytest.mark.parametrize("variant", ["identity_colors_v1", "identity_tint_tracking_v1"])
 def test_identity_prompt_routes_easy_shared_and_reviewed_guides(monkeypatch, media, tmp_path, provider, easy, depth, selection, variant):
-    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
         selection=selection, audio_processing=False, preparation_provider=provider,
         depth_guidance=depth, guide_style_version=2, prompt_variant=variant)
+    if easy:
+        assert_no_tracking_preview(job, cloud, previews)
     if not easy:
         choices = [{"segment_id": section["id"], "absent": False,
             "anchor": {"x": .75 if section.get("target_id") == "person-2" else .25,

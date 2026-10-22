@@ -9,7 +9,7 @@ from swapmein.errors import PublicError
 from swapmein.multi_tracking import build_selected_masks, selected_tracks
 from swapmein.pipeline import Pipeline
 from swapmein.provider import generation_payload
-from test_pipeline_v2 import harness, media
+from test_pipeline_v2 import assert_no_tracking_preview, harness, media
 
 
 @pytest.mark.parametrize("provider", ["workers", "replicate"])
@@ -28,10 +28,12 @@ def test_easy_matching_assignments_reach_guide_and_manual_prompt(monkeypatch, me
                                {'start':2,'end':4,'absent':False,'anchor':{**t['anchor'],'time':3}}]} for t in targets]
         return dict(masks_path=stable,coverage=coverage,targets=targets,assignments=[],diagnostics={'calls':1})
     monkeypatch.setattr(Pipeline,'match_cloudflare_identities',match)
-    job,cloud,*_=harness(monkeypatch,media,easy=True,enhanced=enhanced,selection=selection,
+    job,cloud,_,previews,_=harness(monkeypatch,media,easy=True,enhanced=enhanced,selection=selection,
         audio_processing=False,preparation_provider=provider,depth_guidance=depth,face_mesh=mesh,
         prompt_variant='cloudflare_identity_v1',guide_style_version=2)
     assert seen and job['status']=='ready',job.get('message')
+    assert_no_tracking_preview(job,cloud,previews)
+    assert cloud.enqueued==[('generate',job['id'])]
     assert job['identity_matching_completed']
     assert job['normalized_targets'][0]['scenes'][1]['anchor']['time']==3
     compose=[p for _,ep,p in cloud.calls if ep=='/compose'][-1]
@@ -45,14 +47,17 @@ def test_easy_matching_assignments_reach_guide_and_manual_prompt(monkeypatch, me
     assert generation_payload(4,images,'guide',prompt_variant='cloudflare_identity_v1',easy_mode=True,**kwargs)==generation_payload(4,images,'guide',prompt_variant='identity_tint_tracking_v1',easy_mode=False,**kwargs)
 
 
-def test_matcher_failure_preserves_inputs_and_routes_manual_scene_review(monkeypatch,media):
+@pytest.mark.parametrize('provider',['workers','replicate'])
+def test_matcher_failure_preserves_inputs_and_routes_manual_scene_review(monkeypatch,media,provider):
     def fail(*args,**kwargs):raise PublicError('Matching unavailable',503,code='cloudflare_matching_unavailable')
     monkeypatch.setattr(Pipeline,'match_cloudflare_identities',fail)
-    job,cloud,*_=harness(monkeypatch,media,easy=True,enhanced=True,selection='multi',audio_processing=False,
-        depth_guidance=False,prompt_variant='cloudflare_identity_v1')
+    job,cloud,_,previews,_=harness(monkeypatch,media,easy=True,enhanced=True,selection='multi',audio_processing=False,
+        preparation_provider=provider,depth_guidance=False,prompt_variant='cloudflare_identity_v1')
     assert job['status']=='tracking_review'
     assert not job['identity_matching_completed']
     assert job['tracking_masks_uri'] and job['normalized_uri']
+    assert previews and job['tracking_uri'] in cloud.objects
+    assert job['scene_mask_thumbnail_uris']
     assert job['tracking_plan']['review_required']
     assert not any(kind=='generate' for kind,_ in cloud.enqueued)
     # The same Easy job can complete the existing manual-review rebuild.
@@ -83,9 +88,11 @@ def test_matcher_failure_preserves_inputs_and_routes_manual_scene_review(monkeyp
 def test_manual_and_replace_everyone_skip_cloudflare(monkeypatch,media,easy,selection):
     def forbidden(*args,**kwargs):raise AssertionError('Cloudflare must not run here')
     monkeypatch.setattr(Pipeline,'match_cloudflare_identities',forbidden)
-    job,cloud,*_=harness(monkeypatch,media,easy=easy,enhanced=True,selection=selection,audio_processing=False,
+    job,cloud,_,previews,_=harness(monkeypatch,media,easy=easy,enhanced=True,selection=selection,audio_processing=False,
         depth_guidance=False,prompt_variant='cloudflare_identity_v1')
     assert job['status']==('ready' if easy else 'tracking_review')
+    if easy:assert_no_tracking_preview(job,cloud,previews)
+    else:assert previews and job['tracking_uri'] in cloud.objects
 
 
 class Records:

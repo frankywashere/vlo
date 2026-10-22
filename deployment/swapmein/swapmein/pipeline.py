@@ -141,7 +141,6 @@ class Pipeline:
                         sam_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "sam-input.mp4", sam_input, "video/mp4")
                         prepared = hosted.prepare(root, metadata, sam_metadata, source_uri, sam_uri, remaining)
                         depth_uri, masks_uri = prepared["depth_uri"], prepared["masks_uri"]
-                        preview_uri = None
                         emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
                              height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
                              source="normalized_rgb", preparation_provider="replicate")
@@ -166,7 +165,6 @@ class Pipeline:
                                 if depth_enabled:
                                     depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
                         masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
-                        preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
                     else:
                         raise PublicError("This job's preparation provider is unavailable.", 503)
                     masks = root / "masks.zip"
@@ -282,13 +280,23 @@ class Pipeline:
                          selected_label=label, replace_all_people=options.replace_all_people,
                          missing_frames=sum(count == 0 for count in coverage), target_count=len(targets) or 1)
                     tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
-                    if tracking_needed and ((plan and plan["review_required"]) or preview_uri is None):
-                        selection_preview = root / "selection-preview.mp4"
-                        create_selection_preview(normalized, masks, selection_preview, metadata)
-                        preview = self.cloud.upload(self.settings.app_bucket,
-                            f"outputs/{job_id}/tracking.mp4", selection_preview, "video/mp4")
+                    # This video is only a viewing/selection aid. Decide after
+                    # matching and recovery: Easy jobs can still require manual
+                    # review, while successful Easy jobs never consume it.
+                    review_required = bool(plan and plan["review_required"])
+                    if tracking_needed and (not options.easy_mode or review_required):
+                        if review_required or job.get("preparation_provider", "workers") == "replicate":
+                            selection_preview = root / "selection-preview.mp4"
+                            create_selection_preview(normalized, masks, selection_preview, metadata)
+                            preview = self.cloud.upload(self.settings.app_bucket,
+                                f"outputs/{job_id}/tracking.mp4", selection_preview, "video/mp4")
+                        else:
+                            preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
+                            preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
                     elif tracking_needed:
-                        preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
+                        emit("tracking_preview_skipped", job_id=job_id, reason="easy_mode_no_review",
+                             preparation_provider=job.get("preparation_provider", "workers"),
+                             matching_fallback_used=bool(job.get("matching_fallback_used")))
                 # Existing jobs without a snapshot retain their original audio behavior.
                 audio_processing = job.get("audio_processing", True) and not options.submit_without_audio
                 self.update_job(job_id, message="Preparing vocals and the generation guide." if audio_processing

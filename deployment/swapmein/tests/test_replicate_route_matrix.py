@@ -4,7 +4,7 @@ import pytest
 from swapmein.pipeline_settings import PATH
 from swapmein.replicate_preparation import MODELS
 from test_api import api, authenticated, upload_options
-from test_pipeline_v2 import harness, media
+from test_pipeline_v2 import assert_no_tracking_preview, harness, media
 
 
 @pytest.mark.parametrize("saved_variant,current_variant", [
@@ -66,7 +66,7 @@ def test_upload_completion_pins_replicate_for_saved_prompt_not_changed_admin_pro
 @pytest.mark.parametrize("selection", ["single", "multi", "all"])
 def test_unmasked_mesh_only_routes_to_replicate_sam_and_keeps_original_pixels(
         monkeypatch, media, easy, depth, selection):
-    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=False,
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=easy, enhanced=False,
         selection=selection, audio_processing=False, preparation_provider="replicate",
         depth_guidance=depth, face_mesh=True, prompt_variant="identity_tint_tracking_v1")
     review = not easy and selection != "all"
@@ -75,7 +75,11 @@ def test_unmasked_mesh_only_routes_to_replicate_sam_and_keeps_original_pixels(
     assert not any(kind == "gpu" for kind, _, _ in cloud.calls)
     assert not any(destination.endswith("depth.mp4") for _, destination in cloud.copies)
     assert job["mask_style"] == "none" and job["tracking_performed"]
+    if easy:
+        assert_no_tracking_preview(job, cloud, previews)
     if review:
+        assert previews and job["tracking_uri"] in cloud.objects
+        assert job["scene_mask_thumbnail_uris"]
         assert job["tracking_masks_uri"] and job["tracking_depth_uri"] is None
     else:
         payload = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"][-1]
