@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
 import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey, saveCloudflareApiKey } from "../services/commerce";
+import { FinancePanel } from "./FinancePanel";
 import { AdminSection } from "./AdminSection";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
@@ -82,6 +83,7 @@ export function AdminPage() {
       {!admin && !error && <Typography>Loading admin settings…</Typography>}
       {admin && <>
         {permissions.length === 0 && <Alert severity="info">Read-only admin access. You can view all sections, but cannot change settings or grant credits.</Alert>}
+        {admin.role === "owner" && <FinancePanel />}
         <AccountDirectory selectedEmail={selectedEmail} onSelect={setSelectedEmail} />
         {selectedEmail && <AccountAccessPanel key={selectedEmail} email={selectedEmail} grantable={permissions} onClose={() => setSelectedEmail("")} />}
         <AdminSection title="Service controls"><Stack spacing={2}>

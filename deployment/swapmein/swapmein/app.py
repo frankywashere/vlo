@@ -543,6 +543,18 @@ def account_wallet(x_firebase_token: str | None = Header(default=None)):
     return wallet_view(records, account["account_id"])
 
 
+@app.get("/api/commerce/admin/finances")
+def admin_finances(start: float = Query(ge=0), end: float = Query(ge=0),
+                   x_firebase_token: str | None = Header(default=None)):
+    from .finance import report
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, account, {"owner"})
+    if end <= start or end - start > 366 * 86400:
+        raise PublicError("Choose a date range of up to one year.")
+    return report(records, start, end)
+
+
 @app.get("/api/commerce/admin")
 def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
@@ -1601,6 +1613,11 @@ def provider_status(job_id: str, job: dict, key: str):
             return {**current, "provider_billing": billing,
                     "actual_credits": billing["provider_credits"], "provider_cost_recorded_at": time.time()}
         records.update(f"jobs/{job_id}.json", record_cost)
+        from .finance import record_expense
+        if job.get("access_mode") == "credits":
+            record_expense(records, job.get("provider", "reAPI"), job["provider_task"],
+                           cost=billing.get("provider_cost_usd"), status=billing["provider_cost_status"],
+                           job_id=job_id, detail="Video generation")
         if recorded_now:
             emit("provider_cost_recorded", job_id=job_id, provider=job.get("provider", "reAPI"),
                  provider_task=job["provider_task"], terminal_status=body["status"],

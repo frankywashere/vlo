@@ -160,6 +160,11 @@ class ReplicatePreparation:
                 result = self._request("GET", "/predictions/" + prediction_id)
             self._update(operation, status=result["status"],
                 predict_seconds=_metric(result, "predict_time"), total_seconds=_metric(result, "total_time"))
+            from .finance import record_expense, replicate_cost
+            record_expense(self.records, "Replicate", prediction_id,
+                           at=self._state(operation).get("submitted_at"), job_id=self.job["id"],
+                           cost=replicate_cost(self._state(operation)), status="estimated" if replicate_cost(self._state(operation)) is not None else "unavailable",
+                           detail=f"{operation}: {_metric(result, 'predict_time')} GPU/CPU seconds")
             if result["status"] != "succeeded":
                 raise PublicError("Replicate preparation did not complete. No video generation was submitted.", 502)
             emit("replicate_preparation_completed", job_id=self.job["id"], operation=operation,

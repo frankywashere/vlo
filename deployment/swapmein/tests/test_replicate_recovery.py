@@ -39,9 +39,13 @@ def recovery(monkeypatch):
            "reviewed_masks_uri": "gs://worker/selected.zip", "tracking_metadata": metadata}
     class Records:
         data = copy.deepcopy(job)
+        ancillary = {}
         def read(self, path):
-            return copy.deepcopy(self.data), 1
+            return copy.deepcopy(self.data if path.startswith("jobs/") else self.ancillary.get(path)), 1
         def update(self, path, mutation):
+            if not path.startswith("jobs/"):
+                self.ancillary[path] = mutation(copy.deepcopy(self.ancillary.get(path)))
+                return copy.deepcopy(self.ancillary[path])
             self.data = mutation(copy.deepcopy(self.data))
             return copy.deepcopy(self.data)
     class Cloud:

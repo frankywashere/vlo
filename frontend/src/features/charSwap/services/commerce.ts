@@ -237,3 +237,17 @@ export function loadCreditGrants(cursor?: string) {
   return commerceRequest<{grants: CreditGrantRecord[]; next_cursor: string | null}>(
     "/api/commerce/admin/grants?limit=25" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""));
 }
+
+export interface FinanceEntry {
+  id: string; provider: string; kind: "sale" | "refund" | "expense";
+  at: number; amount: number | null; currency: string; basis: string; detail: string;
+}
+export interface FinanceReport {
+  start: number; end: number; generated_at: number; stripe_mode: string; partial: boolean;
+  entries: FinanceEntry[];
+  totals: Array<{ currency: string; kind: string; basis: string; provider: string; amount: number }>;
+  notes: string[];
+}
+export function loadFinances(start: number, end: number) {
+  return commerceRequest<FinanceReport>(`/api/commerce/admin/finances?start=${start}&end=${end}`);
+}
