@@ -110,6 +110,19 @@ def report(records, start, end):
     except Exception as error:
         emit("finance_source_unavailable", provider="Google Cloud", error=error)
         notes.append("Google billing data unavailable or waiting for the first export; it is not zero spending.")
+    from .finance_payments import cash_summary
+    try:
+        from .finance_cloudflare import sync_payments
+        sync_note = sync_payments(records)
+        notes.append(sync_note)
+        partial |= "coverage is partial" in sync_note
+    except Exception as error:
+        emit("finance_source_unavailable", provider="Cloudflare billing", error=error)
+        notes.append("Cloudflare payment sync unavailable; saved payments remain visible.")
+    payments, truncated = scan(records, "finance/payments/")
+    partial |= truncated
+    payments = [p for p in payments if start <= p.get("at", 0) < end]
+    cash = cash_summary(entries, payments)
     totals = {}
     for e in entries:
         if e["amount"] is not None:
@@ -119,8 +132,8 @@ def report(records, start, end):
         "entries": sorted(entries, key=lambda e: e["at"], reverse=True),
         "totals": [{"currency": k.split(":")[0], "kind": k.split(":")[1], "basis": k.split(":")[2],
                     "provider": k.split(":")[3], "amount": float(v)} for k, v in totals.items()],
-        "partial": partial,
-        "notes": notes + ["Sales are completed site pack purchases; balances and top-ups are not revenue or usage expenses.",
+        "partial": partial, "payments": sorted(payments, key=lambda p: p["at"], reverse=True), "cash_totals": cash,
+        "notes": notes + ["Sales are completed site pack purchases. Credit top-ups appear only in provider payments; usage is shown separately.",
                   "Historical refunds without timestamps are excluded from date totals.",
                   "Stripe fees cover the pinned Stripe account. Google costs are project-only usage, not card payments.",
                   "Replicate costs use measured runtime and public hardware prices verified 2026-10-22; they are estimates, not invoice totals.",

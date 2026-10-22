@@ -15,6 +15,8 @@ def sources(monkeypatch):
     monkeypatch.setattr(finance, 'stripe_fees', lambda *a: ([], False))
     from swapmein import finance_google
     monkeypatch.setattr(finance_google, 'google_costs', lambda *a: ([], False))
+    from swapmein import finance_cloudflare
+    monkeypatch.setattr(finance_cloudflare, 'sync_payments', lambda *a: 'Cloudflare not connected')
 
 def test_retries_deduplicate_and_missing_is_not_zero():
     records = Records()

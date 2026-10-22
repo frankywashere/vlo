@@ -544,15 +544,51 @@ def account_wallet(x_firebase_token: str | None = Header(default=None)):
 
 
 @app.get("/api/commerce/admin/finances")
-def admin_finances(start: float = Query(ge=0), end: float = Query(ge=0),
+def admin_finances(start: float = Query(default=0, ge=0), end: float | None = Query(default=None, ge=0), all_time: bool = False,
                    x_firebase_token: str | None = Header(default=None)):
     from .finance import report
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
     require_staff(records, account, {"owner"})
-    if end <= start or end - start > 366 * 86400:
-        raise PublicError("Choose a date range of up to one year.")
+    if all_time:
+        start, end = 0, time.time() + 1
+    if end is None or end <= start or (not all_time and end - start > 366 * 86400):
+        raise PublicError("Choose All time or a date range of up to one year.")
     return report(records, start, end)
+
+
+class FinancePaymentImport(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+    provider: Literal["reAPI", "Replicate", "Cloudflare", "Google Cloud"]
+    reference: str = Field(min_length=3, max_length=160)
+    paid_at: float = Field(gt=0)
+    amount: str = Field(min_length=1, max_length=20)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    detail: str = Field(default="Verified payment", max_length=160)
+
+
+@app.post("/api/commerce/admin/finances/payments")
+def import_finance_payment(body: FinancePaymentImport, x_firebase_token: str | None = Header(default=None)):
+    from .finance_payments import save_payment
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, account, {"owner"})
+    return save_payment(records, body.provider, body.reference, body.paid_at, body.amount, body.currency,
+                        source="owner_invoice_import", detail=body.detail, date_precision="day")
+
+
+class FinanceBillingKey(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str = Field(min_length=20, max_length=256)
+
+
+@app.post("/api/commerce/admin/finances/cloudflare-key")
+def save_finance_cloudflare_key(body: FinanceBillingKey, x_firebase_token: str | None = Header(default=None)):
+    from .finance_cloudflare import save_token
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, account, {"owner"})
+    return save_token(body.token)
 
 
 @app.get("/api/commerce/admin")

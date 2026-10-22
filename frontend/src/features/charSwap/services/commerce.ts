@@ -239,7 +239,7 @@ export function loadCreditGrants(cursor?: string) {
 }
 
 export interface FinanceEntry {
-  id: string; provider: string; kind: "sale" | "refund" | "expense";
+  id: string; provider: string; kind: "sale" | "refund" | "expense" | "payment";
   at: number; amount: number | null; currency: string; basis: string; detail: string;
 }
 export interface FinanceReport {
@@ -247,7 +247,16 @@ export interface FinanceReport {
   entries: FinanceEntry[];
   totals: Array<{ currency: string; kind: string; basis: string; provider: string; amount: number }>;
   notes: string[];
+  payments?: FinanceEntry[];
+  cash_totals?: Array<{currency: string; gross_sales: number; refunds: number; net_sales: number; provider_payments: number; fees: number; cash_out: number}>;
 }
-export function loadFinances(start: number, end: number) {
-  return commerceRequest<FinanceReport>(`/api/commerce/admin/finances?start=${start}&end=${end}`);
+export function loadFinances(start: number, end: number, allTime = false) {
+  return commerceRequest<FinanceReport>(`/api/commerce/admin/finances?start=${start}&end=${end}${allTime ? "&all_time=true" : ""}`);
+}
+
+export function saveBillingToken(token: string) {
+  return commerceRequest<{configured: boolean}>("/api/commerce/admin/finances/cloudflare-key", {token});
+}
+export function importProviderPayment(payment: {provider: string; reference: string; paid_at: number; amount: string; currency: string; detail: string}) {
+  return commerceRequest<FinanceEntry>("/api/commerce/admin/finances/payments", payment);
 }
