@@ -2,7 +2,7 @@ import {CLEANUP_FAILURE_REASONS} from "./browserCleanupProtocol";
 import type {CleanupFailureReason} from "./browserCleanupProtocol";
 import { accountToken } from "./accountContext";
 
-type ErrorCategory = "runtime" | "unhandled_rejection" | "react" | "commerce_request" | "pipeline_request" | "library_timeout" | "library_aborted" | "library_network" | "library_http" | "library_response" | "library_video_decode" | "library_auth" | "cleanup_previous_interruption" | "cleanup_retry_after_interruption" | "cleanup_cpu_unsupported" | "cleanup_gpu_unsupported" | "cleanup_runtime";
+type ErrorCategory = "runtime" | "unhandled_rejection" | "react" | "commerce_request" | "pipeline_request" | "library_timeout" | "library_aborted" | "library_network" | "library_http" | "library_response" | "library_video_decode" | "library_auth" | "cleanup_previous_interruption" | "cleanup_retry_after_interruption" | "cleanup_cpu_unsupported" | "cleanup_gpu_unsupported" | "cleanup_runtime" | "cleanup_cpu_fallback";
 const ERROR_TYPES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError"]);
 let minute = 0;
 let count = 0;

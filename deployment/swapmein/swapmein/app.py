@@ -383,7 +383,7 @@ class CreditGrant(BaseModel):
 
 class ClientDiagnostic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_video_decode", "library_auth", "cleanup_previous_interruption", "cleanup_retry_after_interruption", "cleanup_cpu_unsupported", "cleanup_gpu_unsupported", "cleanup_runtime"]
+    category: Literal["runtime", "unhandled_rejection", "react", "commerce_request", "pipeline_request", "library_timeout", "library_aborted", "library_network", "library_http", "library_response", "library_video_decode", "library_auth", "cleanup_previous_interruption", "cleanup_retry_after_interruption", "cleanup_cpu_unsupported", "cleanup_gpu_unsupported", "cleanup_runtime", "cleanup_cpu_fallback"]
     error_type: Literal["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError", "Unknown"] = "Unknown"
     cleanup_reason: Literal["previous_interruption", "insecure_context", "worker_api_missing", "webgpu_api_missing", "canvas_api_missing", "bitmap_api_missing", "worker_start_failed", "worker_crash", "worker_error", "model_load_timeout", "inference_timeout", "gpu_adapter_request", "gpu_adapter_missing", "gpu_f16_missing", "model_download", "model_integrity", "gpu_session_create", "cpu_runtime_load", "cpu_model_compile", "image_decode", "canvas_context", "gpu_inference", "cpu_inference", "model_output_invalid", "image_encode", "model_not_ready", "runtime_unavailable"] | None = None
     http_status: int | None = Field(default=None, ge=400, le=599)

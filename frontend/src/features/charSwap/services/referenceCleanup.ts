@@ -11,20 +11,22 @@ let queue: Promise<void> = Promise.resolve();
 let worker: Worker | undefined;
 let ready: Promise<void> | undefined;
 // A previous GPU interruption must not block the new CPU implementation.
-const cpuCleanup = () => isIOSCleanupDevice(navigator.userAgent,navigator.platform,navigator.maxTouchPoints);
-const INTERRUPTED_KEY = cpuCleanup() ? "recastfx-cleanup-cpu-interrupted-v1" : "recastfx-cleanup-interrupted-v1";
-function interrupted() {try {return sessionStorage.getItem(INTERRUPTED_KEY) === "1";} catch {return false;}}
+let desktopCpuFallback = false;
+const cpuCleanup = () => desktopCpuFallback || isIOSCleanupDevice(navigator.userAgent,navigator.platform,navigator.maxTouchPoints);
+const interruptedKey = () => cpuCleanup() ? "recastfx-cleanup-cpu-interrupted-v1" : "recastfx-cleanup-interrupted-v1";
+function interrupted() {try {return sessionStorage.getItem(interruptedKey()) === "1";} catch {return false;}}
 function markRunning(active: boolean) {
-  try {if (active) sessionStorage.setItem(INTERRUPTED_KEY,"1"); else sessionStorage.removeItem(INTERRUPTED_KEY);} catch { /* Storage is optional. */ }
+  try {if (active) sessionStorage.setItem(interruptedKey(),"1"); else sessionStorage.removeItem(interruptedKey());} catch { /* Storage is optional. */ }
 }
-const RECOVERY_KEY = cpuCleanup() ? "recastfx-cleanup-cpu-recovery-v1" : "recastfx-cleanup-gpu-recovery-v1";
-function recoveryAttempted() {try {return sessionStorage.getItem(RECOVERY_KEY) === "1";} catch {return false;}}
-function clearRecovery() {try {sessionStorage.removeItem(RECOVERY_KEY);} catch { /* Storage is optional. */ }}
-const previousInterruption = interrupted();
-const repeatedInterruption = previousInterruption && recoveryAttempted();
+const recoveryKey = () => cpuCleanup() ? "recastfx-cleanup-cpu-recovery-v1" : "recastfx-cleanup-gpu-recovery-v1";
+function recoveryAttempted() {try {return sessionStorage.getItem(recoveryKey()) === "1";} catch {return false;}}
+function clearRecovery() {try {sessionStorage.removeItem(recoveryKey());} catch { /* Storage is optional. */ }}
+let previousInterruption = interrupted();
+let repeatedInterruption = previousInterruption && recoveryAttempted();
 // Interrupted work is not evidence that the hardware lacks cleanup support.
 let unsupported = false;
 let unsupportedReason: CleanupFailureReason = "runtime_unavailable";
+let lastFailureReason: CleanupFailureReason | undefined;
 let running = false;
 // Normal navigation is not evidence of a WebKit crash. Preserve the in-memory
 // worker on bfcache restores, but do not leave a crash marker after a clean exit.
@@ -43,6 +45,18 @@ function stop() {
   for (const cancel of [...waiting]) cancel();
 }
 function releaseLater() {clearTimeout(idle); idle = setTimeout(stop, 60_000);}
+const GPU_FALLBACK_REASONS = new Set<CleanupFailureReason>(["webgpu_api_missing", "gpu_adapter_request",
+  "gpu_adapter_missing", "gpu_f16_missing", "gpu_session_create", "gpu_inference"]);
+function fallbackToCpu(reason: CleanupFailureReason | undefined): boolean {
+  if (cpuCleanup() || !reason || !GPU_FALLBACK_REASONS.has(reason)) return false;
+  // Retire the GPU attempt before changing which engine owns crash markers.
+  stop(); desktopCpuFallback = true; unsupported = false;
+  previousInterruption = interrupted(); repeatedInterruption = previousInterruption && recoveryAttempted();
+  lastFailureReason = undefined; lastProgress = {phase:"loading",downloadMB:176};
+  reportClientError("cleanup_cpu_fallback",undefined,undefined,reason);
+  return true;
+}
+
 function supported() {
   if (repeatedInterruption) {
     reportClientError("cleanup_previous_interruption", undefined, undefined, "previous_interruption");
@@ -55,6 +69,7 @@ function supported() {
     : typeof createImageBitmap !== "function" ? "bitmap_api_missing" : undefined;
   if (reason) {
     reportClientError(cpuCleanup() ? "cleanup_cpu_unsupported" : "cleanup_gpu_unsupported", undefined, undefined, reason);
+    if (fallbackToCpu(reason)) {supported();return;}
     throw new UnsupportedCleanupError();
   }
 }
@@ -65,6 +80,7 @@ function waitFor<T>(target: Worker, match: (reply: CleanupReply) => T | undefine
     waiting.add(cancel);
     function finish() {waiting.delete(cancel); clearTimeout(timer); target.removeEventListener("message",message); target.removeEventListener("error",crash);}
     function fail(error: Error, reason: CleanupFailureReason) {
+      lastFailureReason = reason;
       reportClientError(error instanceof UnsupportedCleanupError ? (cpuCleanup() ? "cleanup_cpu_unsupported" : "cleanup_gpu_unsupported") : "cleanup_runtime", error, undefined, reason);
       finish(); stop(); reject(error);
     }
@@ -87,7 +103,7 @@ function initialize() {
   if (!ready) {
     if (previousInterruption) {
       reportClientError("cleanup_retry_after_interruption", undefined, undefined, "previous_interruption");
-      try {sessionStorage.setItem(RECOVERY_KEY,"1");} catch { /* Storage is optional. */ }
+      try {sessionStorage.setItem(recoveryKey(),"1");} catch { /* Storage is optional. */ }
     }
     running = true; markRunning(true);
     const epoch=generation;
@@ -161,6 +177,7 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
     progress = onProgress;
     try {
       const run = async () => {
+        lastFailureReason = undefined;
         const loading = initialize(); onProgress?.(lastProgress); await loading;
         if (signal.aborted) throw abortError();
         if (!shouldProcess()) throw new CleanupSkippedError();
@@ -180,7 +197,14 @@ export function cleanReferenceBackground(url: string, signal: AbortSignal, _lega
           throw new Error("The cleaned reference could not be read. Use Original.");
         return cleaned;
       };
-      return await Promise.race([run(),canceled]);
+      const withFallback = async () => {
+        try {return await run();}
+        catch (error) {
+          if (!signal.aborted && shouldProcess() && fallbackToCpu(lastFailureReason)) return run();
+          throw error;
+        }
+      };
+      return await Promise.race([withFallback(),canceled]);
     } finally {signal.removeEventListener("abort",cancel); progress = undefined; releaseLater();}
   });
   queue = task.then(() => undefined, () => undefined);

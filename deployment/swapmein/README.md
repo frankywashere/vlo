@@ -63,6 +63,10 @@ never award additional credits. The reward is for opting into the watermark, not
   Transient GPU session/inference failures use `cleanup_runtime`; they do not permanently mark
   the hardware unsupported. No raw driver errors, adapter identifiers, photos, or credentials are
   transmitted. Deploy the backend schema before the frontend when releasing these fields.
+  Desktop cleanup automatically falls back once to the existing CPU runtime when WebGPU is
+  missing, its adapter/features are unavailable, or GPU session/inference fails. The transition
+  emits `cleanup_cpu_fallback` with the GPU failure reason. Photos remain local, queued photos
+  remain serial, and cancellation/Original prevent a fallback retry.
 - Durations are seconds. Nested timers overlap: do not add all events together. A start without
   an end can identify an interrupted process. Error details use the existing redacted logger.
 

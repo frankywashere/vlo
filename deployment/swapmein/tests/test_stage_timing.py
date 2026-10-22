@@ -67,3 +67,11 @@ def test_cleanup_failure_reasons_are_controlled_and_scrubbed(api, monkeypatch, c
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert any(item.get("cleanup_reason") == reason for item in events)
     assert "private-photo" not in json.dumps(events)
+
+
+def test_cpu_fallback_diagnostic_is_accepted(api, monkeypatch, capsys):
+    import swapmein.app as gateway
+    client, _, _, _ = api
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: {"account_id": "b" * 64})
+    assert client.post("/api/diagnostics", json={"category": "cleanup_cpu_fallback", "cleanup_reason": "gpu_adapter_missing"}).status_code == 202
+    assert '"cleanup_cpu_fallback"' in capsys.readouterr().out
