@@ -1,0 +1,47 @@
+{
+  "code_commit": "b1d74434",
+  "backend_revision": "recastfx-api-00065-jsg",
+  "traffic": [
+    {
+      "percent": 100,
+      "revisionName": "recastfx-api-00065-jsg"
+    }
+  ],
+  "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:a3e1d4df9d70f48b4903e0d314667f2541125bc4d382fdb7b2611502b0d41af5",
+  "source_fingerprint": "ee2e556b1a1afed0",
+  "build_id": "c44782bc-6083-4217-96e6-f1af4fb9fda6",
+  "frontend_checks": [
+    {
+      "path": "/assets/charswap-B-inTc51.js",
+      "sha256": "6879f9326264a277d04f2ecbdecec35ddaad6533e16c8f20b4c8b75a1c8112fa",
+      "matches_local_build": true
+    },
+    {
+      "path": "/assets/referenceCleanup.worker-CrkwsS3v.js",
+      "sha256": "8670c272a3ec7ac2eb3c1e1d6c2bb3f245c91ea5ebb1c5fe097d3fd656d2b757",
+      "matches_local_build": true
+    },
+    {
+      "path": "/ml/litert-2.5.3-cpu-v5-diagnostics/referenceCleanup.cpu.js",
+      "sha256": "ed9a8d977b5e1113a5d1a94459f17154ded9c7897a6bb916ac88f76cf848cb3c",
+      "matches_local_build": true
+    }
+  ],
+  "available": true,
+  "live": true,
+  "pipeline_settings": {
+    "revision": 14,
+    "preparation_provider": "replicate",
+    "depth_guidance": false,
+    "prompt_variant": "cloudflare_identity_v1",
+    "matching_no_review": true,
+    "retry_missing_masks_with_sam": true
+  },
+  "validation": {
+    "frontend_tests_passed": 563,
+    "backend_tests_passed": 33,
+    "production_build": "passed",
+    "actual_desktop_cleanup_after_release": "not yet exercised; preserve existing user draft"
+  },
+  "new_render_submitted": false
+}
