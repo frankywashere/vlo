@@ -23,10 +23,11 @@ JOB_KEY_SECRET = "recastfx-job-key"
 PROVIDER_KEY_SECRET = "recastfx-provider-key"
 REPLICATE_KEY_SECRET = "recastfx-replicate-key"
 CLOUDFLARE_KEY_SECRET = "recastfx-cloudflare-key"
+CLOUDFLARE_BILLING_SECRET = "recastfx-cloudflare-billing-key"
 
 
 def ensure_private_provider_secret():
-    for secret in (PROVIDER_KEY_SECRET, REPLICATE_KEY_SECRET, CLOUDFLARE_KEY_SECRET):
+    for secret in (PROVIDER_KEY_SECRET, REPLICATE_KEY_SECRET, CLOUDFLARE_KEY_SECRET, CLOUDFLARE_BILLING_SECRET):
         existing = deploy.gcloud("secrets", "describe", secret, optional=True)
         if not existing:
             deploy.gcloud("secrets", "create", secret, "--replication-policy=automatic")
