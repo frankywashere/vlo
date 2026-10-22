@@ -186,9 +186,10 @@ describe("scene tracking review contract", () => {
       segmentId: "p2-segment-001", message: expect.stringContaining("Two replacements are assigned to the same person"),
     });
   });
-  it("retains the multi-person depth-guide style", async () => {
-    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "ready", mask_style: "depth_multi"})));
-    expect((await getLiveJob("job-1", "session", new AbortController().signal)).mask_style).toBe("depth_multi");
+  it.each(["depth_multi", "identity_overlay_20", "identity_overlay_multi_20", "identity_depth", "identity_depth_multi",
+    "shared_depth", "shared_depth_multi"])("retains the %s guide style", async (mask_style) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "ready", mask_style})));
+    expect((await getLiveJob("job-1", "session", new AbortController().signal)).mask_style).toBe(mask_style);
   });
 
   it("restores validated saved choices for an interrupted guide rebuild", async () => {
@@ -225,7 +226,7 @@ it("requests point recovery and subsequent generation explicitly, with a key onl
   expect(requests.mock.calls[0][1]?.headers).toMatchObject({"X-Reapi-Key": "private-test-key"});
 });
 
-it.each(["current", "favorite_v2", "structured_v1"])("retains the saved %s prompt version", async (prompt_variant) => {
+it.each(["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"])("retains the saved %s prompt version", async (prompt_variant) => {
   requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "completed", settings_used: {prompt_variant}})));
   expect((await getLiveJob("job-1", "session", new AbortController().signal)).settings_used?.prompt_variant).toBe(prompt_variant);
 });

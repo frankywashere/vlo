@@ -23,10 +23,10 @@ from .diagnostics import emit, timed
 @timed("detect_scene_cuts")
 def detect_scene_cuts(source: Path) -> list[float]:
     """Find clip-local cuts, including letterboxed footage with muted changes."""
-    # The old 0.40 threshold missed real shot/reverse-shot cuts, allowing SAM
-    # IDs reused across shots to become conflicting person assignments.
+    # 0.40 missed real shot/reverse-shot cuts; 0.15 also split movement inside
+    # shots. The reviewed alt.mov comparison retained all 23 shots at 0.25.
     cuts = run(["ffmpeg", "-hide_banner", "-loglevel", "info", "-protocol_whitelist", "file,pipe", "-i", str(source), "-an",
-                "-vf", "select='gt(scene,0.15)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
+                "-vf", "select='gt(scene,0.25)',showinfo", "-fps_mode", "vfr", "-f", "null", "-"], timeout=45)
     return [float(value) for value in re.findall(rb"pts_time:([0-9.]+)", cuts.stderr)]
 
 
@@ -467,8 +467,12 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
                           else "The provider soundtrack does not cover the selected section. The result needs review.")
     source_video = next(stream for stream in source["streams"] if stream["codec_type"] == "video")
     out_w, out_h = source_video["width"], source_video["height"]
-    if abs((width / height) / (out_w / out_h) - 1) > .03:
-        raise PublicError("The provider changed the frame shape. The result needs manual review.")
+    aspect_difference = abs((width / height) / (out_w / out_h) - 1)
+    emit("export_media_validation", source_width=out_w, source_height=out_h,
+         output_width=width, output_height=height, requested_duration=duration,
+         output_duration=length, aspect_difference=aspect_difference, dimensions_preserved=True,
+         restore_audio=restore_audio)
+    # Preserve the provider canvas instead of rejecting or stretching its result.
     soundtrack_input = (["-protocol_whitelist", "file,pipe", "-ss", str(audio_start), "-i", str(soundtrack)]
                         if restore_audio else [])
     video_filter = f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,setsar=1"

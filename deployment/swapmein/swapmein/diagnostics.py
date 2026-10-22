@@ -1,6 +1,7 @@
 """Structured Cloud Logging events without exception messages or request data."""
 import hashlib
 import json
+import re
 import traceback
 import time
 import uuid
@@ -11,6 +12,8 @@ from inspect import signature
 
 
 def emit(event, *, error=None, **fields):
+    if fields.get("job_id") is None and _timing_job.get() is not None:
+        fields["job_id"] = _timing_job.get()
     record = {"severity": "ERROR" if error else "INFO", "event": event, **fields}
     if error is not None:
         record["error_type"] = type(error).__name__
@@ -25,6 +28,8 @@ def emit(event, *, error=None, **fields):
         if callable(code):
             code = code()
         if isinstance(code, int):
+            record["error_code"] = code
+        elif isinstance(code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,79}", code):
             record["error_code"] = code
         elif isinstance(getattr(code, "name", None), str):
             record["error_code"] = code.name

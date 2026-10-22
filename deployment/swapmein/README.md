@@ -170,6 +170,12 @@ and absences for the provider prompt. The user chooses each person or **Not in
 this scene**. Two replacements cannot share the same detected person in one
 scene. Group mode requires no individual scene matching.
 
+Shot boundaries use FFmpeg's visual-change score on the prepared clip, with a
+threshold of 0.25. The reviewed `alt.mov` comparison found 23 shots at 0.25,
+versus 25 at 0.15. This reduces movement-related false cuts, but subtle changes
+inside heavy letterboxing can fall below the stricter threshold. Cut detection
+does not establish character identity across shots.
+
 The initial person picker accepts taps only after its displayed video frame has
 settled. An initial unmatched tap in manual enhanced mode requires correction in
 scene review before generation; it does not silently select a nearby person.
@@ -642,6 +648,79 @@ Release the verified CPU overlay before the gateway, set the live pipeline depth
 default off and masked face-mesh default on, then publish the matching frontend.
 Keep Easy Mode and Enhanced Masking on, source audio processing off, and silent
 submission off by default. Existing job snapshots are not rewritten.
+
+### Versioned generation prompts
+
+Admin → Experimental → **Generation prompts** offers six saved prompt families:
+
+| Option | Saved value | Behavior |
+| --- | --- | --- |
+| Current prompts | `current` | Compatibility wording with same-camera guidance. |
+| Favorite prompt across modes | `favorite_v2` | Favorite wording adapted to each guide path. |
+| Structured prompt with same-camera guidance | `structured_v1` | Structured subject, retention and photographic instructions. |
+| Structured with identity colors | `identity_colors_v1` | Reviewed Manual guides can use distinct identity colors; Easy guides use shared markers and timed positions. |
+| Structured with Easy Mode tint tracking | `identity_tint_tracking_v1` | Copies option 4, adding temporal marker-following guidance only when the saved setup uses Easy Mode. |
+| Cloudflare character matching | `cloudflare_identity_v1` | Easy Mode matches original-source crops across shots, remaps SAM IDs to stable reference slots, and uses the Manual identity/scene prompt. |
+
+Option 5's shared-cyan Easy prompt reproduces the chosen
+`02-explicit-tint-tracking` experiment. It follows the tinted person while the
+marker remains attached, then falls back to the visible person and timed position
+if the tint disappears or switches people. Unmasked, depth and Replace Everyone
+paths describe their actual guide and selection scope. Manual prompts and all
+guide pixels remain identical to option 4. Both full and compact prompt forms
+include the guidance before enforcing the 7,000-character limit.
+
+The selector applies to new jobs in both upload paths. Existing jobs, recovery
+and review resumes retain their saved variant and Easy Mode setting. Adding an
+option does not rewrite the selected global setting. The fallback for new jobs
+is `cloudflare_identity_v1`; options 1–5 retain their prior matching behavior.
+
+Option 6 uses one original RGB frame per detected shot and the user's initial
+source-person crops, never the replacement photographs or depth guide. It assigns
+SAM tracks with partial one-to-one maximum-total-score matching at the exploratory
+`0.0446` score cutoff. The remapped per-shot masks, positions and absences supply
+the existing Manual prompt and identity colors. No opaque or distinct-color claim
+is made for a guide that actually uses shared depth tint; the saved guide style
+still controls that wording. Unmasked Easy jobs run SAM internally but compose
+original pixels (and face mesh only if selected). Manual review and Replace Everyone
+keep their existing routes. Fragmented/unsupported scenes, missing credentials,
+network failures or spending limits return the preserved job to scene review;
+provider generation is blocked until matching or review completes.
+
+These are uncalibrated model scores. At this low cutoff, the offline three-clip
+benchmark recovered all known-present pairings but accepted two absent-person
+false matches. The benchmark used manually cropped people; automatic SAM candidate
+extraction still needs a real end-to-end pilot. Option 6 is the default for new jobs.
+
+Admin → System API key also contains the Cloudflare account ID, token and required
+AI Gateway ID. The token is kept in the `recastfx-cloudflare-key` Secret Manager
+bundle and is never returned to the browser, jobs or logs. Saving validates account
+access through a free model-catalog request. The launch script provisions only the
+secret/IAM/environment; an administrator must save credentials before selecting
+Option 6. Local env fallback is `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and
+`CLOUDFLARE_GATEWAY_ID`. Cloudflare calls always name that gateway, skip caches and
+have no automatic retries. The service additionally uses a durable $9 lifetime
+matching allowance: reserve $0.02 per attempt, reconcile successful returned usage
+at 2× published input-token cost (not a verified invoice), retain unknown costs in
+full, and carry a $0.10 initial allowance for earlier experiments. Up to 120 calls
+and four in flight are permitted per job, with a 180-second matching deadline.
+Safe job-correlated diagnostics retain request counts, scores/assignments, timing
+and usage estimates without photographs, tokens or signed URLs.
+
+Admin Experimental also offers **No review on automatic matching failure**
+(`matching_no_review`), off by default and snapshotted for new jobs in both
+upload paths. When enabled, recoverable Cloudflare matching/credential/budget
+failures use the common Option 5 Easy Mode selection, shared-marker guide and
+prompt path. The job saves its requested variant as `cloudflare_identity_v1`,
+its effective `prompt_variant` as `identity_tint_tracking_v1`, and a
+`matching_fallback_used` audit flag; logs identify the safe failure code and both
+variants. A missing initial mask receives at most one SAM recovery attempt
+before the fallback uses position/time guidance for remaining missing masks.
+Manual mode, Replace Everyone, invalid media, mask corruption, conflicting
+selections, and normal generation funding checks retain their existing behavior.
+This switch handles processing failures; it does not detect incorrect matches
+that the model accepts, nor does it guarantee that Option 5 preparation succeeds.
+
 
 Library provider failures retain an allowlisted reason: reAPI workflow error `80006`
 shows “Content rejected”; an explicit face-rejection signal shows “Face rejected”.

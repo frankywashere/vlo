@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
-import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey } from "../services/commerce";
+import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey, saveCloudflareApiKey } from "../services/commerce";
 import { AdminSection } from "./AdminSection";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
@@ -23,6 +23,9 @@ export function AdminPage() {
   const can = (permission: StaffPermission) => permissions.includes(permission);
   const [privateKey, setPrivateKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
+  const [cloudflareKey, setCloudflareKey] = useState("");
+  const [cloudflareAccountId, setCloudflareAccountId] = useState("");
+  const [cloudflareGatewayId, setCloudflareGatewayId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -32,6 +35,8 @@ export function AdminPage() {
     void loadCreditAdmin().then((result) => {
       if (!active) return;
       setAdmin(result);
+      setCloudflareAccountId(result.cloudflare_key?.account_id ?? "");
+      setCloudflareGatewayId(result.cloudflare_key?.gateway_id ?? "");
       setWatermarkVisible(result.watermark?.enabled ?? true);
       setWatermarkBonus(String(result.watermark?.bonus_credits ?? 25));
       setPacks(result.catalog.packs);
@@ -106,11 +111,23 @@ export function AdminPage() {
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
+            disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}
+            onChange={(event) => {
+              const provider = event.target.checked ? "replicate" : "workers";
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, preparation_provider: provider});
+                setAdmin(current => current ? {...current, pipeline} : current);
+                setMessage(`${provider === "replicate" ? "Replicate" : "Our workers"} selected for preparation of new jobs. Existing jobs keep their saved provider.`);
+              });
+            }} />} label="Use Replicate for SAM and depth" />
+          <Typography variant="body2" color="text.secondary">Routes SAM masks, mask retries, and enabled depth processing through Replicate. Off uses our workers. Existing jobs keep their saved provider.</Typography>
+          {!admin.pipeline?.replicate_api_key_configured && <Typography variant="body2" color="text.secondary">Save a Replicate API key under System API key before enabling.</Typography>}
           <FormControl disabled={busy || !can("pipeline_settings")}>
             <FormLabel id="prompt-variant-label">Generation prompts</FormLabel>
-            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "structured_v1"} onChange={(event) => {
+            <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "cloudflare_identity_v1"} onChange={(event) => {
               const variant = event.target.value;
-              if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1") || !can("pipeline_settings")) return;
+              if ((variant !== "current" && variant !== "favorite_v2" && variant !== "structured_v1" && variant !== "identity_colors_v1" && variant !== "identity_tint_tracking_v1" && variant !== "cloudflare_identity_v1") || !can("pipeline_settings")) return;
               void run(async () => {
                 const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, prompt_variant: variant});
                 setAdmin((current) => current ? {...current, pipeline} : current);
@@ -120,9 +137,23 @@ export function AdminPage() {
               <FormControlLabel value="current" control={<Radio />} label="Current prompts" />
               <FormControlLabel value="favorite_v2" control={<Radio />} label="Favorite prompt across modes" />
               <FormControlLabel value="structured_v1" control={<Radio />} label="Structured prompt with same-camera guidance" />
+              <FormControlLabel value="identity_colors_v1" control={<Radio />} label="Structured with identity colors" />
+              <FormControlLabel value="identity_tint_tracking_v1" control={<Radio />} label="Structured with Easy Mode tint tracking" />
+              <FormControlLabel value="cloudflare_identity_v1" control={<Radio />} label="Cloudflare character matching" />
             </RadioGroup>
           </FormControl>
           <Typography variant="body2" color="text.secondary">Applies to new jobs in every mode. Existing jobs keep their saved prompt version.</Typography>
+          <FormControlLabel control={<Switch checked={admin.pipeline?.matching_no_review ?? false}
+            disabled={busy || !can("pipeline_settings")}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, matching_no_review: enabled});
+                setAdmin(current => current ? {...current, pipeline} : current);
+                setMessage(`Automatic matching failure review ${enabled ? "disabled" : "enabled"} for new jobs.`);
+              });
+            }} />} label="No review on automatic matching failure" />
+          <Typography variant="body2" color="text.secondary">If Cloudflare matching cannot complete, continue with Option 5 Easy Mode instead of asking for scene review. Applies to new jobs.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.multi_characters ?? true}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
@@ -180,39 +211,8 @@ export function AdminPage() {
                 setMessage(`${enabled ? "SAM mask retries" : "Coordinate fallback"} selected for new jobs. Existing jobs keep their saved mode.`);
               });
             }} />} label="Retry missing masks with SAM" />
-          <Typography color="text.secondary">Off: use the selected position and timestamp. On: retry the missing mask with SAM, then use coordinates if it still cannot find a mask. Adds GPU processing time.</Typography>
+          <Typography color="text.secondary">Off: use the selected position and timestamp. On: retry the missing mask with SAM, then use coordinates if it still cannot find a mask. Adds processing time.</Typography>
           <Typography variant="body2" color="text.secondary">Applies to new jobs only. Both modes continue to generation automatically after scene choices are submitted.</Typography>
-        </Stack></AdminSection>
-        <AdminSection title="Preparation routing"><Stack spacing={2}>
-          <Typography color="text.secondary">Choose where enhanced masking prepares person masks and depth. This applies to new jobs only. Queued and running jobs keep their saved provider; generation still uses the existing video provider.</Typography>
-          <FormControl disabled={busy || !can("pipeline_settings")}>
-            <FormLabel id="preparation-provider-label">Preparation provider</FormLabel>
-            <RadioGroup aria-labelledby="preparation-provider-label" value={admin.pipeline?.preparation_provider ?? "workers"} onChange={(event) => {
-              const provider = event.target.value;
-              if ((provider !== "workers" && provider !== "replicate") || !can("pipeline_settings")) return;
-              void run(async () => {
-                const pipeline = await savePipelineSettings({ revision: admin.pipeline?.revision ?? 0, preparation_provider: provider });
-                setAdmin({ ...admin, pipeline });
-                setMessage(`${provider === "replicate" ? "Replicate" : "Our workers"} selected for preparation of new jobs. Existing jobs keep their saved provider.`);
-              });
-            }}>
-              <FormControlLabel value="workers" control={<Radio />} label="Our workers" />
-              <FormControlLabel value="replicate" disabled={busy || !can("pipeline_settings") || !admin.pipeline?.replicate_api_key_configured} control={<Radio />} label="Replicate" />
-            </RadioGroup>
-          </FormControl>
-          <Typography variant="body2" color="text.secondary">Clips with enhanced masking off do not run SAM or depth through either provider. Audio processing is controlled separately.</Typography>
-          <Typography variant="body2" color="text.secondary">Replicate usage is billed separately to its API account.</Typography>
-          <Typography variant="body2">Replicate API key: {admin.pipeline?.replicate_api_key_configured ? "Configured" : "Not configured"}</Typography>
-          {!admin.pipeline?.replicate_api_key_configured && <Typography variant="body2" color="text.secondary">Save a Replicate API key before selecting Replicate.</Typography>}
-          <Box component="fieldset" disabled={busy || !can("provider_key")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
-            <TextField label="Replicate API key" type="password" value={replicateKey} onChange={(event) => setReplicateKey(event.target.value)} autoComplete="off" helperText="Stored securely on the server and never displayed. Requires API-key management permission." />
-            <Button variant="outlined" disabled={busy || !replicateKey.trim()} onClick={() => void run(async () => {
-              await saveReplicateApiKey(replicateKey.trim());
-              setReplicateKey("");
-              setAdmin(await loadCreditAdmin());
-              setMessage("Replicate API key saved securely. Select Replicate to route preparation for new jobs.");
-            })}>Save Replicate key</Button>
-          </Stack></Box>
         </Stack></AdminSection>
         <AdminSection title="Credit pricing"><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography color="text.secondary">All prices are in USD. One credit equals US$0.01. Generation pricing scales with clip length. Credit packs start at US$20.00.</Typography>
@@ -255,6 +255,28 @@ export function AdminPage() {
             await savePrivateProviderKey(privateKey.trim()); setPrivateKey("");
             setAdmin(await loadCreditAdmin()); setMessage("System API key saved securely. You can now enable credit-funded generation.");
           })}>Save system key</Button>
+          <Typography fontWeight={600}>Replicate SAM and depth</Typography>
+          <Typography variant="body2">Replicate API key: {admin.pipeline?.replicate_api_key_configured ? "Configured" : "Not configured"}</Typography>
+          <TextField label="Replicate API key" type="password" value={replicateKey} onChange={(event) => setReplicateKey(event.target.value)} autoComplete="off" helperText="Stored securely on the server and never displayed." />
+          <Button variant="outlined" disabled={busy || !can("provider_key") || !replicateKey.trim()} onClick={() => void run(async () => {
+            await saveReplicateApiKey(replicateKey.trim());
+            setReplicateKey("");
+            setAdmin(await loadCreditAdmin());
+            setMessage("Replicate API key saved securely.");
+          })}>Save Replicate key</Button>
+          <Typography fontWeight={600}>Cloudflare character matching</Typography>
+          <Typography variant="body2">Cloudflare API key: {admin.cloudflare_key?.configured ? "Configured" : "Not configured"}</Typography>
+          <TextField label="Cloudflare account ID" required value={cloudflareAccountId} onChange={event => setCloudflareAccountId(event.target.value)} autoComplete="off" />
+          <TextField label="Cloudflare API key" type="password" value={cloudflareKey} onChange={event => setCloudflareKey(event.target.value)} autoComplete="off" helperText={admin.cloudflare_key?.configured ? "Leave blank to keep the saved key." : "Stored securely and never displayed."} />
+          <TextField label="Cloudflare Gateway ID" required value={cloudflareGatewayId} onChange={event => setCloudflareGatewayId(event.target.value)} autoComplete="off" />
+          <Button variant="outlined" disabled={busy || !can("provider_key") || !/^[a-fA-F0-9]{32}$/.test(cloudflareAccountId.trim()) || !/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(cloudflareGatewayId.trim()) || (!cloudflareKey.trim() && !admin.cloudflare_key?.configured)} onClick={() => void run(async () => {
+            const cloudflare_key = await saveCloudflareApiKey({key: cloudflareKey.trim(), account_id: cloudflareAccountId.trim(), gateway_id: cloudflareGatewayId.trim()});
+            setCloudflareKey("");
+            setCloudflareAccountId(cloudflare_key.account_id);
+            setCloudflareGatewayId(cloudflare_key.gateway_id);
+            setAdmin(current => current ? {...current, cloudflare_key} : current);
+            setMessage("Cloudflare credentials saved securely.");
+          })}>Save Cloudflare key</Button>
         </Stack></Box></AdminSection>
         <CreditGrantPanel readOnly={!can("grant_credits")} />
       </>}

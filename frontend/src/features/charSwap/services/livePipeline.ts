@@ -45,6 +45,11 @@ export type LiveJobStatus =
   | "failed"
   | "submission_unknown";
 
+const MASK_STYLES = ["depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20",
+  "gray", "solid_multi", "none", "identity_overlay_20", "identity_overlay_multi_20",
+  "identity_depth", "identity_depth_multi", "shared_depth", "shared_depth_multi"] as const;
+export type MaskStyle = typeof MASK_STYLES[number];
+
 export interface JobSettingsUsed {
   prompt_variant?: PromptVariant;
   depth_overlay_opacity?: number;
@@ -116,7 +121,7 @@ export interface LivePipelineJob {
   watermark_bonus_credits?: number;
   auto_generate?: boolean;
   scene_cut_count?: number;
-  mask_style?: "depth" | "depth_multi" | "cyan_overlay" | "gray" | "solid_multi" | "none";
+  mask_style?: MaskStyle;
   generation_started_at?: number;
   review_wait_seconds?: number;
   review_paused_at?: number;
@@ -359,7 +364,7 @@ function readJob(value: unknown): LivePipelineJob {
   if (isRecord(value.settings_used)) {
     const saved: JobSettingsUsed = {};
     const promptVariant = value.settings_used.prompt_variant;
-    if (promptVariant === "current" || promptVariant === "favorite_v2" || promptVariant === "structured_v1")
+    if (promptVariant === "current" || promptVariant === "favorite_v2" || promptVariant === "structured_v1" || promptVariant === "identity_colors_v1" || promptVariant === "identity_tint_tracking_v1" || promptVariant === "cloudflare_identity_v1")
       saved.prompt_variant = promptVariant;
     for (const field of ["easy_mode", "enhanced_masking", "depth_guidance", "face_mesh", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
       if (typeof value.settings_used[field] === "boolean") saved[field] = value.settings_used[field];
@@ -376,7 +381,7 @@ function readJob(value: unknown): LivePipelineJob {
   if (value.access_mode === "credits" || value.access_mode === "api-key") job.access_mode = value.access_mode;
   if (["guide_rebuild", "mask_recovery", "generation_queue", "guide_review"].includes(String(value.processing_stage)))
     job.processing_stage = value.processing_stage as LivePipelineJob["processing_stage"];
-  if (["depth", "depth_multi", "cyan_overlay", "gray", "solid_multi", "none"].includes(String(value.mask_style)))
+  if (MASK_STYLES.some(style => style === value.mask_style))
     job.mask_style = value.mask_style as LivePipelineJob["mask_style"];
   if (typeof value.message === "string")
     job.message = value.message.slice(0, 500);

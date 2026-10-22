@@ -1,0 +1,43 @@
+{
+  "verified_at": "2026-10-22T00:20:27.529516+00:00",
+  "source_commit": "6c345394d5807bc1dbbf7bb00c60addfefb457f7",
+  "service": "recastfx-api",
+  "revision": "recastfx-api-00063-v7v",
+  "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:c4cd58796084797c951f1f79348fce4b3a0176108f2cc62d9557844e3c05aa1a",
+  "traffic_percent": 100,
+  "backend_source_fingerprint": "b7784de748c2bf33",
+  "cloud_build_id": "c9be3a3a-f235-4132-b517-bf4f5fbdd508",
+  "frontend_asset": "/assets/charswap-DsEs_pKQ.js",
+  "frontend_sha256": "236312d2a19a8a9b32e9e26cacbc5c84082c99d56e9fc64df74893c797e94733",
+  "frontend_live_bytes_equal_build": true,
+  "replicate_key_configured": true,
+  "replicate_account_verified": "frankywashere",
+  "replicate_secret_version": "projects/634011479314/secrets/recastfx-replicate-key/versions/1",
+  "gateway_secret_access_verified": true,
+  "preparation_provider": "workers",
+  "depth_guidance": false,
+  "pipeline_revision": 12,
+  "pipeline_settings_unchanged": true,
+  "private_workers_unchanged": true,
+  "workers_manual_instances": 0,
+  "original_gateway_unchanged": true,
+  "api_available": true,
+  "api_live": true,
+  "paid_inference_submitted": false,
+  "checks": {
+    "backend_full_suite": 2126,
+    "final_replicate_checks": 101,
+    "frontend_char_swap_suite": 556,
+    "frontend_build": "passed",
+    "extension_surface": "clean"
+  },
+  "live_admin_verified": true,
+  "live_switch_label": "Use Replicate for SAM and depth",
+  "live_switch_enabled": false,
+  "live_key_status": "Configured",
+  "ui_verified_at": "2026-10-22T00:22:50.729864+00:00",
+  "screenshot_sha256": {
+    "live-experimental.png": "34b4f0a38b0844a8a913ef642e2bfb0a94a095b9787e94db84245257d2127282",
+    "live-replicate-key.png": "d6ca430608ff78916899279967d9ebe738f265960651b23361ff3db0bb725573"
+  }
+}

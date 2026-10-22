@@ -1,25 +1,27 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
-import type { PipelineSettings, StaffPermission } from "../../services/commerce";
+import type { CloudflareKeySettings, PipelineSettings, StaffPermission } from "../../services/commerce";
 
-const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin" | "viewer", permissions: undefined as StaffPermission[] | undefined, pipelineSettings: undefined as PipelineSettings | undefined, ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn(), watermark: vi.fn(), replicateKey: vi.fn() }));
+const api = vi.hoisted(() => ({ role: "owner" as "owner" | "pricing_admin" | "viewer", permissions: undefined as StaffPermission[] | undefined, pipelineSettings: undefined as PipelineSettings | undefined, cloudflareSettings: undefined as CloudflareKeySettings | undefined, cloudflareKey: vi.fn(), ready: false, grant: vi.fn(), save: vi.fn(), pipeline: vi.fn(), watermark: vi.fn(), replicateKey: vi.fn() }));
 vi.mock("../../services/commerce", () => ({
-  loadCreditAdmin: async () => ({ role: api.role, permissions: api.permissions, pipeline: api.pipelineSettings, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
+  loadCreditAdmin: async () => ({ role: api.role, permissions: api.permissions, pipeline: api.pipelineSettings, cloudflare_key: api.cloudflareSettings, catalog: {revision: 0, packs: [{id: "starter", name: "Starter", credits: 2000, price_cents: 2000, active: true}], credits_per_generation: 150}, features: {revision: 0, checkout: false, credit_generation: false, readiness: {checkout: api.ready, credit_generation: api.ready}} }),
   CommerceRequestError: class extends Error {}, grantAccountCredits: api.grant,
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
-  saveWatermarkSettings: api.watermark, savePipelineSettings: api.pipeline, saveReplicateApiKey: api.replicateKey, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
+  saveWatermarkSettings: api.watermark, savePipelineSettings: api.pipeline, saveReplicateApiKey: api.replicateKey, saveCloudflareApiKey: api.cloudflareKey, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
 }));
 async function renderExpandedAdmin() {
   render(<AdminPage />);
   await screen.findByRole("heading", {name: "Service controls"});
-  for (const name of ["Service controls", "Audio processing", "Experimental", "Preparation routing", "Credit pricing", "System API key", "Grant user credits", "Credit grant history"]) {
+  for (const name of ["Service controls", "Audio processing", "Experimental", "Credit pricing", "System API key", "Grant user credits", "Credit grant history"]) {
     await userEvent.click(screen.getByRole("heading", {name}));
   }
 }
 beforeEach(() => {
   api.pipelineSettings = undefined;
+  api.cloudflareSettings = undefined;
+  api.cloudflareKey.mockReset().mockImplementation(async ({account_id, gateway_id}) => ({configured: true, account_id, gateway_id}));
   api.permissions = undefined;
   api.ready = false;
   api.pipeline.mockReset().mockImplementation(async (settings) => {
@@ -119,13 +121,16 @@ it("does not let pricing staff change audio behavior", async () => {
   expect(await screen.findByRole("switch", { name: "Enable audio processing" })).toBeDisabled();
 });
 
-it("defaults preparation to our workers and requires a securely saved key before routing to Replicate", async () => {
+it("puts the Replicate switch in Experimental and securely saves its key under System API key", async () => {
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
   expect(screen.getByText("Replicate API key: Not configured")).toBeInTheDocument();
-  const keyField = screen.getByLabelText("Replicate API key");
+  const experimental = screen.getByRole("heading", {name: "Experimental"}).closest("details")!;
+  const systemKeys = screen.getByRole("heading", {name: "System API key"}).closest("details")!;
+  expect(within(experimental).getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+  const keyField = within(systemKeys).getByLabelText("Replicate API key");
   expect(keyField).toHaveAttribute("type", "password");
   expect(keyField).toHaveValue("");
   await user.type(keyField, "test-replicate-secret");
@@ -133,9 +138,10 @@ it("defaults preparation to our workers and requires a securely saved key before
   await screen.findByText(/Replicate API key saved securely/);
   expect(api.replicateKey).toHaveBeenCalledWith("test-replicate-secret");
   expect(keyField).toHaveValue("");
+  expect(screen.queryByText("test-replicate-secret")).not.toBeInTheDocument();
   expect(screen.getByText("Replicate API key: Configured")).toBeInTheDocument();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeEnabled();
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 
@@ -143,16 +149,16 @@ it("switches the new-job preparation provider without resetting audio or submitt
   api.pipelineSettings = {revision: 3, audio_processing: true, preparation_provider: "workers", replicate_api_key_configured: true};
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  await user.click(screen.getByRole("radio", {name: "Replicate"}));
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText(/Replicate selected for preparation of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
   expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
   await user.click(screen.getByRole("switch", {name: "Enable audio processing"}));
   await screen.findByText(/Audio processing disabled for new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, audio_processing: false});
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeChecked();
-  await user.click(screen.getByRole("radio", {name: "Our workers"}));
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText(/Our workers selected for preparation of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, preparation_provider: "workers"});
   expect(api.replicateKey).not.toHaveBeenCalled();
@@ -165,10 +171,10 @@ it("separates routing permission from permission to replace Replicate credential
   api.pipelineSettings = {revision: 0, audio_processing: false, preparation_provider: "workers", replicate_api_key_configured: true};
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeEnabled();
   expect(screen.getByLabelText("Replicate API key")).toBeDisabled();
   expect(screen.getByRole("button", {name: "Save Replicate key"})).toBeDisabled();
-  await user.click(screen.getByRole("radio", {name: "Replicate"}));
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText(/Replicate selected for preparation of new jobs/);
   expect(api.replicateKey).not.toHaveBeenCalled();
 });
@@ -178,9 +184,8 @@ it("keeps configured Replicate routing read-only without staff routing permissio
   api.permissions = ["provider_key"];
   api.pipelineSettings = {revision: 0, audio_processing: false, preparation_provider: "replicate", replicate_api_key_configured: true};
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeDisabled();
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
   expect(screen.getByLabelText("Replicate API key")).toBeEnabled();
   expect(screen.getByLabelText("Replicate API key")).toHaveValue("");
   expect(api.pipeline).not.toHaveBeenCalled();
@@ -191,22 +196,57 @@ it("keeps the saved provider selected when routing cannot be saved", async () =>
   api.pipeline.mockRejectedValueOnce(new Error("Settings changed. Refresh and try again."));
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  await user.click(screen.getByRole("radio", {name: "Replicate"}));
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText("Settings changed. Refresh and try again.");
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+});
+
+it.each([true, false])("switches preparation provider independently with depth=%s and preserves face mesh", async (depth_guidance) => {
+  api.pipelineSettings = {revision: 3, audio_processing: true, depth_guidance, face_mesh_enabled: true, preparation_provider: "workers", replicate_api_key_configured: true};
+  const user = userEvent.setup();
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "Use Replicate for SAM and depth"});
+  const depthToggle = screen.getByRole("switch", {name: "Add depth to person masks"});
+  await user.click(toggle);
+  await screen.findByText(/Replicate selected for preparation of new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
+  expect(toggle).toBeChecked();
+  expect(depthToggle).toHaveProperty("checked", depth_guidance);
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).toBeChecked();
+  await user.click(depthToggle);
+  await waitFor(() => expect(depthToggle).toHaveProperty("checked", !depth_guidance));
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, depth_guidance: !depth_guidance});
+  expect(toggle).toBeChecked();
+  await user.click(toggle);
+  await screen.findByText(/Our workers selected for preparation of new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, preparation_provider: "workers"});
+  expect(toggle).not.toBeChecked();
+  expect(depthToggle).toHaveProperty("checked", !depth_guidance);
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+});
+
+it("allows disabling Replicate if its saved key becomes unavailable", async () => {
+  api.pipelineSettings = {revision: 2, audio_processing: false, preparation_provider: "replicate", replicate_api_key_configured: false};
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "Use Replicate for SAM and depth"});
+  expect(toggle).toBeChecked();
+  expect(toggle).toBeEnabled();
+  await userEvent.click(toggle);
+  await screen.findByText(/Our workers selected for preparation of new jobs/);
+  expect(toggle).not.toBeChecked();
+  expect(toggle).toBeDisabled();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 2, preparation_provider: "workers"});
 });
 
 it("lets read-only staff see every section with all mutations disabled", async () => {
   api.role = "viewer";
   await renderExpandedAdmin();
   await screen.findByText(/Read-only admin access/);
-  for (const name of ["Service controls", "Audio processing", "Experimental", "Preparation routing", "Credit pricing", "System API key", "Grant user credits"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
+  for (const name of ["Service controls", "Audio processing", "Experimental", "Credit pricing", "System API key", "Grant user credits"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
   for (const name of ["Save pricing", "Save system key", "Save Replicate key", "Grant credits"]) expect(screen.getByRole("button", {name})).toBeDisabled();
   expect(screen.getByLabelText("System API key")).toHaveValue("");
   expect(screen.getByLabelText("Replicate API key")).toHaveValue("");
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeDisabled();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
   const user = userEvent.setup();
@@ -356,10 +396,10 @@ it("exposes the face-mesh master separately from public switch visibility",async
   expect(master).not.toBeChecked();
 });
 
-it("defaults to the newest prompt and saves each alternate version without changing other settings", async () => {
+it("defaults to Cloudflare matching and saves each alternate version without changing other settings", async () => {
   api.pipelineSettings = {revision: 7, audio_processing: false, depth_guidance: true, face_mesh_enabled: false};
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked();
+  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
   await userEvent.clear(screen.getByLabelText("Pack name"));
   await userEvent.type(screen.getByLabelText("Pack name"), "Unsaved pack name");
   await userEvent.click(screen.getByRole("radio", {name: "Favorite prompt across modes"}));
@@ -371,25 +411,132 @@ it("defaults to the newest prompt and saves each alternate version without chang
   await userEvent.click(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"}));
   await waitFor(() => expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, prompt_variant: "structured_v1"});
+  await userEvent.click(screen.getByRole("radio", {name: "Structured with identity colors"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Structured with identity colors"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 9, prompt_variant: "identity_colors_v1"});
+  await userEvent.click(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 10, prompt_variant: "identity_tint_tracking_v1"});
+  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).not.toBeChecked();
+  expect(screen.getByLabelText("Pack name")).toHaveValue("Unsaved pack name");
 });
 
-it("keeps the saved prompt version if a change fails", async () => {
+it("loads the saved Easy Mode tint tracking option without changing it", async () => {
+  api.pipelineSettings = {revision: 4, audio_processing: false, prompt_variant: "identity_tint_tracking_v1"};
+  await renderExpandedAdmin();
+  expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked();
+  expect(within(screen.getByRole("radiogroup", {name: "Generation prompts"})).getAllByRole("radio")).toHaveLength(6);
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["Current prompts", "current"],
+  ["Structured with Easy Mode tint tracking", "identity_tint_tracking_v1"],
+  ["Cloudflare character matching", "cloudflare_identity_v1"],
+] as const)("keeps the saved prompt version if changing to %s fails", async (label, variant) => {
   api.pipelineSettings = {revision: 3, audio_processing: false, prompt_variant: "structured_v1"};
   api.pipeline.mockRejectedValueOnce(new Error("Pipeline settings changed. Reload and try again."));
   await renderExpandedAdmin();
-  await userEvent.click(screen.getByRole("radio", {name: "Current prompts"}));
+  await userEvent.click(screen.getByRole("radio", {name: label}));
   await screen.findByText("Pipeline settings changed. Reload and try again.");
   expect(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Current prompts"})).not.toBeChecked();
-  expect(screen.getByRole("radio", {name: "Current prompts"})).toBeEnabled();
-  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, prompt_variant: "current"});
+  expect(screen.getByRole("radio", {name: label})).not.toBeChecked();
+  expect(screen.getByRole("radio", {name: label})).toBeEnabled();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, prompt_variant: variant});
 });
 
 it("requires pipeline permission to change any prompt version", async () => {
   api.permissions = ["pricing"];
   await renderExpandedAdmin();
-  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance"]) {
+  for (const name of ["Current prompts", "Favorite prompt across modes", "Structured prompt with same-camera guidance", "Structured with identity colors", "Structured with Easy Mode tint tracking", "Cloudflare character matching"]) {
     expect(screen.getByRole("radio", {name})).toBeDisabled();
   }
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+
+it("saves the Cloudflare prompt option with a revision while preserving manual-mode settings", async () => {
+  api.pipelineSettings = {revision: 11, audio_processing: true, prompt_variant: "identity_tint_tracking_v1", depth_guidance: false, face_mesh_enabled: true};
+  await renderExpandedAdmin();
+  await userEvent.click(screen.getByRole("radio", {name: "Cloudflare character matching"}));
+  await waitFor(() => expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 11, prompt_variant: "cloudflare_identity_v1"});
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).toBeChecked();
+});
+
+it("saves Cloudflare credentials without exposing the token or changing the prompt version", async () => {
+  await renderExpandedAdmin();
+  const token = screen.getByLabelText("Cloudflare API key");
+  expect(token).toHaveAttribute("type", "password");
+  expect(token).toHaveValue("");
+  expect(screen.getByText("Cloudflare API key: Not configured")).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
+  await userEvent.type(screen.getByLabelText(/Cloudflare account ID/), "52b56b12e8c965d69f81d15dbb4e5f52");
+  await userEvent.type(token, "test-cloudflare-secret");
+  expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
+  await userEvent.type(screen.getByLabelText(/Cloudflare Gateway ID/), "recastfx-matching-test");
+  await userEvent.click(screen.getByRole("button", {name: "Save Cloudflare key"}));
+  await screen.findByText("Cloudflare credentials saved securely.");
+  expect(api.cloudflareKey).toHaveBeenCalledWith({key: "test-cloudflare-secret", account_id: "52b56b12e8c965d69f81d15dbb4e5f52", gateway_id: "recastfx-matching-test"});
+  expect(token).toHaveValue("");
+  expect(screen.getByText("Cloudflare API key: Configured")).toBeInTheDocument();
+  expect(screen.queryByText("test-cloudflare-secret")).not.toBeInTheDocument();
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+it("loads Cloudflare metadata without a token and keeps the stored token when editing its gateway", async () => {
+  api.cloudflareSettings = {configured: true, account_id: "52b56b12e8c965d69f81d15dbb4e5f52", gateway_id: "old-gateway"};
+  await renderExpandedAdmin();
+  expect(screen.getByLabelText("Cloudflare API key")).toHaveValue("");
+  expect(screen.getByLabelText(/Cloudflare account ID/)).toHaveValue(api.cloudflareSettings.account_id);
+  await userEvent.clear(screen.getByLabelText(/Cloudflare Gateway ID/));
+  await userEvent.type(screen.getByLabelText(/Cloudflare Gateway ID/), "new-gateway");
+  await userEvent.click(screen.getByRole("button", {name: "Save Cloudflare key"}));
+  await screen.findByText("Cloudflare credentials saved securely.");
+  expect(api.cloudflareKey).toHaveBeenCalledWith({key: "", account_id: api.cloudflareSettings.account_id, gateway_id: "new-gateway"});
+});
+
+it("requires provider-key permission to edit Cloudflare credentials", async () => {
+  api.role = "viewer";
+  api.permissions = ["pipeline_settings"];
+  api.cloudflareSettings = {configured: true, account_id: "52b56b12e8c965d69f81d15dbb4e5f52", gateway_id: "recastfx-matching-test"};
+  await renderExpandedAdmin();
+  expect(screen.getByLabelText("Cloudflare API key")).toHaveValue("");
+  expect(screen.getByLabelText("Cloudflare API key")).toBeDisabled();
+  expect(screen.getByLabelText(/Cloudflare account ID/)).toBeDisabled();
+  expect(screen.getByLabelText(/Cloudflare Gateway ID/)).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
+  expect(api.cloudflareKey).not.toHaveBeenCalled();
+});
+
+
+it("defaults matching failure review on and toggles no-review without changing Option 6 or other settings", async () => {
+  api.pipelineSettings = {revision: 4, audio_processing: true, prompt_variant: "cloudflare_identity_v1", depth_guidance: true};
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "No review on automatic matching failure"});
+  expect(toggle).not.toBeChecked();
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, matching_no_review: true});
+  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  await userEvent.click(toggle);
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, matching_no_review: false});
+  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
+});
+
+it("shows a saved no-review setting and requires pipeline permission to edit it", async () => {
+  api.pipelineSettings = {revision: 2, audio_processing: false, prompt_variant: "cloudflare_identity_v1", matching_no_review: true};
+  api.role = "viewer";
+  api.permissions = ["provider_key"];
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "No review on automatic matching failure"});
+  expect(toggle).toBeChecked();
+  expect(toggle).toBeDisabled();
   expect(api.pipeline).not.toHaveBeenCalled();
 });

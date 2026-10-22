@@ -335,12 +335,27 @@ def test_trim_boundary_rejects_a_real_overflow():
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for cut detection")
-def test_letterboxed_camera_cuts_do_not_reuse_one_tracking_section(tmp_path):
+@pytest.mark.parametrize("first_color,expected", [("white", [2.0]), ("red", [])])
+def test_letterboxed_cut_sensitivity_at_stricter_threshold(tmp_path, first_color, expected):
     from swapmein.media import detect_scene_cuts
     source = tmp_path / "letterboxed.mp4"
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:r=24:d=2",
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={first_color}:s=320x240:r=24:d=2",
         "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=24:d=2", "-filter_complex",
         "[0:v][1:v]concat=n=2:v=1:a=0,pad=480:360:80:60:black[v]", "-map", "[v]",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)], check=True)
+    # Heavy black borders dilute the change score: the muted red/blue cut was
+    # detected at 0.15 but is deliberately below 0.25. Clear cuts still register.
+    assert detect_scene_cuts(source) == expected
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for cut detection")
+def test_mild_brightness_change_does_not_add_a_scene_boundary(tmp_path):
+    from swapmein.media import detect_scene_cuts
+    source = tmp_path / "brightness-step.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x303030:s=320x240:r=24:d=1",
+        "-f", "lavfi", "-i", "color=c=0x444444:s=320x240:r=24:d=1",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=24:d=1", "-filter_complex",
+        "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)], check=True)
     assert detect_scene_cuts(source) == [2.0]
 
@@ -451,3 +466,24 @@ def test_normalize_repairs_early_audio_end_without_changing_trim_or_video(tmp_pa
     assert next(s for s in checked["streams"] if s["codec_type"] == "video")["nb_frames"] == "96"
     assert float(next(s for s in checked["streams"] if s["codec_type"] == "audio")["duration"]) == pytest.approx(4, abs=.01)
     assert decoded_audio_samples(output) >= 4 * 44100
+
+
+@pytest.mark.parametrize("output_dimensions", [(1344, 768), (768, 1344), (768, 768)])
+def test_export_accepts_changed_shape_and_preserves_dimensions(tmp_path, monkeypatch, capsys, output_dimensions):
+    width, height = output_dimensions
+    def metadata(path):
+        generated = path.name != "private-source.mp4"
+        return {"format": {"duration": "15.08"}, "streams": [
+            {"codec_type": "video", "width": width if generated else 1536,
+             "height": height if generated else 768, "nb_frames": "360"},
+            {"codec_type": "audio", "duration": "15"}]}
+    monkeypatch.setattr("swapmein.media.probe", metadata)
+    monkeypatch.setattr("swapmein.media.decoded_audio_samples", lambda *args: 15 * 44100)
+    monkeypatch.setattr("swapmein.media.run", lambda *args, **kwargs: None)
+    result = finish(tmp_path / "raw.mp4", tmp_path / "private-source.mp4", tmp_path / "out.mp4", 15)
+    assert result == {"width": width, "height": height}
+    events = [__import__("json").loads(line) for line in capsys.readouterr().out.splitlines()]
+    event = next(item for item in events if item["event"] == "export_media_validation")
+    assert event["source_width"] == 1536 and event["output_width"] == width
+    assert event["output_height"] == height and event["dimensions_preserved"]
+    assert "private-source" not in str(events)

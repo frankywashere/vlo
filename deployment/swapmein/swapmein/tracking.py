@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image
 
 from .errors import PublicError
-from .diagnostics import timed
+from .diagnostics import emit, timed
 
 
 FPS = 24
@@ -193,6 +193,58 @@ def _jump(previous, current, width, height):
     radius = math.sqrt(max(area_before, area_after) / math.pi)
     return ((min(area_before, area_after) >= 9 and (ratio > 4 or ratio < .25))
             or distance > max(diagonal * .22, radius * 2.5))
+
+
+@timed("sam_track_diagnostics", job_arg="job_id")
+def log_track_diagnostics(archive: Path, metadata: dict, *, job_id=None):
+    """Observe single-shot mask geometry only; never block or alter a job."""
+    try:
+        width, height, frames, _, cuts = _metadata(metadata)
+        if cuts:
+            return {"skipped": True, "reason": "multiple_scenes"}
+        summary = {"frames": frames, "labels": 0, "jump_count": 0, "missing_count": 0,
+                   "reappeared_count": 0, "anomaly_count": 0, "logged_anomaly_count": 0,
+                   "truncated": False}
+        previous, seen = {}, set()
+        with _maps(archive, metadata) as read:
+            for frame in range(frames):
+                flat = read(frame).reshape(-1)
+                positions = np.flatnonzero(flat)
+                values = flat[positions].astype(np.int64)
+                counts = np.bincount(values)
+                sums_x = np.bincount(values, weights=positions % width)
+                sums_y = np.bincount(values, weights=positions // width)
+                current = {int(label): (int(counts[label]), float(sums_x[label] / counts[label]),
+                                       float(sums_y[label] / counts[label]))
+                           for label in np.flatnonzero(counts) if label}
+                for label in sorted(set(previous) | set(current)):
+                    before, after = previous.get(label, (0, 0., 0.)), current.get(label, (0, 0., 0.))
+                    reason = None
+                    if before[0] and not after[0]:
+                        reason, counter = "missing_mask", "missing_count"
+                    elif not before[0] and after[0] and label in seen:
+                        reason, counter = "tracking_reappeared", "reappeared_count"
+                    elif before[0] and after[0] and _jump(before, after, width, height):
+                        reason, counter = "tracking_jump", "jump_count"
+                    if reason:
+                        summary[counter] += 1
+                        summary["anomaly_count"] += 1
+                        if summary["logged_anomaly_count"] < 60:
+                            emit("sam_track_anomaly", job_id=job_id, reason=reason, label=label,
+                                 frame=frame, time_seconds=round(frame / FPS, 6), scene=0,
+                                 previous_coordinates={"x": before[1] / width, "y": before[2] / height} if before[0] else None,
+                                 coordinates={"x": after[1] / width, "y": after[2] / height} if after[0] else None,
+                                 previous_area_pixels=before[0], area_pixels=after[0], diagnostic_only=True)
+                            summary["logged_anomaly_count"] += 1
+                seen.update(current)
+                previous = current
+        summary["labels"] = len(seen)
+        summary["truncated"] = summary["anomaly_count"] > summary["logged_anomaly_count"]
+        emit("sam_track_diagnostics_completed", job_id=job_id, diagnostic_only=True, **summary)
+        return summary
+    except Exception as error:
+        emit("sam_track_diagnostics_failed", job_id=job_id, diagnostic_only=True, error=error)
+        return None
 
 
 def _compact(segments):

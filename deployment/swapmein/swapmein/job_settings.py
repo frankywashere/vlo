@@ -1,13 +1,17 @@
 """Public, durable settings summaries without credentials, URLs or prompts."""
 import math
 
+MASK_STYLES = {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20",
+               "gray", "solid_multi", "identity_overlay_20", "identity_overlay_multi_20",
+               "identity_depth", "identity_depth_multi", "shared_depth", "shared_depth_multi"}
+
 
 def settings_used(job):
     result = dict(job.get("settings_used") or {})
     setup = job.get("setup") or {}
     variant = job.get("prompt_variant", result.get("prompt_variant"))
     result.pop("prompt_variant", None)
-    if isinstance(variant, str) and variant in {"current", "favorite_v2", "structured_v1"}:
+    if isinstance(variant, str) and variant in {"current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"}:
         result["prompt_variant"] = variant
     for key in ("easy_mode", "replace_all_people", "audio_processing", "submit_without_audio", "add_watermark", "depth_guidance", "face_mesh"):
         value = job.get(key, setup.get(key))
@@ -22,9 +26,9 @@ def settings_used(job):
         result["audio_processing"] = False
     if isinstance(setup.get("enhanced_character_masking"), bool):
         result["enhanced_masking"] = setup["enhanced_character_masking"]
-    elif job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20", "gray", "solid_multi"}:
+    elif job.get("mask_style") in MASK_STYLES:
         result["enhanced_masking"] = job["mask_style"] != "none"
-    if job.get("mask_style") in {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20", "gray", "solid_multi"}:
+    if job.get("mask_style") in MASK_STYLES:
         result["mask_style"] = job["mask_style"]
     if isinstance(job.get("watermark_bonus_credits"), int):
         result["watermark_bonus_credits"] = job["watermark_bonus_credits"]

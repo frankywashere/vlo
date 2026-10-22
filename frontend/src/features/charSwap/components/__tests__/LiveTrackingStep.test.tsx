@@ -102,3 +102,16 @@ it("reviews the actual guide and explains skipped tracking with masking off", ()
   expect(screen.queryByRole("link", { name: /detected people/i })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "I reviewed the whole clip" })).toBeDisabled();
 });
+
+it("describes distinct colors only on the reviewed identity-color guide", () => {
+  render(<LiveTrackingStep {...properties()} enhancedCharacterMasking targetCount={2} trackingReviewed maskStyle="identity_overlay_multi_20" />);
+  expect(screen.getByText(/Each character keeps the same color and replacement reference across your reviewed scenes/)).toBeInTheDocument();
+  expect(screen.queryByText(/different colored depth guide/)).not.toBeInTheDocument();
+});
+
+it.each(["cyan_overlay_multi_20", "shared_depth_multi"] as const)("describes %s without assigning identity to the shared color", (maskStyle) => {
+  render(<LiveTrackingStep {...properties()} enhancedCharacterMasking targetCount={2} maskStyle={maskStyle} />);
+  expect(screen.getByText(/Their selected timestamps and positions identify the replacement references/)).toBeInTheDocument();
+  expect(screen.queryByText(/Each character keeps the same color/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/different colored depth guide/)).not.toBeInTheDocument();
+});

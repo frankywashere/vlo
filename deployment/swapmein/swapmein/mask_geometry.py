@@ -7,9 +7,11 @@ import zipfile
 import numpy as np
 from PIL import Image
 
+from .diagnostics import timed
 from .errors import PublicError
 
 
+@timed("mask_resize")
 def resize_label_archive(archive: Path, output: Path, metadata: dict):
     width, height, frames = (metadata.get(key) for key in ("width", "height", "frames"))
     if (any(type(value) is not int for value in (width, height, frames))

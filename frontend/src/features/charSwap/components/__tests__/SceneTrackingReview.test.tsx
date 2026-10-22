@@ -153,3 +153,17 @@ describe("character-first scrolling scene review", () => {
     expect(disconnect).toHaveBeenCalledTimes(2);
   });
 });
+
+it("binds single-person sections without IDs to the supplied Library character", async () => {
+  const props = properties();
+  const person = {...props.target, id: "saved-character-id", name: "Person 2"};
+  render(<SceneTrackingReview {...props} target={{...props.target, id: "selected"}} targets={[person]} />);
+  expect(screen.getByRole("heading", {name: "Character 1 of 1 · Person 2"})).toBeVisible();
+  expect(screen.getAllByRole("region")).toHaveLength(2);
+  select();
+  await act(async () => fireEvent.click(screen.getByRole("button", {name: "Submit and generate"})));
+  expect(props.onApply).toHaveBeenCalledWith(expect.arrayContaining([
+    expect.objectContaining({segment_id: "cut", absent: false}),
+    expect.objectContaining({segment_id: "gap", absent: true}),
+  ]));
+});

@@ -54,6 +54,13 @@ def recover_reviewed_masks(pipeline, job, remaining):
 
 
 def run_mask_recovery(pipeline, job, requests, remaining):
+    # Recovery follows the provider captured when the job was created, including
+    # initial Easy Mode taps, automatic matching anchors, and saved scene review.
+    if job.get("preparation_provider", "workers") == "replicate":
+        from .replicate_recovery import run_replicate_mask_recovery
+        return run_replicate_mask_recovery(pipeline, job, requests, remaining)
+    if job.get("preparation_provider", "workers") != "workers":
+        raise PublicError("This job's preparation provider is unavailable.", 503)
     cloud, settings = pipeline.cloud, pipeline.settings
     job_id = job["id"]
     run_id = "sm-mask-recovery-" + job_id + "-" + uuid.uuid4().hex[:8]

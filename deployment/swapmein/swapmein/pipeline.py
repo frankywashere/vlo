@@ -103,7 +103,11 @@ class Pipeline:
                 if targets:
                     metadata["targets"] = targets
                 multi = len(targets) > 1
-                tracking_needed = options.enhanced_character_masking or job.get("face_mesh", False)
+                automatic_identity = (job.get("prompt_variant") == "cloudflare_identity_v1"
+                    and options.easy_mode and not options.replace_all_people)
+                # Option 6 uses SAM internally for scene assignments even when
+                # the user chooses an original-pixel guide with no mesh.
+                tracking_needed = options.enhanced_character_masking or job.get("face_mesh", False) or automatic_identity
                 depth_enabled = options.enhanced_character_masking and job.get("depth_guidance", True)
                 fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
                 prefix = f"inputs/swapmein-{job_id}/"
@@ -173,15 +177,71 @@ class Pipeline:
                         masks = resized
                         masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "working-masks.zip", masks, "application/zip")
                     raw_masks_uri = masks_uri
-                    initial_recovery = None
-                    if options.easy_mode and options.preparation_version >= 2 and not options.replace_all_people:
-                        from .initial_mask_recovery import recover_initial_selection
-                        initial_recovery = recover_initial_selection(self, job, masks, metadata, targets or [{
+                    if not metadata.get("scene_cuts"):
+                        from .tracking import log_track_diagnostics
+                        log_track_diagnostics(masks, metadata, job_id=job_id)
+                    if automatic_identity:
+                        match_targets = targets or style_targets([{
                             "id": "person", "name": options.target_name, "reference_index": 0,
-                            "anchor": metadata["anchor"]}], root, remaining)
-                    if initial_recovery is not None:
-                        masks_uri, coverage, targets = initial_recovery
-                        label = 1
+                            "anchor": metadata["anchor"]}])
+                        self.update_job(job_id, message="Matching your selected people across scenes.")
+                        try:
+                            from .cloudflare_recovery import recover_identity_anchors
+                            recovered = recover_identity_anchors(self, job, masks, metadata,
+                                match_targets, root, remaining)
+                            if recovered is not None:
+                                masks, masks_uri, recovery_report = recovered
+                                raw_masks_uri = masks_uri
+                                self.update_job(job_id, mask_recovery_report=recovery_report,
+                                    identity_anchor_recovery_completed=True)
+                            matched = self.match_cloudflare_identities(job, normalized, masks, metadata,
+                                match_targets, root, remaining)
+                        except PublicError as error:
+                            if (job.get("matching_no_review") is True and error.code in {
+                                    "cloudflare_matching_unavailable", "cloudflare_matching_budget", "cloudflare_anchor_recovery"}):
+                                # Reuse Option 5's selection and guide path. The
+                                # saved global variant stays 6 for other jobs;
+                                # this job records both requested and used modes.
+                                targets = match_targets if targets else []
+                                tracking_needed = options.enhanced_character_masking or job.get("face_mesh", False)
+                                job = self.update_job(job_id, requested_prompt_variant="cloudflare_identity_v1",
+                                    prompt_variant="identity_tint_tracking_v1", matching_fallback_used=True,
+                                    identity_matching_completed=False, identity_matching_error=error.code,
+                                    normalized_targets=targets,
+                                    message="Automatic matching is unavailable. Continuing with Easy Mode.")
+                                emit("cloudflare_matching_fallback", job_id=job_id, public_code=error.code,
+                                    requested_prompt_variant="cloudflare_identity_v1",
+                                    effective_prompt_variant="identity_tint_tracking_v1")
+                                fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
+                                if tracking_needed:
+                                    masks_uri, label, coverage, targets = self.prepare_easy_selection(
+                                        job, options, masks, masks_uri, metadata, targets, root, remaining)
+                                else:
+                                    label, coverage = None, []
+                                job = self.update_job(job_id, normalized_targets=targets, target_styles=targets if multi else [])
+                            else:
+                                # Preserve raw masks and use the existing review.
+                                metadata.update(review_all_scenes=True, review_shots_only=True, allow_unmatched_anchor=True)
+                                metadata["targets"] = match_targets
+                                plan = analyze_multi_tracking(masks, metadata, match_targets)
+                                label, coverage = 1, []
+                                self.update_job(job_id, identity_matching_completed=False,
+                                    identity_matching_error=error.code, normalized_targets=match_targets)
+                                emit("cloudflare_matching_review_required", job_id=job_id, public_code=error.code)
+                        else:
+                            targets = matched["targets"]
+                            metadata["targets"] = targets
+                            masks_uri = self.cloud.upload(self.settings.worker_bucket,
+                                prefix + "identity-matched-masks.zip", matched["masks_path"], "application/zip")
+                            label, coverage = 1, matched["coverage"]
+                            job = self.update_job(job_id, identity_matching_completed=True,
+                                identity_matching_diagnostics=matched["diagnostics"],
+                                identity_matching_assignments=matched["assignments"],
+                                normalized_targets=targets, target_styles=targets if multi else [])
+                            fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
+                    elif options.easy_mode and not options.replace_all_people:
+                        masks_uri, label, coverage, targets = self.prepare_easy_selection(
+                            job, options, masks, masks_uri, metadata, targets, root, remaining)
                     elif options.replace_all_people:
                         combined = root / "all-people-masks.zip"
                         detection_summary = {}
@@ -222,12 +282,12 @@ class Pipeline:
                          selected_label=label, replace_all_people=options.replace_all_people,
                          missing_frames=sum(count == 0 for count in coverage), target_count=len(targets) or 1)
                     tracking_continuous = not metadata.get("scene_cuts") and all(coverage)
-                    if (plan and plan["review_required"]) or preview_uri is None:
+                    if tracking_needed and ((plan and plan["review_required"]) or preview_uri is None):
                         selection_preview = root / "selection-preview.mp4"
                         create_selection_preview(normalized, masks, selection_preview, metadata)
                         preview = self.cloud.upload(self.settings.app_bucket,
                             f"outputs/{job_id}/tracking.mp4", selection_preview, "video/mp4")
-                    else:
+                    elif tracking_needed:
                         preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
                 # Existing jobs without a snapshot retain their original audio behavior.
                 audio_processing = job.get("audio_processing", True) and not options.submit_without_audio
@@ -260,7 +320,7 @@ class Pipeline:
                                     "fill_mode": fill_mode, "run_id": guide_run,
                                     "face_mesh": job.get("face_mesh", False), "mesh_all_people": options.replace_all_people}
                                 if multi:
-                                    compose_payload["target_styles"] = compose_styles(fill_mode, targets)
+                                    compose_payload["target_styles"] = compose_styles(fill_mode, targets, mask_style)
                                 if fill_mode == "depth" and "depth_overlay_opacity" in job:
                                     compose_payload["depth_opacity"] = job["depth_overlay_opacity"]
                                 composed = invoke("/compose", compose_payload, remaining())
@@ -280,6 +340,8 @@ class Pipeline:
                         "tracking_reviewed": False}
                     if plan["review_required"]:
                         review_message = "Match your person in the flagged sections before the guide is built."
+                        if automatic_identity:
+                            review_message = "Automatic character matching could not be completed. Check scene matches; your clip and reference photos are saved. No generation was submitted."
                         if plan.get("unresolved_anchor"):
                             review_message = ("We could not match an initial selection. Select each person in the scenes below, or mark them not visible."
                                 if plan.get("detected_people_available") else
@@ -391,6 +453,49 @@ class Pipeline:
                     return current
                 self.records.update("control/preparation.json", retain)
 
+    def prepare_easy_selection(self, job, options, masks, masks_uri, metadata, targets, root, remaining):
+        """Common Option 5 mask path, also used by the opt-in matching fallback."""
+        if options.preparation_version >= 2:
+            from .initial_mask_recovery import recover_initial_selection
+            recovery_job = job
+            if job.get("matching_fallback_used") and job.get("identity_anchor_recovery_attempted"):
+                # The same missing tap has already had its bounded SAM retry.
+                # Preserve the saved setting, but use Option 5 coordinates for
+                # remaining missing masks rather than start another GPU pass.
+                recovery_job = {**job, "retry_missing_masks_with_sam": False}
+                emit("matching_fallback_reuses_mask_retry", job_id=job["id"], missing_mask_mode="coordinates")
+            recovery = recover_initial_selection(self, recovery_job, masks, metadata, targets or [{
+                "id": "person", "name": options.target_name, "reference_index": 0,
+                "anchor": metadata["anchor"]}], root, remaining)
+            if recovery is not None:
+                uri, coverage, recovered_targets = recovery
+                return uri, 1, coverage, recovered_targets
+        if len(targets) > 1:
+            tracks = selected_tracks(masks, metadata, targets)
+            combined = root / "selected-people-masks.zip"
+            coverage = build_selected_masks(masks, metadata, tracks, combined, allow_cross_shot_ids=True)
+            uri = self.cloud.upload(self.settings.worker_bucket,
+                f"inputs/swapmein-{job['id']}/selected-people-masks.zip", combined, "application/zip")
+            return uri, 1, coverage, targets
+        label, coverage = select_label(masks, metadata, require_continuous=False)
+        return masks_uri, label, coverage, targets
+
+    @timed("cloudflare_character_matching", job_arg="job")
+    def match_cloudflare_identities(self, job, video, masks, metadata, targets, root, remaining):
+        from .cloudflare_matching import match_tracks
+        from .cloudflare_credentials import server_cloudflare_credentials
+        from .cloudflare_budget import MatchingBudget
+        try:
+            credentials = server_cloudflare_credentials()
+        except PublicError as error:
+            emit("cloudflare_matching_rejected", job_id=job["id"],
+                 reason="credentials_unavailable", error=error, requests_submitted=0)
+            raise PublicError("Automatic matching credentials are unavailable.", 503,
+                              code="cloudflare_matching_unavailable") from None
+        return match_tracks(video, masks, metadata, targets, credentials=credentials,
+            workdir=root / "identity-matching", output_path=root / "identity-matched-masks.zip",
+            deadline_seconds=min(180, remaining()), budget=MatchingBudget(self.records, job["id"]))
+
     @timed("scene_review_resolution", job_arg="job")
     def resolve_saved_review(self, job):
         """Validate saved choices against masks in the durable background task."""
@@ -434,7 +539,7 @@ class Pipeline:
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
         self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")
-        fill_mode, mask_style = guide_style(job, job.get("setup", {}).get("enhanced_character_masking", True), bool(job.get("target_styles")))
+        fill_mode, mask_style = guide_style(job, job.get("setup", {}).get("enhanced_character_masking", True), bool(job.get("target_styles")), reviewed=True)
         with self.cloud.worker("audio") as invoke:
             payload = {"input_uri": job["normalized_uri"],
                 "masks_uri": job["reviewed_masks_uri"], "guide_audio_uri": job["tracking_vocals_uri"],
@@ -442,7 +547,7 @@ class Pipeline:
                 "fill_mode": fill_mode, "run_id": run_id,
                 "face_mesh": job.get("face_mesh", False), "mesh_all_people": job.get("replace_all_people", False)}
             if job.get("target_styles"):
-                payload["target_styles"] = compose_styles(fill_mode, job["target_styles"])
+                payload["target_styles"] = compose_styles(fill_mode, job["target_styles"], mask_style)
             if fill_mode == "depth" and "depth_overlay_opacity" in job:
                 payload["depth_opacity"] = job["depth_overlay_opacity"]
             composed = invoke("/compose", payload, remaining())
@@ -533,7 +638,7 @@ class Pipeline:
                     emit("library_poster_pending", job_id=job_id, error=error)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
-            self.update_job(job_id, status="failed", message=error.message)
+            self.update_job(job_id, status="failed", message=error.message, failure_code=error.code)
             return
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { savePipelineSettings, saveReplicateApiKey } from "../commerce";
+import { savePipelineSettings, saveReplicateApiKey, saveCloudflareApiKey } from "../commerce";
 
 const api = vi.hoisted(() => ({token: vi.fn()}));
 vi.mock("../accountContext", () => ({accountToken: api.token}));
@@ -36,8 +36,34 @@ it("updates only preparation routing without resubmitting unrelated pipeline set
   expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 7, preparation_provider: "replicate"});
 });
 
-it.each(["current", "favorite_v2", "structured_v1"] as const)("updates only the %s prompt version with its revision", async (prompt_variant) => {
+it.each(["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"] as const)("updates only the %s prompt version with its revision", async (prompt_variant) => {
   await savePipelineSettings({revision: 8, prompt_variant});
   expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");
   expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 8, prompt_variant});
+});
+
+
+it("sends Cloudflare credentials only in an authenticated no-store POST body", async () => {
+  const settings = {key: "test-cloudflare-key", account_id: "account-id", gateway_id: "test-gateway"};
+  await expect(saveCloudflareApiKey(settings)).resolves.toEqual({configured: true});
+  expect(requests).toHaveBeenCalledWith("/api/commerce/admin/cloudflare-key", {
+    method: "POST",
+    headers: {"X-Firebase-Token": "account-token", "Content-Type": "application/json"},
+    body: JSON.stringify(settings),
+    credentials: "omit",
+    cache: "no-store",
+  });
+});
+
+it("refuses a Cloudflare credential change when signed out", async () => {
+  api.token.mockResolvedValue(null);
+  await expect(saveCloudflareApiKey({key: "test-secret", account_id: "account", gateway_id: "test"})).rejects.toThrow("Sign in");
+  expect(requests).not.toHaveBeenCalled();
+});
+
+
+it.each([true, false])("saves matching_no_review=%s without changing the selected prompt", async (matching_no_review) => {
+  await savePipelineSettings({revision: 9, matching_no_review});
+  expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");
+  expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 9, matching_no_review});
 });

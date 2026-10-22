@@ -1,0 +1,138 @@
+{
+  "commit": "70371601",
+  "revision": "recastfx-api-00061-drh",
+  "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:ae168b74b06a83a7239addeefab522606a1604dbf211860361dd63cb8c57448c",
+  "traffic_percent": 100,
+  "prompt_variant": "cloudflare_identity_v1",
+  "pipeline_revision": 12,
+  "frontend_asset": "/assets/charswap-CwKB6dj-.js",
+  "frontend_sha256": "edf5df7877a18a94c9673eeb1a77066aaa8c67875d572ac7048968dcf4a14e57",
+  "cloudflare_secret_configured": true,
+  "inference_submitted": false,
+  "worker_details": {
+    "proof-gpu": {
+      "url": "https://proof-gpu-63lqoskl5q-uc.a.run.app",
+      "scaling": {
+        "scalingMode": "MANUAL",
+        "manualInstanceCount": 0
+      },
+      "template": {
+        "scaling": {
+          "maxInstanceCount": 1
+        },
+        "timeout": "1800s",
+        "serviceAccount": "proof-worker@charswap-franky-20261013.iam.gserviceaccount.com",
+        "containers": [
+          {
+            "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gpu@sha256:bcc0c40c4b09a92887e7c6705bb4a9cb81efdcf343b4aeb676ac209c593b17ea",
+            "command": [
+              "python",
+              "-u",
+              "/app/serve_gpu.py"
+            ],
+            "env": [
+              {
+                "name": "ARTIFACT_BUCKET",
+                "value": "charswap-franky-20261013-proof"
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "20",
+                "nvidia.com/gpu": "1",
+                "memory": "80Gi"
+              },
+              "startupCpuBoost": true
+            },
+            "ports": [
+              {
+                "name": "http1",
+                "containerPort": 8080
+              }
+            ],
+            "startupProbe": {
+              "timeoutSeconds": 240,
+              "periodSeconds": 240,
+              "failureThreshold": 1,
+              "tcpSocket": {
+                "port": 8080
+              }
+            }
+          }
+        ],
+        "maxInstanceRequestConcurrency": 1,
+        "nodeSelector": {
+          "accelerator": "nvidia-rtx-pro-6000"
+        },
+        "gpuZonalRedundancyDisabled": true,
+        "client": "gcloud",
+        "clientVersion": "533.0.0"
+      },
+      "serving_images": [
+        {
+          "revision": "proof-gpu-00002-n2k",
+          "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gpu@sha256:bcc0c40c4b09a92887e7c6705bb4a9cb81efdcf343b4aeb676ac209c593b17ea"
+        }
+      ]
+    },
+    "proof-audio": {
+      "url": "https://proof-audio-63lqoskl5q-uk.a.run.app",
+      "scaling": {
+        "scalingMode": "MANUAL",
+        "manualInstanceCount": 0
+      },
+      "template": {
+        "revision": "proof-audio-depth20-1019",
+        "scaling": {
+          "maxInstanceCount": 1
+        },
+        "timeout": "1800s",
+        "serviceAccount": "proof-worker@charswap-franky-20261013.iam.gserviceaccount.com",
+        "containers": [
+          {
+            "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:da744f0eeb7f78035d590538f1b9bd3a822d2542bbea0018a4e906fc32686e5b",
+            "env": [
+              {
+                "name": "ARTIFACT_BUCKET",
+                "value": "charswap-franky-20261013-proof"
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "4",
+                "memory": "8Gi"
+              },
+              "startupCpuBoost": true
+            },
+            "ports": [
+              {
+                "name": "http1",
+                "containerPort": 8080
+              }
+            ],
+            "startupProbe": {
+              "timeoutSeconds": 240,
+              "periodSeconds": 240,
+              "failureThreshold": 1,
+              "tcpSocket": {
+                "port": 8080
+              }
+            }
+          }
+        ],
+        "maxInstanceRequestConcurrency": 1,
+        "client": "gcloud",
+        "clientVersion": "527.0.0"
+      },
+      "serving_images": [
+        {
+          "revision": "proof-audio-depth20-1019",
+          "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:da744f0eeb7f78035d590538f1b9bd3a822d2542bbea0018a4e906fc32686e5b"
+        }
+      ]
+    }
+  },
+  "verification": "live API config, credential route availability, exact frontend bundle bytes, immutable revision, saved control record, secret metadata",
+  "frontend_followup_commit": "b9b3b208",
+  "frontend_followup": "Verified attention message and Library handoff; 549 frontend tests, backend fallback-to-review-to-generation check passed."
+}

@@ -63,7 +63,7 @@ def image_at(archive_bytes, index=24):
 
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
-            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1):
+            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -121,7 +121,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         def __init__(self):
             self.data = {path: {"id": job_id, "status": "queued", "source_uri": "gs://app/upload.bin",
                                "setup": options, "audio_processing": audio_processing,
-                               "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh, "guide_style_version": guide_style_version},
+                               "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh, "guide_style_version": guide_style_version, "prompt_variant": prompt_variant, "matching_no_review": matching_no_review},
                 "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
         def read(self, key):
             return copy.deepcopy(self.data.get(key)), 1
@@ -177,7 +177,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
     cloud.replicate_calls = []
     class HostedPreparation:
         def __init__(self, saved_records, saved_cloud, job):
-            assert enhanced and saved_records is records and saved_cloud is cloud
+            assert (enhanced or face_mesh or prompt_variant == "cloudflare_identity_v1") and saved_records is records and saved_cloud is cloud
             assert job["preparation_provider"] == "replicate"
         def prepare(self, root, checked, sam_metadata, source_uri, sam_uri, remaining):
             assert cloud.objects[source_uri] == media["working"].read_bytes()
@@ -461,3 +461,40 @@ def test_new_shared_cyan_initial_preparation_reuses_labels_and_original_audio(mo
     if selection == "multi":
         assert [target["color"] for target in composed[0]["target_styles"]] == ["#00dcff", "#00dcff"]
     assert cloud.enqueued == [("generate", job["id"])]
+
+
+@pytest.mark.parametrize("provider", ["workers", "replicate"])
+@pytest.mark.parametrize("easy", [False, True])
+@pytest.mark.parametrize("depth", [False, True])
+@pytest.mark.parametrize("selection", ["single", "multi"])
+@pytest.mark.parametrize("variant", ["identity_colors_v1", "identity_tint_tracking_v1"])
+def test_identity_prompt_routes_easy_shared_and_reviewed_guides(monkeypatch, media, tmp_path, provider, easy, depth, selection, variant):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=easy, enhanced=True,
+        selection=selection, audio_processing=False, preparation_provider=provider,
+        depth_guidance=depth, guide_style_version=2, prompt_variant=variant)
+    if not easy:
+        choices = [{"segment_id": section["id"], "absent": False,
+            "anchor": {"x": .75 if section.get("target_id") == "person-2" else .25,
+                       "y": .5, "time": section["seek_time"]}}
+            for section in job["tracking_plan"]["segments"] if section["needs_review"]]
+        job.update(tracking_choices=choices, tracking_applied_revision=1,
+            tracking_resolution_pending=True, generation_after_review_revision=1)
+        class Records:
+            data = copy.deepcopy(job)
+            def update(self, path, mutation):
+                self.data = mutation(copy.deepcopy(self.data))
+                return copy.deepcopy(self.data)
+        records = Records()
+        pipeline = Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud)
+        pipeline.rebuild_reviewed_guide(job, lambda: 60)
+        job = records.data
+    assert job["status"] == "ready", job.get("message")
+    distinct = not easy and (not depth or selection == "multi")
+    assert job["mask_style"].startswith("identity_") == distinct
+    compose = [payload for _, endpoint, payload in cloud.calls if endpoint == "/compose"][-1]
+    assert compose["fill_mode"] == ("depth" if depth else "translucent")
+    if selection == "multi":
+        assert compose["target_styles"][1]["color"] == ("#ff4fd8" if distinct else "#00dcff")
+    if not easy:
+        assert job["tracking_reviewed"]
+        assert all(target.get("scenes") for target in job["normalized_targets"])

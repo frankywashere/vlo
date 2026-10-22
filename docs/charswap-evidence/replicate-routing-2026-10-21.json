@@ -1,0 +1,164 @@
+{
+  "feature": "Replicate SAM and depth routing",
+  "implementation_status": "Deployed and verified; global provider remains workers until the Experimental switch is enabled",
+  "admin": {
+    "experimental_switch": "Use Replicate for SAM and depth",
+    "setting": "preparation_provider",
+    "off": "workers",
+    "on": "replicate",
+    "default": "workers",
+    "switch_permission": "pipeline_settings",
+    "key_location": "System API key / Replicate API key",
+    "key_permission": "provider_key",
+    "key_storage": "Versioned recastfx-replicate-key in Google Secret Manager; password input; no secret readback",
+    "missing_key": "Cannot enable Replicate, but can always switch back to workers",
+    "applies_to": "New jobs; existing jobs retain saved provider, model versions, key version, depth, mesh and prompt settings"
+  },
+  "initial_inference_routes": [
+    {
+      "enhanced_masking": false,
+      "face_mesh": false,
+      "automatic_identity": false,
+      "depth_toggle": "either",
+      "inference": [],
+      "guide": "Original RGB; manual positional review remains available"
+    },
+    {
+      "enhanced_masking": false,
+      "face_mesh": true,
+      "automatic_identity": "either",
+      "depth_toggle": "either",
+      "inference": [
+        "SAM"
+      ],
+      "guide": "Original RGB with selected-person mesh; masks used internally"
+    },
+    {
+      "enhanced_masking": false,
+      "face_mesh": false,
+      "automatic_identity": true,
+      "depth_toggle": "either",
+      "inference": [
+        "SAM"
+      ],
+      "guide": "Original RGB; Option 6 uses masks internally for cross-shot matching"
+    },
+    {
+      "enhanced_masking": true,
+      "face_mesh": "either",
+      "automatic_identity": "either",
+      "depth_toggle": false,
+      "inference": [
+        "SAM"
+      ],
+      "guide": "Existing 20 percent overlay and optional face mesh"
+    },
+    {
+      "enhanced_masking": true,
+      "face_mesh": "either",
+      "automatic_identity": "either",
+      "depth_toggle": true,
+      "inference": [
+        "SAM",
+        "Depth Anything"
+      ],
+      "guide": "Existing depth compositor and optional face mesh"
+    }
+  ],
+  "route_dimensions": {
+    "selection": [
+      "single character",
+      "multiple characters",
+      "replace all people"
+    ],
+    "review": [
+      "Easy",
+      "Manual"
+    ],
+    "prompt_options": [
+      "current",
+      "favorite_v2",
+      "structured_v1",
+      "identity_colors_v1",
+      "identity_tint_tracking_v1",
+      "cloudflare_identity_v1"
+    ],
+    "automatic_identity": "Option 6 + Easy + not replace-all; manual choices otherwise remain authoritative",
+    "automatic_matching_failure": [
+      "Needs attention / scene review",
+      "saved no-review fallback to Option 5"
+    ]
+  },
+  "later_routes": [
+    {
+      "route": "Manual scene-choice rebuild",
+      "behavior": "Reuse saved masks, depth, audio and original RGB; no new inference unless saved missing-mask retry policy requests recovery"
+    },
+    {
+      "route": "Initial Easy missing selection",
+      "entry": "recover_initial_selection -> run_mask_recovery",
+      "replicate_behavior": "Scene-bounded SAM retry on original RGB; select candidate at the saved tap; retain coordinate fallback if no candidate"
+    },
+    {
+      "route": "Option 6 missing initial selection",
+      "entry": "recover_identity_anchors -> run_mask_recovery",
+      "replicate_behavior": "Same retry route; repaired selected masks merge into raw all-person masks only when no original pixel is overwritten"
+    },
+    {
+      "route": "Reviewed missing-mask recovery",
+      "entry": "recover_reviewed_masks -> run_mask_recovery",
+      "replicate_behavior": "Same retry route; selected identity labels preserved; saved depth/audio reused"
+    },
+    {
+      "route": "Cloudflare failure review / no-review fallback",
+      "behavior": "Reuse prepared assets; no new inference simply because matching failed; repeated anchor recovery suppressed"
+    },
+    {
+      "route": "Generation / export / before-video retention",
+      "behavior": "Existing renderer, audio policy, export and trimmed-original retention remain shared"
+    }
+  ],
+  "replicate_transport": {
+    "input": "Prepared original RGB bytes uploaded via authenticated Replicate Files API",
+    "sam": "Pinned 8digit/gener8-sam3, prompt person, preview false, original RGB at SAM resolution",
+    "depth": "Pinned lucataco/depth-anything-video, encoder vits, normalized guide resolution; only when Enhanced Masking and saved depth toggle are both on",
+    "output": "Allowlisted Replicate delivery hosts; bounded download; validate every label frame and depth geometry/timeline; persist to private worker storage",
+    "recovery": "One cached SAM prediction per requested scene, shared across selected people; no depth rerun and no private GPU fallback",
+    "recovery_difference": "The tested Replicate wrapper accepts text prompts only. Its retry reruns person detection within the selected shot and selects the mask at the saved tap; our-worker recovery uses point-prompt tracking. Neither invents a mask when the tap is missed.",
+    "durability": "Persist prediction intent before paid POST; resume known prediction ID; ambiguous POST blocks a duplicate create; verified outputs reused; renew expired or unknown-expiry unconsumed file uploads before submission",
+    "runtime": "Per-task preparation deadline plus Cancel-After on every prediction; timeout requests cancellation",
+    "cleanup": "Delete Files API input after confirmed terminal prediction; retain unconfirmed/running input until safe cleanup or provider expiry",
+    "logs": "Provider, operation, IDs, model, upload bytes/time, predict/total time and bounded transfer timings; no keys, media URLs or provider traceback bodies"
+  },
+  "verification": {
+    "paid_calls_for_this_change": 0,
+    "production_changes": 0,
+    "results": {
+      "full_backend_suite": "2126 passed",
+      "final_focused_replicate_checks": "101 passed; includes final expiry handling and all recovery entry points",
+      "char_swap_frontend_suite": "556 passed across 62 files",
+      "production_frontend_build": "passed",
+      "extension_surface": "clean",
+      "diff_whitespace": "clean",
+      "count_note": "Focused checks overlap the full suite; counts are not additive"
+    },
+    "tests": [
+      "test_replicate_preparation.py",
+      "test_replicate_transport.py",
+      "test_replicate_route_matrix.py",
+      "test_replicate_recovery.py",
+      "test_replicate_api.py",
+      "test_preparation_credentials.py",
+      "test_pipeline_v2.py",
+      "test_cloudflare_pipeline.py",
+      "test_matching_no_review.py",
+      "test_initial_mask_recovery.py",
+      "test_cloudflare_recovery.py",
+      "test_mask_recovery.py",
+      "AdminPage.test.tsx",
+      "commerce.test.ts"
+    ]
+  },
+  "extension_surface": "No supported extension surface changed; the existing RecastFX domain adapter remains shared by all native preparation entry points.",
+  "release_evidence": "recastfx-replicate-routing-release-2026-10-21.json"
+}

@@ -32,8 +32,11 @@ class Cloud:
         self.assets = {}
 
     def signed_url(self, uri, seconds):
-        assert seconds == 3600
-        return "https://storage.googleapis.com/private/signed?X-Goog-Signature=secret"
+        pytest.fail("Replicate uses Files API uploads, not signed storage URLs")
+
+    def download(self, uri, path, maximum):
+        assert maximum == 100 * 1024 * 1024
+        path.write_bytes(b"prepared-video")
 
     def upload(self, bucket, key, path, content_type):
         uri = f"gs://{bucket}/{key}"
@@ -204,7 +207,14 @@ def test_adapter_saves_validated_id_maps_and_depth_before_human_review(adapter, 
     def handle(request):
         calls.append(request)
         if request.url.host == "api.replicate.com":
+            if request.url.path == "/v1/files":
+                assert request.method == "POST" and b"prepared-video" in request.content
+                file_id = "file" + str(len(calls)) + ".mp4"
+                return httpx.Response(201, json={"id": file_id, "urls": {"get": "https://api.replicate.com/v1/files/" + file_id}})
+            if request.method == "DELETE":
+                return httpx.Response(204)
             body = json.loads(request.content)
+            assert body["input"]["video"].startswith("https://api.replicate.com/v1/files/")
             if body["version"] == MODELS["sam"]:
                 assert body["input"]["preview"] is False and body["input"]["prompt"] == "person"
                 output = ["https://replicate.delivery/masks.zip"]
@@ -221,7 +231,7 @@ def test_adapter_saves_validated_id_maps_and_depth_before_human_review(adapter, 
     assert set(result) == {"masks_uri", "depth_uri"}
     assert all(uri in cloud.assets for uri in result.values() if uri)
     assert bool(result["depth_uri"]) is depth_guidance
-    predictions = [json.loads(request.content) for request in calls if request.url.host == "api.replicate.com"]
+    predictions = [json.loads(request.content) for request in calls if request.url.path == "/v1/predictions"]
     assert len(predictions) == (2 if depth_guidance else 1)
     with zipfile.ZipFile(BytesIO(cloud.assets[result["masks_uri"]])) as archive:
         labels = np.asarray(Image.open(BytesIO(archive.read("labels/labels_00000.png"))))
@@ -234,6 +244,7 @@ def test_adapter_saves_validated_id_maps_and_depth_before_human_review(adapter, 
                         "gs://sam" if depth_guidance else "gs://changed-sam", lambda: 60)
     assert len(calls) == count
     assert all(item["asset_verified"] for item in records.data["jobs/job.json"]["replicate_predictions"].values())
+    assert all(item["deleted"] for item in records.data["jobs/job.json"]["replicate_inputs"].values())
 
 
 @pytest.mark.parametrize("field,value", [("width", 3), ("nb_frames", "2"), ("r_frame_rate", "30/1")])
