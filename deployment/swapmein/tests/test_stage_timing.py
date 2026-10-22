@@ -53,3 +53,25 @@ def test_library_failure_diagnostics_are_accepted_and_scrubbed(api, monkeypatch,
     records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert any(record.get("category") == category and record.get("error_type") == error_type for record in records)
     assert not any("private" in json.dumps(record) for record in records)
+
+
+@pytest.mark.parametrize("reason", ["previous_interruption", "gpu_adapter_missing", "gpu_f16_missing", "gpu_session_create", "gpu_inference", "worker_start_failed", "cpu_model_compile", "model_load_timeout"])
+def test_cleanup_failure_reasons_are_controlled_and_scrubbed(api, monkeypatch, capsys, reason):
+    import swapmein.app as gateway
+    client, _, _, _ = api
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: {"account_id": "b" * 64})
+    body = {"category": "cleanup_runtime", "error_type": "Error", "cleanup_reason": reason}
+    assert client.post("/api/diagnostics", json=body).status_code == 202
+    assert client.post("/api/diagnostics", json={**body, "cleanup_reason": "https://private-photo?key=secret"}).status_code == 422
+    assert client.post("/api/diagnostics", json={**body, "message": "private-photo"}).status_code == 422
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert any(item.get("cleanup_reason") == reason for item in events)
+    assert "private-photo" not in json.dumps(events)
+
+
+def test_cpu_fallback_diagnostic_is_accepted(api, monkeypatch, capsys):
+    import swapmein.app as gateway
+    client, _, _, _ = api
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: {"account_id": "b" * 64})
+    assert client.post("/api/diagnostics", json={"category": "cleanup_cpu_fallback", "cleanup_reason": "gpu_adapter_missing"}).status_code == 202
+    assert '"cleanup_cpu_fallback"' in capsys.readouterr().out

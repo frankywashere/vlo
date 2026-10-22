@@ -1,12 +1,14 @@
+import {CLEANUP_FAILURE_REASONS} from "./browserCleanupProtocol";
+import type {CleanupFailureReason} from "./browserCleanupProtocol";
 import { accountToken } from "./accountContext";
 
-type ErrorCategory = "runtime" | "unhandled_rejection" | "react" | "commerce_request" | "pipeline_request" | "library_timeout" | "library_aborted" | "library_network" | "library_http" | "library_response" | "library_video_decode" | "library_auth" | "cleanup_previous_interruption" | "cleanup_retry_after_interruption" | "cleanup_cpu_unsupported" | "cleanup_gpu_unsupported";
+type ErrorCategory = "runtime" | "unhandled_rejection" | "react" | "commerce_request" | "pipeline_request" | "library_timeout" | "library_aborted" | "library_network" | "library_http" | "library_response" | "library_video_decode" | "library_auth" | "cleanup_previous_interruption" | "cleanup_retry_after_interruption" | "cleanup_cpu_unsupported" | "cleanup_gpu_unsupported" | "cleanup_runtime" | "cleanup_cpu_fallback";
 const ERROR_TYPES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError"]);
 let minute = 0;
 let count = 0;
 
 // Never send messages, stacks, URLs, request data, media, or credentials.
-export function reportClientError(category: ErrorCategory, error?: unknown, httpStatus?: number) {
+export function reportClientError(category: ErrorCategory, error?: unknown, httpStatus?: number, cleanupReason?: CleanupFailureReason) {
   if (globalThis.location?.protocol !== "https:") return;
   const now = Math.floor(Date.now() / 60000);
   if (minute !== now) { minute = now; count = 0; }
@@ -20,7 +22,7 @@ export function reportClientError(category: ErrorCategory, error?: unknown, http
     await fetch("/api/diagnostics", {
       method: "POST", credentials: "omit", keepalive: true,
       headers: {"Content-Type": "application/json", "X-Firebase-Token": token},
-      body: JSON.stringify({category, error_type: errorType, ...(httpStatus && httpStatus >= 400 && httpStatus <= 599 ? {http_status: httpStatus} : {})}),
+      body: JSON.stringify({category, error_type: errorType, ...(category.startsWith("cleanup_") && CLEANUP_FAILURE_REASONS.includes(cleanupReason as CleanupFailureReason) ? {cleanup_reason:cleanupReason} : {}), ...(httpStatus && httpStatus >= 400 && httpStatus <= 599 ? {http_status: httpStatus} : {})}),
     });
   })().catch(() => { /* Reporting must never interrupt processing or recurse. */ });
 }

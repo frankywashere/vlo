@@ -13,16 +13,16 @@ class TestWorker extends EventTarget {
 const image=()=>new Blob(["photo"],{type:"image/png"});
 async function settle(){for(let i=0;i<20;i++)await Promise.resolve();}
 beforeEach(()=>{
-  sessionStorage.removeItem("recastfx-cleanup-cpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");
+  sessionStorage.removeItem("recastfx-cleanup-gpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");
   vi.resetModules();vi.useFakeTimers();TestWorker.all=[];
   vi.stubGlobal("Worker",TestWorker);vi.stubGlobal("isSecureContext",true);
   vi.stubGlobal("OffscreenCanvas",class {});vi.stubGlobal("createImageBitmap",vi.fn());
   Object.defineProperty(navigator,"gpu",{configurable:true,value:{}});
   vi.stubGlobal("fetch",vi.fn().mockResolvedValue({ok:true,blob:async()=>image()}));
 });
-afterEach(()=>{sessionStorage.removeItem("recastfx-cleanup-cpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();delete (navigator as unknown as {gpu?:unknown}).gpu;});
-it("rejects unsupported browsers before reading any photo or creating a worker",async()=>{
-  Object.defineProperty(navigator,"gpu",{configurable:true,value:undefined});
+afterEach(()=>{sessionStorage.removeItem("recastfx-cleanup-gpu-recovery-v1");sessionStorage.removeItem("recastfx-cleanup-cpu-recovery-v1"); sessionStorage.removeItem("recastfx-cleanup-interrupted-v1"); sessionStorage.removeItem("recastfx-cleanup-cpu-interrupted-v1");vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();delete (navigator as unknown as {gpu?:unknown}).gpu;});
+it("rejects browsers missing shared canvas support before reading any photo or creating a worker",async()=>{
+  vi.stubGlobal("OffscreenCanvas",undefined);
   const {cleanReferenceBackground}=await import("../referenceCleanup");
   await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"UnsupportedCleanupError"});
   expect(TestWorker.all).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();
@@ -91,17 +91,31 @@ it.each([
   // A GPU failure from an older release must not disable the new CPU worker.
   const result=cleanReferenceBackground("blob:a",new AbortController().signal); await settle();
   const worker=TestWorker.all[0];
-  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v4-white/referenceCleanup.cpu.js");
+  expect(worker.url).toBe("/ml/litert-2.5.3-cpu-v5-diagnostics/referenceCleanup.cpu.js");
   expect(worker.options).toBeUndefined();
   worker.reply({type:"ready"});await settle();
   const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
   worker.reply({type:"result",id:request.id,image:image()});await result;
 });
-it("does not retry a model that was interrupted by a page reload",async()=>{
+it("automatically recovers interrupted desktop cleanup without declaring the hardware unsupported",async()=>{
   sessionStorage.setItem("recastfx-cleanup-interrupted-v1","1");
   const {warmReferenceCleanup,cleanReferenceBackground}=await import("../referenceCleanup");
   warmReferenceCleanup();
-  await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"UnsupportedCleanupError"});
+  const task=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+  expect(TestWorker.all).toHaveLength(1);
+  expect(sessionStorage.getItem("recastfx-cleanup-gpu-recovery-v1")).toBe("1");
+  const worker=TestWorker.all[0];expect(worker.options).toEqual({type:"module"});
+  worker.reply({type:"ready"});await settle();
+  const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+  worker.reply({type:"result",id:request.id,image:image()});await task;
+  expect(sessionStorage.getItem("recastfx-cleanup-interrupted-v1")).toBeNull();
+  expect(sessionStorage.getItem("recastfx-cleanup-gpu-recovery-v1")).toBeNull();
+});
+it("bounds repeated desktop reload recovery without calling the hardware unsupported",async()=>{
+  sessionStorage.setItem("recastfx-cleanup-interrupted-v1","1");
+  sessionStorage.setItem("recastfx-cleanup-gpu-recovery-v1","1");
+  const {cleanReferenceBackground}=await import("../referenceCleanup");
+  await expect(cleanReferenceBackground("blob:a",new AbortController().signal)).rejects.toMatchObject({name:"InterruptedCleanupError"});
   expect(TestWorker.all).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();
 });
 
@@ -228,4 +242,55 @@ it("does not classify an unexpected worker error as unsupported hardware",async(
  const worker=TestWorker.all[1];worker.reply({type:"ready"});await settle();
  const request=worker.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
  worker.reply({type:"result",id:request.id,image:image()});await b;
+});
+
+it.each(["gpu_adapter_missing","gpu_f16_missing","gpu_session_create","gpu_inference"] as const)("automatically falls back to CPU for %s and keeps later photos on CPU",async reason=>{
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ const first=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+ const gpu=TestWorker.all[0];
+ gpu.reply({type:"error",kind:reason.includes("missing")?"unsupported":"runtime",reason,message:"GPU unavailable"});await settle();
+ const cpu=TestWorker.all[1];expect(gpu.terminate).toHaveBeenCalledOnce();
+ expect(cpu.url).toBe("/ml/litert-2.5.3-cpu-v5-diagnostics/referenceCleanup.cpu.js");expect(cpu.options).toBeUndefined();
+ expect(sessionStorage.getItem("recastfx-cleanup-interrupted-v1")).toBeNull();
+ expect(sessionStorage.getItem("recastfx-cleanup-cpu-interrupted-v1")).toBe("1");
+ cpu.reply({type:"ready"});await settle();
+ let request=cpu.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+ cpu.reply({type:"result",id:request.id,image:image()});await first;
+ const second=cleanReferenceBackground("blob:b",new AbortController().signal);await settle();
+ request=cpu.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+ cpu.reply({type:"result",id:request.id,image:image()});await second;
+ expect(TestWorker.all).toHaveLength(2);
+ expect(sessionStorage.getItem("recastfx-cleanup-cpu-interrupted-v1")).toBeNull();
+});
+it("uses CPU when WebGPU is absent without rejecting desktop hardware",async()=>{
+ Object.defineProperty(navigator,"gpu",{configurable:true,value:undefined});
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ const task=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+ const cpu=TestWorker.all[0];expect(cpu.options).toBeUndefined();
+ cpu.reply({type:"ready"});await settle();
+ const request=cpu.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+ cpu.reply({type:"result",id:request.id,image:image()});await task;
+});
+it("does not loop when the CPU fallback also fails",async()=>{
+ const {cleanReferenceBackground}=await import("../referenceCleanup");
+ const task=cleanReferenceBackground("blob:a",new AbortController().signal);
+ const failed=expect(task).rejects.toThrow("CPU failed");await settle();
+ TestWorker.all[0].reply({type:"error",kind:"unsupported",reason:"gpu_adapter_missing",message:"No GPU"});await settle();
+ TestWorker.all[1].reply({type:"error",kind:"runtime",reason:"cpu_model_compile",message:"CPU failed"});await failed;
+ expect(TestWorker.all).toHaveLength(2);
+});
+it("does not start CPU fallback after choosing Original",async()=>{
+ const {cleanReferenceBackground}=await import("../referenceCleanup");let chosen=true;
+ const task=cleanReferenceBackground("blob:a",new AbortController().signal,undefined,undefined,()=>chosen);
+ const failed=expect(task).rejects.toMatchObject({name:"UnsupportedCleanupError"});await settle();chosen=false;
+ TestWorker.all[0].reply({type:"error",kind:"unsupported",reason:"gpu_adapter_missing",message:"No GPU"});await failed;
+ expect(TestWorker.all).toHaveLength(1);
+});
+it("recovers from a GPU failure during warmup when the first photo is queued",async()=>{
+ const {warmReferenceCleanup,cleanReferenceBackground}=await import("../referenceCleanup");warmReferenceCleanup();
+ TestWorker.all[0].reply({type:"error",kind:"unsupported",reason:"gpu_adapter_missing",message:"No GPU"});await settle();
+ const task=cleanReferenceBackground("blob:a",new AbortController().signal);await settle();
+ const cpu=TestWorker.all[1];expect(cpu.options).toBeUndefined();cpu.reply({type:"ready"});await settle();
+ const request=cpu.messages.at(-1)!;if(request.type!=="clean")throw Error("missing image");
+ cpu.reply({type:"result",id:request.id,image:image()});await task;
 });
