@@ -177,6 +177,9 @@ class Pipeline:
                         masks = resized
                         masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "working-masks.zip", masks, "application/zip")
                     raw_masks_uri = masks_uri
+                    if not metadata.get("scene_cuts"):
+                        from .tracking import log_track_diagnostics
+                        log_track_diagnostics(masks, metadata, job_id=job_id)
                     if automatic_identity:
                         match_targets = targets or style_targets([{
                             "id": "person", "name": options.target_name, "reference_index": 0,
@@ -484,7 +487,9 @@ class Pipeline:
         from .cloudflare_budget import MatchingBudget
         try:
             credentials = server_cloudflare_credentials()
-        except PublicError:
+        except PublicError as error:
+            emit("cloudflare_matching_rejected", job_id=job["id"],
+                 reason="credentials_unavailable", error=error, requests_submitted=0)
             raise PublicError("Automatic matching credentials are unavailable.", 503,
                               code="cloudflare_matching_unavailable") from None
         return match_tracks(video, masks, metadata, targets, credentials=credentials,
@@ -633,7 +638,7 @@ class Pipeline:
                     emit("library_poster_pending", job_id=job_id, error=error)
         except PublicError as error:
             emit("pipeline_failed", error=error, job_id=job_id, http_status=error.status_code)
-            self.update_job(job_id, status="failed", message=error.message)
+            self.update_job(job_id, status="failed", message=error.message, failure_code=error.code)
             return
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)

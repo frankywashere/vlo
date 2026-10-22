@@ -8,6 +8,7 @@ import threading
 
 import numpy as np
 
+from .diagnostics import timed
 from .errors import PublicError
 from .media import probe, require_audio_duration
 from .tracking import FPS, _maps, _metadata
@@ -51,6 +52,7 @@ def _read_frame(stream, size):
     return data
 
 
+@timed("tracking_preview")
 def create_selection_preview(source: Path, archive: Path, output: Path, metadata: dict):
     """Render all SAM labels over original frames, retaining normalized audio."""
     width, height, frames, _, _ = _metadata(metadata)

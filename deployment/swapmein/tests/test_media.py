@@ -466,3 +466,24 @@ def test_normalize_repairs_early_audio_end_without_changing_trim_or_video(tmp_pa
     assert next(s for s in checked["streams"] if s["codec_type"] == "video")["nb_frames"] == "96"
     assert float(next(s for s in checked["streams"] if s["codec_type"] == "audio")["duration"]) == pytest.approx(4, abs=.01)
     assert decoded_audio_samples(output) >= 4 * 44100
+
+
+@pytest.mark.parametrize("output_dimensions", [(1344, 768), (768, 1344), (768, 768)])
+def test_export_accepts_changed_shape_and_preserves_dimensions(tmp_path, monkeypatch, capsys, output_dimensions):
+    width, height = output_dimensions
+    def metadata(path):
+        generated = path.name != "private-source.mp4"
+        return {"format": {"duration": "15.08"}, "streams": [
+            {"codec_type": "video", "width": width if generated else 1536,
+             "height": height if generated else 768, "nb_frames": "360"},
+            {"codec_type": "audio", "duration": "15"}]}
+    monkeypatch.setattr("swapmein.media.probe", metadata)
+    monkeypatch.setattr("swapmein.media.decoded_audio_samples", lambda *args: 15 * 44100)
+    monkeypatch.setattr("swapmein.media.run", lambda *args, **kwargs: None)
+    result = finish(tmp_path / "raw.mp4", tmp_path / "private-source.mp4", tmp_path / "out.mp4", 15)
+    assert result == {"width": width, "height": height}
+    events = [__import__("json").loads(line) for line in capsys.readouterr().out.splitlines()]
+    event = next(item for item in events if item["event"] == "export_media_validation")
+    assert event["source_width"] == 1536 and event["output_width"] == width
+    assert event["output_height"] == height and event["dimensions_preserved"]
+    assert "private-source" not in str(events)

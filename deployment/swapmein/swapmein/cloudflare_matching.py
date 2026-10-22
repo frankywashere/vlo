@@ -34,7 +34,8 @@ MAX_CONCURRENCY = 4
 INPUT_USD_PER_MILLION = .15
 
 
-def _unavailable(message="Automatic scene matching is unavailable. Your clip needs scene review."):
+def _unavailable(message="Automatic scene matching is unavailable. Your clip needs scene review.", *, reason="invalid_matching_response"):
+    emit("cloudflare_matching_rejected", reason=reason)
     return PublicError(message, code="cloudflare_matching_unavailable")
 
 
@@ -80,14 +81,14 @@ def _credentials(credentials):
     if (not isinstance(account, str) or not re.fullmatch(r"[a-fA-F0-9]{32}", account)
             or not isinstance(token, str) or not token.strip() or "\n" in token or "\r" in token
             or not isinstance(gateway, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", gateway)):
-        raise _unavailable("Configure the Cloudflare account, API key and capped gateway before automatic scene matching.")
+        raise _unavailable("Configure the Cloudflare account, API key and capped gateway before automatic scene matching.", reason="credentials_missing")
     return account, token, gateway
 
 
 def _box(labels, label):
     ys, xs = np.nonzero(labels == label)
     if not len(xs):
-        raise _unavailable("A selected person has no mask. Check the scene selections.")
+        raise _unavailable("A selected person has no mask. Check the scene selections.", reason="selected_mask_missing")
     return (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
 
 
@@ -125,10 +126,10 @@ def _decode_frames(video_path, directory, frames, width, height):
         for index, frame in enumerate(selected):
             with Image.open(directory / f"rgb-{index + 1:03d}.png") as image:
                 if image.size != (width, height):
-                    raise _unavailable("The original footage and person masks do not have matching dimensions.")
+                    raise _unavailable("The original footage and person masks do not have matching dimensions.", reason="rgb_mask_dimensions")
                 images[frame] = image.convert("RGB")
     except (OSError, ValueError):
-        raise _unavailable("The original footage could not be read for scene matching.") from None
+        raise _unavailable("The original footage could not be read for scene matching.", reason="rgb_decode_failed") from None
     return images
 
 
@@ -154,7 +155,7 @@ def _call(payload, credentials, deadline, budget):
         job_id = None
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise _unavailable("Automatic scene matching exceeded its time limit. Review the scenes to continue.")
+        raise _unavailable("Automatic scene matching exceeded its time limit. Review the scenes to continue.", reason="deadline_exceeded")
     if (payload.get("model") != "clef-omni" or not 1 <= len(payload.get("images", [])) <= 4
             or not 1 <= len(payload.get("questions", {})) <= 4
             or len(json.dumps(payload, allow_nan=False).encode()) > 8 * 1024 * 1024):
@@ -162,7 +163,7 @@ def _call(payload, credentials, deadline, budget):
     attempt = budget.reserve() if budget is not None else None
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise _unavailable("Automatic scene matching exceeded its time limit. Review the scenes to continue.")
+        raise _unavailable("Automatic scene matching exceeded its time limit. Review the scenes to continue.", reason="deadline_exceeded")
     started = time.monotonic()
     status = None
     try:
@@ -204,7 +205,7 @@ def _call(payload, credentials, deadline, budget):
         raw_usage = result.get("usage", body.get("usage", {}))
         tokens = raw_usage.get("input_tokens", raw_usage.get("prompt_tokens")) if isinstance(raw_usage, dict) else None
         if type(tokens) is not int or not 0 <= tokens <= 65_536:
-            raise _unavailable("Cloudflare did not report valid usage. Scene matching stopped to preserve the spending limit.")
+            raise _unavailable("Cloudflare did not report valid usage. Scene matching stopped to preserve the spending limit.", reason="invalid_usage")
         output_tokens = raw_usage.get("output_tokens")
         usage = {"input_tokens": tokens, "output_tokens": output_tokens if type(output_tokens) is int else None,
                  "estimated_cost_usd": tokens * INPUT_USD_PER_MILLION / 1_000_000, "actual_billed_usd": None}
@@ -269,18 +270,22 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
     workdir.mkdir(parents=True, exist_ok=True)
     output = Path(output_path) if output_path is not None else workdir / "identity-masks.zip"
     if output.resolve() == Path(masks_path).resolve() or output.exists():
-        raise _unavailable("Automatic scene matching needs a separate output archive.")
+        raise _unavailable("Automatic scene matching needs a separate output archive.", reason="invalid_output_archive")
     started = time.monotonic()
     deadline = started + deadline_seconds
     boundaries = [0, *cuts, frames]
     shots = []
+    job_id = getattr(budget, "job_id", None)
+    job_id = job_id if isinstance(job_id, str) else None
+    emit("cloudflare_matching_plan", job_id=job_id, scene_count=len(boundaries) - 1,
+         scene_cut_count=len(cuts), target_count=len(targets), frames=frames)
     anchor_labels = {}
     with _maps(masks_path, {**metadata, "anchor": targets[0]["anchor"]}) as read:
         for index, target in enumerate(targets):
             anchor_frame = _metadata({**metadata, "anchor": target["anchor"]})[3]
             label = _pixel_label(read, anchor_frame, target["anchor"], width, height)
             if not label:
-                raise _unavailable("An initial selection missed its person mask. Review the scene selections.")
+                raise _unavailable("An initial selection missed its person mask. Review the scene selections.", reason="anchor_mask_missing")
             anchor_labels[index] = (anchor_frame, label, _box(read(anchor_frame), label))
         for scene, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
             observed = set()
@@ -290,7 +295,7 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                 observed.update(labels)
                 samples.append((frame, labels))
             if len(observed) > MAX_CANDIDATES:
-                raise _unavailable("This scene has too many person tracks for automatic matching. Review its selections.")
+                raise _unavailable("This scene has too many person tracks for automatic matching. Review its selections.", reason="too_many_tracks")
             midpoint = (start + end - 1) / 2
             sample, visible = max(samples, key=lambda item: (len(item[1]), -abs(item[0] - midpoint)))
             locked = {index: label for index, (frame, label, _) in anchor_labels.items() if start <= frame < end}
@@ -299,8 +304,15 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                                   code="tracking_target_conflict")
             # An unseen SAM ID may be a person entering later or a fragmented
             # track. A single sampled frame cannot establish its identity.
-            if observed - visible - set(locked.values()):
-                raise _unavailable("A person track changes inside a scene. Review the scene selections to keep identities correct.")
+            unseen = observed - visible - set(locked.values())
+            emit("cloudflare_matching_scene", job_id=job_id, scene=scene, start_frame=start,
+                 end_frame=end, sample_frame=sample, observed_labels=sorted(observed),
+                 visible_labels=sorted(visible), locked_labels=sorted(set(locked.values())),
+                 unseen_labels=sorted(unseen))
+            if unseen:
+                emit("cloudflare_matching_rejected", job_id=job_id, reason="within_scene_track_change",
+                     scene=scene, unseen_labels=sorted(unseen), requests_submitted=0)
+                raise _unavailable("A person track changes inside a scene. Review the scene selections to keep identities correct.", reason="within_scene_track_change")
             labels = read(sample)
             candidates = [{"label": label, "box": _box(labels, label), "anchor": _anchor(labels, label, sample)}
                           for label in sorted(visible - set(locked.values()))]
@@ -321,7 +333,9 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                         jobs.append({"shot": shot, "people": group, "offset": candidate_offset,
                                      "payload": _payload([references[index] for index in group], candidates[candidate_offset:candidate_offset + 2])})
             if len(jobs) > MAX_REQUESTS:
-                raise _unavailable("Automatic matching exceeds this clip's request limit. Review the scenes to continue.")
+                raise _unavailable("Automatic matching exceeds this clip's request limit. Review the scenes to continue.", reason="request_limit")
+            emit("cloudflare_matching_requests_planned", job_id=job_id, requests=len(jobs),
+                 locked_assignments=sum(len(shot["locked"]) for shot in shots))
             results = _score_jobs(jobs, credentials, deadline, budget)
     usage_tokens, api_seconds = 0, []
     for job, (answers, usage, elapsed) in results:

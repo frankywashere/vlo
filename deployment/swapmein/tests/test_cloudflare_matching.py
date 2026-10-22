@@ -310,3 +310,31 @@ def test_rgb_decoder_reads_supplied_original_at_native_geometry(tmp_path, monkey
     assert "scale=" not in " ".join(command)
     assert set(images) == {0, 5}
     assert images[5].getpixel((0, 0)) == (32, 180, 15)
+
+
+def test_single_shot_stable_anchor_needs_no_matching_request(tmp_path, monkeypatch, capsys):
+    archive, metadata, targets, images = fixture(tmp_path, people=1)
+    metadata["scene_cuts"] = []
+    stub_decoder(monkeypatch, images)
+    monkeypatch.setattr(matching.requests, "post", lambda *args, **kwargs: pytest.fail("Unexpected paid call"))
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    assert result["diagnostics"]["requests"] == 0
+    assert result["diagnostics"]["scene_count"] == 1
+    assert len(result["assignments"]) == 1
+    assert not result["assignments"][0]["absent"]
+
+
+def test_single_shot_fragment_logs_reason_before_any_paid_call(tmp_path, monkeypatch, capsys):
+    archive, metadata, targets, images = fixture(tmp_path, fragmented=True, people=1)
+    metadata["scene_cuts"] = []
+    stub_decoder(monkeypatch, images)
+    monkeypatch.setattr(matching.requests, "post", lambda *args, **kwargs: pytest.fail("Unexpected paid call"))
+    with pytest.raises(PublicError, match="track changes"):
+        matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                              credentials=CREDENTIALS, workdir=tmp_path)
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    rejected = next(item for item in events if item["event"] == "cloudflare_matching_rejected")
+    assert rejected["reason"] == "within_scene_track_change"
+    assert rejected["requests_submitted"] == 0
+    assert rejected["unseen_labels"]

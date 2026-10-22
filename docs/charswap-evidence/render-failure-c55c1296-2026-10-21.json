@@ -1,0 +1,165 @@
+{
+  "frames": 360,
+  "mask_size": [
+    426,
+    854
+  ],
+  "sample_frame": 225,
+  "visible": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    8,
+    9
+  ],
+  "label_spans": {
+    "1": {
+      "first": 0,
+      "last": 359,
+      "frames": 360
+    },
+    "2": {
+      "first": 0,
+      "last": 359,
+      "frames": 360
+    },
+    "3": {
+      "first": 0,
+      "last": 359,
+      "frames": 360
+    },
+    "4": {
+      "first": 0,
+      "last": 359,
+      "frames": 360
+    },
+    "5": {
+      "first": 12,
+      "last": 359,
+      "frames": 199
+    },
+    "6": {
+      "first": 32,
+      "last": 175,
+      "frames": 43
+    },
+    "7": {
+      "first": 117,
+      "last": 228,
+      "frames": 70
+    },
+    "8": {
+      "first": 178,
+      "last": 359,
+      "frames": 182
+    },
+    "9": {
+      "first": 205,
+      "last": 359,
+      "frames": 139
+    }
+  },
+  "replay": {
+    "message": "A person track changes inside a scene. Review the scene selections to keep identities correct.",
+    "code": "cloudflare_matching_unavailable",
+    "api_calls": 0
+  },
+  "export": {
+    "source": [
+      1536,
+      768
+    ],
+    "output": [
+      1344,
+      768
+    ],
+    "aspect_change": 0.125,
+    "tolerance": 0.03,
+    "provider_duration": 15.083333
+  },
+  "job_id": "c55c12968207493fadb7c6ad0be3f1f4",
+  "selected_sam_label": 3,
+  "selected_label_present_frames": 360,
+  "blocking_unselected_label": 6,
+  "matching_api_calls": 0,
+  "scene_cut_count": 0,
+  "face_mesh": {
+    "frames": 360,
+    "frames_with_mesh": 71,
+    "processing_seconds": 14.476409123999971
+  },
+  "supplier_cost_usd": 1.097,
+  "local_export_recovered": true,
+  "local_export_dimensions": [
+    1344,
+    768
+  ],
+  "production_changed": false,
+  "test_plan": [
+    "Replay this saved single-shot archive with paid calls blocked; stable selected label must not be rejected solely for an unrelated label fragment.",
+    "Exercise absent selected person, selected ID fragmentation, duplicate assignments, single-shot and multi-shot fixtures; only unrelated fragments should be ignored.",
+    "Replay representative saved multi-cut clips and verify source-to-reference assignments visually before enabling a revised matcher.",
+    "Reuse this existing MiniMax output to verify export at original provider dimensions; no new generation needed."
+  ],
+  "logging_added": [
+    "inherited job correlation",
+    "string public error codes",
+    "matching scene boundaries and visible/locked/unseen labels",
+    "matching rejection reasons and request plan",
+    "mask resize timing",
+    "tracking preview timing",
+    "export dimensions, duration and ratio difference",
+    "saved failure code"
+  ],
+  "validation": {
+    "focused_tests_passed": 84,
+    "provider_output_full_decode": "passed",
+    "recovered_export_frames": 360,
+    "recovered_export_duration_seconds": 15,
+    "recovered_export_has_audio": true,
+    "extension_surface": "no contract changes",
+    "broader_pipeline_tests_passed": 283
+  },
+  "dimension_policy": "Accept provider aspect ratio, preserve returned canvas; retain media integrity, duration, audio and maximum dimension checks.",
+  "selected_track_continuity": {
+    "frames": 360,
+    "missing_frames": [],
+    "jump_frames": [],
+    "min_area_pixels": 213169,
+    "max_area_pixels": 375824,
+    "sampled_frames": [
+      0,
+      24,
+      48,
+      72,
+      96,
+      120,
+      144,
+      168,
+      192,
+      216,
+      240,
+      264,
+      288,
+      312,
+      336,
+      359
+    ],
+    "sampled_visual_review": "Same foreground performer at all 16 sampled times; no identity jump observed. Mask boundaries are imperfect.",
+    "interpretation": "No total mask dropout or abrupt geometry jump detected in 360 frames; presence checks do not prove perfect boundaries or biometric identity."
+  },
+  "single_shot_detector": {
+    "mode": "diagnostics_only",
+    "scope": "zero_detected_scene_cuts",
+    "coordinates": "normalized x/y from top left; frame and seconds from trimmed original",
+    "max_anomaly_records": 60,
+    "replay_seconds": 4.885004,
+    "observes_all_sam_labels": true,
+    "changes_routing": false,
+    "submits_model_requests": false,
+    "test_cases_passed": 10
+  }
+}

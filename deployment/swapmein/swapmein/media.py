@@ -467,8 +467,12 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
                           else "The provider soundtrack does not cover the selected section. The result needs review.")
     source_video = next(stream for stream in source["streams"] if stream["codec_type"] == "video")
     out_w, out_h = source_video["width"], source_video["height"]
-    if abs((width / height) / (out_w / out_h) - 1) > .03:
-        raise PublicError("The provider changed the frame shape. The result needs manual review.")
+    aspect_difference = abs((width / height) / (out_w / out_h) - 1)
+    emit("export_media_validation", source_width=out_w, source_height=out_h,
+         output_width=width, output_height=height, requested_duration=duration,
+         output_duration=length, aspect_difference=aspect_difference, dimensions_preserved=True,
+         restore_audio=restore_audio)
+    # Preserve the provider canvas instead of rejecting or stretching its result.
     soundtrack_input = (["-protocol_whitelist", "file,pipe", "-ss", str(audio_start), "-i", str(soundtrack)]
                         if restore_audio else [])
     video_filter = f"fps=24,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,setsar=1"

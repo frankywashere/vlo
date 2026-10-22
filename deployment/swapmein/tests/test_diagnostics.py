@@ -93,3 +93,15 @@ def test_worker_failure_logs_non_json_response_without_body(capsys):
     raw = capsys.readouterr().out
     assert json.loads(raw)["validation_errors"] == []
     assert "private-error" not in raw
+
+
+def test_public_error_code_and_context_are_logged_without_message(capsys):
+    from swapmein.diagnostics import timed_stage
+    from swapmein.errors import PublicError
+    with timed_stage("finish", job_id="job123"):
+        emit("export_media_rejected", reason="aspect_ratio_changed")
+        emit("pipeline_failed", error=PublicError("private signed-url", code="provider_aspect_ratio_changed"))
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert all(item["job_id"] == "job123" for item in records)
+    assert records[-2]["error_code"] == "provider_aspect_ratio_changed"
+    assert "private signed-url" not in json.dumps(records)
