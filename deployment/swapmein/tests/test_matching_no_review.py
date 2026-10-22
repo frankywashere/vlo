@@ -4,7 +4,7 @@ import pytest
 from swapmein.errors import PublicError
 from swapmein.pipeline import Pipeline
 from swapmein.provider import generation_payload
-from test_pipeline_v2 import harness,media,image_at
+from test_pipeline_v2 import assert_no_tracking_preview,harness,media,image_at
 
 
 @pytest.mark.parametrize('provider',['workers','replicate'])
@@ -15,9 +15,11 @@ def test_matching_failure_continues_with_exact_option_five_route(monkeypatch,med
     monkeypatch.setattr(Pipeline,'match_cloudflare_identities',fail)
     kwargs=dict(easy=True,enhanced=enhanced,selection=selection,audio_processing=False,
         preparation_provider=provider,depth_guidance=depth,face_mesh=mesh,guide_style_version=2)
-    baseline,base_cloud,*_=harness(monkeypatch,media,prompt_variant='identity_tint_tracking_v1',**kwargs)
-    job,cloud,*_=harness(monkeypatch,media,prompt_variant='cloudflare_identity_v1',matching_no_review=True,**kwargs)
+    baseline,base_cloud,_,base_previews,_=harness(monkeypatch,media,prompt_variant='identity_tint_tracking_v1',**kwargs)
+    job,cloud,_,previews,_=harness(monkeypatch,media,prompt_variant='cloudflare_identity_v1',matching_no_review=True,**kwargs)
     assert baseline['status']==job['status']=='ready',job.get('message')
+    assert_no_tracking_preview(baseline,base_cloud,base_previews)
+    assert_no_tracking_preview(job,cloud,previews)
     assert job['requested_prompt_variant']=='cloudflare_identity_v1'
     assert job['prompt_variant']=='identity_tint_tracking_v1' and job['matching_fallback_used']
     assert job['matching_no_review'] is True and not job['identity_matching_completed']
@@ -46,9 +48,11 @@ def test_matching_failure_continues_with_exact_option_five_route(monkeypatch,med
 def test_no_review_setting_never_changes_manual_or_replace_everyone(monkeypatch,media,easy,selection):
     def forbidden(*args,**kwargs):raise AssertionError('No matching on this route')
     monkeypatch.setattr(Pipeline,'match_cloudflare_identities',forbidden)
-    job,*_=harness(monkeypatch,media,easy=easy,enhanced=True,selection=selection,audio_processing=False,
+    job,cloud,_,previews,_=harness(monkeypatch,media,easy=easy,enhanced=True,selection=selection,audio_processing=False,
         depth_guidance=False,prompt_variant='cloudflare_identity_v1',matching_no_review=True)
     assert job['status']==('ready' if easy else 'tracking_review')
+    if easy:assert_no_tracking_preview(job,cloud,previews)
+    else:assert previews and job['tracking_uri'] in cloud.objects
     assert job['prompt_variant']=='cloudflare_identity_v1' and not job.get('matching_fallback_used')
 
 
@@ -68,9 +72,11 @@ def test_invalid_processing_is_not_hidden_by_no_review(monkeypatch,media,code):
     def forbidden(*args,**kwargs):raise AssertionError('Must not use fallback for invalid processing')
     monkeypatch.setattr(Pipeline,'match_cloudflare_identities',fail)
     monkeypatch.setattr(Pipeline,'prepare_easy_selection',forbidden)
-    job,cloud,*_=harness(monkeypatch,media,easy=True,enhanced=True,selection='multi',audio_processing=False,
+    job,cloud,_,previews,_=harness(monkeypatch,media,easy=True,enhanced=True,selection='multi',audio_processing=False,
         depth_guidance=False,prompt_variant='cloudflare_identity_v1',matching_no_review=True)
     assert job['status']=='tracking_review' and not job.get('matching_fallback_used')
+    assert previews and job['tracking_uri'] in cloud.objects
+    assert job['scene_mask_thumbnail_uris']
     assert not any(kind=='generate' for kind,_ in cloud.enqueued)
 
 

@@ -136,6 +136,22 @@ the actual depth-composited guide, or the original-looking normalized video when
 enhanced masking is off. SAM can miss body pixels or change IDs after cuts;
 resizing labels does not recover missing anatomy or establish identity.
 
+Successful Easy Mode preparation does not render, require, or copy a Library
+`tracking.mp4` viewing preview. This decision happens after identity matching and
+missing-mask recovery, so it covers both preparation providers, all prompt
+variants, selected/all-person swaps, and depth/mesh/audio combinations. Manual
+mode and Easy Mode jobs routed to scene review retain the preview, including
+the **Show detected people** control and masked scene thumbnails in Create and
+Library. Reviewed rebuilds retain that existing preview. The selected masks,
+Cloudflare matching inputs, generation guide and automatic submission are
+unchanged. `tracking_preview_skipped` records `easy_mode_no_review` with the
+saved provider and whether matching used its no-review fallback.
+
+Replicate already receives `preview: false`. The pinned self-hosted GPU runtime
+still creates its own internal `sam_preview.mp4` artifact; successful Easy Mode
+no longer requires or copies that artifact into the Library. This change removes
+the gateway's separate viewing-video work, without changing the GPU runtime.
+
 ### Existing jobs
 
 Saved jobs without `preparation_version` retain version 1: the legacy 854×480
