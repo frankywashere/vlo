@@ -4,6 +4,7 @@ Only the model inference changes. Our normalized timeline, discrete object IDs,
 selection/review, audio, compositor, and export remain the common implementation.
 """
 import hashlib
+from datetime import datetime
 import json
 import math
 from pathlib import Path
@@ -101,8 +102,10 @@ class ReplicatePreparation:
             # provider traceback text in our public error or diagnostics.
             raise PublicError("Replicate preparation could not be confirmed. No replacement prediction was submitted.", 502) from None
 
-    def predict(self, operation, inputs, input_identity, remaining):
-        version = self.models[operation]
+    def predict(self, operation, inputs, input_identity, remaining, *, model_operation=None):
+        # Recovery predictions have independent durable state, but use exactly
+        # the same pinned SAM model as initial preparation.
+        version = self.models[model_operation or operation]
         fingerprint = hashlib.sha256(json.dumps([version, input_identity], sort_keys=True).encode()).hexdigest()
         state = self._state(operation)
         if state and (state.get("fingerprint") != fingerprint or state.get("version") != version):
@@ -172,6 +175,85 @@ class ReplicatePreparation:
                     self._update(operation, cancellation_unconfirmed=True)
             raise
 
+    def _input_state(self, operation):
+        current, _ = self.records.read(self.path)
+        return (current or {}).get("replicate_inputs", {}).get(operation, {})
+
+    def _save_input(self, operation, **fields):
+        def update(current):
+            if not current:
+                raise PublicError("This preparation job is unavailable.", 404)
+            uploads = dict(current.get("replicate_inputs", {}))
+            uploads[operation] = {**uploads.get(operation, {}), **fields}
+            return {**current, "replicate_inputs": uploads, "updated_at": time.time()}
+        self.records.update(self.path, update)
+
+    @timed("replicate_upload")
+    def upload_video(self, operation, path, remaining):
+        """Use the measured Files API path without exposing our storage URLs."""
+        size = path.stat().st_size
+        if not 0 < size <= 100 * 1024 * 1024:
+            raise PublicError("Replicate's prepared input exceeds the upload limit.", 400)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        saved = self._input_state(operation)
+        if saved and saved.get("sha256") != digest:
+            raise PublicError("This job's Replicate upload does not match its prepared input.", 409)
+        lifetime_needed = min(600, remaining()) + 60
+        expires_at = saved.get("expires_at")
+        if (saved.get("id") and not saved.get("deleted") and type(expires_at) in (int, float)
+                and math.isfinite(expires_at) and expires_at > time.time() + lifetime_needed):
+            return self._file_url(saved["id"])
+        timeout = min(60, remaining())
+        if timeout < 5:
+            raise PublicError("Preparation exceeded its bounded runtime. No input was uploaded.")
+        started = time.monotonic()
+        try:
+            with path.open("rb") as handle:
+                response = self.http.request("POST", API + "/files",
+                    headers={"Authorization": "Bearer " + self.key},
+                    files={"content": ("prepared.mp4", handle, "video/mp4")}, timeout=timeout)
+            response.raise_for_status()
+            body = response.json()
+            file_id = body["id"]
+            url = self._file_url(file_id)
+            if body.get("urls", {}).get("get") != url:
+                raise ValueError
+            expiry = body.get("expires_at")
+            expires_at = datetime.fromisoformat(expiry.replace("Z", "+00:00")).timestamp() if isinstance(expiry, str) else None
+            if expires_at is not None and (not math.isfinite(expires_at) or expires_at <= time.time() + lifetime_needed):
+                raise ValueError
+        except Exception:
+            raise PublicError("The prepared video could not be uploaded to Replicate. No prediction was submitted.", 502) from None
+        self._save_input(operation, id=file_id, sha256=digest, bytes=size,
+                         uploaded_at=time.time(), expires_at=expires_at,
+                         upload_seconds=round(time.monotonic() - started, 6), deleted=False)
+        emit("replicate_preparation_input_uploaded", job_id=self.job["id"], operation=operation,
+             bytes=size, elapsed_seconds=round(time.monotonic() - started, 3))
+        return url
+
+    @staticmethod
+    def _file_url(file_id):
+        if (not isinstance(file_id, str) or len(file_id) > 256
+                or not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9]+)?", file_id)):
+            raise PublicError("Replicate returned an invalid input file identity.", 502)
+        return API + "/files/" + file_id
+
+    def release_input(self, operation):
+        """Delete uploaded inputs only after their prediction has finished."""
+        state, uploaded = self._state(operation), self._input_state(operation)
+        if state.get("status") not in TERMINAL or not uploaded.get("id") or uploaded.get("deleted"):
+            return
+        try:
+            response = self.http.request("DELETE", self._file_url(uploaded["id"]),
+                headers={"Authorization": "Bearer " + self.key}, timeout=20)
+            if response.status_code != 404:
+                response.raise_for_status()
+            self._save_input(operation, deleted=True)
+        except Exception:
+            # Files API inputs also expire at the provider. A cleanup outage
+            # must never cause another prediction or discard trusted outputs.
+            emit("replicate_input_cleanup_pending", job_id=self.job["id"], operation=operation)
+
     @timed("replicate_download")
     def download(self, url, path, maximum):
         current = delivery_url(url)
@@ -221,10 +303,22 @@ class ReplicatePreparation:
                     and state.get("version") == self.models[operation]
                     and self.cloud.asset_exists(asset_uri)):
                 saved[operation] = asset_uri
+                self.release_input(operation)
                 continue
-            inputs = {"video": self.cloud.signed_url(uri, seconds=3600)}
-            inputs.update({"prompt": "person", "preview": False} if operation == "sam" else {"encoder": "vits"})
-            output = self.predict(operation, inputs, identity, remaining)
+            inputs = {}
+            if not state:
+                # The pipeline just wrote these files before archiving them;
+                # use those same bytes instead of downloading our own upload.
+                local_input = root / ("sam-input.mp4" if operation == "sam" else "normalized.mp4")
+                if not local_input.exists():
+                    self.cloud.download(uri, local_input, 100 * 1024 * 1024)
+                inputs = {"video": self.upload_video(operation, local_input, remaining)}
+                inputs.update({"prompt": "person", "preview": False} if operation == "sam" else {"encoder": "vits"})
+            try:
+                output = self.predict(operation, inputs, identity, remaining)
+            finally:
+                self.release_input(operation)
+            download_started = time.monotonic()
             if operation == "sam":
                 if not isinstance(output, list) or not 1 <= len(output) <= 2:
                     raise PublicError("Replicate did not return individual tracking masks.", 502)
@@ -244,13 +338,15 @@ class ReplicatePreparation:
             # response was lost, without overwriting immutable source artifacts.
             asset_uri = self.cloud.upload(self.cloud.settings.worker_bucket,
                 f"inputs/swapmein-{self.job['id']}/{uuid.uuid4().hex}-{name}", local, content_type)
-            self._update(operation, asset_uri=asset_uri, asset_verified=True)
+            self._update(operation, asset_uri=asset_uri, asset_verified=True,
+                         output_transfer_validation_seconds=round(time.monotonic() - download_started, 6))
             saved[operation] = asset_uri
         return {"masks_uri": saved["sam"], "depth_uri": saved.get("depth")}
 
 
 def _metric(result, key):
-    value = result.get("metrics", {}).get(key)
+    metrics = result.get("metrics")
+    value = metrics.get(key) if isinstance(metrics, dict) else None
     return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
 
 

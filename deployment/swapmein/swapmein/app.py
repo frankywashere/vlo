@@ -1016,19 +1016,20 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         reserved = True
         defaults = pipeline_settings(records)
         enforce_character_limit(options, len(reference_uris), defaults["multi_characters"])
+        prompt_variant = manifest.get("prompt_variant") or "current"
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
                "access_mode": manifest.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
-               "prompt_variant": manifest.get("prompt_variant") or "current",
+               "prompt_variant": prompt_variant,
                "matching_no_review": manifest.get("matching_no_review") is True,
                "retry_missing_masks_with_sam": defaults["retry_missing_masks_with_sam"],
                "depth_guidance": defaults["depth_guidance"], "guide_style_version": 2, "depth_overlay_opacity": .2,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))}
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (prompt_variant == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         if manifest.get("generation_credits") is not None:

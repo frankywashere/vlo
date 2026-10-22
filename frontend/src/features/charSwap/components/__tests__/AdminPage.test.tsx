@@ -14,7 +14,7 @@ vi.mock("../../services/commerce", () => ({
 async function renderExpandedAdmin() {
   render(<AdminPage />);
   await screen.findByRole("heading", {name: "Service controls"});
-  for (const name of ["Service controls", "Audio processing", "Experimental", "Preparation routing", "Credit pricing", "System API key", "Grant user credits", "Credit grant history"]) {
+  for (const name of ["Service controls", "Audio processing", "Experimental", "Credit pricing", "System API key", "Grant user credits", "Credit grant history"]) {
     await userEvent.click(screen.getByRole("heading", {name}));
   }
 }
@@ -121,13 +121,16 @@ it("does not let pricing staff change audio behavior", async () => {
   expect(await screen.findByRole("switch", { name: "Enable audio processing" })).toBeDisabled();
 });
 
-it("defaults preparation to our workers and requires a securely saved key before routing to Replicate", async () => {
+it("puts the Replicate switch in Experimental and securely saves its key under System API key", async () => {
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
   expect(screen.getByText("Replicate API key: Not configured")).toBeInTheDocument();
-  const keyField = screen.getByLabelText("Replicate API key");
+  const experimental = screen.getByRole("heading", {name: "Experimental"}).closest("details")!;
+  const systemKeys = screen.getByRole("heading", {name: "System API key"}).closest("details")!;
+  expect(within(experimental).getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+  const keyField = within(systemKeys).getByLabelText("Replicate API key");
   expect(keyField).toHaveAttribute("type", "password");
   expect(keyField).toHaveValue("");
   await user.type(keyField, "test-replicate-secret");
@@ -135,9 +138,10 @@ it("defaults preparation to our workers and requires a securely saved key before
   await screen.findByText(/Replicate API key saved securely/);
   expect(api.replicateKey).toHaveBeenCalledWith("test-replicate-secret");
   expect(keyField).toHaveValue("");
+  expect(screen.queryByText("test-replicate-secret")).not.toBeInTheDocument();
   expect(screen.getByText("Replicate API key: Configured")).toBeInTheDocument();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeEnabled();
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 
@@ -145,16 +149,16 @@ it("switches the new-job preparation provider without resetting audio or submitt
   api.pipelineSettings = {revision: 3, audio_processing: true, preparation_provider: "workers", replicate_api_key_configured: true};
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  await user.click(screen.getByRole("radio", {name: "Replicate"}));
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText(/Replicate selected for preparation of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
   expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
   await user.click(screen.getByRole("switch", {name: "Enable audio processing"}));
   await screen.findByText(/Audio processing disabled for new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, audio_processing: false});
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeChecked();
-  await user.click(screen.getByRole("radio", {name: "Our workers"}));
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText(/Our workers selected for preparation of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, preparation_provider: "workers"});
   expect(api.replicateKey).not.toHaveBeenCalled();
@@ -167,10 +171,10 @@ it("separates routing permission from permission to replace Replicate credential
   api.pipelineSettings = {revision: 0, audio_processing: false, preparation_provider: "workers", replicate_api_key_configured: true};
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeEnabled();
   expect(screen.getByLabelText("Replicate API key")).toBeDisabled();
   expect(screen.getByRole("button", {name: "Save Replicate key"})).toBeDisabled();
-  await user.click(screen.getByRole("radio", {name: "Replicate"}));
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText(/Replicate selected for preparation of new jobs/);
   expect(api.replicateKey).not.toHaveBeenCalled();
 });
@@ -180,9 +184,8 @@ it("keeps configured Replicate routing read-only without staff routing permissio
   api.permissions = ["provider_key"];
   api.pipelineSettings = {revision: 0, audio_processing: false, preparation_provider: "replicate", replicate_api_key_configured: true};
   await renderExpandedAdmin();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeDisabled();
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
   expect(screen.getByLabelText("Replicate API key")).toBeEnabled();
   expect(screen.getByLabelText("Replicate API key")).toHaveValue("");
   expect(api.pipeline).not.toHaveBeenCalled();
@@ -193,22 +196,57 @@ it("keeps the saved provider selected when routing cannot be saved", async () =>
   api.pipeline.mockRejectedValueOnce(new Error("Settings changed. Refresh and try again."));
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  await user.click(screen.getByRole("radio", {name: "Replicate"}));
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText("Settings changed. Refresh and try again.");
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeChecked();
-  expect(screen.getByRole("radio", {name: "Replicate"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+});
+
+it.each([true, false])("switches preparation provider independently with depth=%s and preserves face mesh", async (depth_guidance) => {
+  api.pipelineSettings = {revision: 3, audio_processing: true, depth_guidance, face_mesh_enabled: true, preparation_provider: "workers", replicate_api_key_configured: true};
+  const user = userEvent.setup();
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "Use Replicate for SAM and depth"});
+  const depthToggle = screen.getByRole("switch", {name: "Add depth to person masks"});
+  await user.click(toggle);
+  await screen.findByText(/Replicate selected for preparation of new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
+  expect(toggle).toBeChecked();
+  expect(depthToggle).toHaveProperty("checked", depth_guidance);
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).toBeChecked();
+  await user.click(depthToggle);
+  await waitFor(() => expect(depthToggle).toHaveProperty("checked", !depth_guidance));
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, depth_guidance: !depth_guidance});
+  expect(toggle).toBeChecked();
+  await user.click(toggle);
+  await screen.findByText(/Our workers selected for preparation of new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, preparation_provider: "workers"});
+  expect(toggle).not.toBeChecked();
+  expect(depthToggle).toHaveProperty("checked", !depth_guidance);
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+});
+
+it("allows disabling Replicate if its saved key becomes unavailable", async () => {
+  api.pipelineSettings = {revision: 2, audio_processing: false, preparation_provider: "replicate", replicate_api_key_configured: false};
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "Use Replicate for SAM and depth"});
+  expect(toggle).toBeChecked();
+  expect(toggle).toBeEnabled();
+  await userEvent.click(toggle);
+  await screen.findByText(/Our workers selected for preparation of new jobs/);
+  expect(toggle).not.toBeChecked();
+  expect(toggle).toBeDisabled();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 2, preparation_provider: "workers"});
 });
 
 it("lets read-only staff see every section with all mutations disabled", async () => {
   api.role = "viewer";
   await renderExpandedAdmin();
   await screen.findByText(/Read-only admin access/);
-  for (const name of ["Service controls", "Audio processing", "Experimental", "Preparation routing", "Credit pricing", "System API key", "Grant user credits"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
+  for (const name of ["Service controls", "Audio processing", "Experimental", "Credit pricing", "System API key", "Grant user credits"]) expect(screen.getByRole("heading", {name})).toBeInTheDocument();
   for (const name of ["Save pricing", "Save system key", "Save Replicate key", "Grant credits"]) expect(screen.getByRole("button", {name})).toBeDisabled();
   expect(screen.getByLabelText("System API key")).toHaveValue("");
   expect(screen.getByLabelText("Replicate API key")).toHaveValue("");
-  expect(screen.getByRole("radio", {name: "Our workers"})).toBeDisabled();
-  expect(screen.getByRole("radio", {name: "Replicate"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
   const user = userEvent.setup();
