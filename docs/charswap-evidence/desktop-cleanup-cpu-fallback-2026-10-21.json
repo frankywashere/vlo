@@ -14,5 +14,27 @@
     "gpu_requested": false
   },
   "scope": "Keep desktop GPU by default; automatic existing CPU runtime fallback after explicit GPU availability/session/inference failure; no retry loop; queued photos remain serial",
-  "paid_render_submitted": false
+  "paid_render_submitted": false,
+  "deployment": {
+    "revision": "recastfx-api-00066-xm2",
+    "traffic": 100,
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:bed3a043ac3d1fb12bbef9593e05944c5e3870ac36e1a9839f96bd4b60325ee3",
+    "source_fingerprint": "f2d263d145cf192a",
+    "build_id": "641f1e18-93d4-4fb8-a60d-e1b5134d2f74",
+    "code_commit": "5ea3acbd",
+    "frontend_asset": "/assets/charswap-BQEwsMNA.js",
+    "frontend_sha256": "12812de06c98acacc6c80ad84d205e43f9a768c79a54b5069d73e82d81b9f0e9",
+    "matches_tested_build": true,
+    "cpu_model_available": true,
+    "available": true,
+    "live": true,
+    "pipeline_settings": {
+      "revision": 14,
+      "preparation_provider": "replicate",
+      "depth_guidance": false,
+      "prompt_variant": "cloudflare_identity_v1",
+      "matching_no_review": true,
+      "retry_missing_masks_with_sam": true
+    }
+  }
 }
