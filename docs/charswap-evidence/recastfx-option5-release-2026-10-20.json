@@ -1,0 +1,33 @@
+{
+  "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:06f73aee5b354cc30c3b5c695aa89f66ed21329df6210061d2ec24896b7e2193",
+  "service": "recastfx-api",
+  "status": "verified-live",
+  "previous_revision": "recastfx-api-00058-zjc",
+  "commit": "047ce4d8fe312b1f4b85f2d5832ba23393c6e408",
+  "runtime_config_sha256": "fb654dacb8fa8637bbe07cd59463bd93eb6da7372f7e0e5a995f3c0faa3255ac",
+  "revision": "recastfx-api-00059-bll",
+  "service_url": "https://recastfx-api-63lqoskl5q-uk.a.run.app",
+  "frontend_bundle": "/assets/charswap-BCNNKLcV.js",
+  "frontend_sha256": "b762015b42c8b3b001076e28171eb4b2a56b97d4a1847b9d7050c16f619174d0",
+  "verified_at": "2026-10-20T22:16:40.631450-04:00",
+  "prompt_variant": "identity_tint_tracking_v1",
+  "settings_revision": 11,
+  "other_pipeline_controls_preserved": {
+    "audio_processing": false,
+    "depth_guidance": false,
+    "retry_missing_masks_with_sam": true,
+    "face_mesh_enabled": true,
+    "face_mesh_masked_default": true,
+    "face_mesh_unmasked_default": false,
+    "face_mesh_user_control": false,
+    "hide_audio_toggle": false,
+    "multi_characters": true
+  },
+  "checks": {
+    "backend_tests_passed": 1903,
+    "frontend_tests_passed": 105,
+    "build": "passed",
+    "admin_selection_persisted_after_reload": true
+  },
+  "screenshot": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/option5-live-default.png"
+}

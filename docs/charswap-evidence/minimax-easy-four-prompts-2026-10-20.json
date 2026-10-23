@@ -1,0 +1,443 @@
+{
+  "experiment": "Four Easy Mode prompt comparisons",
+  "updated_at_toronto": "2026-10-20T17:00:52.242923-04:00",
+  "new_provider_submissions": 4,
+  "endpoint": "https://reapi.ai/api/v1/videos/generations",
+  "model": "minimax-h3",
+  "production_changed": false,
+  "easy_mode": true,
+  "manual_matches": false,
+  "shared_inputs": {
+    "ref-1": "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+    "ref-2": "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+    "ref-3": "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+    "ref-4": "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+    "ref-5": "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296",
+    "guide": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972"
+  },
+  "reference_pairings": {
+    "A": 4,
+    "B": 5,
+    "C": 1,
+    "D": 3,
+    "E": 2
+  },
+  "results": [
+    {
+      "variant": "01-current-fourth-easy",
+      "status": "completed",
+      "submitted_at": 1792527734.72492,
+      "terminal_observed_at": 1792528553.408941,
+      "elapsed_seconds": 818.7,
+      "supplier_cost_usd": 1.097,
+      "sha256": "a41e7691c0d31994873132c6f5caa85b1baf977e5066dbf138c790822280c96e",
+      "task_id": "task_01a15afa983f766a807a6e8dbead72d6",
+      "settings": {
+        "prompt_variant": "identity_colors_v1",
+        "easy_mode": true,
+        "manual_matches": false,
+        "initial_anchors": [
+          {
+            "id": "f8f24c83-29c4-4227-9ebd-04c9bfb14188",
+            "name": "Person 1",
+            "anchor": {
+              "x": 0.6114130434782609,
+              "y": 0.5001698369565217,
+              "time": 0.0,
+              "frame": 0
+            },
+            "reference_index": 3
+          },
+          {
+            "id": "a2d5bc08-7084-4f74-9f9c-517d405e15cc",
+            "name": "Person 2",
+            "anchor": {
+              "x": 0.5217391304347826,
+              "y": 0.5364017210144928,
+              "time": 3.2083333333333335,
+              "frame": 77
+            },
+            "reference_index": 4
+          },
+          {
+            "id": "19a56dc6-fc67-4f04-82e9-d7a7640b829b",
+            "name": "Person 3",
+            "anchor": {
+              "x": 0.39945652173913043,
+              "y": 0.474807518115942,
+              "time": 6.5,
+              "frame": 156
+            },
+            "reference_index": 0
+          },
+          {
+            "id": "fb1d22ad-9a27-48b9-a93b-13c90383625e",
+            "name": "Person 4",
+            "anchor": {
+              "x": 0.3451086956521739,
+              "y": 0.438575634057971,
+              "time": 8.724571091675376,
+              "frame": 209
+            },
+            "reference_index": 2
+          },
+          {
+            "id": "88afc3a6-fbe5-488e-b0f8-3dcce225d6f6",
+            "name": "Person 5",
+            "anchor": {
+              "x": 0.5733695652173914,
+              "y": 0.4530683876811594,
+              "time": 11.026689041333526,
+              "frame": 265
+            },
+            "reference_index": 1
+          }
+        ],
+        "shared_overlay_rgb": [
+          0,
+          220,
+          255
+        ],
+        "overlay_opacity": 0.2,
+        "face_mesh": true,
+        "depth": false,
+        "original_soundtrack": true,
+        "duration": 15,
+        "resolution": "768P",
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "reference_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "prompt_sha256": "7ca87ebfcdd2a499e853b8d3ae4407235c891257d33ce987e6ecf38b4b1bd104",
+        "prompt_characters": 3724,
+        "added_tracking_wording": null,
+        "production_changed": false
+      },
+      "prompt": "subject_definitions:\n<Video 1> is the source footage, with its existing shots and camera rendering.\n<Audio 1> is the synchronized soundtrack embedded in <Video 1>.\n<Subject 1>: source performer at 0.00 seconds, 61% across and 50% down from the top-left corner. <Subject 6>: identity, hair and clothing from <Picture 4> only.\n<Subject 2>: source performer at 3.21 seconds, 52% across and 54% down from the top-left corner. <Subject 7>: identity, hair and clothing from <Picture 5> only.\n<Subject 3>: source performer at 6.50 seconds, 40% across and 47% down from the top-left corner. <Subject 8>: identity, hair and clothing from <Picture 1> only.\n<Subject 4>: source performer at 8.72 seconds, 35% across and 44% down from the top-left corner. <Subject 9>: identity, hair and clothing from <Picture 3> only.\n<Subject 5>: source performer at 11.03 seconds, 57% across and 45% down from the top-left corner. <Subject 10>: identity, hair and clothing from <Picture 2> only.\n\nsummary:\n[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1>. Change only the selected performers: <Subject 1> becomes <Subject 6>, <Subject 2> becomes <Subject 7>, <Subject 3> becomes <Subject 8>, <Subject 4> becomes <Subject 9>, <Subject 5> becomes <Subject 10>. Keep every original shot and the source performance.\n\nretention_analysis:\n<Video 1>: partially_preserved - retain the source environment, unselected people, framing, camera work, timing and photographic treatment. Only the selected identities and clothing change, and guide annotations are removed.\n<Audio 1>: fully_copy - retain the original embedded soundtrack without added dialogue or music.\n<Subject 1>: preserve source performance; transfer identity, hair and clothing from <Subject 6> (<Picture 4>) only.\n<Subject 2>: preserve source performance; transfer identity, hair and clothing from <Subject 7> (<Picture 5>) only.\n<Subject 3>: preserve source performance; transfer identity, hair and clothing from <Subject 8> (<Picture 1>) only.\n<Subject 4>: preserve source performance; transfer identity, hair and clothing from <Subject 9> (<Picture 3>) only.\n<Subject 5>: preserve source performance; transfer identity, hair and clothing from <Subject 10> (<Picture 2>) only.\n\ndetailed_description:\nPictures supply identity, hair and clothing only. <Video 1> supplies shot lighting, camera texture, performance and photographic rendering.\nFollow every existing shot, cut and interaction over the exact 15-second timeline. Keep pairings separate through overlaps and cuts; replace only present source performers, never bystanders.\nFollow visible facial expressions, mouth movements and speaking turns; keep listeners' mouths at rest. Replace entire head, hands, body and feet; preserve source performance, never photograph pose.\nSelected performers with detected masks share the same cyan tint at 20% opacity. The shared color marks selection, not identity. For each reference assignment, identify the tinted source person at the listed timestamp and position. If no tint is available there, use the visible source person at that same anchor, never another tinted person. Coordinates identify a person at that timestamp; they are not a fixed screen position to follow throughout the video. Face-mesh lines describe facial motion only. Remove all color and mesh marks from the finished footage.\nAll replacement performers should look as though they were filmed in the original scene with the same camera.\n\noverall_soundscape:\nReuse the original dialogue, ambience, laughter and effects from <Audio 1>, retaining their source timing and speaker associations.\n\nnon_diegetic_music:\nRetain only music already present in <Audio 1>; add none.",
+      "local_result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/01-current-fourth-easy/result.mp4"
+    },
+    {
+      "variant": "02-explicit-tint-tracking",
+      "status": "completed",
+      "submitted_at": 1792527735.04295,
+      "terminal_observed_at": 1792528472.573256,
+      "elapsed_seconds": 737.5,
+      "supplier_cost_usd": 1.097,
+      "sha256": "3ecdf3004efc486dd69227185fcdb14d4c7737dd4d035abe4593741911c5161c",
+      "task_id": "task_01a15afa995977dda16a1098589518ca",
+      "settings": {
+        "prompt_variant": "identity_colors_v1",
+        "easy_mode": true,
+        "manual_matches": false,
+        "initial_anchors": [
+          {
+            "id": "f8f24c83-29c4-4227-9ebd-04c9bfb14188",
+            "name": "Person 1",
+            "anchor": {
+              "x": 0.6114130434782609,
+              "y": 0.5001698369565217,
+              "time": 0.0,
+              "frame": 0
+            },
+            "reference_index": 3
+          },
+          {
+            "id": "a2d5bc08-7084-4f74-9f9c-517d405e15cc",
+            "name": "Person 2",
+            "anchor": {
+              "x": 0.5217391304347826,
+              "y": 0.5364017210144928,
+              "time": 3.2083333333333335,
+              "frame": 77
+            },
+            "reference_index": 4
+          },
+          {
+            "id": "19a56dc6-fc67-4f04-82e9-d7a7640b829b",
+            "name": "Person 3",
+            "anchor": {
+              "x": 0.39945652173913043,
+              "y": 0.474807518115942,
+              "time": 6.5,
+              "frame": 156
+            },
+            "reference_index": 0
+          },
+          {
+            "id": "fb1d22ad-9a27-48b9-a93b-13c90383625e",
+            "name": "Person 4",
+            "anchor": {
+              "x": 0.3451086956521739,
+              "y": 0.438575634057971,
+              "time": 8.724571091675376,
+              "frame": 209
+            },
+            "reference_index": 2
+          },
+          {
+            "id": "88afc3a6-fbe5-488e-b0f8-3dcce225d6f6",
+            "name": "Person 5",
+            "anchor": {
+              "x": 0.5733695652173914,
+              "y": 0.4530683876811594,
+              "time": 11.026689041333526,
+              "frame": 265
+            },
+            "reference_index": 1
+          }
+        ],
+        "shared_overlay_rgb": [
+          0,
+          220,
+          255
+        ],
+        "overlay_opacity": 0.2,
+        "face_mesh": true,
+        "depth": false,
+        "original_soundtrack": true,
+        "duration": 15,
+        "resolution": "768P",
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "reference_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "prompt_sha256": "bbc83109dd49c67f1766df642662631c5393ecf87ae6c7a83c4a534c5ae111c8",
+        "prompt_characters": 4029,
+        "added_tracking_wording": "Use the tinted region to help follow the identified source person's movement and performance while it remains attached to that person. If the tint disappears or switches to someone else, use the visible source person and the timestamp/position assignments. Keep the same replacement identity across cuts.",
+        "production_changed": false
+      },
+      "prompt": "subject_definitions:\n<Video 1> is the source footage, with its existing shots and camera rendering.\n<Audio 1> is the synchronized soundtrack embedded in <Video 1>.\n<Subject 1>: source performer at 0.00 seconds, 61% across and 50% down from the top-left corner. <Subject 6>: identity, hair and clothing from <Picture 4> only.\n<Subject 2>: source performer at 3.21 seconds, 52% across and 54% down from the top-left corner. <Subject 7>: identity, hair and clothing from <Picture 5> only.\n<Subject 3>: source performer at 6.50 seconds, 40% across and 47% down from the top-left corner. <Subject 8>: identity, hair and clothing from <Picture 1> only.\n<Subject 4>: source performer at 8.72 seconds, 35% across and 44% down from the top-left corner. <Subject 9>: identity, hair and clothing from <Picture 3> only.\n<Subject 5>: source performer at 11.03 seconds, 57% across and 45% down from the top-left corner. <Subject 10>: identity, hair and clothing from <Picture 2> only.\n\nsummary:\n[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1>. Change only the selected performers: <Subject 1> becomes <Subject 6>, <Subject 2> becomes <Subject 7>, <Subject 3> becomes <Subject 8>, <Subject 4> becomes <Subject 9>, <Subject 5> becomes <Subject 10>. Keep every original shot and the source performance.\n\nretention_analysis:\n<Video 1>: partially_preserved - retain the source environment, unselected people, framing, camera work, timing and photographic treatment. Only the selected identities and clothing change, and guide annotations are removed.\n<Audio 1>: fully_copy - retain the original embedded soundtrack without added dialogue or music.\n<Subject 1>: preserve source performance; transfer identity, hair and clothing from <Subject 6> (<Picture 4>) only.\n<Subject 2>: preserve source performance; transfer identity, hair and clothing from <Subject 7> (<Picture 5>) only.\n<Subject 3>: preserve source performance; transfer identity, hair and clothing from <Subject 8> (<Picture 1>) only.\n<Subject 4>: preserve source performance; transfer identity, hair and clothing from <Subject 9> (<Picture 3>) only.\n<Subject 5>: preserve source performance; transfer identity, hair and clothing from <Subject 10> (<Picture 2>) only.\n\ndetailed_description:\nPictures supply identity, hair and clothing only. <Video 1> supplies shot lighting, camera texture, performance and photographic rendering.\nFollow every existing shot, cut and interaction over the exact 15-second timeline. Keep pairings separate through overlaps and cuts; replace only present source performers, never bystanders.\nFollow visible facial expressions, mouth movements and speaking turns; keep listeners' mouths at rest. Replace entire head, hands, body and feet; preserve source performance, never photograph pose.\nSelected performers with detected masks share the same cyan tint at 20% opacity. The shared color marks selection, not identity. For each reference assignment, identify the tinted source person at the listed timestamp and position. If no tint is available there, use the visible source person at that same anchor, never another tinted person. Coordinates identify a person at that timestamp; they are not a fixed screen position to follow throughout the video. Use the tinted region to help follow the identified source person's movement and performance while it remains attached to that person. If the tint disappears or switches to someone else, use the visible source person and the timestamp/position assignments. Keep the same replacement identity across cuts. Face-mesh lines describe facial motion only. Remove all color and mesh marks from the finished footage.\nAll replacement performers should look as though they were filmed in the original scene with the same camera.\n\noverall_soundscape:\nReuse the original dialogue, ambience, laughter and effects from <Audio 1>, retaining their source timing and speaker associations.\n\nnon_diegetic_music:\nRetain only music already present in <Audio 1>; add none.",
+      "local_result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/02-explicit-tint-tracking/result.mp4"
+    },
+    {
+      "variant": "03-full-manual-adapted-shared-cyan",
+      "status": "completed",
+      "submitted_at": 1792529088.8409102,
+      "terminal_observed_at": 1792529737.038026,
+      "elapsed_seconds": 648.2,
+      "supplier_cost_usd": 1.097,
+      "sha256": "e4a026c4fcfe735904ea8b072e969db9468d2c648cbbaa66826bc6be2f6b1afa",
+      "task_id": "task_01a15b0f41bb702aa03b2899707671d0",
+      "settings": {
+        "prompt_variant": "identity_colors_v1",
+        "easy_mode": true,
+        "manual_matches": false,
+        "initial_anchors": [
+          {
+            "id": "f8f24c83-29c4-4227-9ebd-04c9bfb14188",
+            "name": "Person 1",
+            "anchor": {
+              "x": 0.6114130434782609,
+              "y": 0.5001698369565217,
+              "time": 0.0,
+              "frame": 0
+            },
+            "reference_index": 3
+          },
+          {
+            "id": "a2d5bc08-7084-4f74-9f9c-517d405e15cc",
+            "name": "Person 2",
+            "anchor": {
+              "x": 0.5217391304347826,
+              "y": 0.5364017210144928,
+              "time": 3.2083333333333335,
+              "frame": 77
+            },
+            "reference_index": 4
+          },
+          {
+            "id": "19a56dc6-fc67-4f04-82e9-d7a7640b829b",
+            "name": "Person 3",
+            "anchor": {
+              "x": 0.39945652173913043,
+              "y": 0.474807518115942,
+              "time": 6.5,
+              "frame": 156
+            },
+            "reference_index": 0
+          },
+          {
+            "id": "fb1d22ad-9a27-48b9-a93b-13c90383625e",
+            "name": "Person 4",
+            "anchor": {
+              "x": 0.3451086956521739,
+              "y": 0.438575634057971,
+              "time": 8.724571091675376,
+              "frame": 209
+            },
+            "reference_index": 2
+          },
+          {
+            "id": "88afc3a6-fbe5-488e-b0f8-3dcce225d6f6",
+            "name": "Person 5",
+            "anchor": {
+              "x": 0.5733695652173914,
+              "y": 0.4530683876811594,
+              "time": 11.026689041333526,
+              "frame": 265
+            },
+            "reference_index": 1
+          }
+        ],
+        "shared_overlay_rgb": [
+          0,
+          220,
+          255
+        ],
+        "overlay_opacity": 0.2,
+        "face_mesh": true,
+        "depth": false,
+        "original_soundtrack": true,
+        "duration": 15,
+        "resolution": "768P",
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "reference_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "prompt_sha256": "20a778f6dfa978bffc1cae78deee15e71a1e4982bd6cf7d00431a4d406c94e8f",
+        "prompt_characters": 6998,
+        "added_tracking_wording": null,
+        "production_changed": false,
+        "prompt_form": "full",
+        "intentional_color_mismatch": false,
+        "prompt_origin": "Exact successful manually reviewed distinct-color test, adapted only for shared-cyan identity cues in case03; unchanged in case04.",
+        "documentation": {
+          "source_prompt_characters": 6932,
+          "source_prompt_sha256": "b7c3c747da272031c2b2fd97d2a0fcca7bd69d2b4ec904f717c3f90505577d58",
+          "changes_from_successful_manual": [
+            "Describe one shared cyan tint at 20% opacity in the opening instead of distinct color tints.",
+            "Remove five individual color-to-reference lines; preserve the five existing timestamp, position and reference anchors.",
+            "Replace only the color instruction paragraph with current Easy case01 shared-cyan paragraph.",
+            "Within that paragraph shorten For each reference assignment, identify to Identify, saving31characters and fitting7000; no other manual sections compacted."
+          ],
+          "comparison_notes": [
+            "Full subject definitions and all ten subject retention descriptions preserved.",
+            "Case01 to case03 compares full versus compact wording, not only overall prompt length.",
+            "Case03 does not include case02 added temporal tint-tracking sentence."
+          ]
+        }
+      },
+      "prompt": "subject_definitions:\n<Video 1> is the original source footage being edited, including its existing shots and camera rendering. The shared cyan tint at 20% opacity and face-mesh lines are selection and motion annotations, not the target visual style.\n<Audio 1> is the synchronized soundtrack embedded in <Video 1>.\n<Subject 1> is the source performer selected in <Video 1> at 0.00 seconds, 61% across and 50% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 6> is the replacement character whose identity, hair and clothing come from <Picture 4>. The photo defines the character, not a target frame or pose.\n<Subject 2> is the source performer selected in <Video 1> at 3.21 seconds, 52% across and 54% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 7> is the replacement character whose identity, hair and clothing come from <Picture 5>. The photo defines the character, not a target frame or pose.\n<Subject 3> is the source performer selected in <Video 1> at 6.50 seconds, 40% across and 47% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 8> is the replacement character whose identity, hair and clothing come from <Picture 1>. The photo defines the character, not a target frame or pose.\n<Subject 4> is the source performer selected in <Video 1> at 8.72 seconds, 35% across and 44% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 9> is the replacement character whose identity, hair and clothing come from <Picture 3>. The photo defines the character, not a target frame or pose.\n<Subject 5> is the source performer selected in <Video 1> at 11.03 seconds, 57% across and 45% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 10> is the replacement character whose identity, hair and clothing come from <Picture 2>. The photo defines the character, not a target frame or pose.\n\nsummary:\n[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1>. Change only the selected performers: <Subject 1> becomes <Subject 6>, <Subject 2> becomes <Subject 7>, <Subject 3> becomes <Subject 8>, <Subject 4> becomes <Subject 9>, <Subject 5> becomes <Subject 10>. Keep every original shot and the source performance.\n\nretention_analysis:\n<Video 1>: partially_preserved - retain the source environment, unselected people, framing, camera work, timing and photographic treatment. Only the selected identities and clothing change, and guide annotations are removed.\n<Audio 1>: fully_copy - retain the original embedded soundtrack without added dialogue or music.\n<Subject 1>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 6>.\n<Subject 6>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 1> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 2>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 7>.\n<Subject 7>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 2> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 3>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 8>.\n<Subject 8>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 3> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 4>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 9>.\n<Subject 9>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 4> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 5>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 10>.\n<Subject 10>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 5> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n\ndetailed_description:\nThe source video governs how the whole scene is photographed, including the replacement people. Render their appearance within that same source-shot lighting and image texture. Identity comes from the pictures; photographic rendering comes from <Video 1>.\nFollow all existing shots, cuts, actions and interactions in <Video 1> over its exact 15-second timeline. Keep all pairings separate through cuts and overlaps. Each replacement appears only where its corresponding source performer is present; do not insert it elsewhere or replace an unselected bystander.\nPreserve each source performer's continuous movement and visible mouth performance, not the still pose or expression in the photograph. Keep a listener listening when somebody else speaks. Replace the entire selected character, including head, hands, body and feet, consistently with its reference identity and clothing.\nSelected performers with detected masks share the same cyan tint at 20% opacity. The shared color marks selection, not identity. Identify the tinted source person at the listed timestamp and position. If no tint is available there, use the visible source person at that same anchor, never another tinted person. Coordinates identify a person at that timestamp; they are not a fixed screen position to follow throughout the video. Face-mesh lines describe facial motion only. Remove all color and mesh marks from the finished footage.\nAll replacement performers should look as though they were filmed in the original scene with the same camera.\n\noverall_soundscape:\nReuse the original dialogue, ambience, laughter and effects from <Audio 1>, retaining their source timing and speaker associations.\n\nnon_diegetic_music:\nRetain only music already present in <Audio 1>; add none.",
+      "local_result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/03-full-manual-adapted-shared-cyan/result.mp4"
+    },
+    {
+      "variant": "04-literal-manual-prompt-shared-cyan",
+      "status": "completed",
+      "submitted_at": 1792529089.132009,
+      "terminal_observed_at": 1792530051.2828329,
+      "elapsed_seconds": 962.2,
+      "supplier_cost_usd": 1.097,
+      "sha256": "63ae499171c1e4897e8477e4bc3679709112f6c35856352ab11f64ecaf1e4d99",
+      "task_id": "task_01a15b0f42d476edbbf242264a52e313",
+      "settings": {
+        "prompt_variant": "identity_colors_v1",
+        "easy_mode": true,
+        "manual_matches": false,
+        "initial_anchors": [
+          {
+            "id": "f8f24c83-29c4-4227-9ebd-04c9bfb14188",
+            "name": "Person 1",
+            "anchor": {
+              "x": 0.6114130434782609,
+              "y": 0.5001698369565217,
+              "time": 0.0,
+              "frame": 0
+            },
+            "reference_index": 3
+          },
+          {
+            "id": "a2d5bc08-7084-4f74-9f9c-517d405e15cc",
+            "name": "Person 2",
+            "anchor": {
+              "x": 0.5217391304347826,
+              "y": 0.5364017210144928,
+              "time": 3.2083333333333335,
+              "frame": 77
+            },
+            "reference_index": 4
+          },
+          {
+            "id": "19a56dc6-fc67-4f04-82e9-d7a7640b829b",
+            "name": "Person 3",
+            "anchor": {
+              "x": 0.39945652173913043,
+              "y": 0.474807518115942,
+              "time": 6.5,
+              "frame": 156
+            },
+            "reference_index": 0
+          },
+          {
+            "id": "fb1d22ad-9a27-48b9-a93b-13c90383625e",
+            "name": "Person 4",
+            "anchor": {
+              "x": 0.3451086956521739,
+              "y": 0.438575634057971,
+              "time": 8.724571091675376,
+              "frame": 209
+            },
+            "reference_index": 2
+          },
+          {
+            "id": "88afc3a6-fbe5-488e-b0f8-3dcce225d6f6",
+            "name": "Person 5",
+            "anchor": {
+              "x": 0.5733695652173914,
+              "y": 0.4530683876811594,
+              "time": 11.026689041333526,
+              "frame": 265
+            },
+            "reference_index": 1
+          }
+        ],
+        "shared_overlay_rgb": [
+          0,
+          220,
+          255
+        ],
+        "overlay_opacity": 0.2,
+        "face_mesh": true,
+        "depth": false,
+        "original_soundtrack": true,
+        "duration": 15,
+        "resolution": "768P",
+        "guide_sha256": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972",
+        "reference_sha256": [
+          "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+          "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+          "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+          "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+          "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296"
+        ],
+        "prompt_sha256": "b7c3c747da272031c2b2fd97d2a0fcca7bd69d2b4ec904f717c3f90505577d58",
+        "prompt_characters": 6932,
+        "added_tracking_wording": null,
+        "production_changed": false,
+        "prompt_form": "full",
+        "intentional_color_mismatch": true,
+        "prompt_origin": "Exact successful manually reviewed distinct-color test, adapted only for shared-cyan identity cues in case03; unchanged in case04."
+      },
+      "prompt": "subject_definitions:\n<Video 1> is the original source footage being edited, including its existing shots and camera rendering. The distinct 20%-opacity color tints and face-mesh lines are selection and motion annotations, not the target visual style.\n<Audio 1> is the synchronized soundtrack embedded in <Video 1>.\n<Subject 1> is the source performer selected in <Video 1> at 0.00 seconds, 61% across and 50% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 6> is the replacement character whose identity, hair and clothing come from <Picture 4>. The photo defines the character, not a target frame or pose.\n<Subject 2> is the source performer selected in <Video 1> at 3.21 seconds, 52% across and 54% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 7> is the replacement character whose identity, hair and clothing come from <Picture 5>. The photo defines the character, not a target frame or pose.\n<Subject 3> is the source performer selected in <Video 1> at 6.50 seconds, 40% across and 47% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 8> is the replacement character whose identity, hair and clothing come from <Picture 1>. The photo defines the character, not a target frame or pose.\n<Subject 4> is the source performer selected in <Video 1> at 8.72 seconds, 35% across and 44% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 9> is the replacement character whose identity, hair and clothing come from <Picture 3>. The photo defines the character, not a target frame or pose.\n<Subject 5> is the source performer selected in <Video 1> at 11.03 seconds, 57% across and 45% down from the top-left corner. This anchor identifies that performer when they appear again after cuts.\n<Subject 10> is the replacement character whose identity, hair and clothing come from <Picture 2>. The photo defines the character, not a target frame or pose.\n<Subject 1>: cyan overlay; <Picture 4>.\n<Subject 2>: magenta overlay; <Picture 5>.\n<Subject 3>: gold overlay; <Picture 1>.\n<Subject 4>: lime green overlay; <Picture 3>.\n<Subject 5>: orange overlay; <Picture 2>.\n\nsummary:\n[video editing + reference generation + audio reuse] The target video is an edited version of <Video 1>. Change only the selected performers: <Subject 1> becomes <Subject 6>, <Subject 2> becomes <Subject 7>, <Subject 3> becomes <Subject 8>, <Subject 4> becomes <Subject 9>, <Subject 5> becomes <Subject 10>. Keep every original shot and the source performance.\n\nretention_analysis:\n<Video 1>: partially_preserved - retain the source environment, unselected people, framing, camera work, timing and photographic treatment. Only the selected identities and clothing change, and guide annotations are removed.\n<Audio 1>: fully_copy - retain the original embedded soundtrack without added dialogue or music.\n<Subject 1>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 6>.\n<Subject 6>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 1> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 2>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 7>.\n<Subject 7>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 2> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 3>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 8>.\n<Subject 8>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 3> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 4>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 9>.\n<Subject 9>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 4> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n<Subject 5>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject 10>.\n<Subject 10>: attribute_transfer - transfer this character's recognizable identity, hair and clothing onto <Subject 5> throughout that source performer's appearances. Do not transfer the photograph's pose, illumination, background or photographic sharpness.\n\ndetailed_description:\nThe source video governs how the whole scene is photographed, including the replacement people. Render their appearance within that same source-shot lighting and image texture. Identity comes from the pictures; photographic rendering comes from <Video 1>.\nFollow all existing shots, cuts, actions and interactions in <Video 1> over its exact 15-second timeline. Keep all pairings separate through cuts and overlaps. Each replacement appears only where its corresponding source performer is present; do not insert it elsewhere or replace an unselected bystander.\nPreserve each source performer's continuous movement and visible mouth performance, not the still pose or expression in the photograph. Keep a listener listening when somebody else speaks. Replace the entire selected character, including head, hands, body and feet, consistently with its reference identity and clothing.\nEach performer has the 20%-opacity color assigned above. Keep color-to-reference mappings across cuts; use position/time anchors where tint is missing. Face-mesh lines describe facial motion only. Remove all color and mesh marks from the finished footage.\nAll replacement performers should look as though they were filmed in the original scene with the same camera.\n\noverall_soundscape:\nReuse the original dialogue, ambience, laughter and effects from <Audio 1>, retaining their source timing and speaker associations.\n\nnon_diegetic_music:\nRetain only music already present in <Audio 1>; add none.",
+      "local_result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/04-literal-manual-prompt-shared-cyan/result.mp4"
+    }
+  ],
+  "limitations": [
+    "No seed is exposed on the used endpoint; one sample per variant cannot isolate stochastic variation.",
+    "Current four-person-plus prompt uses the live builder automatic compact form, identical in both variants except added tracking wording.",
+    "Cases01and02 use the live compact Easy prompt. Cases03and04 use the full successful manual-style prompt with no manually reviewed guide or scene schedule.",
+    "Case04 deliberately retains distinct-color identity instructions even though all masks share cyan; user explicitly requested this mismatch."
+  ],
+  "creative_review": "pending for these four matched Easy simulation results"
+}
