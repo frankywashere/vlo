@@ -1,0 +1,116 @@
+{
+  "experiment": "Easy Mode current versus explicit tint-tracking wording",
+  "date": "2026-10-20",
+  "new_provider_submissions": 2,
+  "production_changed": false,
+  "easy_mode": true,
+  "manual_matches": false,
+  "duration_seconds": 15,
+  "resolution": "768P",
+  "overlay": "shared cyan at 20% opacity",
+  "face_mesh": true,
+  "depth": false,
+  "original_soundtrack": true,
+  "initial_anchors": [
+    {
+      "id": "f8f24c83-29c4-4227-9ebd-04c9bfb14188",
+      "name": "Person 1",
+      "anchor": {
+        "x": 0.6114130434782609,
+        "y": 0.5001698369565217,
+        "time": 0.0,
+        "frame": 0
+      },
+      "reference_index": 3
+    },
+    {
+      "id": "a2d5bc08-7084-4f74-9f9c-517d405e15cc",
+      "name": "Person 2",
+      "anchor": {
+        "x": 0.5217391304347826,
+        "y": 0.5364017210144928,
+        "time": 3.2083333333333335,
+        "frame": 77
+      },
+      "reference_index": 4
+    },
+    {
+      "id": "19a56dc6-fc67-4f04-82e9-d7a7640b829b",
+      "name": "Person 3",
+      "anchor": {
+        "x": 0.39945652173913043,
+        "y": 0.474807518115942,
+        "time": 6.5,
+        "frame": 156
+      },
+      "reference_index": 0
+    },
+    {
+      "id": "fb1d22ad-9a27-48b9-a93b-13c90383625e",
+      "name": "Person 4",
+      "anchor": {
+        "x": 0.3451086956521739,
+        "y": 0.438575634057971,
+        "time": 8.724571091675376,
+        "frame": 209
+      },
+      "reference_index": 2
+    },
+    {
+      "id": "88afc3a6-fbe5-488e-b0f8-3dcce225d6f6",
+      "name": "Person 5",
+      "anchor": {
+        "x": 0.5733695652173914,
+        "y": 0.4530683876811594,
+        "time": 11.026689041333526,
+        "frame": 265
+      },
+      "reference_index": 1
+    }
+  ],
+  "reference_pairings": {
+    "A": 4,
+    "B": 5,
+    "C": 1,
+    "D": 3,
+    "E": 2
+  },
+  "shared_input_hashes": {
+    "ref-1": "be2f4ffc715b0c8b3c19ab8bbbcea737a6cbebf9a5df5ab865a86801be6034e4",
+    "ref-2": "8563c9ed11ea5c217174792da510f89efc859717af7066a0f411f7fca349c953",
+    "ref-3": "1b39eec723d4adbeaceb0d4dd2c5ab0f3a8a9e0172c8274708d161f525ce8b1d",
+    "ref-4": "3e741e277ce356ccc5353bf6507cf181296106bc714d8501b879a852db31758e",
+    "ref-5": "142fa3ccd558660e4515bf6c24ee6d0ef3c14cac82e960125a161a4ca826f296",
+    "guide": "d298692850a2f43de76a1ffabac42d6ce78fd67f9672f1b4456196414e572972"
+  },
+  "changed_wording": "Use the tinted region to help follow the identified source person's movement and performance while it remains attached to that person. If the tint disappears or switches to someone else, use the visible source person and the timestamp/position assignments. Keep the same replacement identity across cuts.",
+  "results": [
+    {
+      "variant": "01-current-fourth-easy",
+      "status": "completed",
+      "elapsed_seconds": 818.7,
+      "supplier_cost_usd": 1.097,
+      "sha256": "a41e7691c0d31994873132c6f5caa85b1baf977e5066dbf138c790822280c96e",
+      "prompt_characters": 3724,
+      "prompt_sha256": "7ca87ebfcdd2a499e853b8d3ae4407235c891257d33ce987e6ecf38b4b1bd104",
+      "local_result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/01-current-fourth-easy/result.mp4",
+      "local_prompt": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/01-current-fourth-easy/prompt.txt"
+    },
+    {
+      "variant": "02-explicit-tint-tracking",
+      "status": "completed",
+      "elapsed_seconds": 737.5,
+      "supplier_cost_usd": 1.097,
+      "sha256": "3ecdf3004efc486dd69227185fcdb14d4c7737dd4d035abe4593741911c5161c",
+      "prompt_characters": 4029,
+      "prompt_sha256": "bbc83109dd49c67f1766df642662631c5393ecf87ae6c7a83c4a534c5ae111c8",
+      "local_result": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/02-explicit-tint-tracking/result.mp4",
+      "local_prompt": "/Users/frank/Desktop/Coding/CharSwap/experiments/minimax_easy_tint_tracking_ab_v1/02-explicit-tint-tracking/prompt.txt"
+    }
+  ],
+  "limitations": [
+    "No seed is exposed on the used endpoint; one sample per variant cannot isolate stochastic variation.",
+    "Current four-person-plus prompt uses the live builder automatic compact form, identical in both variants except added tracking wording."
+  ],
+  "creative_review": "pending"
+}
