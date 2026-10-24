@@ -9,6 +9,7 @@ import { GenerationOptions } from "./GenerationOptions";
 import { formatTime } from "../utils/videoGeometry";
 
 interface ReviewStepProps {
+  requireGuidePreview?: boolean;
   accessMode?: "credits" | "api-key";
   watermarkOffer?: {bonusCredits: number};
   faceMeshOptions?: FaceMeshOptions;
@@ -32,6 +33,7 @@ interface ReviewStepProps {
 }
 
 export function ReviewStep({
+  requireGuidePreview = true,
   isAdmin, faceMeshOptions, hideAudioToggle, watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
   onApiSettings, onAccessModeChange, trackingReady = false, onOptionsChange,
   live = false,
@@ -70,7 +72,7 @@ export function ReviewStep({
   const cleanupIssue = targets.map(target => references.find(reference => reference.id === assignments[target.id]))
     .map(reference => reference && referenceCleanupBlocker(reference)).find(Boolean);
   const canSubmit = !cleanupIssue && enoughCredits && !busy && creditsAvailable && (
-    live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && playableGuide === guideIdentity)
+    live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && (!requireGuidePreview || playableGuide === guideIdentity))
     : !easyMode && enhancedCharacterMasking && !trackingReady
   );
   return (

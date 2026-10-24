@@ -24,9 +24,11 @@ it("saves the isolated global switch with its revision and approved testers only
   fireEvent.click(toggle);
   fireEvent.change(screen.getByLabelText("Approved tester emails"), { target: { value: "First@example.com, second@example.com" } });
   expect(api.save).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Save one-minute test settings" }));
+  expect(screen.getByLabelText("Generation prompts")).toBeInTheDocument();
+  expect(screen.getByText(/All settings below apply to new renders from Create/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Save test site settings" }));
   await waitFor(() => expect(api.save).toHaveBeenCalledWith({ revision: 3, enabled: true, prompt_variant: "cloudflare_identity_v1",
     tester_emails: ["first@example.com", "second@example.com"] }));
-  expect(await screen.findByText("One-minute test settings saved.")).toBeInTheDocument();
+  expect(await screen.findByText("Test site settings saved.")).toBeInTheDocument();
   expect(screen.getByText(/Checks use estimates; provider balances and rate limits are shared/)).toBeInTheDocument();
 });

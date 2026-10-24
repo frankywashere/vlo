@@ -1,5 +1,5 @@
 import { accountToken } from "../services/accountContext";
-import type { PromptVariant } from "../services/commerce";
+import type { CreditCatalog, CreditWallet, PromptVariant } from "../services/commerce";
 import type { JobSettingsUsed, SelectionTarget, TrackingReviewChoice, TrackingReviewSegment } from "../services/livePipeline";
 
 const ROOT = "/api/long-renders";
@@ -35,6 +35,10 @@ export interface LongRenderCapabilities {
   is_admin: boolean;
   max_seconds: number;
   test_credits: number;
+  wallet?: CreditWallet;
+  credit_catalog?: CreditCatalog;
+  reference_cleanup_available?: boolean;
+  reference_cleanup_endpoint?: string | null;
   settings?: LongRenderSettings;
   pipeline?: LongRenderSettings;
   capabilities?: Record<string, unknown>;
@@ -70,6 +74,7 @@ export interface LongRenderJob {
   tracking_revision?: number;
   settings_used?: JobSettingsUsed;
   easy_mode?: boolean;
+  auto_generate?: boolean;
   generation_credits?: number;
   consumer_credits_used?: number;
   consumer_credits_returned?: number;
@@ -93,7 +98,7 @@ export interface LongRenderSetup {
   enhanced_character_masking: boolean;
   submit_without_audio: boolean;
   add_watermark: boolean;
-  auto_generate: false;
+  auto_generate: boolean;
   replace_all_people: boolean;
   preparation_version: 2;
   face_mesh?: boolean;
@@ -213,5 +218,6 @@ export function isLongRenderRunning(job: LongRenderJob): boolean {
 }
 
 export function longRenderNeedsPolling(job: LongRenderJob): boolean {
-  return isLongRenderRunning(job) || ["queued", "running", "processing", "pending"].includes(job.comparison_status ?? "");
+  return isLongRenderRunning(job) || Boolean(job.auto_generate && job.status === "ready") ||
+    ["queued", "running", "processing", "pending"].includes(job.comparison_status ?? "");
 }

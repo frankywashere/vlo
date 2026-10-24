@@ -12,12 +12,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .accounts import verify_account
-from .commerce import apply_wallet_change, generation_credit_cost, wallet_path
+from .commerce import generation_credit_cost, wallet_path, wallet_view
 from .config import Settings
 from .errors import PublicError
 from .job_settings import settings_used
 from .limits import MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES
 from .long_render_cloud import LongCloud, isolated_run_url
+from .long_render_diagnostics import register_diagnostics
 from .long_render_models import LongSetup, plan_children
 from .media import Anchor
 from .prompt_variants import PROMPT_VARIANTS
@@ -88,7 +89,7 @@ def admin_emails():
             "frank@whipsnapfilms.com,frankywashere@gmail.com").split(",") if email.strip()}
 
 
-def account(token, *, admin=False, enabled=False):
+def account(token, *, admin=False):
     settings, records, _, _ = services()
     actor = verify_account(token, settings.project)
     config = defaults(records)
@@ -96,14 +97,26 @@ def account(token, *, admin=False, enabled=False):
     allowed = is_admin or actor["email"] in config.get("tester_emails", [])
     if not allowed or admin and not is_admin:
         raise PublicError("This isolated test is available to approved testers only.", 403)
-    if enabled and not config["enabled"]:
-        raise PublicError("One-minute tests are currently turned off by the administrator.", 409)
     return {**actor, "is_admin": is_admin}, config
 
 
+def maximum_duration(config):
+    """The preview always renders in isolation; this switch only extends length."""
+    return 60 if config["enabled"] else 15
+
+
+def test_credit_catalog():
+    """Describe the same fixed test quote charged by generate_parent, never checkout."""
+    return {"currency": "usd", "packs": [], "credits_per_generation": 150,
+            "credits_per_second": 10, "usd_cents_per_credit": 1,
+            "minimum_pack_cents": 2000, "stripe_mode": "test", "configured": True,
+            "checkout_enabled": False, "watermark_enabled": True,
+            "watermark_bonus_credits": 0}
+
+
 def wallet(records, actor):
-    return apply_wallet_change(records, actor["account_id"], "long-test-bootstrap-v1", 10000,
-                               "test_grant", details={"environment": "one-minute-test"})
+    from .long_render_runtime import test_wallet
+    return test_wallet(records, actor["account_id"])
 
 
 def owned(job_id, actor):
@@ -124,11 +137,13 @@ def view(parent):
         "width", "height", "tracking_revision", "tracking_choices", "tracking_error_segment_id", "queue_pending")
         if key in parent}
     result.update(settings_used=settings_used(parent), test_credits=True,
+                  auto_generate=parent.get("auto_generate_authorized", False),
                   preparation_estimate_usd=.5, estimated_cost_usd=round(parent["duration"] * .148 + .5, 3))
     result["children"] = [{key: child[key] for key in ("index", "status", "duration", "passthrough", "message")
                            if key in child} for child in parent.get("children", [])]
     result["can_resume_status"] = not any(child.get("status") in {"submitting", "submission_unknown"}
-        for child in parent.get("children", [])) and (bool(parent.get("queue_pending")) or any(
+        for child in parent.get("children", [])) and (bool(parent.get("queue_pending")) or
+        parent.get("status") == "ready" and parent.get("auto_generate_authorized", False) and not parent.get("generation_queue_confirmed") or any(
             child.get("provider_task") and child.get("status") in {"generating", "output_saving"}
             for child in parent.get("children", [])))
     result["normalized_targets"] = parent.get("normalized_targets", [])
@@ -161,7 +176,8 @@ def view(parent):
     applied = (current_wallet or {}).get("applied", {})
     refunds = sum(max(0, amount) for key, amount in applied.items()
                   if key.startswith("long-refund:" + parent["id"] + ":"))
-    result["consumer_credits_used"] = max(0, parent.get("test_credits_reserved", 0) - refunds)
+    debited = max(parent.get("test_credits_reserved", 0), -min(0, applied.get("long-generation:" + parent["id"], 0)))
+    result["consumer_credits_used"] = max(0, debited - refunds)
     result["consumer_credits_returned"] = refunds
     return result
 
@@ -176,8 +192,10 @@ def capabilities(x_firebase_token: str | None = Header(default=None)):
     actor, config = account(x_firebase_token)
     _, records, _, _ = services()
     balance = wallet(records, actor)
-    return {"enabled": config["enabled"], "is_admin": actor["is_admin"], "max_seconds": 60,
+    return {"enabled": config["enabled"], "is_admin": actor["is_admin"], "max_seconds": maximum_duration(config),
             "test_credits": balance["balance"], "settings": config, "pipeline": config,
+            "wallet": wallet_view(records, actor["account_id"]), "credit_catalog": test_credit_catalog(),
+            "reference_cleanup_available": True, "reference_cleanup_endpoint": None,
             "estimated_provider_usd_per_second": .148, "preparation_estimate_usd": .5,
             "capabilities": {"replicate": True, "workers": False, "manual": True, "easy": True,
                              "depth": True, "face_mesh": True, "all_prompt_variants": True}}
@@ -250,12 +268,13 @@ class ReviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     choices: list[ReviewChoice] = Field(min_length=1, max_length=1200)
     approved: bool = Field(default=False, strict=True)
+    auto_generate: bool = Field(default=False, strict=True)
 
 
 @app.post(PREFIX + "/jobs")
 def create_parent(options: CreateParent, x_firebase_token: str | None = Header(default=None)):
     from .pipeline_settings import enforce_character_limit, face_mesh_snapshot
-    actor, config = account(x_firebase_token, enabled=True)
+    actor, config = account(x_firebase_token)
     settings, records, cloud, _ = services()
     setup = options.setup
     if any(ref.size > MAX_REFERENCE_BYTES for ref in options.references):
@@ -266,6 +285,8 @@ def create_parent(options: CreateParent, x_firebase_token: str | None = Header(d
     if any(target.reference_index >= len(options.references) for target in setup.targets or []):
         raise PublicError("Every selected person needs an uploaded reference.")
     duration = round(setup.trim[1] - setup.trim[0])
+    if duration > maximum_duration(config):
+        raise PublicError("Select at most 15 seconds, or ask an administrator to enable one-minute renders.", 409)
     estimate = round(duration * .148 + .5, 3)
     if estimate > config["max_spend_usd"]:
         raise PublicError("This clip exceeds the test's provider-spending allowance.", 409)
@@ -308,7 +329,7 @@ def get_parent(job_id: str, x_firebase_token: str | None = Header(default=None))
 
 @app.post(PREFIX + "/jobs/{job_id}/prepare")
 def prepare_parent(job_id: str, approval: Approval, x_firebase_token: str | None = Header(default=None)):
-    actor, config = account(x_firebase_token, enabled=True)
+    actor, config = account(x_firebase_token)
     parent = owned(job_id, actor)
     _, records, cloud, pipeline = services()
     if not approval.approved:
@@ -322,7 +343,8 @@ def prepare_parent(job_id: str, approval: Approval, x_firebase_token: str | None
         if blob.size != item["size"]:
             raise PublicError("Wait for all video and reference uploads to finish.", 409)
     pipeline.admit(parent)
-    parent = pipeline.update_job(job_id, status="queued", message="Queued on the isolated test backend.")
+    parent = pipeline.update_job(job_id, status="queued", message="Queued on the isolated test backend.",
+        auto_generate_authorized=parent.get("auto_generate_authorized", False) or parent["setup"].get("auto_generate", False))
     pipeline._queue("long-prepare", job_id)
     return {"job": view(pipeline.get_job(job_id))}
 
@@ -332,6 +354,8 @@ def review_parent(job_id: str, options: ReviewBody, x_firebase_token: str | None
     actor, _ = account(x_firebase_token)
     parent = owned(job_id, actor)
     _, records, cloud, pipeline = services()
+    if not options.approved:
+        raise PublicError("Approve the saved scene choices before continuing.")
     choices = [choice.model_dump(exclude_none=True) for choice in options.choices]
     expected = {segment["id"] for segment in parent.get("tracking_plan", {}).get("segments", [])
                 if segment.get("needs_review", True)}
@@ -342,6 +366,7 @@ def review_parent(job_id: str, options: ReviewBody, x_firebase_token: str | None
         if current.get("status") != "tracking_review":
             raise PublicError("Reload this test before changing its scene review.", 409)
         return {**current, "pending_review_choices": choices, "status": "review_queued",
+                "auto_generate_authorized": current.get("auto_generate_authorized", False) or options.auto_generate,
                 "message": "Your scene choices are saved. Building the test guides.", "updated_at": time.time()}
     records.update(f"jobs/{job_id}.json", save_review)
     pipeline._queue("long-review", job_id)
@@ -350,29 +375,20 @@ def review_parent(job_id: str, options: ReviewBody, x_firebase_token: str | None
 
 @app.post(PREFIX + "/jobs/{job_id}/generate")
 def generate_parent(job_id: str, approval: Approval, x_firebase_token: str | None = Header(default=None)):
-    actor, _ = account(x_firebase_token, enabled=True)
+    actor, _ = account(x_firebase_token)
     parent = owned(job_id, actor)
     _, records, cloud, pipeline = services()
     if not approval.approved:
         raise PublicError("Approve the test-credit quote and real provider spend before generation.")
     if parent["status"] != "ready":
         return {"job": view(parent)}
-    children = pipeline.preflight(parent)
-    parent = pipeline.update_job(job_id, children=children)
-    quote = sum(generation_credit_cost(child["duration"]) for child in parent["children"] if not child.get("passthrough"))
-    wallet(records, actor)
-    if quote:
-        apply_wallet_change(records, actor["account_id"], "long-generation:" + job_id, -quote,
-                            "generation", details={"environment": "one-minute-test"})
-    parent = pipeline.update_job(job_id, test_credits_reserved=quote, generation_credits=quote,
-                                 generation_approved=True)
-    pipeline._queue("long-generate", job_id)
+    parent = pipeline.approve_generation(job_id)
     return {"job": view(pipeline.get_job(job_id))}
 
 
 @app.post(PREFIX + "/jobs/{job_id}/retry")
 def retry_parent(job_id: str, options: dict, x_firebase_token: str | None = Header(default=None)):
-    actor, _ = account(x_firebase_token, enabled=True)
+    actor, _ = account(x_firebase_token)
     owned(job_id, actor)
     _, _, _, pipeline = services()
     kind = options.get("kind")
@@ -423,3 +439,6 @@ def task(operation: str, body: Task, authorization: str | None = Header(default=
         raise PublicError("Unknown test task.", 404)
     getattr(pipeline, methods[operation])(body.job_id)
     return {"ok": True}
+
+
+register_diagnostics(app, account, owned)

@@ -62,3 +62,27 @@ it("records only allowlisted cleanup failure reasons", async () => {
   expect(bodies[1]).not.toHaveProperty("cleanup_reason");
   expect(JSON.stringify(bodies)).not.toContain("private");
 });
+
+it.each(["recastfx-polished-preview.web.app", "recastfx-polished-preview.firebaseapp.com"])("keeps errors and timings on the isolated backend for %s", async hostname => {
+  vi.stubGlobal("location", { protocol: "https:", hostname });
+  const { reportClientError, reportClientTiming } = await import("../diagnostics");
+  reportClientError("cleanup_runtime", new TypeError("private-media"), 502, "gpu_session_create");
+  reportClientTiming("cleanup_inference", 12.34);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+    "/api/long-renders/diagnostics", "/api/long-renders/diagnostics/timing",
+  ]);
+  for (const [, request] of vi.mocked(fetch).mock.calls) {
+    expect(request!.body).not.toContain("private");
+    expect(request!.credentials).toBe("omit");
+    expect(request!.headers).toMatchObject({ "X-Firebase-Token": "private-auth-token" });
+  }
+});
+
+it("keeps production diagnostics on their existing routes", async () => {
+  vi.stubGlobal("location", { protocol: "https:", hostname: "recastfx.com" });
+  const { reportClientError, reportClientTiming } = await import("../diagnostics");
+  reportClientError("runtime"); reportClientTiming("cleanup_queue", .2);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(["/api/diagnostics", "/api/diagnostics/timing"]);
+});

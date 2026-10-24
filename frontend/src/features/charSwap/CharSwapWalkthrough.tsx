@@ -40,7 +40,8 @@ import { isUploadUnconfirmed } from "./model/preparation";
 import { useApiKeyPreview } from "./hooks/useApiKeyPreview";
 import { ApiKeySettingsDialog } from "./components/ApiKeySettingsDialog";
 import { loadAccountAccess } from "./services/commerce";
-import { MAX_SOURCE_BYTES } from "./limits";
+import { MAX_SOURCE_BYTES, TARGET_COLORS } from "./limits";
+import { isLongRenderPreviewHost } from "./longRender/api";
 import { ReferenceCleanupProvider } from "./components/ReferenceCleanupProvider";
 import { ReferenceCleanupWait } from "./components/ReferenceCleanupWait";
 import { CreationProgress } from "./components/CreationProgress";
@@ -111,6 +112,7 @@ export function CharSwapWalkthrough({
 }: CharSwapWalkthroughProps = {}) {
   const {
     step,
+    maxClipSeconds,
     clip,
     trim,
     targets,
@@ -137,6 +139,7 @@ export function CharSwapWalkthrough({
   } = useCharSwapStore(
     useShallow((state) => ({
       step: state.step,
+      maxClipSeconds: state.maxClipSeconds ?? 15,
       clip: state.clip,
       trim: state.trim,
       targets: state.targets,
@@ -177,7 +180,9 @@ export function CharSwapWalkthrough({
   const [pendingCreate, setPendingCreate] = useState(false);
   const [waitingForCleanup,setWaitingForCleanup]=useState(false);
   const { key: apiKey, hasKey, isSampleKey, saveKey, clearKey } = useApiKeyPreview();
+  const preview = isLongRenderPreviewHost();
   useEffect(() => {
+    if (preview) return;
     let active = true;
     void loadAccountAccess().then(access => {
       if (!active) return;
@@ -186,11 +191,15 @@ export function CharSwapWalkthrough({
       if (access.api_key_enabled) setAccessMode("api-key");
     }).catch(() => { if (active) setApiKeyAllowed(false); });
     return () => { active = false; };
-  }, []);
+  }, [preview]);
   useEffect(() => {
     if (!apiKeyAllowed && accessMode === "api-key") { setAccessMode("credits"); clearKey(); }
   }, [apiKeyAllowed, accessMode, clearKey]);
   const pipeline = useLivePipeline(apiKey, provider, accessMode);
+  useEffect(() => {
+    if (pipeline.job && !["failed", "completed"].includes(pipeline.job.status)) return;
+    useCharSwapStore.getState().setMaxClipSeconds(pipeline.maxClipSeconds ?? 15);
+  }, [pipeline.maxClipSeconds, pipeline.job?.id, pipeline.job?.status]);
   const ownCredits = useLiveCredits(!credits, pipeline.job?.status);
   const creditAccount = credits ?? ownCredits;
   const secureSite = isSecureLiveOrigin();
@@ -229,6 +238,7 @@ export function CharSwapWalkthrough({
   const busy =
     locked || assets.busy || loadingDemo || assets.pendingReferences.length > 0;
   const state = {
+    maxClipSeconds,
     watermarkBonusQuote: creditAccount.catalog?.watermark_bonus_credits,
     easyMode,
     submitWithoutAudio,
@@ -266,9 +276,12 @@ export function CharSwapWalkthrough({
   ).filter((item) => item !== "trim");
   const current = flowSteps.indexOf(clipStep ? "clip" : step);
   const selectedDuration = trimDuration(trim);
+  const reviewTargets = pipeline.job?.selection_targets?.map((target, index) => ({
+    ...target, color: target.color ?? TARGET_COLORS[index], thumbnail: target.thumbnail_url,
+  })) ?? targets;
   const validLiveTrim =
     selectedDuration >= 4 &&
-    selectedDuration <= 15 &&
+    selectedDuration <= maxClipSeconds &&
     Math.abs(selectedDuration - Math.round(selectedDuration)) < 1e-6;
   const singleCharacterBlocked = live && (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) && pipeline.multiCharacters === false && (targets.length > 1 || replaceAllPeople);
   const continueDisabled =
@@ -622,9 +635,10 @@ export function CharSwapWalkthrough({
                     key={pipeline.job.id + ":" + pipeline.job.tracking_revision}
                     sourceUrl={pipeline.job.source_preview_url}
                     trackingUrl={pipeline.job.tracking_url}
+                    sceneTrackingPreviews={pipeline.sceneTrackingPreviews}
                     segments={pipeline.job.tracking_segments}
-                    target={targets[0]}
-                    targets={targets}
+                    target={reviewTargets[0]}
+                    targets={reviewTargets}
                     references={targets.map(target => ({ targetId: target.id, asset: references.find(reference => reference.id === assignments[target.id]) }))}
                     duration={pipeline.job.duration ?? selectedDuration}
                     enhancedMasking={enhancedCharacterMasking}
@@ -635,7 +649,16 @@ export function CharSwapWalkthrough({
                     errorMessage={pipeline.error ?? (pipeline.job.tracking_review_error ? pipeline.job.message : undefined)}
                     message={pipeline.job.message}
                     initialChoices={pipeline.job.tracking_choices}
-                    onApply={pipeline.resolveTracking}
+                    onApply={async (choices) => {
+                      const saved = await pipeline.resolveTracking(choices);
+                      if (saved && preview) {
+                        // The isolated backend owns the approved rebuild and render
+                        // after this point; keep its saved job while showing progress.
+                        reviewTracking([]);
+                        visit("generation");
+                      }
+                      return saved;
+                    }}
                     onRefresh={() => void pipeline.refresh()}
                   />
                 ) : (
@@ -677,6 +700,7 @@ export function CharSwapWalkthrough({
               ))}
             {step === "review" && (
               <ReviewStep
+                requireGuidePreview={!preview}
                 live={live}
                 accessMode={accessMode}
                 apiKeyAllowed={apiKeyAllowed}
@@ -690,7 +714,7 @@ export function CharSwapWalkthrough({
                 busy={Boolean(locked) || singleCharacterBlocked}
                 creditBalance={balance}
                 generationCredits={generationCredits}
-                isAdmin={isAdmin}
+                isAdmin={pipeline.isAdmin ?? isAdmin}
                 hideAudioToggle={pipeline.hideAudioToggle}
                 faceMeshOptions={pipeline.faceMeshOptions}
                 watermarkOffer={creditAccount.catalog?.watermark_enabled && accessMode === "credits" ? {bonusCredits: creditAccount.catalog.watermark_bonus_credits ?? 25} : undefined}

@@ -258,3 +258,14 @@ describe("walkthrough gates", () => {
     expect(canVisitStep(readyState(), "review")).toBe(true);
   });
 });
+
+it("uses the minute limit throughout wizard prerequisites only when explicitly configured", () => {
+  const longClip = {...CLIP, duration: 90};
+  let state = setClip({...createInitialState(), maxClipSeconds: 60}, longClip);
+  expect(state.trim).toEqual([0, 60]);
+  state = setTrim(state, [10, 70]);
+  expect(state.trim).toEqual([10, 70]);
+  expect(canContinue(state, "trim")).toBe(true);
+  expect(getStepBlocker({...state, maxClipSeconds: 15}, "trim")).toContain("15");
+  expect(setClip(createInitialState(), longClip).trim).toEqual([0, 15]);
+});

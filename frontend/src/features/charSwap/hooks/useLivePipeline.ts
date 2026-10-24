@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PreparationProgressState } from "../model/preparation";
 import { isUploadUnconfirmed } from "../model/preparation";
 import type { WalkthroughState } from "../model/model";
+import { isLongRenderPreviewHost } from "../longRender/api";
+import { usePreviewPipeline } from "../longRender/usePreviewPipeline";
+import type { LongRenderJob } from "../longRender/api";
 import {
   assertLiveKey,
   createLiveJob,
@@ -30,6 +33,10 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "generating", "finalizin
 const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
+  maxClipSeconds?: 15 | 60;
+  isAdmin?: boolean;
+  rawJob?: LongRenderJob | null;
+  sceneTrackingPreviews?: Record<string, { url: string; offset: number }>;
   hideAudioToggle?: boolean;
   multiCharacters?: boolean;
   faceMeshOptions?: LivePipelineConfig["face_mesh_options"];
@@ -61,6 +68,13 @@ function safeMessage(message: string, key: string, token?: string): string {
 
 /** Credentials, session tokens and outstanding work belong to this mount. */
 export function useLivePipeline(apiKey: string, provider: GenerationProvider = "reAPI", accessMode: GenerationAccessMode = "api-key"): LivePipelineHandle {
+  const preview = isLongRenderPreviewHost();
+  const normalPipeline = useProductionPipeline(apiKey, provider, accessMode, !preview);
+  const previewPipeline = usePreviewPipeline(preview);
+  return preview ? previewPipeline : normalPipeline;
+}
+
+function useProductionPipeline(apiKey: string, provider: GenerationProvider, accessMode: GenerationAccessMode, active: boolean): LivePipelineHandle {
   const [config, setConfig] = useState<LivePipelineConfig | null>(null);
   const [job, setJob] = useState<LivePipelineJob | null>(null);
   const [preparationProgress, setPreparationProgress] = useState<PreparationProgressState | null>(null);
@@ -81,7 +95,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   const currentJob = useRef<LivePipelineJob | null>(null);
   const attemptedJobs = useRef(new Set<string>());
   const pollStartedAt = useRef(0);
-  const enabled = config?.live === true && config.available && isSecureLiveOrigin();
+  const enabled = active && config?.live === true && config.available && isSecureLiveOrigin();
   const jobId = job?.id;
   const jobStatus = job?.status;
 
@@ -132,7 +146,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   }, [reset]);
 
   useEffect(() => {
-    if (!isSecureLiveOrigin()) return;
+    if (!active || !isSecureLiveOrigin()) return;
     const controller = new AbortController();
     void getLiveConfig(controller.signal).then((value) => {
       if (!controller.signal.aborted) setConfig(value);
@@ -141,7 +155,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       // Its absence leaves the walkthrough usable and generation unavailable.
     });
     return () => controller.abort();
-  }, []);
+  }, [active]);
 
   useEffect(() => () => {
     cancelRequests();

@@ -32,6 +32,7 @@ export const STEPS: Step[] = [
   "generation",
 ];
 interface CharSwapStore extends WalkthroughState {
+  setMaxClipSeconds: (maximum: 15 | 60) => void;
   retryNotice?: string;
   retryNeedsSource?: boolean;
   restoreRetry: (draft: import("./services/jobRecovery").RetryDraft) => void;
@@ -67,6 +68,13 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   selectionVersion: 0,
   trackingReady: false,
   error: null,
+  setMaxClipSeconds: (maximum) => set((state) => {
+    if ((state.maxClipSeconds ?? 15) === maximum) return state;
+    const next = { ...state, maxClipSeconds: maximum };
+    const updated = state.clip && state.trim[1] - state.trim[0] > maximum
+      ? setTrim(next, [state.trim[0], state.trim[0] + maximum]) : next;
+    return { ...updated, selectionVersion: state.selectionVersion + 1, trackingReady: false };
+  }),
   setReplaceAllPeople: (enabled) => set((state) => {
     const updated = setReplaceAllPeople(state, enabled);
     return updated === state ? state : {...updated,
@@ -123,7 +131,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   loadClip: (clip) =>
     set((state) => ({
       ...(state.retryNeedsSource ? {...state, clip, retryNeedsSource: false,
-        trim: state.trim[1] <= clip.duration ? state.trim : [0, Math.min(15, Math.floor(clip.duration))] as [number, number],
+        trim: state.trim[1] <= clip.duration ? state.trim : [0, Math.min(state.maxClipSeconds ?? 15, Math.floor(clip.duration))] as [number, number],
         ...(state.trim[1] <= clip.duration ? {} : {targets: [], assignments: {}, replaceAllPeople: false}),
       } : {...setClip(state, clip), retryNotice: undefined}),
       selectionVersion: state.selectionVersion + 1,

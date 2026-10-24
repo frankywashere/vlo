@@ -1,6 +1,11 @@
 import {CLEANUP_FAILURE_REASONS} from "./browserCleanupProtocol";
 import type {CleanupFailureReason} from "./browserCleanupProtocol";
 import { accountToken } from "./accountContext";
+import { isLongRenderPreviewHost } from "../longRender/api";
+
+function diagnosticEndpoint(): string {
+  return isLongRenderPreviewHost() ? "/api/long-renders/diagnostics" : "/api/diagnostics";
+}
 
 type ErrorCategory = "runtime" | "unhandled_rejection" | "react" | "commerce_request" | "pipeline_request" | "library_timeout" | "library_aborted" | "library_network" | "library_http" | "library_response" | "library_video_decode" | "library_auth" | "cleanup_previous_interruption" | "cleanup_retry_after_interruption" | "cleanup_cpu_unsupported" | "cleanup_gpu_unsupported" | "cleanup_runtime" | "cleanup_cpu_fallback";
 const ERROR_TYPES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "NetworkError", "AbortError", "TimeoutError"]);
@@ -19,7 +24,7 @@ export function reportClientError(category: ErrorCategory, error?: unknown, http
   void (async () => {
     const token = await accountToken();
     if (!token) return;
-    await fetch("/api/diagnostics", {
+    await fetch(diagnosticEndpoint(), {
       method: "POST", credentials: "omit", keepalive: true,
       headers: {"Content-Type": "application/json", "X-Firebase-Token": token},
       body: JSON.stringify({category, error_type: errorType, ...(category.startsWith("cleanup_") && CLEANUP_FAILURE_REASONS.includes(cleanupReason as CleanupFailureReason) ? {cleanup_reason:cleanupReason} : {}), ...(httpStatus && httpStatus >= 400 && httpStatus <= 599 ? {http_status: httpStatus} : {})}),
@@ -52,7 +57,7 @@ export function reportClientTiming(stage: ClientStage, elapsedSeconds: number, o
   void (async () => {
     const token = await accountToken();
     if (!token) return;
-    await fetch("/api/diagnostics/timing", {method: "POST", credentials: "omit", keepalive: true,
+    await fetch(`${diagnosticEndpoint()}/timing`, {method: "POST", credentials: "omit", keepalive: true,
       headers: {"Content-Type": "application/json", "X-Firebase-Token": token},
       body: JSON.stringify({stage, elapsed_seconds: Number(elapsedSeconds.toFixed(6)), outcome}),
     });

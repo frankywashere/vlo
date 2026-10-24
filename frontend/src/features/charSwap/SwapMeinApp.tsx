@@ -28,10 +28,11 @@ import { useAccount } from "./hooks/useAccount";
 import { useLiveCredits } from "./hooks/useLiveCredits";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
-import { LongRenderPage } from "./longRender/LongRenderPage";
+import { PreviewLibrary } from "./longRender/PreviewLibrary";
+import { PreviewAdmin } from "./longRender/PreviewAdmin";
 import { isLongRenderPreviewHost, loadLongRenderCapabilities } from "./longRender/api";
 
-type AppView = "home" | "create" | "library" | "settings" | "admin" | "one-minute";
+type AppView = "home" | "create" | "library" | "settings" | "admin";
 type AccountState = ReturnType<typeof useAccount>;
 
 function readDestination(): AppView {
@@ -39,7 +40,7 @@ function readDestination(): AppView {
   if (["success", "cancelled"].includes(query.get("checkout") ?? ""))
     return "settings";
   const page = query.get("page");
-  if (page === "one-minute" && isLongRenderPreviewHost()) return "one-minute";
+  if (page === "one-minute" && isLongRenderPreviewHost()) return "library";
   return page === "create" ||
     page === "library" ||
     page === "settings" ||
@@ -51,6 +52,13 @@ function readDestination(): AppView {
 export function SwapMeinApp() {
   const account = useAccount();
   const [destination, setDestination] = useState<AppView>(readDestination);
+  useEffect(() => {
+    const url = new URL(globalThis.location.href);
+    if (isLongRenderPreviewHost() && url.searchParams.get("page") === "one-minute") {
+      url.searchParams.set("page", "library");
+      globalThis.history.replaceState(null, "", url);
+    }
+  }, []);
   const [colorMode, setColorMode] = useState<"light" | "dark">(() => {
     try {
       return localStorage.getItem("recastfx:appearance") === "dark"
@@ -149,7 +157,6 @@ function AccountWorkspace({
   const creationRef = useRef<CharSwapWalkthroughHandle>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [staffRole, setStaffRole] = useState<string | null>(null);
-  const [longRenderAvailable, setLongRenderAvailable] = useState(false);
   const [appError, setAppError] = useState("");
   const [jobStatus, setJobStatus] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(() => {
@@ -169,6 +176,12 @@ function AccountWorkspace({
   useEffect(() => {
     if (!account.user) return;
     let active = true;
+    if (isLongRenderPreviewHost()) {
+      void loadLongRenderCapabilities().then(capability => {
+        if (active) setStaffRole(capability.is_admin ? "owner" : null);
+      }).catch(() => { if (active) setStaffRole(null); });
+      return () => { active = false; };
+    }
     void loadAccountAccess()
       .then((access) => {
         if (active) setStaffRole(access.role);
@@ -179,18 +192,6 @@ function AccountWorkspace({
     return () => {
       active = false;
     };
-  }, [account.user]);
-  useEffect(() => {
-    if (!account.user || !isLongRenderPreviewHost()) return;
-    let active = true;
-    const refresh = () => {
-      void loadLongRenderCapabilities().then(value => {
-        if (active) setLongRenderAvailable(value.enabled || value.is_admin);
-      }).catch(() => { if (active) setLongRenderAvailable(false); });
-    };
-    refresh();
-    globalThis.addEventListener("recastfx:long-render-settings", refresh);
-    return () => { active = false; globalThis.removeEventListener("recastfx:long-render-settings", refresh); };
   }, [account.user]);
   useEffect(() => () => useCharSwapStore.getState().reset(), []);
   useEffect(() => {
@@ -251,7 +252,6 @@ function AccountWorkspace({
         onCreate={() => navigate("create")}
         onLibrary={() => navigate("library")}
         onAdmin={staffRole ? () => navigate("admin") : undefined}
-        onLongRender={longRenderAvailable ? () => navigate("one-minute") : undefined}
         onSettings={() => showSettings("account")}
         locked={account.loading}
         accountName={account.displayName ?? account.user?.displayName}
@@ -285,7 +285,8 @@ function AccountWorkspace({
           />
         </Box>
       )}
-      {view === "library" && account.user && (
+      {view === "library" && account.user && isLongRenderPreviewHost() && <PreviewLibrary onCreate={() => navigate("create")} />}
+      {view === "library" && account.user && !isLongRenderPreviewHost() && (
         <AccountLibrary retryDisabled={busy} onCreate={() => navigate("create")} onRetry={(draft) => {
           setStarted(true);
           useCharSwapStore.getState().restoreRetry(draft);
@@ -309,8 +310,7 @@ function AccountWorkspace({
           locked={busy}
         />
       )}
-      {view === "admin" && account.user && staffRole && <AdminPage />}
-      {view === "one-minute" && account.user && isLongRenderPreviewHost() && <LongRenderPage />}
+      {view === "admin" && account.user && staffRole && (isLongRenderPreviewHost() ? <PreviewAdmin /> : <AdminPage />)}
       <Dialog
         open={accountOpen && !account.user}
         onClose={() => {

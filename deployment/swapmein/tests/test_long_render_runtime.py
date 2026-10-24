@@ -3,6 +3,8 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
+from google.api_core.exceptions import AlreadyExists
+
 import pytest
 
 from swapmein.commerce import wallet_path
@@ -145,6 +147,177 @@ def runtime(monkeypatch):
 def completed():
     return {"status": "completed", "usage": {"credits": 500},
             "output": {"video_urls": ["https://cdn.reapi.ai/output.mp4"]}}
+
+
+def reset_generation_approval(runtime, *, auto=False):
+    pipeline, records, _, _ = runtime
+    pipeline.update_job(PARENT_ID, generation_approved=False, test_credits_reserved=0,
+                        auto_generate_authorized=auto)
+    records.data[wallet_path(ACCOUNT)] = {"balance": 10000,
+        "applied": {"long-test-bootstrap-v1": 10000}, "transactions": []}
+
+
+def prepared_runtime(runtime, monkeypatch, *, auto=False, review=False):
+    reset_generation_approval(runtime, auto=auto)
+    pipeline = runtime[0]
+    pipeline.update_job(PARENT_ID, status="queued", guide_audio_uri="gs://test/audio",
+        processed_reference_uris=["gs://test/reference"],
+        tracking_metadata={"scene_cuts": []}, normalized_targets=[])
+    monkeypatch.setattr("swapmein.long_render_runtime.prepare_children", lambda pipeline, parent, *args: {
+        "status": "tracking_review" if review else "ready", "children": pipeline._children(parent)})
+    return pipeline
+
+
+def test_default_preparation_still_waits_for_explicit_generation_approval(runtime, monkeypatch):
+    pipeline = prepared_runtime(runtime, monkeypatch)
+    parent = pipeline.prepare(PARENT_ID)
+    assert parent["status"] == "ready" and not parent.get("generation_approved")
+    assert not runtime[2].queues and not runtime[3].calls
+    assert runtime[1].data[wallet_path(ACCOUNT)]["balance"] == 10000
+
+
+def test_approved_auto_intent_generates_after_preparation_without_a_browser(runtime, monkeypatch):
+    pipeline = prepared_runtime(runtime, monkeypatch, auto=True)
+    parent = pipeline.prepare(PARENT_ID)
+    pipeline.prepare(PARENT_ID)
+    assert parent["generation_approved"] and parent["generation_queue_confirmed"]
+    assert parent["test_credits_reserved"] == 160
+    assert [kind for kind, _, _ in runtime[2].queues] == ["long-generate"]
+    wallet = runtime[1].data[wallet_path(ACCOUNT)]
+    assert wallet["balance"] == 9840 and len(wallet["transactions"]) == 1
+    assert not runtime[3].calls
+
+
+def test_auto_intent_pauses_for_scene_review_and_continues_only_after_review(runtime, monkeypatch):
+    pipeline = prepared_runtime(runtime, monkeypatch, auto=True, review=True)
+    parent = pipeline.prepare(PARENT_ID)
+    assert parent["status"] == "tracking_review" and not parent.get("generation_approved")
+    assert not runtime[2].queues and runtime[1].data[wallet_path(ACCOUNT)]["balance"] == 10000
+    monkeypatch.setattr("swapmein.long_render_runtime.resolve_parent_review", lambda pipeline, parent, *args: {
+        "status": "ready", "children": pipeline._children(parent)})
+    pipeline.review(PARENT_ID, [{"segment_id": "scene-1", "absent": True}])
+    pipeline.review(PARENT_ID, [{"segment_id": "scene-1", "absent": True}])
+    assert pipeline.get_job(PARENT_ID)["generation_approved"]
+    assert runtime[1].data[wallet_path(ACCOUNT)]["balance"] == 9840
+    assert [kind for kind, _, _ in runtime[2].queues] == ["long-generate"]
+    assert not runtime[3].calls
+
+
+def test_concurrent_approval_callbacks_debit_and_confirm_initial_queue_once(runtime, monkeypatch):
+    reset_generation_approval(runtime, auto=True)
+    pipeline, records, cloud, provider = runtime
+    original = records.update
+    entered = False
+    def interleave(key, mutate):
+        nonlocal entered
+        result = original(key, mutate)
+        if key == wallet_path(ACCOUNT) and not entered and "long-generation:" + PARENT_ID in result["applied"]:
+            entered = True
+            pipeline.approve_generation(PARENT_ID)
+        return result
+    monkeypatch.setattr(records, "update", interleave)
+    pipeline.approve_generation(PARENT_ID)
+    assert records.data[wallet_path(ACCOUNT)]["balance"] == 9840
+    assert len(records.data[wallet_path(ACCOUNT)]["transactions"]) == 1
+    assert len(cloud.queues) == 1 and not provider.calls
+
+
+@pytest.mark.parametrize("lost_ack", ["wallet", "parent"])
+def test_generation_approval_recovers_storage_ack_loss_without_another_debit(runtime, monkeypatch, lost_ack):
+    reset_generation_approval(runtime, auto=True)
+    pipeline, records, cloud, provider = runtime
+    original = records.update
+    lost = False
+    def lose_ack(key, mutate):
+        nonlocal lost
+        result = original(key, mutate)
+        eligible = (key == wallet_path(ACCOUNT) and "long-generation:" + PARENT_ID in result.get("applied", {})
+                    if lost_ack == "wallet" else key == f"jobs/{PARENT_ID}.json" and result.get("generation_approved"))
+        if eligible and not lost:
+            lost = True
+            raise RuntimeError("Storage acknowledgement lost")
+        return result
+    monkeypatch.setattr(records, "update", lose_ack)
+    with pytest.raises(RuntimeError, match="acknowledgement"):
+        pipeline.approve_generation(PARENT_ID)
+    pipeline.retry(PARENT_ID, "status")
+    assert pipeline.get_job(PARENT_ID)["generation_queue_confirmed"]
+    assert records.data[wallet_path(ACCOUNT)]["balance"] == 9840
+    assert len(records.data[wallet_path(ACCOUNT)]["transactions"]) == 1
+    assert len(cloud.queues) == 1 and not provider.calls
+
+
+def test_generation_queue_ack_loss_reuses_the_same_named_task(runtime, monkeypatch):
+    reset_generation_approval(runtime, auto=True)
+    pipeline, records, cloud, provider = runtime
+    named = set()
+    attempts = []
+    def enqueue(kind, identifier, **options):
+        token = options["task_token"]
+        attempts.append(token)
+        if token in named:
+            raise AlreadyExists("Task already accepted")
+        named.add(token)
+        cloud.queues.append((kind, identifier, options))
+        raise RuntimeError("Queue acknowledgement lost")
+    monkeypatch.setattr(cloud, "enqueue", enqueue)
+    pending = pipeline.approve_generation(PARENT_ID)
+    assert pending["queue_pending"] == "long-generate"
+    pipeline.retry(PARENT_ID, "status")
+    assert attempts[0] == attempts[1] and len(named) == len(cloud.queues) == 1
+    assert pipeline.get_job(PARENT_ID)["generation_queue_confirmed"]
+    assert records.data[wallet_path(ACCOUNT)]["balance"] == 9840 and not provider.calls
+
+
+def test_cancel_between_debit_and_parent_approval_refunds_without_queuing(runtime, monkeypatch):
+    reset_generation_approval(runtime, auto=True)
+    pipeline, records, cloud, provider = runtime
+    original = records.update
+    cancelled = False
+    def interleave(key, mutate):
+        nonlocal cancelled
+        result = original(key, mutate)
+        if key == wallet_path(ACCOUNT) and not cancelled and "long-generation:" + PARENT_ID in result["applied"]:
+            cancelled = True
+            pipeline.cancel(PARENT_ID)
+        return result
+    monkeypatch.setattr(records, "update", interleave)
+    result = pipeline.approve_generation(PARENT_ID)
+    assert result["status"] == "cancelled" and not cloud.queues and not provider.calls
+    assert records.data[wallet_path(ACCOUNT)]["balance"] == 10000
+
+
+def test_wallet_ack_loss_can_be_cancelled_before_parent_reservation_is_saved(runtime, monkeypatch):
+    reset_generation_approval(runtime, auto=True)
+    pipeline, records, cloud, provider = runtime
+    original = records.update
+    lost = False
+    def lose_ack(key, mutate):
+        nonlocal lost
+        result = original(key, mutate)
+        if key == wallet_path(ACCOUNT) and not lost and "long-generation:" + PARENT_ID in result.get("applied", {}):
+            lost = True
+            raise RuntimeError("Wallet acknowledgement lost")
+        return result
+    monkeypatch.setattr(records, "update", lose_ack)
+    with pytest.raises(RuntimeError):
+        pipeline.approve_generation(PARENT_ID)
+    assert pipeline.get_job(PARENT_ID)["test_credits_reserved"] == 0
+    pipeline.cancel(PARENT_ID)
+    pipeline.cancel(PARENT_ID)
+    assert records.data[wallet_path(ACCOUNT)]["balance"] == 10000
+    assert not cloud.queues and not provider.calls
+
+
+def test_insufficient_test_credits_retains_guides_and_never_queues_generation(runtime, monkeypatch):
+    pipeline = prepared_runtime(runtime, monkeypatch, auto=True)
+    runtime[1].data[wallet_path(ACCOUNT)]["balance"] = 10
+    result = pipeline.prepare(PARENT_ID)
+    assert result["status"] == "failed" and result["error_code"] == "long_render_credits"
+    assert "no generation was submitted" in result["message"]
+    assert all(child.get("guide_uri") for child in result["children"])
+    assert runtime[1].data[wallet_path(ACCOUNT)]["balance"] == 10
+    assert not runtime[2].queues and not runtime[3].calls
 
 
 def test_admission_is_idempotent_and_preserves_lifetime_reservations(runtime):

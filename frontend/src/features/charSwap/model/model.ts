@@ -63,6 +63,8 @@ export interface MatchDecision {
 }
 
 export interface WalkthroughState {
+  /** Client policy only; the selected backend independently enforces its limit. */
+  maxClipSeconds?: 15 | 60;
   replaceAllPeople?: boolean;
   easyMode?: boolean;
   submitWithoutAudio?: boolean;
@@ -89,7 +91,9 @@ const STEPS: Step[] = [
   "generation",
 ];
 const MIN_CLIP_SECONDS = 1;
-const MAX_CLIP_SECONDS = 15;
+export function clipLimit(state: Pick<WalkthroughState, "maxClipSeconds">): number {
+  return state.maxClipSeconds === 60 ? 60 : 15;
+}
 
 export function createInitialState(): WalkthroughState {
   return {
@@ -118,7 +122,7 @@ export function setClip(
     clip,
     trim: [
       0,
-      Math.min(Math.max(Math.floor(clip.duration), 0), MAX_CLIP_SECONDS),
+      Math.min(Math.max(Math.floor(clip.duration), 0), clipLimit(state)),
     ],
     targets: [],
     references: [],
@@ -141,7 +145,7 @@ export function setTrim(
   const start = Math.max(0, Math.min(earlier, duration - minimum));
   const end = Math.min(
     duration,
-    start + MAX_CLIP_SECONDS,
+    start + clipLimit(state),
     Math.max(start + minimum, later),
   );
   if (state.trim[0] === start && state.trim[1] === end) return state;
@@ -327,9 +331,9 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
         start < 0 ||
         end > state.clip.duration + 1e-6 ||
         trimDuration(state.trim) < MIN_CLIP_SECONDS ||
-        trimDuration(state.trim) > MAX_CLIP_SECONDS
+        trimDuration(state.trim) > clipLimit(state)
       ) {
-        return "Choose a section between 1 and 15 seconds.";
+        return `Choose a section between 1 and ${clipLimit(state)} seconds.`;
       }
       return null;
     }

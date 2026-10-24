@@ -22,6 +22,17 @@ from test_long_render_api import HEADERS, intake, service
 PROJECT = "charswap-franky-20261013"
 
 
+def test_preview_hosting_has_no_production_api_fallback():
+    root = Path(__file__).resolve().parents[3]
+    preview = json.loads((root / "firebase.preview.json").read_text())["hosting"]
+    api_routes = [route for route in preview["rewrites"] if route["source"].startswith("/api/")]
+    assert api_routes
+    assert all(route["run"]["serviceId"] == "recastfx-long-test" for route in api_routes)
+    assert any(route["source"] == "/api/**" for route in api_routes)
+    production = json.loads((root / "firebase.launch.json").read_text())["hosting"]
+    assert all(route.get("run", {}).get("serviceId") != "recastfx-long-test" for route in production["rewrites"])
+
+
 def settings(**fields):
     baseline = replace(Settings(), app_bucket=PROJECT + "-long-test", worker_bucket=PROJECT + "-long-test",
         service_url="https://recastfx-long-test-634011479314.us-east4.run.app",

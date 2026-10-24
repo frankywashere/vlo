@@ -18,12 +18,13 @@ export function TrimStep({
   estimatedCredits,
   creditBalance,
 }: TrimStepProps) {
-  const { clip, trim, targets, changeTrim } = useCharSwapStore(
+  const { clip, trim, targets, changeTrim, maxSeconds } = useCharSwapStore(
     useShallow((state) => ({
       clip: state.clip,
       trim: state.trim,
       targets: state.targets,
       changeTrim: state.changeTrim,
+      maxSeconds: state.maxClipSeconds === 60 ? 60 as const : 15 as const,
     })),
   );
   if (!clip) return null;
@@ -49,6 +50,7 @@ export function TrimStep({
             value={trim}
             duration={clip.duration}
             onChange={changeTrim}
+            maxSeconds={maxSeconds}
           />
         </Box>
         <Typography variant="caption" color="text.secondary">
@@ -88,11 +90,11 @@ export function TrimStep({
             onCommit={(value) => {
               if (value.trim() && Number.isFinite(Number(value)))
                 changeTrim(
-                  resizeTrim(trim, "start", Number(value), clip.duration),
+                  resizeTrim(trim, "start", Number(value), clip.duration, maxSeconds),
                 );
             }}
             inputProps={{
-              min: Math.max(0, trim[1] - 15),
+              min: Math.max(0, trim[1] - maxSeconds),
               max: trim[1] - minimumLength,
               step: 1,
             }}
@@ -104,7 +106,7 @@ export function TrimStep({
             onCommit={(value) => {
               if (value.trim() && Number.isFinite(Number(value)))
                 changeTrim(
-                  resizeTrim(trim, "end", Number(value), clip.duration),
+                  resizeTrim(trim, "end", Number(value), clip.duration, maxSeconds),
                 );
             }}
             inputProps={{
@@ -148,7 +150,7 @@ export function TrimStep({
           </Box>
         )}
         <Typography variant="body2" color="text.secondary">
-          4–15 seconds. Length snaps to whole seconds.
+          4–{maxSeconds} seconds. Length snaps to whole seconds.
         </Typography>
         {!!targets.length && (
           <Typography variant="caption" color="text.secondary">

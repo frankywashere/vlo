@@ -1,4 +1,5 @@
 import {
+  Alert,
   Box,
   Tab,
   Tabs,
@@ -101,7 +102,11 @@ export function SettingsPage({
             onSignOut={onSignOut}
           />
         )}
-        {activeTab === "credits" && <CreditsPanel credits={credits} />}
+        {activeTab === "credits" && (credits.isolatedPreview ? <Box>
+          <Typography variant="h4" sx={{ mb: 2 }}>{credits.wallet?.balance.toLocaleString() ?? "…"} test credits</Typography>
+          <Alert severity="info">This test site has a separate credit balance. Purchases are disabled here. Provider calls still use real funds.</Alert>
+          {credits.error && <Alert severity="error" sx={{ mt: 2 }}>{credits.error}</Alert>}
+        </Box> : <CreditsPanel credits={credits} />)}
       </Box>
     </Box>
   );

@@ -83,3 +83,14 @@ it("blocks final submission if a selected clean photo is still pending on the re
   expect(screen.getByRole("button",{name:"Generate video"})).toBeDisabled();
   expect(screen.getByText(/Wait for background cleanup/)).toBeInTheDocument();
 });
+
+it("allows an isolated parent after scene review without requiring a nonexistent full-length guide, preserving the production guard", () => {
+  useCharSwapStore.getState().setEasyMode(false);
+  const props = {...properties(), trackingReady: true, job: {id: "parent", status: "ready" as const, easy_mode: false}};
+  const {rerender} = render(<ReviewStep {...props} />);
+  expect(screen.getByRole("button", {name: "Generate video"})).toBeDisabled();
+  rerender(<ReviewStep {...props} requireGuidePreview={false} />);
+  expect(screen.getByRole("button", {name: "Generate video"})).toBeEnabled();
+  rerender(<ReviewStep {...props} trackingReady={false} requireGuidePreview={false} />);
+  expect(screen.getByRole("button", {name: "Generate video"})).toBeDisabled();
+});

@@ -7,7 +7,9 @@ import tempfile
 import time
 import uuid
 
-from .commerce import apply_wallet_change, generation_credit_cost
+from google.api_core.exceptions import AlreadyExists
+
+from .commerce import apply_wallet_change, generation_credit_cost, wallet_path
 from .diagnostics import emit, provider_billing, timed
 from .errors import PublicError
 from .finance import record_expense
@@ -29,6 +31,12 @@ POLL_SECONDS = 30
 MAX_POLLS_PER_CHILD = 120
 LIBRARY_SECONDS = 30 * 86400
 MAX_REVIEW_SECTIONS = 1200
+
+
+def test_wallet(records, account_id):
+    """Bootstrap the isolated wallet once, including browser-free continuations."""
+    return apply_wallet_change(records, account_id, "long-test-bootstrap-v1", 10000,
+                               "test_grant", details={"environment": "one-minute-test"})
 
 
 class LongRenderPipeline:
@@ -172,7 +180,8 @@ class LongRenderPipeline:
     def prepare(self, identifier):
         parent = self._claim(identifier, {"queued"}, "preparing", lease_seconds=PREPARATION_SECONDS + 60)
         if not parent:
-            return self.get_job(identifier)
+            current = self.get_job(identifier)
+            return self.approve_generation(identifier) if current["status"] == "ready" and current.get("auto_generate_authorized") else current
         self.cloud.job_id = identifier
         remaining = self._remaining(identifier)
         try:
@@ -235,10 +244,11 @@ class LongRenderPipeline:
                 thumbnails = {segment["id"]: segment["thumbnail_uri"]
                               for segment in result.get("tracking_plan", {}).get("segments", [])
                               if segment.get("thumbnail_uri")}
-                return self.update_job(identifier, **result, generation_credits=quote,
+                parent = self.update_job(identifier, **result, generation_credits=quote,
                     scene_thumbnail_uris=thumbnails, operation_until=None, queue_pending=None,
                     message="Check each person and scene before generating." if result["status"] == "tracking_review"
                     else "The prepared parts are ready. Approve the total test-credit quote to generate.")
+                return self.approve_generation(identifier) if parent["status"] == "ready" and parent.get("auto_generate_authorized") else parent
         except Exception as error:
             return self._fail(identifier, "preparation", error)
 
@@ -247,7 +257,8 @@ class LongRenderPipeline:
         parent = self._claim(identifier, {"tracking_review", "review_queued"}, "reviewing",
                              lease_seconds=PREPARATION_SECONDS + 60)
         if not parent:
-            return self.get_job(identifier)
+            current = self.get_job(identifier)
+            return self.approve_generation(identifier) if current["status"] == "ready" and current.get("auto_generate_authorized") else current
         try:
             self.cloud.check_cap()
             remaining = self._remaining(identifier)
@@ -256,9 +267,10 @@ class LongRenderPipeline:
                 remaining()
             result["children"] = self.preflight({**parent, **result})
             quote = sum(generation_credit_cost(child["duration"]) for child in result["children"] if not child.get("passthrough"))
-            return self.update_job(identifier, **result, pending_review_choices=choices,
+            parent = self.update_job(identifier, **result, pending_review_choices=choices,
                 generation_credits=quote, operation_until=None, queue_pending=None,
                 message="Your reviewed scene matches are saved. Approve the total quote to generate.")
+            return self.approve_generation(identifier) if parent.get("auto_generate_authorized") else parent
         except PublicError as error:
             if error.code in {"tracking_review_invalid", "tracking_target_conflict", "tracking_background"}:
                 return self.update_job(identifier, status="tracking_review", review_required=True,
@@ -277,9 +289,77 @@ class LongRenderPipeline:
             raise PublicError("Private generation credentials are unavailable. Saved parts are retained.", 503)
         return key
 
+    def _queue_approved_generation(self, parent):
+        """A deterministic task name survives a lost create-task acknowledgement."""
+        if parent.get("generation_queue_confirmed") or parent.get("cancel_requested"):
+            return parent
+        token = hashlib.sha256(("long-approved-generation:" + parent["id"]).encode()).hexdigest()[:32]
+        try:
+            self.cloud.enqueue("long-generate", parent["id"], task_token=token)
+        except AlreadyExists:
+            pass
+        except Exception as error:
+            emit("long_render_queue_pending", job_id=parent["id"], kind="long-generate", error=error)
+            return self.update_job(parent["id"], queue_recovery_status="required",
+                message="Background queue confirmation is pending. Your approved work is retained; do not start another render.")
+
+        def confirm(current):
+            cleared = {"queue_pending": None, "queue_recovery_status": None} if current.get("queue_pending") == "long-generate" else {}
+            return {**current, **cleared, "generation_queue_confirmed": True, "updated_at": time.time()}
+        return self.records.update(f"jobs/{parent['id']}.json", confirm)
+
+    def approve_generation(self, identifier):
+        """Share explicit and saved automatic approval without repeating a debit or POST.
+
+        The wallet transaction is independently idempotent. Saving the parent
+        approval and pending task before enqueue permits recovery after either
+        storage or queue acknowledgements are lost. Paid provider POSTs remain
+        protected by the existing atomic child claim in generate().
+        """
+        parent = self.get_job(identifier)
+        if parent.get("cancel_requested") or parent["status"] != "ready":
+            return parent
+        children = self.preflight(parent)
+        parent = self.admit(parent)
+        quote = sum(generation_credit_cost(child["duration"]) for child in children if not child.get("passthrough"))
+        test_wallet(self.records, parent["account_id"])
+        if quote:
+            try:
+                apply_wallet_change(self.records, parent["account_id"], "long-generation:" + identifier, -quote,
+                                    "generation", details={"environment": "one-minute-test"})
+            except PublicError as error:
+                emit("long_generation_approval_failed", job_id=identifier, error=error, environment="one-minute-test")
+                if error.status_code == 402:
+                    raise PublicError("This test wallet has insufficient credits. Saved guides are retained; no generation was submitted.",
+                                      402, code="long_render_credits") from error
+                raise
+
+        def approve(current):
+            if current.get("cancel_requested") or current["status"] != "ready":
+                return current
+            return {**current, "test_credits_reserved": quote, "generation_credits": quote,
+                    "generation_approved": True,
+                    **({"queue_pending": "long-generate", "message": "Queued for generation on the isolated test backend."}
+                       if not current.get("generation_queue_confirmed") else {}),
+                    "updated_at": time.time()}
+        parent = self.records.update(f"jobs/{identifier}.json", approve)
+        if parent.get("cancel_requested"):
+            # Cancellation may race the independently atomic wallet debit.
+            self._refund_unsubmitted({**parent, "test_credits_reserved": quote})
+            return self.get_job(identifier)
+        if parent["status"] != "ready":
+            return parent
+        return self._queue_approved_generation(parent)
+
     def _refund(self, parent, child):
-        if not parent.get("account_id") or not parent.get("test_credits_reserved") or child.get("passthrough"):
+        if not parent.get("account_id") or child.get("passthrough"):
             return
+        if not parent.get("test_credits_reserved"):
+            # A wallet write can succeed before its acknowledgement or parent
+            # reservation is saved. Cancellation still owes that debit back.
+            wallet, _ = self.records.read(wallet_path(parent["account_id"]))
+            if (wallet or {}).get("applied", {}).get("long-generation:" + parent["id"], 0) >= 0:
+                return
         allocation = generation_credit_cost(child["duration"])
         apply_wallet_change(self.records, parent["account_id"],
             f"long-refund:{parent['id']}:{child['index']}", allocation, "refund",
@@ -692,6 +772,8 @@ class LongRenderPipeline:
                             operation_until=None, message="Retrying assembly from saved parts.")
             self._queue("long-assemble", identifier)
         elif kind == "status":
+            if parent["status"] == "ready" and parent.get("auto_generate_authorized") and not parent.get("generation_queue_confirmed"):
+                return self.approve_generation(identifier)
             children = self._children(parent)
             if any(child.get("status") in {"submitting", "submission_unknown"} for child in children):
                 raise PublicError("A submission without a confirmed task needs operator reconciliation. Background recovery cannot submit it again.", 409)
@@ -718,6 +800,8 @@ class LongRenderPipeline:
                             or any(child["status"] not in {"ready", "succeeded"} and not child.get("passthrough") for child in children)):
                         raise PublicError("The remaining generation plan is not approved or a part needs review. No new generation was submitted.", 409)
                     self.preflight(parent)
+                    if not parent.get("generation_queue_confirmed"):
+                        return self._queue_approved_generation(parent)
                 if pending == "long-assemble" and (parent["status"] != "finalizing"
                         or any(child["status"] != "succeeded" and not child.get("passthrough") for child in children)):
                     raise PublicError("Save every required part before resuming assembly.", 409)

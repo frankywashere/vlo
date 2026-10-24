@@ -121,5 +121,7 @@ describe("isolated one-minute API", () => {
     expect(longRenderNeedsPolling({ ...job, status: "completed", comparison_status: "running" })).toBe(true);
     expect(longRenderNeedsPolling({ ...job, status: "completed", comparison_status: "ready" })).toBe(false);
     expect(longRenderNeedsPolling({ ...job, status: "completed", comparison_status: "failed" })).toBe(false);
+    expect(longRenderNeedsPolling({ ...job, status: "ready", auto_generate: true })).toBe(true);
+    expect(longRenderNeedsPolling({ ...job, status: "ready", auto_generate: false })).toBe(false);
   });
 });

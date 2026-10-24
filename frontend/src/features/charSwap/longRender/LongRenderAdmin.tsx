@@ -40,15 +40,15 @@ export function LongRenderAdmin() {
   }
   return <Box sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
     <Stack spacing={2}>
-      <Typography component="h3" variant="h6">One-minute renders · test site</Typography>
-      <Typography variant="body2" color="text.secondary">These settings apply to new one-minute tests. The normal 15-second workflow keeps its existing settings.</Typography>
+      <Typography component="h3" variant="h6">Generation settings</Typography>
+      <Typography variant="body2" color="text.secondary">All settings below apply to new renders from Create on this test site. Turning one-minute renders off limits new clips to 15 seconds. Existing renders keep their saved settings.</Typography>
       {error && <Alert severity="error">{error}</Alert>}
-      {saved && <Alert severity="success">One-minute test settings saved.</Alert>}
+      {saved && <Alert severity="success">Test site settings saved.</Alert>}
       {!settings && !error && <Typography>Loading test settings…</Typography>}
       {settings && <>
         <FormControlLabel label="Enable one-minute renders on test site" control={<Switch checked={settings.enabled} disabled={busy}
           onChange={(_, enabled) => { setSettings({ ...settings, enabled }); setSaved(false); }} />} />
-        <TextField select label="One-minute generation prompts" value={settings.prompt_variant ?? "cloudflare_identity_v1"} disabled={busy}
+        <TextField select label="Generation prompts" value={settings.prompt_variant ?? "cloudflare_identity_v1"} disabled={busy}
           onChange={event => { setSettings({ ...settings, prompt_variant: event.target.value as LongRenderSettings["prompt_variant"] }); setSaved(false); }}>
           {PROMPTS.map(([value, text]) => <MenuItem key={value} value={value}>{text}</MenuItem>)}
         </TextField>
@@ -73,9 +73,9 @@ export function LongRenderAdmin() {
           helperText="Comma-separated addresses. Test admins already have access."
           onChange={event => { setTesters(event.target.value); setSaved(false); }} />
         <Typography variant="caption" color="text.secondary">Preparation uses Replicate. Test credits are separate; provider calls use real funds. Checks use estimates; provider balances and rate limits are shared.</Typography>
-        <Button variant="outlined" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save one-minute test settings"}</Button>
+        <Button variant="outlined" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save test site settings"}</Button>
       </>}
-      <Button disabled={busy} onClick={() => void reload()}>Reload one-minute test settings</Button>
+      <Button disabled={busy} onClick={() => void reload()}>Reload test site settings</Button>
     </Stack>
   </Box>;
 }

@@ -9,12 +9,14 @@ interface TrimRangeSliderProps {
   value: TrimRange;
   duration: number;
   onChange: (value: TrimRange) => void;
+  maxSeconds?: 15 | 60;
 }
 
 export function TrimRangeSlider({
   value,
   duration,
   onChange,
+  maxSeconds = 15,
 }: TrimRangeSliderProps) {
   const rail = useRef<HTMLDivElement>(null);
   const gesture = useRef<{
@@ -104,6 +106,7 @@ export function TrimRangeSlider({
                 thumb === 0 ? "start" : "end",
                 next[thumb],
                 duration,
+                maxSeconds,
               ),
             );
         }}

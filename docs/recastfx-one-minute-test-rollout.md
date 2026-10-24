@@ -6,10 +6,12 @@ be merged or deployed into the production gateway as part of preview testing.
 
 ## Entry point and isolation
 
-- Connected preview: `https://recastfx-polished-preview.web.app/?page=one-minute`.
-- The account menu exposes **One-minute tests** only on the connected preview.
-- Normal `/api/**` remains bound to `recastfx-api`; only
-  `/api/long-renders/**` goes to `recastfx-long-test`.
+- Connected preview: `https://recastfx-polished-preview.web.app/?page=create`.
+- Use the regular **Create**, **Library**, and **Admin** pages. The separate
+  One-minute tests menu/page is retired; old bookmarks open Library.
+- Every preview `/api/**` request routes to `recastfx-long-test`. Supported
+  rendering endpoints remain under `/api/long-renders/**`; an accidental old
+  production API call fails closed instead of reaching production.
 - Dedicated test bucket, preparation/render queues, service identities,
   coordinator, request-billed CPU worker, settings, job records and test wallet.
   No production CPU/GPU scaling or shared preparation lease is used.
@@ -22,10 +24,13 @@ be merged or deployed into the production gateway as part of preview testing.
 
 ## First preview release
 
-The global test-site toggle is in the preview's Admin Experimental section and
-on its test page. Defaults are copied once from the current nonsecret pipeline
-settings, with Replicate preparation selected. Subsequent test settings do not
-change production defaults. Depth remains off unless enabled there.
+The global test-site toggle and one generation-prompt selector live only in
+Admin Experimental. All test-site renders use these isolated settings. The
+one-minute switch controls the maximum duration of new reservations: 60 seconds
+on, 15 seconds off. Existing accepted jobs continue under their saved settings.
+Defaults were copied once from the nonsecret production pipeline settings, with
+Replicate preparation selected. Later test changes do not alter production.
+Depth remains off unless enabled there.
 
 All six generation prompt families are retained. Each parent is 4–60 whole
 seconds at 24 fps and is balanced into valid 4–15 second provider windows. A
@@ -64,7 +69,11 @@ while the comparison is still processing. Both have Blob-based downloads.
 
 - The first preview uses an isolated **test-credit** wallet. It never debits,
   refunds or awards production wallet credits. Provider calls still spend real
-  funds. Upload, paid preparation and generation approval are distinct steps.
+  funds. The normal Create submission approves preparation and, in Easy Mode,
+  subsequent generation. Upload confirmation saves that intent on the backend;
+  closing the browser does not stop the approved continuation. Manual Mode
+  pauses for scene review and its Apply and generate action saves approval.
+  The standalone API still supports separately approved preparation/generation.
 - The default per-test and lifetime admission allowances are each US$10. These
   use a conservative existing rate estimate plus a preparation allowance;
   they are not provider-enforced caps or final invoice totals. Unknown spend
@@ -131,3 +140,40 @@ deploy the test feature; the first real clip remains a separate measured test.
   option 6, depth off and masked face mesh on were copied correctly. Admins
   retain their per-run face-mesh switch even when it is hidden from other users.
 - The temporary connection-check job was deleted after both successful runs.
+
+## Unified preview workspace release (October 24, 2026)
+
+- Regular Create now uses the existing clip/trim, person selection, reference
+  cleanup, options, scene review and progress components with an isolated
+  pipeline adapter. Library reuses the regular generation cards and detail
+  drawer, including before/after, settings, characters and both downloads.
+- There is no separate test-page navigation. Its old bookmark resolves to the
+  regular Library. Generation settings appear once, in Admin Experimental.
+- The preview header and credit settings use only the isolated test wallet and
+  fixed test pricing. Checkout and personal-provider-key submission are absent.
+  The production Admin editor is never mounted on the preview.
+- The length toggle applies only to new reservations: 15 seconds off, 60 on.
+  Accepted jobs retain their saved setup and can finish with the toggle off.
+- Easy submission and Manual Apply and generate save approval durably. The
+  server continues after preparation/review without a browser. Approval uses
+  one idempotent wallet transaction and deterministic initial task name;
+  ambiguous provider submissions still require reconciliation.
+- Browser error/timing reports use bounded authenticated diagnostic endpoints
+  in the isolated gateway. All preview API rewrites now point to that gateway;
+  an obsolete short-render API request returns 404 rather than production data.
+- The gateway alone advanced to `recastfx-long-test-00003-zzz`, image
+  `sha256:c1dc0bef4dc8969b57e5213b2e8d2597433286955810541436fc637f434095e8`.
+  The private test CPU revision/image, production gateway traffic, and existing
+  production worker configurations were verified unchanged.
+- Preview serves `charswap-B2qYz2c2.js`. Production still serves
+  `charswap-DZOrIgVg.js`. The hosting deployment targeted only the preview site.
+- Validation: 2,478 backend tests; 644 CharSwap frontend tests; TypeScript,
+  production build and extension-impact check passed. A later focused isolation
+  run (32 tests) also covers the preview's fail-closed hosting routes.
+- Offline browser QA exercised the regular 60-second upload/selection/reference/
+  submission/Library path, with external requests blocked and model services
+  mocked. Desktop and 390-pixel mobile detail layouts had no horizontal overflow
+  or page errors. Actual Chrome sign-in, Create, empty isolated Library, test
+  wallet, one Admin prompt selector, and absent test-page menu were verified.
+- No paid model request or real render was submitted during this release.
+  Prompt option 6 and the one-minute switch remain on; depth remains off.

@@ -42,3 +42,10 @@ it("normalizes 15-second floating-point subtraction without accepting a longer t
  expect(trimDuration(moveTrim([0,15],1.1,20))).toBe(15);
  expect(trimDuration([1.1,16.101])).toBeGreaterThan(15);
 });
+
+it("supports the exact minute endpoint only with an explicit sixty-second policy", () => {
+  expect(resizeTrim([0, 15], "end", 60, 90, 60)).toEqual([0, 60]);
+  expect(resizeTrim([0, 15], "end", 60, 90)).toEqual([0, 15]);
+  expect(resizeTrim([10, 25], "end", 70, 90, 60)).toEqual([10, 70]);
+  expect(resizeTrim([10, 70], "start", 0, 90, 60)).toEqual([10, 70]);
+});
