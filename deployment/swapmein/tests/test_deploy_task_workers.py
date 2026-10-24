@@ -14,7 +14,8 @@ def release(monkeypatch):
 
 
 @pytest.mark.parametrize('preview',[True,False])
-def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,monkeypatch,preview):
+@pytest.mark.parametrize('existing_scheduler',[True,False])
+def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,monkeypatch,preview,existing_scheduler):
     api,worker,queue,_=release.resources(preview)
     calls=[];worker_env=[]
     account='existing-task@project.iam.gserviceaccount.com'
@@ -33,6 +34,7 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
             return {'status':{'url':f'https://{args[3]}-63lqoskl5q-uk.a.run.app','latestCreatedRevisionName':args[3]+'-new'}}
         if args[:3]==('run','services','get-iam-policy'):return {'bindings':[{'members':['serviceAccount:'+account]}]}
         if args[:3]==('services','list','--enabled'):return [{'config':{'name':'cloudscheduler.googleapis.com'}}]
+        if args[:3]==('scheduler','jobs','describe'):return {'name':'existing'} if existing_scheduler else None
         if kwargs.get('optional'):return None
         return {}
     monkeypatch.setattr(release.deploy,'gcloud',gcloud)
@@ -53,3 +55,7 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
     deploy_worker=next(c for c in calls if c[:2]==('run','deploy'))
     assert '--min-instances=0' in deploy_worker and '--max-instances=1' in deploy_worker and '--no-allow-unauthenticated' in deploy_worker
     assert not any('gpu' in item.lower() for c in calls for item in c)
+
+    scheduler_call=next(c for c in calls if c[:2]==('scheduler','jobs') and c[2] in {'create','update'})
+    assert ('--update-headers=Content-Type=application/json' if existing_scheduler else '--headers=Content-Type=application/json') in scheduler_call
+    assert any(item.endswith('/maintenance/recover-deliveries') for item in scheduler_call)

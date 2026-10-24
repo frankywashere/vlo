@@ -83,7 +83,8 @@ def deploy_worker(image, *, preview):
     command='update' if current else 'create'
     deploy.gcloud('scheduler','jobs',command,'http',scheduler,'--location='+deploy.REGION,'--schedule=*/5 * * * *',
         '--time-zone=UTC','--uri='+api_url+'/maintenance/recover-deliveries','--http-method=POST','--message-body={}',
-        '--headers=Content-Type=application/json','--oidc-service-account-email='+env['TASK_SERVICE_ACCOUNT'],
+        ('--update-headers=' if current else '--headers=')+'Content-Type=application/json',
+        '--oidc-service-account-email='+env['TASK_SERVICE_ACCOUNT'],
         '--oidc-token-audience='+api_url,'--attempt-deadline=180s','--max-retry-attempts=0')
     for service in (api,worker):
         current=deploy.google_get(f'https://run.googleapis.com/v2/projects/{deploy.PROJECT}/locations/{deploy.REGION}/services/{service}')
