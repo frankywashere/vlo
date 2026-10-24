@@ -23,6 +23,7 @@ from .accounts import archive_completed, LIBRARY_SECONDS
 from .cleanup import cleanup_completed_media
 from .watermark import award_watermark_bonus
 from .replicate_preparation import ReplicatePreparation
+from .comparison import create_comparison
 
 
 class Pipeline:
@@ -632,11 +633,26 @@ class Pipeline:
                         **({"watermark": True} if job.get("setup", {}).get("add_watermark") else {}))
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
+                comparison_fields = {}
+                if job.get("account_id"):
+                    try:
+                        comparison = root / "comparison.mp4"
+                        comparison_dimensions = create_comparison(original, output, comparison, job["duration"])
+                        comparison_uri = self.cloud.upload(self.settings.app_bucket,
+                            prefix + f"comparison-{uuid.uuid4().hex}.mp4", comparison, "video/mp4")
+                        comparison_fields = {"comparison_uri": comparison_uri, "comparison_status": "ready",
+                                             "comparison_layout": comparison_dimensions["layout"]}
+                        emit("comparison_export_saved", job_id=job_id, **comparison_dimensions)
+                    except Exception as error:
+                        # An optional comparison must never fail delivery or charge
+                        # the user again for an otherwise successful main render.
+                        comparison_fields = {"comparison_status": "failed", "comparison_uri": None, "comparison_layout": None}
+                        emit("comparison_export_failed", job_id=job_id, error=error)
                 completed = self.update_job(job_id, status="completed", completed_at=time.time(), message=("Your video is ready at its generated resolution, with the original soundtrack." if restore_audio
                              else "Your video is ready at its generated resolution, with the returned audio."), output_uri=output_uri, thumbnail_uri=None,
                     library_expires_at=time.time() + LIBRARY_SECONDS if job.get("account_id") else None,
                     width=output_dimensions["width"], height=output_dimensions["height"],
-                    watermark_applied=bool(job.get("setup", {}).get("add_watermark")))
+                    watermark_applied=bool(job.get("setup", {}).get("add_watermark")), **comparison_fields)
                 emit("video_export_completed", job_id=job_id, audio_processing=audio_processing, audio_restored=restore_audio, submit_without_audio=job.get("setup", {}).get("submit_without_audio", False), width=output_dimensions["width"], height=output_dimensions["height"],
                      **job.get("provider_billing", {}))
                 try:

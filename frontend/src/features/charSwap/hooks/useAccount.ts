@@ -9,6 +9,7 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import type { User } from "firebase/auth";
+import { getAuthDomain } from "../utils/authDomain";
 import { setAccountTokenSupplier } from "../services/accountContext";
 import {
   getSignInErrorCode,
@@ -20,7 +21,7 @@ const firebase = initializeApp({
   projectId: "charswap-franky-20261013",
   appId: "1:634011479314:web:dcb75b9cbeeb4b260a97cb",
   apiKey: "AIzaSyAeeNhm75jLmCizILz4P0y8oYXR4qTHuys",
-  authDomain: "recastfx.com",
+  authDomain: getAuthDomain(window.location.hostname),
 });
 const auth = getAuth(firebase);
 setAccountTokenSupplier(async () =>

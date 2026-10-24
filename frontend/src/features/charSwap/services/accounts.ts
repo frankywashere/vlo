@@ -10,6 +10,9 @@ export interface AccountJob extends Omit<LivePipelineJob, "status"> {
   updated_at?: number;
   expires_at?: number;
   reference_url?: string;
+  comparison_url?: string;
+  comparison_status?: "ready" | "failed";
+  comparison_layout?: "side_by_side" | "stacked";
 }
 
 class LibraryHttpError extends Error {

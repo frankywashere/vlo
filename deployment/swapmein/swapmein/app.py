@@ -306,6 +306,12 @@ def view(job: dict, *, review_thumbnails: bool = True):
             segment_id = job.get("tracking_error_segment_id")
             if isinstance(segment_id, str) and segment_id in {section["id"] for section in job["tracking_plan"].get("segments", [])}:
                 result["tracking_error_segment_id"] = segment_id
+    if job.get("comparison_uri") and job.get("library_expires_at", 0) > time.time():
+        result["comparison_url"] = cloud.signed_url(job["comparison_uri"])
+    if job.get("comparison_status"):
+        result["comparison_status"] = job["comparison_status"]
+    if job.get("comparison_layout"):
+        result["comparison_layout"] = job["comparison_layout"]
     if job.get("before_uri") and job.get("library_expires_at", 0) > time.time():
         result["source_preview_url"] = cloud.signed_url(job["before_uri"])
     elif job.get("normalized_uri") and temporary_media_available:
@@ -1348,6 +1354,11 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
                     public["thumbnail_url"] = cloud.signed_url(item["thumbnail_uri"])
                 if item.get("before_uri"):
                     public["source_preview_url"] = cloud.signed_url(item["before_uri"])
+                if item.get("comparison_uri"):
+                    public["comparison_url"] = cloud.signed_url(item["comparison_uri"])
+                for key in ("comparison_status", "comparison_layout"):
+                    if item.get(key):
+                        public[key] = item[key]
             elif item.get("status") == "completed":
                 public.update(status="expired", message="The 30-day video retention period has ended.")
             else:

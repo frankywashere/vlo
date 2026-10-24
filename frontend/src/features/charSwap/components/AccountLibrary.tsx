@@ -4,8 +4,6 @@ import {
   Box,
   Button,
   CircularProgress,
-  Dialog,
-  DialogTitle,
   LinearProgress,
   IconButton,
   Tooltip,
@@ -30,6 +28,7 @@ import { JobElapsedTime } from "./JobElapsedTime";
 import { JobSettings } from "./JobSettings";
 import { SceneTrackingReview } from "./SceneTrackingReview";
 import { loadAccountAccess } from "../services/commerce";
+import { GenerationDetails } from "./GenerationDetails";
 import { GenerationCard } from "./GenerationCard";
 import { isGenerationRunning } from "../utils/libraryJobs";
 import { TARGET_COLORS } from "../limits";
@@ -107,6 +106,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
               "reference_url",
               "tracking_url",
               "source_preview_url",
+              "comparison_url",
             ] as const) {
               const oldUrl = previous.job[field];
               const newUrl = job[field];
@@ -260,7 +260,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     try {
       await setJobHidden(job.id, hidden);
       if (!mounted.current) return;
-      if (hidden) hiddenJobs.current.add(job.id);
+      if (hidden) { hiddenJobs.current.add(job.id); setSelected(null); }
       else hiddenJobs.current.delete(job.id);
       setJobs((current) => hidden ? current.filter((item) => item.id !== job.id)
         : [job, ...current.filter((item) => item.id !== job.id)].sort((a, b) => b.created_at - a.created_at));
@@ -297,7 +297,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             {selected && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used}
               creditsUsed={selected.consumer_credits_used} creditsReturned={selected.consumer_credits_returned}
               accessMode={selected.access_mode} /></>}
-            {selected?.guide_url && !selected.easy_mode && (
+            {reviewPage && selected?.guide_url && !selected.easy_mode && (
               <Box
                 component="video"
                 controls
@@ -437,9 +437,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           </Stack>
         </Box>
         <Stack direction="row" spacing={1} sx={{mt: 3, p: reviewPage ? 0 : 1, justifyContent: "flex-end", flexWrap: "wrap"}}>
-          <Button disabled={busy} onClick={close}>
-            {reviewPage ? "Back to Library" : "Close"}
-          </Button>
+          {reviewPage && <Button disabled={busy} onClick={close}>Back to Library</Button>}
           {recovery && (recovery.action === "save" || recovery.action === "retry" && onRetry) && (
             <Button variant="contained" disabled={busy || checkingRecovery || retryDisabled} onClick={() => void recoverJob()}>
               {recovery.action === "save" ? "Retry saving video" : recovery.source_url && recovery.reference_urls?.every(Boolean)
@@ -566,7 +564,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           </Button>
         </Stack>
       </Stack>
-      {error && (
+      {error && !selected && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
@@ -622,20 +620,21 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
               job={job}
               onOpen={() => {
                 setKey("");
-                setReviewPage(job.status === "tracking_review");
+                setReviewPage(false);
                 setSelected(job);
                 setError(null);
               }}
-              removing={visibilityPending.includes(job.id)}
-              onRemove={() => void hide(job, true)}
+              onReview={() => { setKey(""); setReviewPage(true); setSelected(job); setError(null); }}
             />
           ))}
         </Box>
       )}
-      <Dialog open={!!selected} onClose={close} maxWidth="md" fullWidth>
-        <DialogTitle>{selected?.title}</DialogTitle>
-        {details}
-      </Dialog>
+      {selected && <GenerationDetails key={selected.id} job={selected} busy={busy}
+        onClose={close} onReview={() => setReviewPage(true)}
+        removing={visibilityPending.includes(selected.id)} onRemove={() => void hide(selected, true)}>
+        {error && selected.status === "completed" && <Alert severity="error" sx={{mb: 2}}>{error}</Alert>}
+        {selected.status === "completed" ? <JobElapsedTime job={selected} /> : details}
+      </GenerationDetails>}
     </Box>
   );
 }

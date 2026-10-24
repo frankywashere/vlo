@@ -1,0 +1,101 @@
+{
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Execution",
+  "metadata": {
+    "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "533.0.0",
+      "run.googleapis.com/creator": "frankywashere@gmail.com",
+      "run.googleapis.com/execution-environment": "gen2",
+      "run.googleapis.com/lastModifier": "frankywashere@gmail.com",
+      "run.googleapis.com/operation-id": "da94c437-2d50-43ea-b9e9-bd2f618f4655"
+    },
+    "creationTimestamp": "2026-10-24T13:17:10.457221Z",
+    "generation": 1,
+    "labels": {
+      "cloud.googleapis.com/location": "us-east4",
+      "run.googleapis.com/job": "recastfx-comparison-benchmark",
+      "run.googleapis.com/jobGeneration": "1",
+      "run.googleapis.com/jobResourceVersion": "1792847828853929",
+      "run.googleapis.com/jobUid": "01bef082-b8cc-47bb-9717-d696700fe3ce",
+      "run.googleapis.com/satisfiesPzs": "true"
+    },
+    "name": "recastfx-comparison-benchmark-m5lzr",
+    "namespace": "634011479314",
+    "ownerReferences": [
+      {
+        "apiVersion": "serving.knative.dev/v1",
+        "blockOwnerDeletion": true,
+        "controller": true,
+        "kind": "Job",
+        "name": "recastfx-comparison-benchmark",
+        "uid": "01bef082-b8cc-47bb-9717-d696700fe3ce"
+      }
+    ],
+    "resourceVersion": "AAZele4A/R4",
+    "selfLink": "/apis/run.googleapis.com/v1/namespaces/634011479314/executions/recastfx-comparison-benchmark-m5lzr",
+    "uid": "094659a8-9eca-40fb-a3ef-9a68f6f3b4d5"
+  },
+  "spec": {
+    "parallelism": 1,
+    "taskCount": 1,
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "args": [
+              "import base64;exec(base64.b64decode('aW1wb3J0IGpzb24sdGltZSx0ZW1wZmlsZSxzdWJwcm9jZXNzCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aApmcm9tIGdvb2dsZS5jbG91ZCBpbXBvcnQgc3RvcmFnZQpzdGFydGVkPXRpbWUudGltZSgpOyBjbGllbnQ9c3RvcmFnZS5DbGllbnQoKTsgYnVja2V0PWNsaWVudC5idWNrZXQoJ2NoYXJzd2FwLWZyYW5reS0yMDI2MTAxMy1hcHAnKQpqb2I9anNvbi5sb2FkcyhidWNrZXQuYmxvYignam9icy85ZWJkMzUwOTRlN2Y0OTBmYjQ1OWYwMTk2MzAzYmM3My5qc29uJykuZG93bmxvYWRfYXNfdGV4dCgpKQpyZXBvcnQ9eydzdGFydGVkX2F0JzpzdGFydGVkLCdjcHUnOjIsJ21lbW9yeV9naWInOjIsJ2R1cmF0aW9uJzoxNSwncmVzdWx0cyc6W119CnJvb3Q9UGF0aCh0ZW1wZmlsZS5ta2R0ZW1wKCkpO2JlZm9yZT1yb290LydiZWZvcmUubXA0JzthZnRlcj1yb290LydhZnRlci5tcDQnCmRlZiBkb3dubG9hZCh1cmkscGF0aCk6CiB0PXRpbWUubW9ub3RvbmljKCk7IGIsaz11cmlbNTpdLnNwbGl0KCcvJywxKTtjbGllbnQuYnVja2V0KGIpLmJsb2IoaykuZG93bmxvYWRfdG9fZmlsZW5hbWUoc3RyKHBhdGgpKTtyZXR1cm4gcm91bmQodGltZS5tb25vdG9uaWMoKS10LDMpCnJlcG9ydFsnZG93bmxvYWRfYmVmb3JlX3NlY29uZHMnXT1kb3dubG9hZChqb2IuZ2V0KCdiZWZvcmVfdXJpJykgb3Igam9iWydub3JtYWxpemVkX3VyaSddLGJlZm9yZSkKcmVwb3J0Wydkb3dubG9hZF9hZnRlcl9zZWNvbmRzJ109ZG93bmxvYWQoam9iWydvdXRwdXRfdXJpJ10sYWZ0ZXIpCmJhc2U9WydmZm1wZWcnLCctdicsJ2Vycm9yJywnLW5vc3RkaW4nLCcteScsJy1pJyxzdHIoYmVmb3JlKSwnLWknLHN0cihhZnRlcildCmVuY29kZT1bJy1jOnYnLCdsaWJ4MjY0JywnLXRocmVhZHMnLCcyJywnLWNyZicsJzE4JywnLXBpeF9mbXQnLCd5dXY0MjBwJywnLWM6YScsJ2FhYycsJy1iOmEnLCcxOTJrJywnLXQnLCcxNScsJy1tb3ZmbGFncycsJytmYXN0c3RhcnQnXQpkZWYgcnVuKG5hbWUsYXJncyxvdXRwdXRzKToKIHQ9dGltZS5tb25vdG9uaWMoKTtzdWJwcm9jZXNzLnJ1bihhcmdzLGNoZWNrPVRydWUsdGltZW91dD05MCxjYXB0dXJlX291dHB1dD1UcnVlKTtyPXsnbmFtZSc6bmFtZSwnc2Vjb25kcyc6cm91bmQodGltZS5tb25vdG9uaWMoKS10LDMpLCdieXRlcyc6e3AubmFtZTpwLnN0YXQoKS5zdF9zaXplIGZvciBwIGluIG91dHB1dHN9fTtyZXBvcnRbJ3Jlc3VsdHMnXS5hcHBlbmQocik7cHJpbnQoanNvbi5kdW1wcyhyKSxmbHVzaD1UcnVlKQpub3JtYWw9J2Zwcz0yNCx0cmltPWR1cmF0aW9uPTE1LHNldHB0cz1QVFMtU1RBUlRQVFMsc2V0c2FyPTEnCmZ1bGw9cm9vdC8nZnVsbC5tcDQnO2NvbXA9cm9vdC8nY29tcGFyaXNvbi5tcDQnO2R1YWw9cm9vdC8nZHVhbC5tcDQnO2R1YWxjb21wPXJvb3QvJ2R1YWxjb21wYXJpc29uLm1wNCc7cG9ydHJhaXQ9cm9vdC8ncG9ydHJhaXQubXA0JwpydW4oJ2ZpbmlzaF9iYXNlbGluZScsYmFzZStbJy1tYXAnLCcxOnY6MCcsJy1tYXAnLCcxOmE6MD8nLCAnLXZmJyxub3JtYWxdK2VuY29kZStbc3RyKGZ1bGwpXSxbZnVsbF0pCnN0YWNrPWYnWzA6dl17bm9ybWFsfSxzY2FsZT0xMDI0Ojc2ODpmb3JjZV9vcmlnaW5hbF9hc3BlY3RfcmF0aW89ZGVjcmVhc2UscGFkPTEwMjQ6NzY4Oihvdy1pdykvMjoob2gtaWgpLzJbYl07WzE6dl17bm9ybWFsfSxzY2FsZT0xMDI0Ojc2OCxzcGxpdFthXVtmXTtbYl1bYV12c3RhY2s9aW5wdXRzPTJbY10nCnJ1bignY29tcGFyaXNvbl9zZXBhcmF0ZScsYmFzZStbJy1maWx0ZXJfY29tcGxleCcsc3RhY2sucmVwbGFjZSgnLHNwbGl0W2FdW2ZdJywnW2FdJyksJy1tYXAnLCdbY10nLCctbWFwJywnMTphOjA/J10rZW5jb2RlK1tzdHIoY29tcCldLFtjb21wXSkKcnVuKCdmaW5pc2hfYW5kX2NvbXBhcmlzb25fb25lX3Byb2Nlc3MnLGJhc2UrWyctZmlsdGVyX2NvbXBsZXgnLHN0YWNrLCctbWFwJywnW2ZdJywnLW1hcCcsJzE6YTowPyddK2VuY29kZStbc3RyKGR1YWwpXStbJy1tYXAnLCdbY10nLCctbWFwJywnMTphOjA/J10rZW5jb2RlK1tzdHIoZHVhbGNvbXApXSxbZHVhbCxkdWFsY29tcF0pCiMgQ2VudGVyIGNyb3BzIGFyZSBvbmx5IGEgdGhyb3VnaHB1dCB0ZXN0IGZvciB0d28gNDMyeDc2OCBwb3J0cmFpdCBwYW5lbHMuCnBzdGFjaz1mJ1swOnZde25vcm1hbH0sc2NhbGU9LTI6NzY4LGNyb3A9NDMyOjc2OCxzZXRzYXI9MVtiXTtbMTp2XXtub3JtYWx9LHNjYWxlPS0yOjc2OCxjcm9wPTQzMjo3Njgsc2V0c2FyPTFbYV07W2JdW2FdaHN0YWNrPWlucHV0cz0yW2NdJwpydW4oJ3BvcnRyYWl0X3NpZGVfYnlfc2lkZV84NjR4NzY4JyxiYXNlK1snLWZpbHRlcl9jb21wbGV4Jyxwc3RhY2ssJy1tYXAnLCdbY10nLCctbWFwJywnMTphOjA/J10rZW5jb2RlK1tzdHIocG9ydHJhaXQpXSxbcG9ydHJhaXRdKQp0PXRpbWUubW9ub3RvbmljKCk7YnVja2V0LmJsb2IoJ2V4cGVyaW1lbnRzL2NvbXBhcmlzb24tZXhwb3J0LWJlbmNobWFyay9sYW5kc2NhcGUubXA0JykudXBsb2FkX2Zyb21fZmlsZW5hbWUoc3RyKGNvbXApLGNvbnRlbnRfdHlwZT0ndmlkZW8vbXA0Jyk7cmVwb3J0Wyd1cGxvYWRfY29tcGFyaXNvbl9zZWNvbmRzJ109cm91bmQodGltZS5tb25vdG9uaWMoKS10LDMpCnJlcG9ydFsndG90YWxfd29ya2VyX3NlY29uZHMnXT1yb3VuZCh0aW1lLnRpbWUoKS1zdGFydGVkLDMpCnJlcG9ydFsndmFsaWRhdGlvbiddPWpzb24ubG9hZHMoc3VicHJvY2Vzcy5jaGVja19vdXRwdXQoWydmZnByb2JlJywnLXYnLCdlcnJvcicsJy1zaG93X3N0cmVhbXMnLCctc2hvd19mb3JtYXQnLCctb2YnLCdqc29uJyxzdHIoY29tcCldKSkKYnVja2V0LmJsb2IoJ2V4cGVyaW1lbnRzL2NvbXBhcmlzb24tZXhwb3J0LWJlbmNobWFyay9yZXBvcnQuanNvbicpLnVwbG9hZF9mcm9tX3N0cmluZyhqc29uLmR1bXBzKHJlcG9ydCksY29udGVudF90eXBlPSdhcHBsaWNhdGlvbi9qc29uJyk7cHJpbnQoanNvbi5kdW1wcyh7J3RvdGFsX3dvcmtlcl9zZWNvbmRzJzpyZXBvcnRbJ3RvdGFsX3dvcmtlcl9zZWNvbmRzJ10sJ3JlcG9ydCc6J2V4cGVyaW1lbnRzL2NvbXBhcmlzb24tZXhwb3J0LWJlbmNobWFyay9yZXBvcnQuanNvbid9KSxmbHVzaD1UcnVlKQo='))"
+            ],
+            "command": [
+              "python",
+              "-c"
+            ],
+            "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:2cefdeb00ceafb10e7fe1e78b1e4cfdc5b3fcdd840fc8724e9de7a9194cd0f83",
+            "resources": {
+              "limits": {
+                "cpu": "2",
+                "memory": "2Gi"
+              }
+            }
+          }
+        ],
+        "maxRetries": 0,
+        "serviceAccountName": "swapmein-gateway@charswap-franky-20261013.iam.gserviceaccount.com",
+        "timeoutSeconds": "300"
+      }
+    }
+  },
+  "status": {
+    "completionTime": "2026-10-24T13:18:15.653998Z",
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-10-24T13:18:15.653998Z",
+        "message": "Execution completed successfully in 1m1.19s.",
+        "status": "True",
+        "type": "Completed"
+      },
+      {
+        "lastTransitionTime": "2026-10-24T13:17:11.275265Z",
+        "message": "Provisioned imported containers.",
+        "status": "True",
+        "type": "ResourcesAvailable"
+      },
+      {
+        "lastTransitionTime": "2026-10-24T13:17:19.683389Z",
+        "message": "Started deployed execution in 8.4s.",
+        "status": "True",
+        "type": "Started"
+      },
+      {
+        "lastTransitionTime": "2026-10-24T13:17:11.180285Z",
+        "message": "Imported container image.",
+        "status": "True",
+        "type": "ContainerReady"
+      }
+    ],
+    "logUri": "https://console.cloud.google.com/logs/viewer?project=charswap-franky-20261013&advancedFilter=resource.type%3D%22cloud_run_job%22%0Aresource.labels.job_name%3D%22recastfx-comparison-benchmark%22%0Aresource.labels.location%3D%22us-east4%22%0Alabels.%22run.googleapis.com/execution_name%22%3D%22recastfx-comparison-benchmark-m5lzr%22",
+    "observedGeneration": 1,
+    "startTime": "2026-10-24T13:17:14.460865Z",
+    "succeededCount": 1
+  }
+}

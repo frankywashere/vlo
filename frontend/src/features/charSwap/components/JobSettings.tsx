@@ -1,8 +1,8 @@
 import { Box, Typography } from "@mui/material";
 import type { JobSettingsUsed } from "../services/livePipeline";
 
-export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode }: {
-  settings?: JobSettingsUsed; creditsUsed?: number; creditsReturned?: number; accessMode?: string;
+export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode, expanded = false }: {
+  settings?: JobSettingsUsed; creditsUsed?: number; creditsReturned?: number; accessMode?: string; expanded?: boolean;
 }) {
   const rows: [string, string][] = [];
   if (creditsUsed !== undefined) rows.push(["Credits used", creditsUsed.toLocaleString()]);
@@ -50,7 +50,7 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
   }
   const incomplete = !settings || [settings.easy_mode, settings.enhanced_masking, settings.audio_processing].some(value => value === undefined);
   return (
-    <Box component="details" sx={{ mt: 2, borderTop: 1, borderColor: "divider", pt: 1.5 }}>
+    <Box component="details" open={expanded || undefined} sx={{ mt: 2, borderTop: 1, borderColor: "divider", pt: 1.5 }}>
       <Box component="summary" sx={{ cursor: "pointer", typography: "body2", fontWeight: 600, py: 0.5 }}>Settings used</Box>
       <Box component="dl" sx={{ my: 1, display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 1 }}>
         {rows.map(([label, value]) => (
