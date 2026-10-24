@@ -9,7 +9,7 @@ from google.api_core.exceptions import PreconditionFailed
 
 from .cloud import Cloud
 from .config import Settings
-from .guide_style import guide_style, compose_styles
+from .guide_style import IDENTITY_DEPTH_STYLES, guide_style, compose_styles
 from .errors import PublicError
 from .diagnostics import emit, timed, wait_timing
 from .limits import MAX_SOURCE_BYTES
@@ -332,6 +332,8 @@ class Pipeline:
                                     compose_payload["target_styles"] = compose_styles(fill_mode, targets, mask_style)
                                 if fill_mode == "depth" and "depth_overlay_opacity" in job:
                                     compose_payload["depth_opacity"] = job["depth_overlay_opacity"]
+                                    if mask_style in IDENTITY_DEPTH_STYLES and job["depth_overlay_opacity"] < 1:
+                                        compose_payload["depth_tint_by_target"] = True
                                 composed = invoke("/compose", compose_payload, remaining())
                                 if composed.get("metrics", {}).get("face_mesh_metrics"):
                                     self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])
@@ -559,6 +561,8 @@ class Pipeline:
                 payload["target_styles"] = compose_styles(fill_mode, job["target_styles"], mask_style)
             if fill_mode == "depth" and "depth_overlay_opacity" in job:
                 payload["depth_opacity"] = job["depth_overlay_opacity"]
+                if mask_style in IDENTITY_DEPTH_STYLES and job["depth_overlay_opacity"] < 1:
+                    payload["depth_tint_by_target"] = True
             composed = invoke("/compose", payload, remaining())
             if composed.get("metrics", {}).get("face_mesh_metrics"):
                 self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])

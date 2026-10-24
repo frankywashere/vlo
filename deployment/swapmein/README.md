@@ -814,6 +814,15 @@ RGB-channel brightness. Existing jobs without the saved opacity keep their
 previous composition. Deploy the CPU `/compose` schema before the gateway that
 sends `depth_opacity`.
 
+New identity-color jobs (prompt options 4–6) save
+`depth_identity_colors_version: 1`. When Manual review or option 6 matching has
+established person identities, the depth guide keeps each person's assigned
+20% tint over the full colored depth base, and the prompt maps those colors to
+the reference photos. Shared-tint Easy routes and replace-everyone keep their
+shared treatment. Saved jobs without this version retain their prior rendering.
+This is independent of whether Replicate or the GPU worker supplied the masks.
+Deploy the CPU worker accepting `depth_tint_by_target` before this gateway.
+
 ### Automatic before/after exports
 
 New account renders create an optional comparison during the existing CPU finish

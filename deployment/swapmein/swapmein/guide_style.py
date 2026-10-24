@@ -15,9 +15,10 @@ def guide_style(job, enhanced, multi, *, reviewed=False):
         identity = (manual and (reviewed or job.get("tracking_reviewed") or job.get("identity_matching_completed"))
                     and not job.get("replace_all_people", setup.get("replace_all_people", False)))
         if job.get("depth_guidance", True):
-            # The translucent-depth renderer uses a shared magenta tint. Only
-            # its full-strength multi-person depth path preserves target hues.
-            depth_identity = identity and multi and job.get("depth_overlay_opacity", 1) == 1
+            # New jobs keep person colors over depth too. Saved jobs retain
+            # the shared-tint composition their guide/prompt was prepared for.
+            depth_identity = identity and multi and (job.get("depth_overlay_opacity", 1) == 1
+                or job.get("depth_identity_colors_version", 0) >= 1)
             style = "identity_depth" if depth_identity else "shared_depth"
             return "depth", style + ("_multi" if multi else "")
         if identity:

@@ -74,7 +74,8 @@ def assert_no_tracking_preview(job, cloud, previews):
 
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
-            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False, preview_available=True):
+            background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False, preview_available=True,
+            depth_overlay_opacity=None, depth_identity_colors_version=None):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -135,6 +136,10 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                                "setup": options, "audio_processing": audio_processing,
                                "preparation_provider": preparation_provider, "depth_guidance": depth_guidance, "face_mesh": face_mesh, "guide_style_version": guide_style_version, "prompt_variant": prompt_variant, "matching_no_review": matching_no_review},
                 "control/preparation.json": {"active": {"job_id": job_id, "until": time.time() + 100}}}
+            if depth_overlay_opacity is not None:
+                self.data[path]["depth_overlay_opacity"] = depth_overlay_opacity
+            if depth_identity_colors_version is not None:
+                self.data[path]["depth_identity_colors_version"] = depth_identity_colors_version
         def read(self, key):
             return copy.deepcopy(self.data.get(key)), 1
         def update(self, key, mutation):
@@ -549,3 +554,71 @@ def test_identity_prompt_routes_easy_shared_and_reviewed_guides(monkeypatch, med
     if not easy:
         assert job["tracking_reviewed"]
         assert all(target.get("scenes") for target in job["normalized_targets"])
+
+
+@pytest.mark.parametrize("provider", ["workers", "replicate"])
+@pytest.mark.parametrize("variant", ["identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"])
+@pytest.mark.parametrize("version", [None, 1])
+def test_manual_review_keeps_target_depth_tints_on_both_preparation_routes(monkeypatch, media, provider, variant, version):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=False, enhanced=True,
+        selection="multi", audio_processing=False, preparation_provider=provider,
+        prompt_variant=variant, guide_style_version=2, depth_overlay_opacity=.2,
+        depth_identity_colors_version=version)
+    assert job["status"] == "tracking_review", job.get("message")
+    choices = [{"segment_id": section["id"], "absent": False,
+        "anchor": {"x": .75 if section["target_id"] == "person-2" else .25,
+                   "y": .5, "time": section["seek_time"]}}
+        for section in job["tracking_plan"]["segments"] if section["needs_review"]]
+    job.update(tracking_choices=choices, tracking_applied_revision=1,
+        tracking_resolution_pending=True, generation_after_review_revision=None)
+    class Records:
+        data = copy.deepcopy(job)
+        def update(self, path, mutation):
+            self.data = mutation(copy.deepcopy(self.data))
+            return copy.deepcopy(self.data)
+    records = Records()
+    before_calls = len(cloud.calls)
+    Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud).rebuild_reviewed_guide(job, lambda: 60)
+    saved = records.data
+    assert saved["status"] == "ready" and saved["tracking_reviewed"]
+    assert saved["mask_style"] == ("identity_depth_multi" if version == 1 else "shared_depth_multi")
+    assert [(kind, endpoint) for kind, endpoint, _ in cloud.calls[before_calls:]] == [("audio", "/compose")]
+    payload = cloud.calls[-1][2]
+    assert payload["fill_mode"] == "depth" and payload["depth_opacity"] == .2
+    assert payload.get("depth_tint_by_target", False) is (version == 1)
+    assert [style["color"] for style in payload["target_styles"]] == (
+        ["#00dcff", "#ff4fd8"] if version == 1 else ["#00dcff", "#00dcff"])
+    assert set(np.unique(image_at(cloud.objects[payload["masks_uri"]]))) == {0, 1, 2}
+    assert all(target.get("scenes") for target in saved["normalized_targets"])
+    assert len(cloud.replicate_calls) == (1 if provider == "replicate" else 0)
+    if provider == "replicate":
+        assert not any(kind == "gpu" for kind, _, _ in cloud.calls)
+
+
+@pytest.mark.parametrize("provider", ["workers", "replicate"])
+@pytest.mark.parametrize("version", [None, 1])
+def test_matched_easy_option_six_keeps_identity_depth_tints_without_manual_rebuild(monkeypatch, media, provider, version):
+    from swapmein.multi_tracking import build_selected_masks, selected_tracks
+    def match(self, job, video, masks, metadata, targets, root, remaining):
+        stable = root / "matched.zip"
+        coverage = build_selected_masks(masks, metadata, selected_tracks(masks, metadata, targets), stable)
+        matched = [{**target, "scenes": [{"start": 0, "end": 4, "absent": False,
+            "anchor": target["anchor"]}]} for target in targets]
+        return {"masks_path": stable, "coverage": coverage, "targets": matched,
+                "assignments": [], "diagnostics": {"calls": 1}}
+    monkeypatch.setattr(Pipeline, "match_cloudflare_identities", match)
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+        selection="multi", audio_processing=False, preparation_provider=provider,
+        prompt_variant="cloudflare_identity_v1", guide_style_version=2,
+        depth_overlay_opacity=.2, depth_identity_colors_version=version)
+    assert job["status"] == "ready" and job["identity_matching_completed"], job.get("message")
+    assert_no_tracking_preview(job, cloud, previews)
+    assert job["mask_style"] == ("identity_depth_multi" if version == 1 else "shared_depth_multi")
+    payload = next(payload for _, endpoint, payload in cloud.calls if endpoint == "/compose")
+    assert payload["fill_mode"] == "depth" and payload["depth_opacity"] == .2
+    assert payload.get("depth_tint_by_target", False) is (version == 1)
+    assert [style["color"] for style in payload["target_styles"]] == (
+        ["#00dcff", "#ff4fd8"] if version == 1 else ["#00dcff", "#00dcff"])
+    if provider == "replicate":
+        assert len(cloud.replicate_calls) == 1
+        assert not any(kind == "gpu" for kind, _, _ in cloud.calls)
