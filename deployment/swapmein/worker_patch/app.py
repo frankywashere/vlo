@@ -27,7 +27,7 @@ def health():
     # otherwise look healthy and fail only after expensive GPU preparation.
     from composite import compose
     from PIL import __version__ as pillow_version
-    return {"status": "ready", "device": "cpu", "version": "audio-cyan-guide-v8",
+    return {"status": "ready", "device": "cpu", "version": "audio-identity-depth-v9",
             "operations": ["audio", "compose"], "compositor_ready": callable(compose),
             "pillow_version": pillow_version}
 
@@ -47,6 +47,7 @@ class ComposeRequest(BaseModel):
     fill_mode: Literal['gray','original','color','depth','solid','translucent'] = 'gray'
     depth_uri: str | None = None
     depth_opacity: float = Field(default=1.0, ge=0, le=1)
+    depth_tint_by_target: bool = False
     target_styles: list[TargetStyle] | None = Field(default=None, min_length=1, max_length=5)
     run_id: str
     face_mesh: bool = False
@@ -54,6 +55,8 @@ class ComposeRequest(BaseModel):
 
     @model_validator(mode='after')
     def validate_styles(self):
+        if self.depth_tint_by_target and (self.fill_mode != 'depth' or not self.target_styles):
+            raise ValueError('Identity depth tint requires depth and target styles')
         if self.target_styles and self.fill_mode not in ['depth','solid','original','translucent']:
             raise ValueError('Target styles require a depth or solid guide')
         if self.target_styles and (len({style.label for style in self.target_styles})!=len(self.target_styles)
@@ -82,7 +85,8 @@ def composite(request: ComposeRequest):
                 download_input(request.depth_uri,str(depth_source))
             metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode,depth_source,
                 [style.model_dump() for style in request.target_styles] if request.target_styles is not None else None,
-                face_mesh=request.face_mesh, mesh_all_people=request.mesh_all_people, depth_opacity=request.depth_opacity)
+                face_mesh=request.face_mesh, mesh_all_people=request.mesh_all_people, depth_opacity=request.depth_opacity,
+                depth_tint_by_target=request.depth_tint_by_target)
             metrics['request_processing_seconds']=time.monotonic()-started
             (output/'metrics.json').write_text(json.dumps(metrics,indent=2))
             return {'metrics':metrics,'files':upload_tree(output,request.run_id)}

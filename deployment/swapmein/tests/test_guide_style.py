@@ -37,3 +37,39 @@ def test_replace_everyone_never_claims_individual_identity_colors(variant):
     job = {"prompt_variant": variant, "setup": {"easy_mode": False, "replace_all_people": True},
            "depth_guidance": False}
     assert guide_style(job, True, False, reviewed=True) == ("translucent", "cyan_overlay_20")
+
+
+@pytest.mark.parametrize("variant,easy,reviewed,matched,distinct", [
+    ("identity_colors_v1", False, True, False, True),
+    ("identity_tint_tracking_v1", False, True, False, True),
+    ("cloudflare_identity_v1", False, True, False, True),
+    ("cloudflare_identity_v1", True, False, True, True),
+    ("cloudflare_identity_v1", True, True, False, True),
+    ("identity_colors_v1", True, True, False, False),
+    ("identity_tint_tracking_v1", True, True, False, False),
+    ("cloudflare_identity_v1", True, False, False, False),
+    ("identity_colors_v1", False, False, False, False),
+])
+@pytest.mark.parametrize("version", [None, 1])
+def test_light_depth_identity_tints_require_verified_assignments_and_new_job_version(
+        variant, easy, reviewed, matched, distinct, version):
+    job = {"prompt_variant": variant, "easy_mode": easy, "depth_guidance": True,
+           "depth_overlay_opacity": .2, "identity_matching_completed": matched}
+    if version is not None:
+        job["depth_identity_colors_version"] = version
+    fill, style = guide_style(job, True, True, reviewed=reviewed)
+    uses_identity_colors = distinct and version == 1
+    assert (fill, style) == ("depth", "identity_depth_multi" if uses_identity_colors else "shared_depth_multi")
+    assert compose_styles(fill, TARGETS, style) == (
+        TARGETS if uses_identity_colors else [{**target, "color": "#00dcff"} for target in TARGETS])
+
+
+@pytest.mark.parametrize("variant", ["identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"])
+def test_light_depth_identity_version_does_not_color_a_shared_or_unmasked_guide(variant):
+    job = {"prompt_variant": variant, "easy_mode": False, "depth_guidance": True,
+           "depth_overlay_opacity": .2, "depth_identity_colors_version": 1,
+           "tracking_reviewed": True}
+    assert guide_style(job, True, False) == ("depth", "shared_depth")
+    assert guide_style(job, False, True) == ("original", "none")
+    job["replace_all_people"] = True
+    assert guide_style(job, True, True) == ("depth", "shared_depth_multi")
