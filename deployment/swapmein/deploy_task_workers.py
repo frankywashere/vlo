@@ -27,7 +27,7 @@ def resources(preview):
 def bound_service(service, maximum):
     """Apply only service-level bounds; revision bounds came from deployment."""
     allowed = {'recastfx-long-test': 1, 'recastfx-api': 1, 'recastfx-long-worker': 1,
-               'recastfx-worker': HEAVY_CEILING, 'recastfx-control-worker': CONTROL_INSTANCES, 'proof-audio': HEAVY_CEILING}
+               'recastfx-worker': HEAVY_CEILING, 'recastfx-control-worker': CONTROL_INSTANCES, 'recastfx-audio': HEAVY_CEILING}
     if allowed.get(service) != maximum:
         raise deploy.SetupError('Unexpected worker scaling target')
     resource = f'projects/{deploy.PROJECT}/locations/{deploy.REGION}/services/{service}'
@@ -75,6 +75,36 @@ def bound_service(service, maximum):
             or current.get('template', {}).get('containers', [{}])[0].get('resources', {}).get('cpuIdle') is not True):
         raise deploy.SetupError('Worker bounded request-billed scaling was not confirmed')
     return current
+
+
+def deploy_isolated_audio(env, gateway_account):
+    """Reuse the installed CPU image without changing the legacy site's worker."""
+    source = deploy.gcloud('run','services','describe','proof-audio','--region='+deploy.REGION)
+    spec = source['spec']['template']['spec']
+    container = spec['containers'][0]
+    image = container['image']
+    if (not re.fullmatch(r'us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:[a-f0-9]{64}', image)
+            or spec['serviceAccountName'] != 'proof-worker@'+deploy.PROJECT+'.iam.gserviceaccount.com'
+            or len(spec['containers']) != 1 or container.get('command') or container.get('args')
+            or any('value' not in item for item in container.get('env', []))):
+        raise deploy.SetupError('Unexpected legacy CPU configuration; inspect before cloning')
+    service = 'recastfx-audio'
+    with tempfile.TemporaryDirectory(prefix='recastfx-isolated-cpu-') as directory:
+        env_file = Path(directory)/'env.json'
+        env_file.write_text(json.dumps({item['name']: item['value'] for item in container.get('env', [])}))
+        body = deploy.gcloud('run','deploy',service,'--region='+deploy.REGION,'--image='+image,
+            '--service-account='+spec['serviceAccountName'],'--min-instances=0',
+            '--max-instances='+str(HEAVY_CEILING),'--concurrency=1','--cpu=4','--memory=8Gi',
+            '--timeout=1800','--cpu-throttling','--no-allow-unauthenticated',
+            '--env-vars-file='+str(env_file),timeout=600)
+    for role in ('roles/run.invoker','roles/run.viewer'):
+        deploy.gcloud('run','services','add-iam-policy-binding',service,'--region='+deploy.REGION,
+            '--member=serviceAccount:'+gateway_account,'--role='+role)
+    bound_service(service, HEAVY_CEILING)
+    iam = deploy.gcloud('run','services','get-iam-policy',service,'--region='+deploy.REGION)
+    if any(member in {'allUsers','allAuthenticatedUsers'} for binding in iam.get('bindings', []) for member in binding.get('members', [])):
+        raise deploy.SetupError('The isolated CPU worker must remain private')
+    return body['status']['url']
 
 
 def prepare_capacity_migration(env, *, submissions_paused):
@@ -128,21 +158,8 @@ def deploy_worker(image, *, preview, submissions_paused=False):
     deploy.verify_cap()
     if not preview:
         prepare_capacity_migration(env, submissions_paused=submissions_paused)
-        cpu = deploy.google_get(f'https://run.googleapis.com/v2/projects/{deploy.PROJECT}/locations/{deploy.REGION}/services/proof-audio')
-        expected_cpu = f'projects/{deploy.PROJECT}/locations/{deploy.REGION}/services/proof-audio'
-        numbered_cpu = f'https://proof-audio-{deploy.PROJECT_NUMBER}.{deploy.REGION}.run.app'
-        if (cpu.get('name') != expected_cpu or cpu.get('invokerIamDisabled') is True
-                or env.get('AUDIO_URL') not in {cpu.get('uri'), numbered_cpu}):
-            raise deploy.SetupError('The existing private CPU endpoint could not be verified')
-        cpu_iam = deploy.gcloud('run','services','get-iam-policy','proof-audio','--region='+deploy.REGION)
-        if any(member in {'allUsers','allAuthenticatedUsers'} for binding in cpu_iam.get('bindings', []) for member in binding.get('members', [])):
-            raise deploy.SetupError('The existing CPU worker must remain private')
-        # The old per-request manual zeroing could stop another user's guide.
-        # Keep the existing image/identity/private IAM, and let request-based
-        # autoscaling own this CPU service before enabling parallel preparation.
-        deploy.gcloud('run','services','update','proof-audio','--region='+deploy.REGION,
-            '--min-instances=0','--max-instances='+str(HEAVY_CEILING),'--concurrency=1','--cpu-throttling',timeout=600)
-        bound_service('proof-audio',HEAVY_CEILING)
+        env['AUDIO_URL'] = deploy_isolated_audio(env, account)
+        env['AUDIO_SERVICE'] = 'recastfx-audio'
         env['REQUEST_SCALED_AUDIO']='true'
         env['PROCESSING_CAPACITY_ENABLED']='false'
     lanes = [('heavy',worker,queue,1 if preview else HEAVY_CEILING,1)]
@@ -190,7 +207,7 @@ def deploy_worker(image, *, preview, submissions_paused=False):
         deploy.gcloud('run','services','update-traffic',service,'--region='+deploy.REGION,
             '--to-revisions='+revisions[lane]+'=100')
     api_env = (common+',RELIABLE_TASKS=true,TASK_WORKER_MODE=false,TASK_WORKER_LANE=heavy,TASK_QUEUE='+queue+
-               ',RENDER_TASK_QUEUE='+queue+('' if preview else ',REQUEST_SCALED_AUDIO=true'))
+               ',RENDER_TASK_QUEUE='+queue+('' if preview else ',REQUEST_SCALED_AUDIO=true,AUDIO_SERVICE=recastfx-audio,AUDIO_URL='+env['AUDIO_URL']))
     body=deploy.gcloud('run','services','update',api,'--region='+deploy.REGION,'--image='+image,'--concurrency=4',
         '--update-env-vars='+api_env,timeout=600)
     api_revision=body['status']['latestCreatedRevisionName']

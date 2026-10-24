@@ -199,7 +199,10 @@ class Cloud:
         if service not in {"gpu", "audio"}:
             raise ValueError("Unknown worker")
         region = (self.settings.gpu_region or self.settings.region) if service == "gpu" else self.settings.region
-        return f"https://run.googleapis.com/v2/projects/{self.settings.project}/locations/{region}/services/proof-{service}"
+        name = "proof-gpu" if service == "gpu" else getattr(self.settings, "audio_service", "proof-audio")
+        if name not in {"proof-gpu", "proof-audio", "recastfx-audio"}:
+            raise ValueError("Unknown worker service")
+        return f"https://run.googleapis.com/v2/projects/{self.settings.project}/locations/{region}/services/{name}"
 
     def _scale(self, service: str, count: int):
         headers = {"Authorization": "Bearer " + access_token()}
@@ -285,7 +288,8 @@ class Cloud:
         IAM privacy is verified by deployment; requests still require an ID
         token for this exact service. Never turn a shared service off here.
         """
-        resource = f"projects/{self.settings.project}/locations/{self.settings.region}/services/proof-audio"
+        name = getattr(self.settings, "audio_service", "proof-audio")
+        resource = f"projects/{self.settings.project}/locations/{self.settings.region}/services/{name}"
         response = self.http.get(self._admin_url("audio"),
             headers={"Authorization": "Bearer " + access_token()}, timeout=30)
         try:
@@ -295,7 +299,7 @@ class Cloud:
             template = state.get("template", {})
             revision = template.get("scaling", {})
             containers = template.get("containers", [])
-            numbered_url = f"https://proof-audio-{self.settings.project_number}.{self.settings.region}.run.app"
+            numbered_url = f"https://{name}-{self.settings.project_number}.{self.settings.region}.run.app"
             if (state.get("name") != resource or state.get("deleteTime")
                     or state.get("reconciling")
                     or state.get("generation") != state.get("observedGeneration")
