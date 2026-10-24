@@ -303,9 +303,9 @@ class Cloud:
                     or self.settings.audio_url not in {state.get("uri"), numbered_url}
                     or scaling.get("scalingMode", "AUTOMATIC") != "AUTOMATIC"
                     or int(scaling.get("minInstanceCount", 0)) != 0
-                    or not 1 <= int(scaling.get("maxInstanceCount", 0)) <= 4
+                    or not 1 <= int(scaling.get("maxInstanceCount", 0)) <= 32
                     or int(revision.get("minInstanceCount", 0)) != 0
-                    or not 1 <= int(revision.get("maxInstanceCount", 0)) <= 4
+                    or not 1 <= int(revision.get("maxInstanceCount", 0)) <= 32
                     or int(template.get("maxInstanceRequestConcurrency", 0)) != 1
                     or len(containers) != 1
                     or containers[0].get("resources", {}).get("cpuIdle") is not True):

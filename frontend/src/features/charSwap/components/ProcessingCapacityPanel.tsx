@@ -8,6 +8,12 @@ interface ProcessingCapacityPanelProps {
   canEdit: boolean;
 }
 
+const MAX_CONFIGURED_JOBS = 32;
+
+function validCeiling(value: number | undefined): value is number {
+  return value !== undefined && Number.isInteger(value) && value >= 1 && value <= MAX_CONFIGURED_JOBS;
+}
+
 function validLimit(value: string, maximum: number) {
   return value.trim() !== "" && Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= maximum;
 }
@@ -46,9 +52,15 @@ export function ProcessingCapacityPanel({ canEdit }: ProcessingCapacityPanelProp
     return () => { ++request.current; };
   }, [expanded, refresh]);
 
-  const heavyValid = validLimit(heavyJobs, 4);
-  const reapiValid = validLimit(reapiJobs, 8);
-  const editable = canEdit && Boolean(capacity?.infrastructure.configured) && !busy;
+  const heavyCeiling = capacity?.infrastructure.heavy_ceiling;
+  const reapiCeiling = capacity?.infrastructure.control_ceiling;
+  const ceilingsValid = validCeiling(heavyCeiling) && validCeiling(reapiCeiling);
+  const heavyMaximum = validCeiling(heavyCeiling) ? heavyCeiling : MAX_CONFIGURED_JOBS;
+  const reapiMaximum = validCeiling(reapiCeiling) ? reapiCeiling : MAX_CONFIGURED_JOBS;
+  const heavyValid = validLimit(heavyJobs, heavyMaximum);
+  const reapiValid = validLimit(reapiJobs, reapiMaximum);
+  const configurationReady = Boolean(capacity?.infrastructure.configured) && ceilingsValid;
+  const editable = canEdit && configurationReady && !busy;
   const changed = capacity && (Number(heavyJobs) !== capacity.heavy_jobs || Number(reapiJobs) !== capacity.reapi_jobs);
 
   async function save() {
@@ -75,19 +87,20 @@ export function ProcessingCapacityPanel({ canEdit }: ProcessingCapacityPanelProp
       {message && <Alert severity="success">{message}</Alert>}
       {busy && !capacity && <Typography>Loading processing capacity…</Typography>}
       {capacity && <>
-        {!capacity.infrastructure.configured && <Alert severity="warning">Concurrency controls are unavailable until the worker configuration is ready.</Alert>}
+        {!configurationReady && <Alert severity="warning">Concurrency controls are unavailable until the worker configuration is ready.</Alert>}
         {!canEdit && <Typography variant="body2" color="text.secondary">Requires service-control permission to change limits.</Typography>}
+        <Typography variant="body2" color="text.secondary">All API keys on the same reAPI account share its approved media-task limit. Keep the render limit within your account’s approved allowance.</Typography>
         <Typography variant="body2">Active processing jobs: {capacity.active.heavy} · Active reAPI renders: {capacity.active.reapi}</Typography>
         <Box component="form" onSubmit={event => { event.preventDefault(); void save(); }} sx={{ minWidth: 0 }}>
           <Stack spacing={2}>
             <TextField label="Simultaneous processing jobs" type="number" value={heavyJobs} disabled={!editable}
               onChange={event => { setHeavyJobs(event.target.value); setMessage(""); }}
-              error={!heavyValid} helperText={heavyValid ? "Preparation and finishing share this limit. Choose 1–4." : "Enter a whole number from 1 to 4."}
-              slotProps={{ htmlInput: { min: 1, max: 4, step: 1 } }} />
+              error={!heavyValid} helperText={heavyValid ? `Preparation and finishing share this limit. Choose 1–${heavyMaximum}.` : `Enter a whole number from 1 to ${heavyMaximum}.`}
+              slotProps={{ htmlInput: { min: 1, max: heavyMaximum, step: 1 } }} />
             <TextField label="Simultaneous reAPI renders" type="number" value={reapiJobs} disabled={!editable}
               onChange={event => { setReapiJobs(event.target.value); setMessage(""); }}
-              error={!reapiValid} helperText={reapiValid ? "Limits submitted renders still running at reAPI. Choose 1–8." : "Enter a whole number from 1 to 8."}
-              slotProps={{ htmlInput: { min: 1, max: 8, step: 1 } }} />
+              error={!reapiValid} helperText={reapiValid ? `Limits submitted renders still running at reAPI. Choose 1–${reapiMaximum}.` : `Enter a whole number from 1 to ${reapiMaximum}.`}
+              slotProps={{ htmlInput: { min: 1, max: reapiMaximum, step: 1 } }} />
             <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap" }}>
               <Button type="submit" variant="contained" disabled={!editable || !changed || !heavyValid || !reapiValid}>Save processing limits</Button>
               <Button type="button" disabled={busy} onClick={() => void refresh()}>Refresh processing capacity</Button>

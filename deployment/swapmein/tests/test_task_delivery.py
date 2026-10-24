@@ -276,9 +276,10 @@ def test_preview_never_uses_configured_production_control_lane(runtime):
 
 
 def test_capacity_wait_does_not_consume_delivery_execution_or_repeat_started_preparation(runtime,monkeypatch):
-    from swapmein.processing_capacity import STATE_PATH
+    from swapmein.processing_capacity import STATE_PATH, SETTINGS_PATH
     settings,records,tasks,clock,_=runtime
     settings=replace(production_lanes(settings),processing_capacity_enabled=True,request_scaled_audio=True)
+    records.data[SETTINGS_PATH]={'heavy_jobs':2,'reapi_jobs':2}
     records.data[STATE_PATH]={'initialized':1,'heavy':{
         'other1':{'until':clock[0]+100},'other2':{'until':clock[0]+100}}}
     TaskDelivery(settings,records,tasks).enqueue('prepare',JOB,task_token=TOKEN)

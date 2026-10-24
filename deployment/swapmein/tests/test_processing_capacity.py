@@ -55,7 +55,7 @@ def capacity(monkeypatch):
                        control_task_worker_url="https://recastfx-control-worker-63lqoskl5q-uk.a.run.app",
                        task_worker_url="https://recastfx-worker-63lqoskl5q-uk.a.run.app",
                        task_queue="recastfx-work", control_task_queue="recastfx-control")
-    records = AtomicRecords({STATE_PATH: {"initialized": 1}})
+    records = AtomicRecords({STATE_PATH: {"initialized": 1}, SETTINGS_PATH: {"heavy_jobs": 2, "reapi_jobs": 2}})
     return ProcessingCapacity(settings, records), records, clock
 
 
@@ -75,6 +75,41 @@ def test_concurrent_provider_admission_accepts_two_and_leaves_third_waiting(capa
     # Repeating an accepted reservation never consumes a second slot.
     assert limits.claim_provider(next(iter(accepted))) is True
     assert len(records.data[STATE_PATH]["reapi"]) == 2
+
+
+def test_new_install_defaults_to_eight_and_queues_the_ninth(capacity):
+    limits, records, _ = capacity
+    records.data.pop(SETTINGS_PATH)
+    view = limits.view()
+    assert view["heavy_jobs"] == view["reapi_jobs"] == 8
+    assert view["infrastructure"]["heavy_ceiling"] == view["infrastructure"]["control_ceiling"] == 32
+    for index in range(8):
+        identifier = f"{index:032x}"
+        assert limits.claim_provider(identifier)
+        assert limits.claim_heavy(identifier, identifier)
+    assert not limits.claim_provider("f" * 32)
+    with pytest.raises(PublicError, match="available processing worker"):
+        limits.claim_heavy("f" * 32, "e" * 32)
+
+
+def test_admin_can_raise_both_to_32_without_disturbing_existing_work(capacity):
+    limits, records, _ = capacity
+    original = deepcopy(records.data[STATE_PATH])
+    view = limits.save(OWNER, 0, 32, 32)
+    assert view["heavy_jobs"] == view["reapi_jobs"] == 32
+    assert records.data[STATE_PATH] == original
+    for index in range(32):
+        identifier = f"{index:032x}"
+        assert limits.claim_provider(identifier)
+        assert limits.claim_heavy(identifier, identifier)
+    assert not limits.claim_provider("f" * 32)
+    with pytest.raises(PublicError, match="available processing worker"):
+        limits.claim_heavy("f" * 32, "e" * 32)
+
+
+def test_existing_saved_limits_are_not_silently_overwritten_by_new_defaults(capacity):
+    limits, _, _ = capacity
+    assert limits.view()["heavy_jobs"] == limits.view()["reapi_jobs"] == 2
 
 
 def test_lowering_limit_does_not_cancel_existing_provider_or_heavy_work(capacity):
@@ -213,7 +248,7 @@ def test_initialize_rejects_invalid_active_identity_without_partial_seed():
 
 
 @pytest.mark.parametrize("revision,heavy,renders", [(True, 2, 2), (-1, 2, 2), (0, True, 2),
-    (0, 0, 2), (0, 5, 2), (0, 2, 0), (0, 2, 9), (0, 2, 1.5)])
+    (0, 0, 2), (0, 33, 2), (0, 2, 0), (0, 2, 33), (0, 2, 1.5)])
 def test_save_rejects_invalid_limits_without_changing_records(capacity, revision, heavy, renders):
     limits, records, _ = capacity
     before = deepcopy(records.data)
@@ -228,7 +263,7 @@ def test_settings_permission_and_revision_are_enforced(capacity):
     with pytest.raises(PublicError) as error:
         limits.save(USER, 0, 2, 2)
     assert error.value.status_code == 403
-    assert SETTINGS_PATH not in records.data
+    assert records.data[SETTINGS_PATH] == {"heavy_jobs": 2, "reapi_jobs": 2}
     limits.save(OWNER, 0, 3, 4)
     with pytest.raises(PublicError) as error:
         limits.save(OWNER, 0, 1, 1)
@@ -249,7 +284,7 @@ def test_enabled_but_unconfigured_capacity_fails_closed(capacity, missing):
                    lambda: limits.save(OWNER, 0, 2, 2)):
         with pytest.raises(PublicError) as error: action()
         assert error.value.status_code == 503
-    assert SETTINGS_PATH not in records.data
+    assert records.data[SETTINGS_PATH] == {"heavy_jobs": 2, "reapi_jobs": 2}
 
 
 def test_minute_preview_cannot_enable_production_admission(capacity):
@@ -322,7 +357,7 @@ def test_concurrent_pooled_preparation_claims_accept_two_without_lost_lease():
 
 
 @pytest.mark.parametrize("field,value", [("heavy_jobs", True), ("heavy_jobs", "2"), ("heavy_jobs", 0),
-    ("heavy_jobs", 5), ("reapi_jobs", 0), ("reapi_jobs", 9), ("reapi_jobs", 1.5)])
+    ("heavy_jobs", 33), ("reapi_jobs", 0), ("reapi_jobs", 33), ("reapi_jobs", 1.5)])
 def test_corrupt_saved_limits_fail_closed_before_admitting_work(capacity, field, value):
     limits, records, _ = capacity
     records.data[SETTINGS_PATH] = {"revision": 3, "heavy_jobs": 2, "reapi_jobs": 2, field: value}

@@ -26,7 +26,7 @@ from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
 from .media import Anchor, Setup, normalize_reference, strip_audio
 from .pipeline import Pipeline
-from .processing_capacity import ProcessingCapacity
+from .processing_capacity import ProcessingCapacity, HEAVY_CEILING, REAPI_CEILING
 from .task_delivery import worker_audience
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .provider_failure import provider_failure, failure_message
@@ -612,8 +612,8 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
 class CapacityUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     revision: int = Field(ge=0)
-    heavy_jobs: int = Field(ge=1, le=4)
-    reapi_jobs: int = Field(ge=1, le=8)
+    heavy_jobs: int = Field(ge=1, le=HEAVY_CEILING)
+    reapi_jobs: int = Field(ge=1, le=REAPI_CEILING)
 
 
 @app.get("/api/commerce/admin/capacity")

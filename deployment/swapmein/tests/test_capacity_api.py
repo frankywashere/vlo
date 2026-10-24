@@ -103,6 +103,9 @@ def test_admin_capacity_auth_strict_bounds_and_conflict(enabled, monkeypatch):
     assert client.post(path, headers=owner, json={"revision": 0, "heavy_jobs": True, "reapi_jobs": 3}).status_code == 422
     assert client.post(path, headers=owner, json={"revision": 0, "heavy_jobs": 2, "reapi_jobs": 3}).status_code == 200
     assert client.post(path, headers=owner, json={"revision": 0, "heavy_jobs": 2, "reapi_jobs": 3}).status_code == 409
+    assert client.post(path, headers=owner, json={"revision": 1, "heavy_jobs": 32, "reapi_jobs": 32}).status_code == 200
+    assert client.post(path, headers=owner, json={"revision": 2, "heavy_jobs": 33, "reapi_jobs": 8}).status_code == 422
+    assert client.post(path, headers=owner, json={"revision": 2, "heavy_jobs": 8, "reapi_jobs": 33}).status_code == 422
 
 
 def test_admission_enqueues_instead_of_running_heavy_preparation(enabled, monkeypatch):

@@ -6,7 +6,7 @@ import type { ProcessingCapacity } from "../../services/commerce";
 
 const api = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock("../../services/commerce", () => ({ loadProcessingCapacity: api.load, saveProcessingCapacity: api.save }));
-const initial: ProcessingCapacity = { revision: 7, heavy_jobs: 2, reapi_jobs: 2, active: { heavy: 1, reapi: 2 }, infrastructure: { configured: true, heavy_ceiling: 4, control_ceiling: 8 } };
+const initial: ProcessingCapacity = { revision: 7, heavy_jobs: 8, reapi_jobs: 8, active: { heavy: 1, reapi: 2 }, infrastructure: { configured: true, heavy_ceiling: 32, control_ceiling: 32 } };
 
 beforeEach(() => {
   api.load.mockReset().mockResolvedValue(initial);
@@ -25,8 +25,8 @@ async function open(canEdit = true) {
 
 it("loads only when expanded, shows actual counts, and refreshes current limits without saving", async () => {
   const user = await open();
-  expect(screen.getByLabelText("Simultaneous processing jobs")).toHaveValue(2);
-  expect(screen.getByLabelText("Simultaneous reAPI renders")).toHaveValue(2);
+  expect(screen.getByLabelText("Simultaneous processing jobs")).toHaveValue(8);
+  expect(screen.getByLabelText("Simultaneous reAPI renders")).toHaveValue(8);
   expect(screen.getByRole("button", { name: "Save processing limits" })).toBeDisabled();
   api.load.mockResolvedValueOnce({ ...initial, heavy_jobs: 3, active: { heavy: 3, reapi: 1 } });
   await user.click(screen.getByRole("button", { name: "Refresh processing capacity" }));
@@ -42,17 +42,17 @@ it("saves changed whole-number limits with the loaded revision and uses the retu
   expect(api.save).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Save processing limits" }));
   await screen.findByText(/Processing limits saved/);
-  expect(api.save).toHaveBeenLastCalledWith({ revision: 7, heavy_jobs: 3, reapi_jobs: 2 });
+  expect(api.save).toHaveBeenLastCalledWith({ revision: 7, heavy_jobs: 3, reapi_jobs: 8 });
   await user.clear(heavy); await user.type(heavy, "1");
   await user.click(screen.getByRole("button", { name: "Save processing limits" }));
   await screen.findByText(/Processing limits saved/);
-  expect(api.save).toHaveBeenLastCalledWith({ revision: 8, heavy_jobs: 1, reapi_jobs: 2 });
+  expect(api.save).toHaveBeenLastCalledWith({ revision: 8, heavy_jobs: 1, reapi_jobs: 8 });
   expect(screen.getByText(/Lowering a limit does not cancel work already running/)).toBeInTheDocument();
 });
 
 it.each([
-  ["Simultaneous processing jobs", "0"], ["Simultaneous processing jobs", "5"], ["Simultaneous processing jobs", "1.5"],
-  ["Simultaneous reAPI renders", "0"], ["Simultaneous reAPI renders", "9"], ["Simultaneous reAPI renders", "2.5"],
+  ["Simultaneous processing jobs", "0"], ["Simultaneous processing jobs", "33"], ["Simultaneous processing jobs", "1.5"],
+  ["Simultaneous reAPI renders", "0"], ["Simultaneous reAPI renders", "33"], ["Simultaneous reAPI renders", "2.5"],
   ["Simultaneous processing jobs", ""],
 ])("blocks invalid %s=%s instead of silently saving a different number", async (label, value) => {
   const user = await open();
@@ -96,7 +96,7 @@ it("retains attempted values after a revision conflict, then reloads before anot
   await user.type(screen.getByLabelText("Simultaneous reAPI renders"), "4");
   await user.click(screen.getByRole("button", { name: "Save processing limits" }));
   await screen.findByText(/Processing limits saved/);
-  expect(api.save).toHaveBeenLastCalledWith({ revision: 9, heavy_jobs: 2, reapi_jobs: 4 });
+  expect(api.save).toHaveBeenLastCalledWith({ revision: 9, heavy_jobs: 8, reapi_jobs: 4 });
 });
 
 it("shows a failed load and provides a refresh path", async () => {
@@ -108,4 +108,37 @@ it("shows a failed load and provides a refresh path", async () => {
   await user.click(screen.getByRole("button", { name: "Refresh processing capacity" }));
   await screen.findByText("Active processing jobs: 1 · Active reAPI renders: 2");
   expect(api.save).not.toHaveBeenCalled();
+});
+
+
+it("accepts the configured ceiling of 32 for both limits", async () => {
+  const user = await open();
+  for (const label of ["Simultaneous processing jobs", "Simultaneous reAPI renders"]) {
+    const input = screen.getByLabelText(label);
+    expect(input).toHaveAttribute("max", "32");
+    await user.clear(input); await user.type(input, "32");
+  }
+  await user.click(screen.getByRole("button", { name: "Save processing limits" }));
+  await screen.findByText(/Processing limits saved/);
+  expect(api.save).toHaveBeenLastCalledWith({ revision: 7, heavy_jobs: 32, reapi_jobs: 32 });
+  expect(screen.getByText(/All API keys on the same reAPI account share its approved media-task limit/)).toBeInTheDocument();
+});
+
+it("honors lower deployed ceilings returned by the server", async () => {
+  api.load.mockResolvedValueOnce({ ...initial, infrastructure: { ...initial.infrastructure, heavy_ceiling: 8, control_ceiling: 16 } });
+  const user = await open();
+  expect(screen.getByLabelText("Simultaneous processing jobs")).toHaveAttribute("max", "8");
+  expect(screen.getByLabelText("Simultaneous reAPI renders")).toHaveAttribute("max", "16");
+  await user.clear(screen.getByLabelText("Simultaneous processing jobs"));
+  await user.type(screen.getByLabelText("Simultaneous processing jobs"), "9");
+  expect(screen.getByRole("button", { name: "Save processing limits" })).toBeDisabled();
+  expect(api.save).not.toHaveBeenCalled();
+});
+
+it.each([0, 33, 1.5])("keeps controls disabled for an unsupported server ceiling %s", async ceiling => {
+  api.load.mockResolvedValueOnce({ ...initial, infrastructure: { ...initial.infrastructure, heavy_ceiling: ceiling } });
+  await open();
+  expect(screen.getByText(/Concurrency controls are unavailable/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Simultaneous processing jobs")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Save processing limits" })).toBeDisabled();
 });

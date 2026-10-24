@@ -58,9 +58,9 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
     assert all((c[2] if c[:2]==('run','deploy') else c[3]) in expected for c in writes)
     queues={c[3]:c for c in calls if c[:3]==('tasks','queues','create')}
     assert '--max-attempts=20' in queues[queue]
-    assert '--max-concurrent-dispatches='+('1' if preview else '4') in queues[queue]
+    assert '--max-concurrent-dispatches='+('1' if preview else '32') in queues[queue]
     deploy_worker=next(c for c in calls if c[:3]==('run','deploy',worker))
-    assert '--min-instances=0' in deploy_worker and '--max-instances='+('1' if preview else '4') in deploy_worker
+    assert '--min-instances=0' in deploy_worker and '--max-instances='+('1' if preview else '32') in deploy_worker
     assert '--no-allow-unauthenticated' in deploy_worker
     assert '--set-secrets=RECASTFX_JOB_KEY=existing-job-key:latest' in deploy_worker
     assert not any('gpu' in item.lower() for c in calls for item in c)
@@ -69,7 +69,7 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
     assert any(item.endswith('/maintenance/recover-deliveries') for item in scheduler_call)
     if preview:
         assert not migrations and not result['control_worker']
-        assert set(worker_env)=={worker} and ('proof-audio',4) not in bounds
+        assert set(worker_env)=={worker} and ('proof-audio',32) not in bounds
     else:
         assert migrations==[{'submissions_paused':True}]
         assert '--max-concurrent-dispatches=16' in queues['recastfx-control']
@@ -79,7 +79,7 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
         assert worker_env['recastfx-control-worker']['TASK_WORKER_LANE']=='control'
         assert worker_env[worker]['REQUEST_SCALED_AUDIO']=='true'
         assert worker_env[worker]['PROCESSING_CAPACITY_ENABLED']=='false'  # Activated only after canonical routing exists.
-        assert ('proof-audio',4) in bounds
+        assert ('proof-audio',32) in bounds
         api_update=next(c for c in calls if c[:4]==('run','services','update',api))
         assert any('PROCESSING_CAPACITY_ENABLED=true' in arg for arg in api_update)
 
@@ -88,17 +88,17 @@ def test_service_scaling_is_etag_guarded_scoped_and_verified(release,monkeypatch
     resource=f'projects/{release.deploy.PROJECT}/locations/{release.deploy.REGION}/services/recastfx-worker'
     state={'name':resource,'etag':'original','generation':'1','observedGeneration':'1',
            'terminalCondition':{'state':'CONDITION_SUCCEEDED'},'scaling':{'maxInstanceCount':1},
-           'template':{'scaling':{'maxInstanceCount':4},'containers':[{'resources':{'cpuIdle':True}}]}}
+           'template':{'scaling':{'maxInstanceCount':32},'containers':[{'resources':{'cpuIdle':True}}]}}
     updates=[]
     monkeypatch.setattr(release.deploy,'google_get',lambda url:state)
     def patch(url,body):
         updates.append((url,body));state['scaling']=body['scaling']
         return {'name':f'projects/{release.deploy.PROJECT}/locations/{release.deploy.REGION}/operations/safe','done':True}
     monkeypatch.setattr(release.deploy,'google_patch',patch)
-    release.bound_service('recastfx-worker',4)
+    release.bound_service('recastfx-worker',32)
     assert updates[0][1]['etag']=='original'
-    assert updates[0][1]['scaling']=={'minInstanceCount':0,'maxInstanceCount':4,'scalingMode':'AUTOMATIC'}
-    with pytest.raises(release.deploy.SetupError):release.bound_service('proof-gpu',4)
+    assert updates[0][1]['scaling']=={'minInstanceCount':0,'maxInstanceCount':32,'scalingMode':'AUTOMATIC'}
+    with pytest.raises(release.deploy.SetupError):release.bound_service('proof-gpu',32)
 
 
 def test_migration_requires_an_explicit_admission_pause_before_access(release,monkeypatch):

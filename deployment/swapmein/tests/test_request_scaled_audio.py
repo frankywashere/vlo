@@ -16,8 +16,8 @@ def state():
     return {"name": f"projects/{settings.project}/locations/{settings.region}/services/proof-audio",
             "uri": "https://proof-audio-63lqoskl5q-uk.a.run.app", "generation": "4", "observedGeneration": "4",
             "terminalCondition": {"state": "CONDITION_SUCCEEDED"},
-            "scaling": {"scalingMode": "AUTOMATIC", "minInstanceCount": 0, "maxInstanceCount": 4},
-            "template": {"scaling": {"minInstanceCount": 0, "maxInstanceCount": 4},
+            "scaling": {"scalingMode": "AUTOMATIC", "minInstanceCount": 0, "maxInstanceCount": 32},
+            "template": {"scaling": {"minInstanceCount": 0, "maxInstanceCount": 32},
                          "maxInstanceRequestConcurrency": 1,
                          "containers": [{"resources": {"cpuIdle": True}}]}}
 
@@ -73,8 +73,8 @@ def test_cpu_preflight_fails_closed_before_token_or_inference(monkeypatch, failu
     if failure == "wrong-resource": body["name"] = body["name"].replace("proof-audio", "other-service")
     if failure == "manual": body["scaling"]["scalingMode"] = "MANUAL"
     if failure == "warm-minimum": body["scaling"]["minInstanceCount"] = 1
-    if failure == "unbounded-service": body["scaling"]["maxInstanceCount"] = 5
-    if failure == "unbounded-revision": body["template"]["scaling"]["maxInstanceCount"] = 5
+    if failure == "unbounded-service": body["scaling"]["maxInstanceCount"] = 33
+    if failure == "unbounded-revision": body["template"]["scaling"]["maxInstanceCount"] = 33
     if failure == "concurrency": body["template"]["maxInstanceRequestConcurrency"] = 2
     if failure == "instance-billing": body["template"]["containers"][0]["resources"]["cpuIdle"] = False
     if failure == "unready": body["terminalCondition"]["state"] = "CONDITION_FAILED"

@@ -15,8 +15,9 @@ from .security import digest
 SETTINGS_PATH = "control/processing-settings.json"
 STATE_PATH = "control/processing-capacity.json"
 LEASE_SECONDS = 1890
-HEAVY_CEILING = 4
-REAPI_CEILING = 8
+HEAVY_CEILING = 32
+REAPI_CEILING = 32
+DEFAULT_CAPACITY = 8
 
 
 class ProcessingCapacity:
@@ -46,12 +47,12 @@ class ProcessingCapacity:
     def limits(self):
         current, _ = self.records.read(SETTINGS_PATH)
         current = current or {}
-        if (type(current.get("heavy_jobs", 2)) is not int or not 1 <= current.get("heavy_jobs", 2) <= HEAVY_CEILING
-                or type(current.get("reapi_jobs", 2)) is not int or not 1 <= current.get("reapi_jobs", 2) <= REAPI_CEILING):
+        if (type(current.get("heavy_jobs", DEFAULT_CAPACITY)) is not int or not 1 <= current.get("heavy_jobs", DEFAULT_CAPACITY) <= HEAVY_CEILING
+                or type(current.get("reapi_jobs", DEFAULT_CAPACITY)) is not int or not 1 <= current.get("reapi_jobs", DEFAULT_CAPACITY) <= REAPI_CEILING):
             raise PublicError("Saved processing capacity is invalid. Ask an administrator to review it.", 503)
         return {"revision": current.get("revision", 0),
-                "heavy_jobs": current.get("heavy_jobs", 2) if self.configured() else 1,
-                "reapi_jobs": current.get("reapi_jobs", 2),
+                "heavy_jobs": current.get("heavy_jobs", DEFAULT_CAPACITY) if self.configured() else 1,
+                "reapi_jobs": current.get("reapi_jobs", DEFAULT_CAPACITY),
                 **({"updated_at": current["updated_at"]} if "updated_at" in current else {})}
 
     def require_ready(self):

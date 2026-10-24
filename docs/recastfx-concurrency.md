@@ -9,8 +9,8 @@ Staff with `service_controls` can save revision-checked integer limits:
 
 | Setting | Default after migration | Bounds | Counts |
 | --- | --- | --- | --- |
-| Simultaneous processing jobs | 2 | 1–4 | Preparation and finishing tasks sharing the heavy worker pool |
-| Simultaneous reAPI renders | 2 | 1–8 | Reservations, accepted generations and unresolved submissions |
+| Simultaneous processing jobs | 8 | 1–32 | Preparation and finishing tasks sharing the heavy worker pool |
+| Simultaneous reAPI renders | 8 | 1–32 | Reservations, accepted generations and unresolved submissions |
 
 The panel loads on expansion, shows active counts and has explicit Save and
 Refresh actions. It is read-only until the required worker routes, CPU lifecycle
@@ -25,19 +25,25 @@ running.
 
 The reAPI limit applies to this production backend's tracked work, not to jobs
 submitted directly through another script/provider dashboard or the isolated
-minute-test backend. Provider-enforced limits still apply. Their official
-[API overview](https://reapi.ai/docs/api) documents asynchronous tasks, a default
-20 HTTP requests per second per user, and that idempotency headers do not prevent
-another billable POST. That HTTP rate is not an account-specific promise of eight
-simultaneous video generations. Start with two and observe provider responses.
+minute-test backend. Provider-enforced limits still apply. Their live
+[pricing page](https://reapi.ai/pricing), checked October 24, lists 30 concurrent
+media tasks per account and offers account limit increases.
+The API overview and pricing page also list different request-rate defaults
+(20 versus 50 per second), so neither is treated as verification of this
+account's exact allowance. Idempotency headers do not prevent another billable
+POST. Start at eight, observe provider responses, and keep Admin within the
+account's approved limit. Multiple keys on one account share those limits; no
+key pool or automatic cross-key resubmission is introduced. A higher account
+allowance can use the same existing key. Saving a higher Admin value within
+1–32 needs no deployment once the infrastructure is installed.
 
 ## Runtime routes
 
 | Work | Queue / worker | Deployment ceiling |
 | --- | --- | --- |
 | Admission, guarded provider submission, status checks | `recastfx-control` / `recastfx-control-worker` | 16 concurrent deliveries; two instances, eight requests each |
-| Preparation, reviewed guide rebuild, finishing/comparison export | `recastfx-work` / `recastfx-worker` | Four concurrent deliveries; four instances, one request each |
-| CPU guide/face mesh/audio work | existing private `proof-audio` | Automatic min zero/max four, one request per instance |
+| Preparation, reviewed guide rebuild, finishing/comparison export | `recastfx-work` / `recastfx-worker` | 32 concurrent deliveries; 32 instances, one request each |
+| CPU guide/face mesh/audio work | existing private `proof-audio` | Automatic min zero/max 32, one request per instance |
 | Local SAM/depth GPU route | existing private `proof-gpu` | Existing single-worker lifecycle and exclusive preparation lease |
 
 The application heavy permit is checked before claiming a delivery execution.
@@ -110,7 +116,7 @@ Before a production migration:
    existing service account. GPU capacity and provider keys do not change.
 5. Verify queue settings, private IAM, CPU billing/scaling, both worker audiences,
    health, watchdog success and Admin readiness; then deliberately resume the
-   paused admission path. Begin at two/two and measure queue wait, stage timing,
+   paused admission path. Begin at eight/eight and measure queue wait, stage timing,
    provider failures and spend before raising the limits.
 
 For rollback, first stop new admissions and drain active CPU requests. Returning
@@ -142,3 +148,16 @@ fixture update. All 598 CharSwap frontend tests passed with two test workers;
 TypeScript, the browser-cleanup asset check and the production frontend build
 passed. The extension-impact and whitespace checks were clean. Nothing was
 submitted to a paid model or deployed during this implementation.
+
+The follow-up raises the preconfigured ceiling from four/eight to 32 for both
+controls and changes new-install defaults from two to eight. Existing saved
+limits are retained. CPU/worker minima stay zero and billing stays request based;
+these ceilings do not reserve paid idle instances. Local GPU exclusivity and
+minute-preview isolation are unchanged.
+
+The 32-ceiling/eight-default follow-up passed 458 focused backend integration
+checks, 56 Admin/panel tests, a subsequent 54-test capacity/API boundary rerun,
+TypeScript/build and extension-impact/diff checks. Tests admit eight jobs and
+queue the ninth by default, permit all 32 after an explicit Admin change, reject
+33, and retain any previously saved limits. No provider key was added, and no
+live deployment or paid model request was made.

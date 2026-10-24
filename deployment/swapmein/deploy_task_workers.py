@@ -25,7 +25,7 @@ def resources(preview):
 def bound_service(service, maximum):
     """Apply only service-level bounds; revision bounds came from deployment."""
     allowed = {'recastfx-long-test': 1, 'recastfx-api': 1, 'recastfx-long-worker': 1,
-               'recastfx-worker': 4, 'recastfx-control-worker': 2, 'proof-audio': 4}
+               'recastfx-worker': 32, 'recastfx-control-worker': 2, 'proof-audio': 32}
     if allowed.get(service) != maximum:
         raise deploy.SetupError('Unexpected worker scaling target')
     resource = f'projects/{deploy.PROJECT}/locations/{deploy.REGION}/services/{service}'
@@ -139,11 +139,11 @@ def deploy_worker(image, *, preview, submissions_paused=False):
         # Keep the existing image/identity/private IAM, and let request-based
         # autoscaling own this CPU service before enabling parallel preparation.
         deploy.gcloud('run','services','update','proof-audio','--region='+deploy.REGION,
-            '--min-instances=0','--max-instances=4','--concurrency=1','--cpu-throttling',timeout=600)
-        bound_service('proof-audio',4)
+            '--min-instances=0','--max-instances=32','--concurrency=1','--cpu-throttling',timeout=600)
+        bound_service('proof-audio',32)
         env['REQUEST_SCALED_AUDIO']='true'
         env['PROCESSING_CAPACITY_ENABLED']='false'
-    lanes = [('heavy',worker,queue,1 if preview else 4,1)]
+    lanes = [('heavy',worker,queue,1 if preview else 32,1)]
     if not preview:
         lanes.append(('control',control_worker,control_queue,2,8))
     revisions, urls = {}, {}
