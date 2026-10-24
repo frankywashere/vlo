@@ -28,9 +28,20 @@ def deploy_worker(image, *, preview):
     original = deploy.gcloud('run','services','describe',api,'--region='+deploy.REGION)
     spec = original['spec']['template']['spec']
     account = spec['serviceAccountName']
-    if any('valueFrom' in entry for entry in spec['containers'][0].get('env', [])):
-        raise deploy.SetupError('Inspect secret references before copying the worker configuration')
-    env = {item['name']:item['value'] for item in spec['containers'][0].get('env', [])}
+    secret_refs = []
+    for entry in spec['containers'][0].get('env', []):
+        if 'valueFrom' not in entry:
+            continue
+        ref = entry['valueFrom'].get('secretKeyRef', {})
+        if (not re.fullmatch(r'[A-Z][A-Z0-9_]*', entry['name'])
+                or not re.fullmatch(r'[a-zA-Z0-9_-]+', ref.get('name', ''))
+                or not re.fullmatch(r'latest|[0-9]+', ref.get('key', ''))):
+            raise deploy.SetupError('Unsupported secret reference; inspect before copying the worker configuration')
+        secret_refs.append(entry['name']+'='+ref['name']+':'+ref['key'])
+    # Reuse Secret Manager references with the same existing service identity;
+    # never read secret values into the deployment process or env file.
+    secret_args = ['--set-secrets='+','.join(secret_refs)] if secret_refs else []
+    env = {item['name']:item['value'] for item in spec['containers'][0].get('env', []) if 'value' in item}
     api_url = original['status']['url']
     worker_url = f'https://{worker}-{deploy.PROJECT_NUMBER}.{deploy.REGION}.run.app'
     env.update(SERVICE_URL=api_url,TASK_WORKER_URL=worker_url,RELIABLE_TASKS='true',TASK_WORKER_MODE='true',
@@ -50,7 +61,7 @@ def deploy_worker(image, *, preview):
             '--service-account='+account,'--min-instances=0','--max-instances=1','--concurrency=1',
             '--cpu=2','--memory=4Gi','--timeout=1800','--cpu-throttling','--no-allow-unauthenticated',
             '--env-vars-file='+str(env_file),'--command=python',
-            '--args=-m,uvicorn,'+module+',--host,0.0.0.0,--port,8080,--no-access-log',timeout=600)
+            '--args=-m,uvicorn,'+module+',--host,0.0.0.0,--port,8080,--no-access-log',*secret_args,timeout=600)
     actual_url=body['status']['url']
     if actual_url != worker_url:
         worker_url=actual_url
