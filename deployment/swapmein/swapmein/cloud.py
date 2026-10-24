@@ -59,6 +59,11 @@ class Cloud:
 
     @timed("enqueue", job_arg="job_id")
     def enqueue(self, kind: str, job_id: str, *, task_token: str | None = None, delay_seconds: int = 0):
+        if self.settings.reliable_tasks:
+            from .task_delivery import TaskDelivery
+            from .storage import Records
+            return TaskDelivery(self.settings, Records(self.settings.app_bucket, self.storage), self.tasks).enqueue(
+                kind, job_id, task_token=task_token, delay_seconds=delay_seconds)
         settings = self.settings
         queue = settings.render_task_queue if kind in {"generate", "poll-provider"} else settings.task_queue
         if task_token is not None and (not isinstance(task_token, str)
