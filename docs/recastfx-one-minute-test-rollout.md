@@ -254,3 +254,21 @@ new resume action; TypeScript/build and extension-impact checks passed. The
 watchdog-route correction added a further regression and all 30 focused shared
 worker/deployment tests passed in both source trees. Codec/decode validation is
 technical verification; creative acceptance remains with the user.
+
+Live release verification:
+
+- Preview API `recastfx-long-test-00006-9wh`, private worker
+  `recastfx-long-worker-00004-lmp`, queue `recastfx-long-work`.
+- Production API `recastfx-api-00072-h27`, private worker
+  `recastfx-worker-00002-zfx`, queue `recastfx-work`. The production image was
+  built separately from main plus shared delivery changes; staging explicitly
+  rejected inclusion of `long_render_app.py`.
+- API health checks returned 200; unauthenticated worker requests returned 403.
+  Both queues report concurrency one and the configured 20-attempt backoff.
+  Service/revision limits remain min zero, max one and request-billed CPU.
+- Production still serves `charswap-DZOrIgVg.js`; only the preview serves
+  `charswap-DArgTw1h.js`. Original GPU services were not redeployed.
+- Deployment preserves existing Secret Manager references with the same service
+  identity; no secret values are read into the deployment env file. Four
+  deployment regressions cover create/update scheduler flags and secret refs;
+  all 32 shared worker/deployment tests pass after these deployment fixes.
