@@ -135,18 +135,19 @@ class Records:
 def check_preparation_capacity(current: dict | None, now: float,
                                monthly_limit: int = Settings.monthly_preparations,
                                daily_limit: int = Settings.daily_preparations, *,
-                               limit_prefix: str = "preparation"):
+                               limit_prefix: str = "preparation", maximum: int = 1, requires_gpu: bool = False):
     """Read-only preflight; reservation must still check inside its atomic update."""
     current = current or {}
     clock = datetime.fromtimestamp(now, timezone.utc)
     month, day = clock.strftime("%Y-%m"), clock.strftime("%Y-%m-%d")
-    active = current.get("active")
-    if active:
-        if active.get("until", 0) <= now or active.get("blocked"):
+    active = preparation_leases(current)
+    for lease in active.values():
+        if lease.get("until", 0) <= now or lease.get("blocked"):
             raise PublicError("A previous preparation needs operator recovery before new clips can run.", 503,
                               code="preparation_recovery")
+    if len(active) >= maximum or requires_gpu and any(lease.get("requires_gpu", True) for lease in active.values()):
         raise PublicError("Another clip is being prepared. Try again when it finishes.", 429,
-                          code="preparation_busy", retry_after=max(1, math.ceil(active["until"] - now)))
+                          code="preparation_busy", retry_after=max(1, math.ceil(min(lease["until"] for lease in active.values()) - now)))
     month_count = current.get("month_count", 0) if current.get("month") == month else 0
     day_count = current.get("day_count", 0) if current.get("day") == day else 0
     subject = "upload" if limit_prefix == "upload" else "preparation"
@@ -165,19 +166,21 @@ def check_preparation_capacity(current: dict | None, now: float,
 def reserve_preparation(current: dict | None, job_id: str, now: float,
                         monthly_limit: int = Settings.monthly_preparations,
                         daily_limit: int = Settings.daily_preparations, *,
-                        limit_prefix: str = "preparation"):
-    available = check_preparation_capacity(current, now, monthly_limit, daily_limit, limit_prefix=limit_prefix)
-    return {**available, "month_count": available["month_count"] + 1,
-            "day_count": available["day_count"] + 1, "active": {"job_id": job_id, "until": now + 1800}}
+                        limit_prefix: str = "preparation", maximum: int = 1, requires_gpu: bool = False):
+    available = check_preparation_capacity(current, now, monthly_limit, daily_limit, limit_prefix=limit_prefix,
+                                          maximum=maximum, requires_gpu=requires_gpu)
+    reserved = {**(current or {}), **available, "month_count": available["month_count"] + 1,
+                "day_count": available["day_count"] + 1}
+    return set_preparation_lease(reserved, job_id, {"job_id": job_id, "until": now + 1800,
+        **({"requires_gpu": requires_gpu} if maximum > 1 else {})}, pooled=maximum > 1)
 
 
 def check_queue_capacity(current, now, monthly_limit, daily_limit):
     current = current or {}
-    active = current.get("active")
-    if active and (active.get("blocked") or active.get("until", 0) <= now):
+    if any(active.get("blocked") or active.get("until", 0) <= now for active in preparation_leases(current).values()):
         raise PublicError("A previous preparation needs operator recovery before new clips can queue.", 503,
                           code="preparation_recovery")
-    return check_preparation_capacity({k: v for k, v in current.items() if k != "active"},
+    return check_preparation_capacity({k: v for k, v in current.items() if k not in {"active", "active_jobs"}},
                                       now, monthly_limit, daily_limit)
 
 
@@ -187,20 +190,42 @@ def reserve_queued_preparation(current, now, monthly_limit, daily_limit):
             "day_count": counts["day_count"] + 1}
 
 
-def claim_queued_slot(current, job_id, now):
+def preparation_leases(current):
     current = current or {}
-    active = current.get("active")
-    if active and (active.get("blocked") or active.get("until", 0) <= now):
+    leases = dict(current.get("active_jobs", {}))
+    if current.get("active"):
+        leases[current["active"].get("job_id", "legacy-unidentified")] = current["active"]
+    return leases
+
+
+def set_preparation_lease(current, job_id, lease, *, pooled=False):
+    current = dict(current or {})
+    if pooled or current.get("active_jobs"):
+        leases = preparation_leases(current)
+        leases[job_id] = lease
+        current.pop("active", None)
+        return {**current, "active_jobs": leases}
+    return {**current, "active": lease}
+
+
+def claim_queued_slot(current, job_id, now, *, maximum=1, requires_gpu=False):
+    current = current or {}
+    leases = preparation_leases(current)
+    active = leases.get(job_id)
+    if any(lease.get("blocked") or lease.get("until", 0) <= now for lease in leases.values()):
         raise PublicError("Preparation requires operator recovery.", 503, code="preparation_recovery")
-    if active and active.get("job_id") != job_id:
+    if not active and (len(leases) >= maximum or requires_gpu and any(lease.get("requires_gpu", True) for lease in leases.values())):
         raise PublicError("Waiting for the current preparation to finish.", 429, code="preparation_busy")
-    return {**current, "active": {"job_id": job_id, "until": now + 1800}}
+    return set_preparation_lease(current, job_id, {"job_id": job_id, "until": now + 1800,
+        **({"requires_gpu": requires_gpu} if maximum > 1 else {})}, pooled=maximum > 1)
 
 
 def release_preparation(current: dict | None, job_id: str):
     updated = dict(current or {})
     if updated.get("active", {}).get("job_id") == job_id:
         updated.pop("active", None)
+    if "active_jobs" in updated:
+        updated["active_jobs"] = {key: value for key, value in updated["active_jobs"].items() if key != job_id}
     return updated
 
 

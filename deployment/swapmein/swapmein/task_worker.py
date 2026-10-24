@@ -9,7 +9,7 @@ from starlette.concurrency import run_in_threadpool
 from .diagnostics import emit
 from .errors import PublicError
 from .security import verify_task_identity
-from .task_delivery import KINDS, LEASE_SECONDS, TaskDelivery
+from .task_delivery import CONTROL_KINDS, KINDS, LEASE_SECONDS, TaskDelivery, worker_audience
 
 
 def recovery_before_work(settings, records, kind, job_id, receipt):
@@ -64,9 +64,12 @@ def create_task_worker(source_app, context):
     async def delivery(request, call_next):
         key = claim = None
         manager = None
+        capacity = None
+        capacity_claim = None
+        capacity_job_id = None
         try:
             settings, records, cloud = context()
-            verify_task_identity(request.headers.get("authorization"), settings.task_worker_url,
+            verify_task_identity(request.headers.get("authorization"), worker_audience(settings),
                                  settings.task_service_account)
             if not settings.task_worker_mode or not settings.reliable_tasks:
                 raise PublicError("The private task worker is not enabled.", 503)
@@ -81,8 +84,17 @@ def create_task_worker(source_app, context):
                 job_id, token = body["job_id"], body["delivery_token"]
             except (ValueError, TypeError, KeyError):
                 raise PublicError("Invalid background instruction.", 400) from None
+            if settings.task_worker_lane not in {"heavy", "control"} or (settings.task_worker_lane == "control" and kind not in CONTROL_KINDS):
+                raise PublicError("This operation does not belong to this worker lane.", 404)
+            if kind in {"prepare", "finish"} and settings.task_worker_lane == "heavy":
+                from .processing_capacity import ProcessingCapacity
+                capacity = ProcessingCapacity(settings, records)
+                if capacity.enabled():
+                    capacity_job_id = job_id
+                    capacity_claim = await run_in_threadpool(capacity.claim_heavy, job_id, token)
             manager = TaskDelivery(settings, records, cloud.tasks)
-            key, claim, receipt, acquired = await run_in_threadpool(manager.begin, kind, job_id, token)
+            key, claim, receipt, acquired = await run_in_threadpool(manager.begin, kind, job_id, token,
+                                                                 expected_lane=settings.task_worker_lane)
             if not acquired:
                 return JSONResponse({"ok": True, "duplicate": True})
             should_run = await run_in_threadpool(recovery_before_work, settings, records, kind, job_id, receipt)
@@ -97,6 +109,12 @@ def create_task_worker(source_app, context):
                                  else "Background delivery will be retried."},
                 status_code=error.status_code if isinstance(error, PublicError) else 503,
                 headers={"Retry-After": "30"})
+        finally:
+            if capacity and capacity_claim:
+                try:
+                    await run_in_threadpool(capacity.release_heavy, capacity_job_id, token, capacity_claim)
+                except Exception as error:
+                    emit("task_capacity_release_failed", error=error, job_id=capacity_job_id)
     return app
 
 
@@ -107,4 +125,6 @@ def register_delivery_recovery(app, context):
         verify_task_identity(authorization, settings.service_url, settings.task_service_account)
         if not settings.reliable_tasks:
             raise PublicError("Durable task delivery is not enabled.", 409)
+        from .processing_capacity import ProcessingCapacity
+        ProcessingCapacity(settings, records).reconcile()
         return TaskDelivery(settings, records, cloud.tasks).sweep()

@@ -16,6 +16,7 @@ import httpx
 from google.protobuf import duration_pb2, timestamp_pb2
 
 from .config import Settings
+from .capacity_bounds import HEAVY_CEILING
 from .errors import PublicError
 from .diagnostics import emit, timed, timed_stage, worker_failure_event
 from .security import validate_media_url
@@ -256,9 +257,88 @@ class Cloud:
         emit("backup_shutdown_registered", job_id=self.job_id, worker=service, task_name=created.name)
         return created.name
 
+    def _invoke_worker(self, service, worker_url, headers):
+        def invoke(endpoint: str, body: dict, timeout: float = 600):
+            operation = body.get("operation") if body.get("operation") in {"depth", "sam", "both"} else None
+            stage = {"/compose": "guide_composition", "/recover-masks": "sam_recovery"}.get(endpoint, "worker_inference")
+            with timed_stage(stage, job_id=self.job_id, worker=service, operation=operation):
+                response = self.http.post(worker_url + endpoint, json=body, headers=headers, timeout=min(600, timeout))
+                if not response.is_success:
+                    worker_failure_event(response, job_id=self.job_id, worker=service, stage=stage, payload=body)
+                    if response.status_code == 422:
+                        raise PublicError("The processing service rejected the guide request. Your scene choices are saved; no generation was submitted.",
+                            502, code="worker_request_rejected")
+                    raise PublicError("A private processing worker failed. Your choices are saved; no generation was submitted.", 502)
+                result = response.json()
+                metrics = result.get("metrics", {})
+                if isinstance(metrics, dict):
+                    for name, value in metrics.items():
+                        if re.fullmatch(r"[a-z_]{1,64}_seconds", name) and type(value) in (int, float) and 0 <= value < 86400:
+                            emit("worker_stage_metric", job_id=self.job_id, worker=service, operation=operation,
+                                 metric=name, elapsed_seconds=value)
+                return result
+        return invoke
+
+    def _verify_request_scaled_audio(self):
+        """Read-only deployment check before an autoscaled CPU request.
+
+        IAM privacy is verified by deployment; requests still require an ID
+        token for this exact service. Never turn a shared service off here.
+        """
+        resource = f"projects/{self.settings.project}/locations/{self.settings.region}/services/proof-audio"
+        response = self.http.get(self._admin_url("audio"),
+            headers={"Authorization": "Bearer " + access_token()}, timeout=30)
+        try:
+            response.raise_for_status()
+            state = response.json()
+            scaling = state.get("scaling", {})
+            template = state.get("template", {})
+            revision = template.get("scaling", {})
+            containers = template.get("containers", [])
+            numbered_url = f"https://proof-audio-{self.settings.project_number}.{self.settings.region}.run.app"
+            if (state.get("name") != resource or state.get("deleteTime")
+                    or state.get("reconciling")
+                    or state.get("generation") != state.get("observedGeneration")
+                    or state.get("terminalCondition", {}).get("state") != "CONDITION_SUCCEEDED"
+                    or state.get("invokerIamDisabled") is True
+                    or self.settings.audio_url not in {state.get("uri"), numbered_url}
+                    or scaling.get("scalingMode", "AUTOMATIC") != "AUTOMATIC"
+                    or int(scaling.get("minInstanceCount", 0)) != 0
+                    or not 1 <= int(scaling.get("maxInstanceCount", 0)) <= HEAVY_CEILING
+                    or int(revision.get("minInstanceCount", 0)) != 0
+                    or not 1 <= int(revision.get("maxInstanceCount", 0)) <= HEAVY_CEILING
+                    or int(template.get("maxInstanceRequestConcurrency", 0)) != 1
+                    or len(containers) != 1
+                    or containers[0].get("resources", {}).get("cpuIdle") is not True):
+                raise ValueError
+        except Exception:
+            raise PublicError("The shared CPU worker's bounded automatic scaling could not be verified. No CPU request was sent.",
+                              503, code="audio_scaling_unverified") from None
+        emit("request_scaled_worker_verified", job_id=self.job_id, worker="audio",
+             max_instances=int(scaling["maxInstanceCount"]))
+
     @contextmanager
     def worker(self, service: str):
         self.check_cap()
+        if service == "audio" and self.settings.request_scaled_audio:
+            self._verify_request_scaled_audio()
+            worker_url = self.settings.audio_url
+            with timed_stage("worker_authentication", job_id=self.job_id, worker=service):
+                token = id_token.fetch_id_token(Request(), worker_url)
+            headers = {"Authorization": "Bearer " + token}
+            with timed_stage("worker_health_ready", job_id=self.job_id, worker=service):
+                response = self.http.get(worker_url + "/health", headers=headers, timeout=120)
+                response.raise_for_status()
+                if response.json().get("status") != "ready":
+                    raise PublicError("The CPU worker was not ready.", 503)
+            emit("request_scaled_worker_started", job_id=self.job_id, worker=service)
+            try:
+                yield self._invoke_worker(service, worker_url, headers)
+            finally:
+                # Request billing and min=0 handle idle capacity. A per-job
+                # scale-to-zero or shutdown task would interrupt other jobs.
+                emit("request_scaled_worker_released", job_id=self.job_id, worker=service)
+            return
         # Mandatory backup is registered before any paid instance is enabled.
         backup = self._backup_shutdown(service)
         worker_url = self.settings.gpu_url if service == "gpu" else self.settings.audio_url
@@ -275,25 +355,7 @@ class Cloud:
             response.raise_for_status()
             if service == "gpu" and response.json().get("cuda") is not True:
                 raise PublicError("The GPU worker was not ready.", 503)
-            def invoke(endpoint: str, body: dict, timeout: float = 600):
-                operation = body.get("operation") if body.get("operation") in {"depth", "sam", "both"} else None
-                stage = {"/compose": "guide_composition", "/recover-masks": "sam_recovery"}.get(endpoint, "worker_inference")
-                with timed_stage(stage, job_id=self.job_id, worker=service, operation=operation):
-                    response = self.http.post(worker_url + endpoint, json=body, headers=headers, timeout=min(600, timeout))
-                    if not response.is_success:
-                        worker_failure_event(response, job_id=self.job_id, worker=service, stage=stage, payload=body)
-                        if response.status_code == 422:
-                            raise PublicError("The processing service rejected the guide request. Your scene choices are saved; no generation was submitted.",
-                                502, code="worker_request_rejected")
-                        raise PublicError("A private processing worker failed. Your choices are saved; no generation was submitted.", 502)
-                    result = response.json()
-                    metrics = result.get("metrics", {})
-                    if isinstance(metrics, dict):
-                        for name, value in metrics.items():
-                            if re.fullmatch(r"[a-z_]{1,64}_seconds", name) and type(value) in (int, float) and 0 <= value < 86400:
-                                emit("worker_stage_metric", job_id=self.job_id, worker=service, operation=operation,
-                                     metric=name, elapsed_seconds=value)
-                    return result
+            invoke = self._invoke_worker(service, worker_url, headers)
             yield invoke
         finally:
             try:

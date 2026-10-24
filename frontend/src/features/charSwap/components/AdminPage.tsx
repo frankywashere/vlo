@@ -3,6 +3,7 @@ import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel
 import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey, saveCloudflareApiKey } from "../services/commerce";
 import { FinancePanel } from "./FinancePanel";
 import { AdminSection } from "./AdminSection";
+import { ProcessingCapacityPanel } from "./ProcessingCapacityPanel";
 import { AccountDirectory } from "./AccountDirectory";
 import { AccountAccessPanel } from "./AccountAccessPanel";
 import { CreditGrantPanel } from "./CreditGrantPanel";
@@ -98,6 +99,7 @@ export function AdminPage() {
             {!admin.features.readiness.credit_generation && <Typography variant="body2" color="text.secondary">Requires the private provider key on the gateway.</Typography>}
           </Box>
         </Stack></AdminSection>
+        <ProcessingCapacityPanel canEdit={can("service_controls")} />
         <AdminSection title="Audio processing"><Stack spacing={2}>
           <FormControlLabel control={<Switch checked={admin.pipeline?.audio_processing ?? false}
             disabled={busy || !can("pipeline_settings")}

@@ -22,16 +22,29 @@ KINDS = {"admit", "prepare", "generate", "poll-provider", "finish",
          "long-prepare", "long-review", "long-generate", "long-poll", "long-assemble", "long-comparison"}
 LEASE_SECONDS = 1890  # Longer than Cloud Tasks / Cloud Run's 1800-second request window.
 MAX_DELIVERIES = 3
+CONTROL_KINDS = {"admit", "generate", "poll-provider"}
 
 
 def worker_audience(settings):
-    return settings.task_worker_url if settings.task_worker_mode else settings.service_url
+    if not settings.task_worker_mode:
+        return settings.service_url
+    return settings.control_task_worker_url if settings.task_worker_lane == "control" else settings.task_worker_url
 
 
-def validate_worker(settings):
-    service = "recastfx-long-worker" if settings.app_bucket == settings.project + "-long-test" else "recastfx-worker"
+def delivery_lane(settings, kind):
+    """Separate short control work only when production has both lanes installed."""
+    preview = settings.app_bucket == settings.project + "-long-test"
+    return "control" if not preview and kind in CONTROL_KINDS and settings.control_task_worker_url else "heavy"
+
+
+def validate_worker(settings, lane="heavy"):
+    preview = settings.app_bucket == settings.project + "-long-test"
+    if lane not in {"heavy", "control"} or preview and lane != "heavy":
+        raise PublicError("The private background worker is not configured.", 503)
+    service = "recastfx-long-worker" if preview else "recastfx-control-worker" if lane == "control" else "recastfx-worker"
+    worker_url = settings.control_task_worker_url if lane == "control" else settings.task_worker_url
     try:
-        url = urlsplit(settings.task_worker_url)
+        url = urlsplit(worker_url)
         valid = (url.scheme == "https" and not url.username and not url.password and url.port in {None, 443}
                  and url.hostname in {f"{service}-63lqoskl5q-uk.a.run.app",
                                       f"{service}-{settings.project_number}.{settings.region}.run.app"}
@@ -40,6 +53,23 @@ def validate_worker(settings):
         valid = False
     if not valid:
         raise PublicError("The private background worker is not configured.", 503)
+    return worker_url
+
+
+def delivery_target(settings, receipt):
+    lane = receipt.get("lane", "heavy")
+    worker_url = validate_worker(settings, lane)
+    queue = settings.control_task_queue if lane == "control" else settings.task_queue
+    # Persisted queue identities keep existing instructions on their original
+    # queue across lane rollout and recovery. They cannot point outside this
+    # deployment's known queues.
+    queue = receipt.get("queue", queue)
+    allowed = {settings.task_queue}
+    if lane == "control":
+        allowed = {settings.control_task_queue}
+    if not isinstance(queue, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", queue) or queue not in allowed:
+        raise PublicError("The background queue is not configured.", 503)
+    return lane, queue, worker_url
 
 
 class TaskDelivery:
@@ -53,14 +83,17 @@ class TaskDelivery:
         return f"{kind}-{job_id}-{token}"
 
     def enqueue(self, kind, job_id, *, task_token=None, delay_seconds=0):
-        validate_worker(self.settings)
+        lane = delivery_lane(self.settings, kind)
+        validate_worker(self.settings, lane)
         if task_token is not None and (not isinstance(task_token, str) or not re.fullmatch(r"[a-f0-9]{32}", task_token)):
             raise PublicError("Invalid task token.", 400)
         token = task_token or uuid.uuid4().hex
         key = self.identity(kind, job_id, token)
         now = time.time()
         envelope = {"kind": kind, "job_id": job_id, "task_token": task_token, "delivery_token": token, "created_at": now,
-                    "not_before": now + max(5, min(120, delay_seconds)), "delivery": 0, "state": "pending"}
+                    "not_before": now + max(5, min(120, delay_seconds)), "delivery": 0, "state": "pending",
+                    "lane": lane, "queue": self.settings.control_task_queue if lane == "control" else self.settings.task_queue}
+        delivery_target(self.settings, envelope)  # Reject incomplete routing before persisting an unrecoverable pointer.
         # Write the active pointer first. A crash between these writes can be
         # repaired from this envelope without losing the requested instruction.
         self.records.update("task-active/" + key + ".json", lambda old: old or envelope)
@@ -71,19 +104,19 @@ class TaskDelivery:
         self.dispatch(key, receipt)
 
     def dispatch(self, key, receipt):
-        validate_worker(self.settings)
+        lane, queue, worker_url = delivery_target(self.settings, receipt)
         if receipt["state"] in {"completed", "blocked", "running"}:
             return
         attempt = receipt.get("delivery", 0)
-        name = self.tasks.task_path(self.settings.project, self.settings.region, self.settings.task_queue,
+        name = self.tasks.task_path(self.settings.project, self.settings.region, queue,
             hashlib.sha256((key + ":" + str(attempt)).encode()).hexdigest())
         task = tasks_v2.Task(name=name, http_request=tasks_v2.HttpRequest(
             http_method=tasks_v2.HttpMethod.POST,
-            url=self.settings.task_worker_url + "/internal/" + receipt["kind"],
+            url=worker_url + "/internal/" + receipt["kind"],
             headers={"Content-Type": "application/json"},
             body=json.dumps({"job_id": receipt["job_id"], "task_token": receipt["task_token"], "delivery_token": receipt["delivery_token"]}).encode(),
             oidc_token=tasks_v2.OidcToken(service_account_email=self.settings.task_service_account,
-                                        audience=self.settings.task_worker_url)),
+                                        audience=worker_url)),
             dispatch_deadline=duration_pb2.Duration(seconds=1800))
         scheduled = timestamp_pb2.Timestamp()
         scheduled.FromDatetime(datetime.fromtimestamp(max(time.time() + 5, receipt["not_before"]), timezone.utc))
@@ -92,7 +125,7 @@ class TaskDelivery:
             **current, "task_name": name, "last_dispatch_at": time.time()})
         try:
             self.tasks.create_task(parent=self.tasks.queue_path(self.settings.project, self.settings.region,
-                self.settings.task_queue), task=task, retry=None, timeout=20)
+                queue), task=task, retry=None, timeout=20)
         except AlreadyExists:
             pass  # A lost create-task acknowledgement is not a new instruction.
         except Exception as error:
@@ -101,15 +134,17 @@ class TaskDelivery:
         self.records.update("task-delivery/" + key + ".json", lambda current: {
             **current, "state": "queued" if current["state"] == "pending" else current["state"]})
         emit("background_task_queued", job_id=receipt["job_id"], kind=receipt["kind"],
-             queue=self.settings.task_queue, delivery=attempt, reliable=True)
+             queue=queue, lane=lane, delivery=attempt, reliable=True)
 
-    def begin(self, kind, job_id, token):
+    def begin(self, kind, job_id, token, *, expected_lane=None):
         key = self.identity(kind, job_id, token)
         now = time.time()
         claim = uuid.uuid4().hex
         def take(current):
             if not current:
                 raise PublicError("Background delivery is not recorded.", 409)
+            if expected_lane is not None and current.get("lane", "heavy") != expected_lane:
+                raise PublicError("This instruction belongs to a different worker lane.", 409)
             if current["state"] in {"completed", "blocked"}:
                 return current
             if current["state"] == "running" and current.get("lease_until", 0) > now:
