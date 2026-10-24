@@ -24,7 +24,7 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
     def gcloud(*args,**kwargs):
         calls.append(args)
         if args[:4]==('run','services','describe',api):
-            return {'spec':{'template':{'spec':{'serviceAccountName':account,'containers':[{'env':[{'name':k,'value':v} for k,v in env.items()]}]}}},
+            return {'spec':{'template':{'spec':{'serviceAccountName':account,'containers':[{'env':[{'name':k,'value':v} for k,v in env.items()]+[{'name':'RECASTFX_JOB_KEY','valueFrom':{'secretKeyRef':{'name':'existing-job-key','key':'latest'}}}]}]}}},
                     'status':{'url':f'https://{api}-63lqoskl5q-uk.a.run.app'}}
         if args[:3]==('run','deploy',worker):
             file=next(arg.split('=',1)[1] for arg in args if arg.startswith('--env-vars-file='))
@@ -59,3 +59,6 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
     scheduler_call=next(c for c in calls if c[:2]==('scheduler','jobs') and c[2] in {'create','update'})
     assert ('--update-headers=Content-Type=application/json' if existing_scheduler else '--headers=Content-Type=application/json') in scheduler_call
     assert any(item.endswith('/maintenance/recover-deliveries') for item in scheduler_call)
+
+    assert '--set-secrets=RECASTFX_JOB_KEY=existing-job-key:latest' in deploy_worker
+    assert 'RECASTFX_JOB_KEY' not in worker_env[0]
