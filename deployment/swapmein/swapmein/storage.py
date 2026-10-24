@@ -109,6 +109,15 @@ class Records:
     def create(self, path: str, data: dict):
         self.write(path, data, 0)
 
+    def delete(self, path: str):
+        """Remove an internal index pointer, never a financial/media record."""
+        if not path.startswith("task-active/"):
+            raise ValueError("Only delivery index pointers may be removed")
+        try:
+            self.bucket.blob(path).delete()
+        except NotFound:
+            pass
+
     def list_paths(self, prefix: str, maximum: int = 100):
         return [blob.name for blob in self.client.list_blobs(self.bucket, prefix=prefix, max_results=maximum)]
 
