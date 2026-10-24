@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException
 
 from .cloud import Cloud
 from .config import Settings
+from .task_worker import register_delivery_recovery
 from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
 from .media import Anchor, Setup, normalize_reference, strip_audio
@@ -1724,10 +1725,12 @@ class InternalTask(BaseModel):
     model_config = ConfigDict(extra="forbid")
     job_id: str
     task_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    delivery_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 def internal_pipeline(task: InternalTask, authorization: str | None):
-    verify_task_identity(authorization, settings.service_url, settings.task_service_account)
+    verify_task_identity(authorization, settings.task_worker_url if settings.task_worker_mode else settings.service_url,
+                         settings.task_service_account)
     if not ID_PATTERN.fullmatch(task.job_id):
         raise PublicError("Invalid task.")
     records, cloud, _ = services()
@@ -1836,3 +1839,11 @@ def admit_preparation(task: InternalTask, authorization: str | None = Header(def
     emit("queued_preparation_admitted", job_id=task.job_id)
     pipeline.prepare(task.job_id)
     return {"ok": True}
+
+
+def delivery_context():
+    records, cloud, _ = services()
+    return settings, records, cloud
+
+
+register_delivery_recovery(app, delivery_context)
