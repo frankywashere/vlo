@@ -16,6 +16,7 @@ import httpx
 from google.protobuf import duration_pb2, timestamp_pb2
 
 from .config import Settings
+from .capacity_bounds import HEAVY_CEILING
 from .errors import PublicError
 from .diagnostics import emit, timed, timed_stage, worker_failure_event
 from .security import validate_media_url
@@ -303,9 +304,9 @@ class Cloud:
                     or self.settings.audio_url not in {state.get("uri"), numbered_url}
                     or scaling.get("scalingMode", "AUTOMATIC") != "AUTOMATIC"
                     or int(scaling.get("minInstanceCount", 0)) != 0
-                    or not 1 <= int(scaling.get("maxInstanceCount", 0)) <= 32
+                    or not 1 <= int(scaling.get("maxInstanceCount", 0)) <= HEAVY_CEILING
                     or int(revision.get("minInstanceCount", 0)) != 0
-                    or not 1 <= int(revision.get("maxInstanceCount", 0)) <= 32
+                    or not 1 <= int(revision.get("maxInstanceCount", 0)) <= HEAVY_CEILING
                     or int(template.get("maxInstanceRequestConcurrency", 0)) != 1
                     or len(containers) != 1
                     or containers[0].get("resources", {}).get("cpuIdle") is not True):

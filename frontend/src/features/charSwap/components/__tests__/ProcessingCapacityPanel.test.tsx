@@ -6,7 +6,7 @@ import type { ProcessingCapacity } from "../../services/commerce";
 
 const api = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock("../../services/commerce", () => ({ loadProcessingCapacity: api.load, saveProcessingCapacity: api.save }));
-const initial: ProcessingCapacity = { revision: 7, heavy_jobs: 8, reapi_jobs: 8, active: { heavy: 1, reapi: 2 }, infrastructure: { configured: true, heavy_ceiling: 32, control_ceiling: 32 } };
+const initial: ProcessingCapacity = { revision: 7, heavy_jobs: 8, reapi_jobs: 8, active: { heavy: 1, reapi: 2 }, infrastructure: { configured: true, heavy_ceiling: 256, control_ceiling: 256 } };
 
 beforeEach(() => {
   api.load.mockReset().mockResolvedValue(initial);
@@ -51,8 +51,8 @@ it("saves changed whole-number limits with the loaded revision and uses the retu
 });
 
 it.each([
-  ["Simultaneous processing jobs", "0"], ["Simultaneous processing jobs", "33"], ["Simultaneous processing jobs", "1.5"],
-  ["Simultaneous reAPI renders", "0"], ["Simultaneous reAPI renders", "33"], ["Simultaneous reAPI renders", "2.5"],
+  ["Simultaneous processing jobs", "0"], ["Simultaneous processing jobs", "257"], ["Simultaneous processing jobs", "1.5"],
+  ["Simultaneous reAPI renders", "0"], ["Simultaneous reAPI renders", "257"], ["Simultaneous reAPI renders", "2.5"],
   ["Simultaneous processing jobs", ""],
 ])("blocks invalid %s=%s instead of silently saving a different number", async (label, value) => {
   const user = await open();
@@ -111,16 +111,16 @@ it("shows a failed load and provides a refresh path", async () => {
 });
 
 
-it("accepts the configured ceiling of 32 for both limits", async () => {
+it("accepts the configured ceiling of 256 for both limits", async () => {
   const user = await open();
   for (const label of ["Simultaneous processing jobs", "Simultaneous reAPI renders"]) {
     const input = screen.getByLabelText(label);
-    expect(input).toHaveAttribute("max", "32");
-    await user.clear(input); await user.type(input, "32");
+    expect(input).toHaveAttribute("max", "256");
+    await user.clear(input); await user.type(input, "256");
   }
   await user.click(screen.getByRole("button", { name: "Save processing limits" }));
   await screen.findByText(/Processing limits saved/);
-  expect(api.save).toHaveBeenLastCalledWith({ revision: 7, heavy_jobs: 32, reapi_jobs: 32 });
+  expect(api.save).toHaveBeenLastCalledWith({ revision: 7, heavy_jobs: 256, reapi_jobs: 256 });
   expect(screen.getByText(/All API keys on the same reAPI account share its approved media-task limit/)).toBeInTheDocument();
 });
 
@@ -135,7 +135,7 @@ it("honors lower deployed ceilings returned by the server", async () => {
   expect(api.save).not.toHaveBeenCalled();
 });
 
-it.each([0, 33, 1.5])("keeps controls disabled for an unsupported server ceiling %s", async ceiling => {
+it.each([0, 257, 1.5])("keeps controls disabled for an unsupported server ceiling %s", async ceiling => {
   api.load.mockResolvedValueOnce({ ...initial, infrastructure: { ...initial.infrastructure, heavy_ceiling: ceiling } });
   await open();
   expect(screen.getByText(/Concurrency controls are unavailable/)).toBeInTheDocument();

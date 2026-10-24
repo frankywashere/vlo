@@ -1,0 +1,9 @@
+"""Preconfigured worker headroom; active admission remains an Admin setting."""
+
+HEAVY_CEILING = 256
+REAPI_CEILING = 256
+DEFAULT_CAPACITY = 8
+CONTROL_INSTANCES = 16
+CONTROL_CONCURRENCY = 8
+CONTROL_DISPATCH_RATE = 16
+HEAVY_DISPATCH_RATE = 32

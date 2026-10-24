@@ -12,6 +12,8 @@ import tempfile
 import time
 
 import deploy
+from swapmein.capacity_bounds import (HEAVY_CEILING, CONTROL_INSTANCES,
+    CONTROL_CONCURRENCY, CONTROL_DISPATCH_RATE, HEAVY_DISPATCH_RATE)
 
 
 def resources(preview):
@@ -25,7 +27,7 @@ def resources(preview):
 def bound_service(service, maximum):
     """Apply only service-level bounds; revision bounds came from deployment."""
     allowed = {'recastfx-long-test': 1, 'recastfx-api': 1, 'recastfx-long-worker': 1,
-               'recastfx-worker': 32, 'recastfx-control-worker': 2, 'proof-audio': 32}
+               'recastfx-worker': HEAVY_CEILING, 'recastfx-control-worker': CONTROL_INSTANCES, 'proof-audio': HEAVY_CEILING}
     if allowed.get(service) != maximum:
         raise deploy.SetupError('Unexpected worker scaling target')
     resource = f'projects/{deploy.PROJECT}/locations/{deploy.REGION}/services/{service}'
@@ -139,20 +141,21 @@ def deploy_worker(image, *, preview, submissions_paused=False):
         # Keep the existing image/identity/private IAM, and let request-based
         # autoscaling own this CPU service before enabling parallel preparation.
         deploy.gcloud('run','services','update','proof-audio','--region='+deploy.REGION,
-            '--min-instances=0','--max-instances=32','--concurrency=1','--cpu-throttling',timeout=600)
-        bound_service('proof-audio',32)
+            '--min-instances=0','--max-instances='+str(HEAVY_CEILING),'--concurrency=1','--cpu-throttling',timeout=600)
+        bound_service('proof-audio',HEAVY_CEILING)
         env['REQUEST_SCALED_AUDIO']='true'
         env['PROCESSING_CAPACITY_ENABLED']='false'
-    lanes = [('heavy',worker,queue,1 if preview else 32,1)]
+    lanes = [('heavy',worker,queue,1 if preview else HEAVY_CEILING,1)]
     if not preview:
-        lanes.append(('control',control_worker,control_queue,2,8))
+        lanes.append(('control',control_worker,control_queue,CONTROL_INSTANCES,CONTROL_CONCURRENCY))
     revisions, urls = {}, {}
     for lane, service, lane_queue, maximum, concurrency in lanes:
         existing_queue = deploy.gcloud('tasks','queues','describe',lane_queue,'--location='+deploy.REGION,optional=True)
         command = 'update' if existing_queue else 'create'
         dispatches = maximum * concurrency
+        dispatch_rate = 1 if preview else CONTROL_DISPATCH_RATE if lane == 'control' else HEAVY_DISPATCH_RATE
         deploy.gcloud('tasks','queues',command,lane_queue,'--location='+deploy.REGION,
-            '--max-concurrent-dispatches='+str(dispatches),'--max-dispatches-per-second='+str(dispatches),
+            '--max-concurrent-dispatches='+str(dispatches),'--max-dispatches-per-second='+str(dispatch_rate),
             '--max-attempts=20','--max-retry-duration=86400s','--min-backoff=5s','--max-backoff=300s',
             '--max-doublings=6','--log-sampling-ratio=1')
         for role in ('roles/cloudtasks.enqueuer','roles/cloudtasks.viewer'):

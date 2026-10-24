@@ -9,8 +9,8 @@ Staff with `service_controls` can save revision-checked integer limits:
 
 | Setting | Default after migration | Bounds | Counts |
 | --- | --- | --- | --- |
-| Simultaneous processing jobs | 8 | 1–32 | Preparation and finishing tasks sharing the heavy worker pool |
-| Simultaneous reAPI renders | 8 | 1–32 | Reservations, accepted generations and unresolved submissions |
+| Simultaneous processing jobs | 8 | 1–256 | Preparation and finishing tasks sharing the heavy worker pool |
+| Simultaneous reAPI renders | 8 | 1–256 | Reservations, accepted generations and unresolved submissions |
 
 The panel loads on expansion, shows active counts and has explicit Save and
 Refresh actions. It is read-only until the required worker routes, CPU lifecycle
@@ -35,15 +35,15 @@ POST. Start at eight, observe provider responses, and keep Admin within the
 account's approved limit. Multiple keys on one account share those limits; no
 key pool or automatic cross-key resubmission is introduced. A higher account
 allowance can use the same existing key. Saving a higher Admin value within
-1–32 needs no deployment once the infrastructure is installed.
+1–256 needs no deployment once the infrastructure is installed.
 
 ## Runtime routes
 
 | Work | Queue / worker | Deployment ceiling |
 | --- | --- | --- |
-| Admission, guarded provider submission, status checks | `recastfx-control` / `recastfx-control-worker` | 16 concurrent deliveries; two instances, eight requests each |
-| Preparation, reviewed guide rebuild, finishing/comparison export | `recastfx-work` / `recastfx-worker` | 32 concurrent deliveries; 32 instances, one request each |
-| CPU guide/face mesh/audio work | existing private `proof-audio` | Automatic min zero/max 32, one request per instance |
+| Admission, guarded provider submission, status checks | `recastfx-control` / `recastfx-control-worker` | 128 concurrent deliveries; 16 instances, eight requests each; 16 dispatches/second |
+| Preparation, reviewed guide rebuild, finishing/comparison export | `recastfx-work` / `recastfx-worker` | 256 concurrent deliveries; 256 instances, one request each; 32 dispatches/second |
+| CPU guide/face mesh/audio work | existing private `proof-audio` | Automatic min zero/max 256, one request per instance |
 | Local SAM/depth GPU route | existing private `proof-gpu` | Existing single-worker lifecycle and exclusive preparation lease |
 
 The application heavy permit is checked before claiming a delivery execution.
@@ -149,15 +149,43 @@ TypeScript, the browser-cleanup asset check and the production frontend build
 passed. The extension-impact and whitespace checks were clean. Nothing was
 submitted to a paid model or deployed during this implementation.
 
-The follow-up raises the preconfigured ceiling from four/eight to 32 for both
+An earlier follow-up raised the preconfigured ceiling from four/eight to 32 for both
 controls and changes new-install defaults from two to eight. Existing saved
 limits are retained. CPU/worker minima stay zero and billing stays request based;
 these ceilings do not reserve paid idle instances. Local GPU exclusivity and
 minute-preview isolation are unchanged.
 
-The 32-ceiling/eight-default follow-up passed 458 focused backend integration
+That earlier 32-ceiling/eight-default follow-up passed 458 focused backend integration
 checks, 56 Admin/panel tests, a subsequent 54-test capacity/API boundary rerun,
 TypeScript/build and extension-impact/diff checks. Tests admit eight jobs and
 queue the ninth by default, permit all 32 after an explicit Admin change, reject
 33, and retain any previously saved limits. No provider key was added, and no
 live deployment or paid model request was made.
+
+## Expanded headroom (October 24, 2026)
+
+The current preconfigured ceiling is 256 processing jobs and 256 active reAPI
+renders, with both defaults still eight. The control service can scale to 16
+instances with eight requests each, while queue dispatch rates remain bounded
+at 16/second for control work and 32/second for heavy work. Shared backend
+constants live in `swapmein/capacity_bounds.py` to keep deployment and runtime
+validation aligned. Admin fields follow the server-advertised ceiling.
+
+Live us-east4 quotas were rechecked: 3,000 vCPUs and 6,000 GiB memory. At all
+configured worker ceilings, heavy workers (256×2 vCPU/4 GiB), guide workers
+(256×4 vCPU/8 GiB) and control workers (16×2 vCPU/4 GiB) total 1,568 vCPUs and
+3,136 GiB before the existing small API/preview services. This fits the checked
+CPU/RAM allowance with headroom; it is arithmetic, not a measured throughput
+claim or a reservation of that capacity. Local GPU exclusivity is unchanged.
+
+All minima remain zero and CPU billing remains request based. The saved Admin
+value, rather than this ceiling, controls expensive stage admission. Excess
+queued tasks and retries can still incur small request/startup overhead. Actual
+provider allowances, existing daily admission/spend controls and regional
+availability remain independent constraints. No Google quota was increased.
+
+The expanded ceiling passed 458 backend integration checks, 56 Admin/panel tests,
+TypeScript/build and extension-impact/diff checks. Boundary tests accept 256 and
+reject 257; deployment tests preserve min zero/private IAM, keep preview/GPU
+limits unchanged and verify dispatch rates do not grow with the instance ceiling.
+No live deployment or paid provider request was performed.

@@ -11,13 +11,11 @@ from .commerce import require_permission
 from .diagnostics import emit
 from .errors import PublicError
 from .security import digest
+from .capacity_bounds import HEAVY_CEILING, REAPI_CEILING, DEFAULT_CAPACITY
 
 SETTINGS_PATH = "control/processing-settings.json"
 STATE_PATH = "control/processing-capacity.json"
 LEASE_SECONDS = 1890
-HEAVY_CEILING = 32
-REAPI_CEILING = 32
-DEFAULT_CAPACITY = 8
 
 
 class ProcessingCapacity:

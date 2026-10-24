@@ -82,7 +82,7 @@ def test_new_install_defaults_to_eight_and_queues_the_ninth(capacity):
     records.data.pop(SETTINGS_PATH)
     view = limits.view()
     assert view["heavy_jobs"] == view["reapi_jobs"] == 8
-    assert view["infrastructure"]["heavy_ceiling"] == view["infrastructure"]["control_ceiling"] == 32
+    assert view["infrastructure"]["heavy_ceiling"] == view["infrastructure"]["control_ceiling"] == 256
     for index in range(8):
         identifier = f"{index:032x}"
         assert limits.claim_provider(identifier)
@@ -92,13 +92,13 @@ def test_new_install_defaults_to_eight_and_queues_the_ninth(capacity):
         limits.claim_heavy("f" * 32, "e" * 32)
 
 
-def test_admin_can_raise_both_to_32_without_disturbing_existing_work(capacity):
+def test_admin_can_raise_both_to_256_without_disturbing_existing_work(capacity):
     limits, records, _ = capacity
     original = deepcopy(records.data[STATE_PATH])
-    view = limits.save(OWNER, 0, 32, 32)
-    assert view["heavy_jobs"] == view["reapi_jobs"] == 32
+    view = limits.save(OWNER, 0, 256, 256)
+    assert view["heavy_jobs"] == view["reapi_jobs"] == 256
     assert records.data[STATE_PATH] == original
-    for index in range(32):
+    for index in range(256):
         identifier = f"{index:032x}"
         assert limits.claim_provider(identifier)
         assert limits.claim_heavy(identifier, identifier)
@@ -248,7 +248,7 @@ def test_initialize_rejects_invalid_active_identity_without_partial_seed():
 
 
 @pytest.mark.parametrize("revision,heavy,renders", [(True, 2, 2), (-1, 2, 2), (0, True, 2),
-    (0, 0, 2), (0, 33, 2), (0, 2, 0), (0, 2, 33), (0, 2, 1.5)])
+    (0, 0, 2), (0, 257, 2), (0, 2, 0), (0, 2, 257), (0, 2, 1.5)])
 def test_save_rejects_invalid_limits_without_changing_records(capacity, revision, heavy, renders):
     limits, records, _ = capacity
     before = deepcopy(records.data)
@@ -357,7 +357,7 @@ def test_concurrent_pooled_preparation_claims_accept_two_without_lost_lease():
 
 
 @pytest.mark.parametrize("field,value", [("heavy_jobs", True), ("heavy_jobs", "2"), ("heavy_jobs", 0),
-    ("heavy_jobs", 33), ("reapi_jobs", 0), ("reapi_jobs", 33), ("reapi_jobs", 1.5)])
+    ("heavy_jobs", 257), ("reapi_jobs", 0), ("reapi_jobs", 257), ("reapi_jobs", 1.5)])
 def test_corrupt_saved_limits_fail_closed_before_admitting_work(capacity, field, value):
     limits, records, _ = capacity
     records.data[SETTINGS_PATH] = {"revision": 3, "heavy_jobs": 2, "reapi_jobs": 2, field: value}

@@ -8,7 +8,7 @@ interface ProcessingCapacityPanelProps {
   canEdit: boolean;
 }
 
-const MAX_CONFIGURED_JOBS = 32;
+const MAX_CONFIGURED_JOBS = 256;
 
 function validCeiling(value: number | undefined): value is number {
   return value !== undefined && Number.isInteger(value) && value >= 1 && value <= MAX_CONFIGURED_JOBS;
