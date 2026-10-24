@@ -6,7 +6,7 @@ be merged or deployed into the production gateway as part of preview testing.
 
 ## Entry point and isolation
 
-- Connected preview: `https://recastfx-polished-preview.web.app/?page=long-render`.
+- Connected preview: `https://recastfx-polished-preview.web.app/?page=one-minute`.
 - The account menu exposes **One-minute tests** only on the connected preview.
 - Normal `/api/**` remains bound to `recastfx-api`; only
   `/api/long-renders/**` goes to `recastfx-long-test`.
@@ -110,3 +110,19 @@ Responsive desktop/mobile UI QA uses mocked APIs with external requests blocked.
 Actual preview authentication, route binding and deployed service configuration
 must be checked after deployment. No paid one-minute generation is required to
 deploy the test feature; the first real clip remains a separate measured test.
+
+## Deployment verification (October 24, 2026)
+
+- The depth fix is on production gateway `recastfx-api-00071-4jw`; the one-minute
+  implementation remains on branch `1minute` and the preview only.
+- Isolated gateway: `recastfx-long-test-00002-qjr`; private CPU:
+  `recastfx-long-cpu-00001-b6m`. Both are request-billed, min zero/max one.
+- Runtime identity checks passed for the project spending protection, all three
+  provider credentials, the shared Cloudflare guard and private CPU invocation.
+  The same identity was explicitly denied access to production account objects.
+- An additional read-only runtime check verified private upload signing and the
+  registered minute-long audio endpoint. No provider prediction was submitted.
+- Full local suites: 2,438 backend tests and 607 frontend tests passed; later
+  focused recovery, isolation and deployment-script regressions also passed.
+- Production still serves `charswap-DZOrIgVg.js`; only the connected preview
+  serves `charswap-Mz9WLZqA.js`. Production's ordinary provider route is unchanged.
