@@ -102,9 +102,11 @@ def _guide_description(enhanced_masking, mask_style, face_mesh, has_fallback, re
     elif mask_style == "cyan_overlay":
         visual = ("The translucent cyan overlay marks the selected person, not their appearance. "
                   "Use position/time assignments for identity.")
-    elif mask_style in {"depth", "depth_multi"}:
+    elif mask_style in {"depth", "depth_multi", *SHARED_DEPTH_STYLES}:
         visual = ("Colored depth imagery inside detected person masks describes shape and motion, not appearance. "
                   "Use position/time assignments for identity.")
+        if mask_style in SHARED_DEPTH_STYLES:
+            visual += " The shared tint marks selection, not individual identity."
     else:
         visual = ("Flat opaque person silhouettes mark detected selections, not depth or target appearance. "
                   "Use position/time assignments for identity.")
@@ -114,7 +116,7 @@ def _guide_description(enhanced_masking, mask_style, face_mesh, has_fallback, re
     if face_mesh and not (enhanced_masking and mask_style in SHARED_CYAN_STYLES):
         visual += " Face-mesh lines describe detected facial motion only; remove every mesh line from the final video."
     if enhanced_masking and mask_style not in SHARED_CYAN_STYLES:
-        if mask_style in {"depth", "depth_multi"}:
+        if mask_style in {"depth", "depth_multi", *SHARED_DEPTH_STYLES}:
             visual += " Remove all depth-map colors from the finished footage."
         elif mask_style in {"cyan_overlay", *SHARED_CYAN_STYLES}:
             visual += " Remove all selection tint from the finished footage."
@@ -305,7 +307,7 @@ def _structured_prompt(duration, targets, enhanced_masking, mask_style, audio_pr
                 assignments.append(f"<Subject {index}>: {color} {marker}; <Picture {reference}>.")
             elif not identity_colors and enhanced_masking and mask_style in {"depth_multi", "solid_multi"} and not target.get("coordinate_fallback"):
                 marker = "depth" if mask_style == "depth_multi" else "flat mask"
-                assignments.append(f"<Subject {index}>'s detected {marker} marker is {TARGET_COLORS[index - 1][1]}.")
+                assignments.append(f"<Subject {index}>'s detected {marker} marker is {_target_color_name(target, index)}.")
             assignments.extend(_scene_lines(index, target, compact=compact))
         mapping = "Change only the selected performers: " + ", ".join(pairs) + "."
         if any(target.get("scenes") for target in targets):

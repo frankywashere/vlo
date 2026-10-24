@@ -254,16 +254,33 @@ def _score_jobs(jobs, credentials, deadline, budget):
 
 
 def match_tracks(video_path, masks_path, metadata, targets, *, credentials, workdir,
-                 output_path=None, deadline_seconds=180, budget=None):
+                 output_path=None, deadline_seconds=180, budget=None,
+                 source_crops=None, local_anchors=None):
     """Return reviewed-shape targets and shot-scoped stable masks for Easy Mode.
 
     ``video_path`` must be the normalized original RGB, not a generated guide.
     ``budget`` is the service's shared durable guard with reserve()/settle().
     It must be supplied by production orchestration; tests can omit it.
+    Long renders may supply verified original-person JPEG crops from another
+    child, and only the real anchors that fall inside this child's timeline.
+    Omitting both optional arguments preserves the ordinary short-render path.
     """
     _credentials(credentials)
     targets = style_targets(targets)
-    width, height, frames, _, cuts = _metadata({**metadata, "anchor": targets[0]["anchor"]})
+    external = source_crops is not None
+    if external:
+        ids = {target["id"] for target in targets}
+        if (not isinstance(source_crops, dict) or set(source_crops) != ids
+                or not isinstance(local_anchors, dict) or not set(local_anchors) <= ids
+                or any(not isinstance(crop, str) or not crop.startswith("data:image/jpeg;base64,")
+                       or len(crop) > 1_000_000 for crop in source_crops.values())):
+            raise _unavailable("The saved source-person crops are incomplete.", reason="source_crops_invalid")
+        validation = {**metadata, "anchor": {"frame": 0}}
+    elif local_anchors is not None:
+        raise _unavailable(reason="source_crops_invalid")
+    else:
+        validation = {**metadata, "anchor": targets[0]["anchor"]}
+    width, height, frames, _, cuts = _metadata(validation)
     if type(deadline_seconds) not in (int, float) or not 0 < deadline_seconds <= 300:
         raise _unavailable()
     workdir = Path(workdir)
@@ -280,10 +297,13 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
     emit("cloudflare_matching_plan", job_id=job_id, scene_count=len(boundaries) - 1,
          scene_cut_count=len(cuts), target_count=len(targets), frames=frames)
     anchor_labels = {}
-    with _maps(masks_path, {**metadata, "anchor": targets[0]["anchor"]}) as read:
+    with _maps(masks_path, validation) as read:
         for index, target in enumerate(targets):
-            anchor_frame = _metadata({**metadata, "anchor": target["anchor"]})[3]
-            label = _pixel_label(read, anchor_frame, target["anchor"], width, height)
+            anchor = local_anchors.get(target["id"]) if external else target["anchor"]
+            if anchor is None:
+                continue
+            anchor_frame = _metadata({**metadata, "anchor": anchor})[3]
+            label = _pixel_label(read, anchor_frame, anchor, width, height)
             if not label:
                 raise _unavailable("An initial selection missed its person mask. Review the scene selections.", reason="anchor_mask_missing")
             anchor_labels[index] = (anchor_frame, label, _box(read(anchor_frame), label))
@@ -321,7 +341,8 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
         decode_frames = [shot["frame"] for shot in shots] + [item[0] for item in anchor_labels.values()]
         with tempfile.TemporaryDirectory(prefix="identity-rgb-", dir=workdir) as temporary:
             images = _decode_frames(video_path, Path(temporary), decode_frames, width, height)
-            references = [_image_url(images[anchor_labels[index][0]], anchor_labels[index][2]) for index in range(len(targets))]
+            references = ([source_crops[target["id"]] for target in targets] if external else
+                          [_image_url(images[anchor_labels[index][0]], anchor_labels[index][2]) for index in range(len(targets))])
             jobs = []
             for shot in shots:
                 shot["scores"] = [[0.0] * len(shot["candidates"]) for _ in targets]
@@ -354,7 +375,8 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
             locked = index in shot["locked"]
             candidate = chosen.get(index)
             label = shot["locked"].get(index) if locked else candidate["label"] if candidate else None
-            anchor = ({key: target["anchor"][key] for key in ("x", "y", "time")} if locked else candidate["anchor"] if candidate else None)
+            locked_anchor = local_anchors.get(target["id"]) if external else target["anchor"]
+            anchor = ({key: locked_anchor[key] for key in ("x", "y", "time")} if locked else candidate["anchor"] if candidate else None)
             score = 1.0 if locked else shot["scores"][index][shot["candidates"].index(candidate)] if candidate else None
             assignment = {"segment_id": f"cf-scene-{shot['scene']:03d}-t{index}", "target_id": target["id"],
                           "reference_index": target["reference_index"], "start_frame": shot["start"], "end_frame": shot["end"],
@@ -367,7 +389,7 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
     coverage = []
     try:
         by_scene = {shot["scene"]: [item for item in assignments if item["start_frame"] == shot["start"]] for shot in shots}
-        with _maps(masks_path, {**metadata, "anchor": targets[0]["anchor"]}) as read, zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as archive:
+        with _maps(masks_path, validation) as read, zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as archive:
             for shot in shots:
                 selected = by_scene[shot["scene"]]
                 for frame in range(shot["start"], shot["end"]):

@@ -28,8 +28,10 @@ import { useAccount } from "./hooks/useAccount";
 import { useLiveCredits } from "./hooks/useLiveCredits";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
+import { LongRenderPage } from "./longRender/LongRenderPage";
+import { isLongRenderPreviewHost, loadLongRenderCapabilities } from "./longRender/api";
 
-type AppView = "home" | "create" | "library" | "settings" | "admin";
+type AppView = "home" | "create" | "library" | "settings" | "admin" | "one-minute";
 type AccountState = ReturnType<typeof useAccount>;
 
 function readDestination(): AppView {
@@ -37,6 +39,7 @@ function readDestination(): AppView {
   if (["success", "cancelled"].includes(query.get("checkout") ?? ""))
     return "settings";
   const page = query.get("page");
+  if (page === "one-minute" && isLongRenderPreviewHost()) return "one-minute";
   return page === "create" ||
     page === "library" ||
     page === "settings" ||
@@ -146,6 +149,7 @@ function AccountWorkspace({
   const creationRef = useRef<CharSwapWalkthroughHandle>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [staffRole, setStaffRole] = useState<string | null>(null);
+  const [longRenderAvailable, setLongRenderAvailable] = useState(false);
   const [appError, setAppError] = useState("");
   const [jobStatus, setJobStatus] = useState("");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(() => {
@@ -175,6 +179,18 @@ function AccountWorkspace({
     return () => {
       active = false;
     };
+  }, [account.user]);
+  useEffect(() => {
+    if (!account.user || !isLongRenderPreviewHost()) return;
+    let active = true;
+    const refresh = () => {
+      void loadLongRenderCapabilities().then(value => {
+        if (active) setLongRenderAvailable(value.enabled || value.is_admin);
+      }).catch(() => { if (active) setLongRenderAvailable(false); });
+    };
+    refresh();
+    globalThis.addEventListener("recastfx:long-render-settings", refresh);
+    return () => { active = false; globalThis.removeEventListener("recastfx:long-render-settings", refresh); };
   }, [account.user]);
   useEffect(() => () => useCharSwapStore.getState().reset(), []);
   useEffect(() => {
@@ -235,6 +251,7 @@ function AccountWorkspace({
         onCreate={() => navigate("create")}
         onLibrary={() => navigate("library")}
         onAdmin={staffRole ? () => navigate("admin") : undefined}
+        onLongRender={longRenderAvailable ? () => navigate("one-minute") : undefined}
         onSettings={() => showSettings("account")}
         locked={account.loading}
         accountName={account.displayName ?? account.user?.displayName}
@@ -293,6 +310,7 @@ function AccountWorkspace({
         />
       )}
       {view === "admin" && account.user && staffRole && <AdminPage />}
+      {view === "one-minute" && account.user && isLongRenderPreviewHost() && <LongRenderPage />}
       <Dialog
         open={accountOpen && !account.user}
         onClose={() => {

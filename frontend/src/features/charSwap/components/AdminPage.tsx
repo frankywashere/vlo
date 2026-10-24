@@ -9,6 +9,7 @@ import { CreditGrantPanel } from "./CreditGrantPanel";
 import { DEFAULT_MARGIN_MODEL, marginPricing } from "../utils/marginPricing";
 import type { StaffPermission, MarginModel } from "../services/commerce";
 import type { CreditAdmin, CreditPack } from "../services/commerce";
+import { LongRenderAdmin } from "../longRender/LongRenderAdmin";
 
 export function AdminPage() {
   const [admin, setAdmin] = useState<CreditAdmin | null>(null);
@@ -113,6 +114,7 @@ export function AdminPage() {
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
+          {admin.role === "owner" && <LongRenderAdmin />}
           <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
             disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}
             onChange={(event) => {

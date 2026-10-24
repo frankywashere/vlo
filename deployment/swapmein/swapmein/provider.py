@@ -7,8 +7,8 @@ import httpx
 from .errors import PublicError
 from .diagnostics import emit, submission_event
 from .multi_tracking import TARGET_COLORS
-from .guide_style import SHARED_CYAN_STYLES
-from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1, CLOUDFLARE_IDENTITY_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, identity_colors_prompt, normalize_prompt_variant, structured_prompt
+from .guide_style import SHARED_CYAN_STYLES, SHARED_DEPTH_STYLES
+from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1, CLOUDFLARE_IDENTITY_V1, SAME_CAMERA_SENTENCE, _target_color_name, adapt_favorite_prompt, identity_colors_prompt, normalize_prompt_variant, structured_prompt
 
 BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
@@ -93,10 +93,10 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
         location = (f"selected at approximately {anchor['x'] * 100:.0f}% of the frame width and "
                     f"{anchor['y'] * 100:.0f}% of its height, measured from the top left, "
                     f"at {anchor['time']:.2f} seconds")
-        marker = (f" covered by {TARGET_COLORS[index][1]}-tinted depth imagery" if mask_style in {"depth_multi", "solid_multi"}
+        marker = (f" covered by {_target_color_name(target, index + 1)}-tinted depth imagery" if mask_style in {"depth_multi", "solid_multi"}
                   else " covered by colored depth imagery") if enhanced_masking and not shared_cyan and not target.get("coordinate_fallback") else ""
         if target.get("scenes"):
-            instructions.append(f"Person {index + 1} uses the character from reference image {reference}. "
+            instructions.append(f"Person {index + 1}{marker} uses the character from reference image {reference}. "
                                 "Use the following scene-specific positions and absences as the authoritative assignments.")
         else:
             instructions.append(f"Person {index + 1}{marker}, {location}, must be replaced with the character "
@@ -140,7 +140,7 @@ def compact_multi_scene_prompt(duration: int, targets: list[dict], enhanced_mask
         "Scene entries are authoritative. Replace the identified person throughout each listed interval. "
         "Absent intervals mean do not replace anyone for that assignment."]
     for index, target in enumerate(targets):
-        marker = f" ({TARGET_COLORS[index][1]} depth)" if enhanced_masking and not target.get("coordinate_fallback") and mask_style in {"depth_multi", "solid_multi"} else ""
+        marker = f" ({_target_color_name(target, index + 1)} depth)" if enhanced_masking and not target.get("coordinate_fallback") and mask_style in {"depth_multi", "solid_multi"} else ""
         lines.append(f"Person {index + 1}{marker} -> reference image {target['reference_index'] + 1}.")
         scenes = target.get("scenes", [])
         if target.get("coordinate_fallback"):
@@ -222,6 +222,14 @@ def shared_cyan_guidance(mask_style, face_mesh, replace_all_people):
                else "Remove all overlay colors from the finished video."))
 
 
+def shared_depth_guidance(mask_style):
+    if mask_style not in SHARED_DEPTH_STYLES:
+        return ""
+    return (" Selected people share the same depth-guide treatment with a shared tint. "
+            "The tint marks selection, not individual identity. Use the listed position/time assignments "
+            "to identify each person. Remove all depth-guide colors from the finished footage.")
+
+
 def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False):
     prompt_variant = normalize_prompt_variant(prompt_variant)
     images = [image_url] if isinstance(image_url, str) else image_url
@@ -253,7 +261,7 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
             targets=targets, face_mesh=face_mesh, **tracking_options)
     else:
         mesh_note = (" Facial mesh lines in the reference video mark detected facial motion only. Use them as expression and mouth-motion guidance; remove every mesh line from all faces in the final video. Keep speaker assignments and dialogue timing tied to the original people, including across cuts." if face_mesh else "")
-        prompt = audio_prompt(mask_prompt(prompt, mask_style), audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + " " + PERFORMANCE_GUIDANCE
+        prompt = audio_prompt(mask_prompt(prompt, mask_style), audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + shared_depth_guidance(mask_style) + " " + PERFORMANCE_GUIDANCE
         favorite_options = dict(enhanced_masking=enhanced_masking, anchor=anchor, mask_style=mask_style,
             targets=targets, replace_all_people=replace_all_people)
         if prompt_variant == FAVORITE_V2:
@@ -261,7 +269,7 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         prompt += " " + SAME_CAMERA_SENTENCE
         if len(prompt) > 7000 and targets:
             prompt = audio_prompt(mask_prompt(compact_multi_scene_prompt(duration, targets, enhanced_masking, mask_style), mask_style),
-                audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + " " + PERFORMANCE_GUIDANCE
+                audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + shared_depth_guidance(mask_style) + " " + PERFORMANCE_GUIDANCE
             if prompt_variant == FAVORITE_V2:
                 prompt = adapt_favorite_prompt(prompt, **favorite_options)
             prompt += " " + SAME_CAMERA_SENTENCE

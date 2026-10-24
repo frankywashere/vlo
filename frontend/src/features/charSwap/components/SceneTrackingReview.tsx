@@ -13,6 +13,7 @@ interface SceneTrackingReviewProps {
   enhancedMasking?: boolean;
   sourceUrl: string;
   trackingUrl?: string;
+  sceneTrackingPreviews?: Record<string, { url: string; offset: number }>;
   segments: TrackingReviewSegment[];
   target: TargetPerson;
   targets?: TargetPerson[];
@@ -25,6 +26,7 @@ interface SceneTrackingReviewProps {
   errorMessage?: string | null;
   message?: string;
   initialChoices?: TrackingReviewChoice[];
+  generateAfterReview?: boolean;
   onApply: (choices: TrackingReviewChoice[]) => Promise<boolean>;
   onRefresh: () => void;
 }
@@ -34,6 +36,7 @@ interface SceneChoiceCardProps {
   label: string;
   sourceUrl: string;
   trackingUrl?: string;
+  trackingTimeOffset?: number;
   showDetected: boolean;
   width: number;
   height: number;
@@ -45,7 +48,7 @@ interface SceneChoiceCardProps {
 }
 
 /** Offscreen decoders are released so a long review doesn't exhaust phone memory. */
-function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected, width, height, busy, choice, error, onChoose, onRefresh }: SceneChoiceCardProps) {
+function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, trackingTimeOffset = 0, showDetected, width, height, busy, choice, error, onChoose, onRefresh }: SceneChoiceCardProps) {
   const container = useRef<HTMLElement | null>(null);
   const [visible, setVisible] = useState(typeof IntersectionObserver === "undefined");
   const [selectedFrame, setSelectedFrame] = useState<number>();
@@ -54,6 +57,7 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
   const frame = selectedFrame !== undefined && frames.includes(selectedFrame) ? selectedFrame : frames[0];
   const detected = Boolean(trackingUrl) && showDetected;
   const url = detected ? trackingUrl! : sourceUrl;
+  const displayFrame = detected ? frame - Math.round(trackingTimeOffset * 24) : frame;
   const imageUrl = frame === Math.floor(section.seek_time * 24 + 1e-7)
     ? detected ? section.tracking_thumbnail_url : section.thumbnail_url : undefined;
 
@@ -78,11 +82,12 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
     </Stack>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Box sx={{ aspectRatio: `${width}/${height}`, width: "100%" }}>
-      {visible && <SceneReviewFrame key={`${url}:${frame}:${imageUrl ?? ""}`} url={url} imageUrl={imageUrl}
-        frame={frame} width={width} height={height} disabled={busy}
+      {visible && <SceneReviewFrame key={`${url}:${displayFrame}:${imageUrl ?? ""}`} url={url} imageUrl={imageUrl}
+        frame={displayFrame} width={width} height={height} disabled={busy}
         selectedPoint={choice?.anchor && Math.floor(choice.anchor.time * 24 + 1e-7) === frame ? choice.anchor : undefined}
         onReadyChange={(ready) => setFailed(!ready)}
-        onSelect={(point, time) => onChoose({ segment_id: section.id, absent: false, anchor: { ...point, time } })} />}
+        onSelect={(point, time) => onChoose({ segment_id: section.id, absent: false,
+          anchor: { ...point, time: detected ? time + trackingTimeOffset : time } })} />}
     </Box>
     <Typography variant="body2" color={choice?.anchor ? "success.main" : "text.secondary"} sx={{ mt: 1.5 }}>
       {choice?.anchor ? "Selected. Tap again to change the person." : "No selection — not in this scene."}
@@ -99,7 +104,7 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
 /** Both Library and Create review one character across all scenes before moving on. */
 export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackingUrl, segments,
   target: fallbackTarget, targets = [], references = [], width, height, busy, errorSegmentId,
-  errorMessage, initialChoices = [], onApply, onRefresh }: SceneTrackingReviewProps) {
+  errorMessage, initialChoices = [], generateAfterReview = true, sceneTrackingPreviews = {}, onApply, onRefresh }: SceneTrackingReviewProps) {
   // Single-person plans omit target_id; bind those sections to the supplied
   // person rather than the Library's generic fallback placeholder.
   const implicitTargetId = targets.length === 1 ? targets[0].id : fallbackTarget.id;
@@ -178,8 +183,9 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
         Tap the person in each box below. Leave it blank if they’re not there.
       </Typography>
       {!enhancedMasking && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Masking stays off. Your selections tell the model who to replace.</Typography>}
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Submit starts generation automatically.</Typography>
-      {trackingUrl && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{generateAfterReview
+        ? "Submit starts generation automatically." : "Save scene matches, then approve the generation quote separately."}</Typography>
+      {(trackingUrl || Object.keys(sceneTrackingPreviews).length > 0) && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
         onChange={(_event, checked) => setShowDetected(checked)} />} />}
     </Box>
     {scenes.map((scene, index) => {
@@ -188,7 +194,8 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
       return <Stack key={`${person.id}:${scene.id}`} spacing={2}>
         {checks.map((section, checkIndex) => <SceneChoiceCard key={`${person.id}:${section.id}`} section={section}
           label={`Scene ${index + 1}${checks.length > 1 ? ` · Tracking check ${checkIndex + 1} of ${checks.length}` : ""}`}
-          sourceUrl={sourceUrl} trackingUrl={trackingUrl} showDetected={showDetected} width={width} height={height}
+          sourceUrl={sourceUrl} trackingUrl={sceneTrackingPreviews[section.id]?.url ?? trackingUrl}
+          trackingTimeOffset={sceneTrackingPreviews[section.id]?.offset ?? 0} showDetected={showDetected} width={width} height={height}
           busy={locked} choice={choices[section.id]} onChoose={choose} onRefresh={onRefresh}
           error={section.id === errorSegmentId ? errorMessage || "This scene needs another look. Review the selected person, or use Show another frame." : null} />)}
       </Stack>;
@@ -196,7 +203,7 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
     <Typography variant="body2" color="text.secondary">Untapped images will be saved as “not in this scene” for {person.name}.</Typography>
     <Stack direction="row" spacing={2} justifyContent="space-between">
       {activeIndex > 0 ? <Button disabled={locked} onClick={() => setNavigation({ index: activeIndex - 1, acknowledgedError: errorSegmentId ?? null })}>Previous character</Button> : <Box />}
-      <Button variant="contained" disabled={locked} onClick={() => void advance()}>{submitting ? "Submitting…" : last ? "Submit and generate" : "Next character"}</Button>
+      <Button variant="contained" disabled={locked} onClick={() => void advance()}>{submitting ? "Submitting…" : last ? generateAfterReview ? "Submit and generate" : "Save scene matches" : "Next character"}</Button>
     </Stack>
   </Stack>;
 }

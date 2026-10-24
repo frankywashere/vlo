@@ -76,4 +76,18 @@ describe("account menu shared shell contract", () => {
       }),
     ).toBe(false);
   });
+
+  it("includes the test workflow only when supplied and closes its shared native menu after selection", async () => {
+    const navigate = vi.fn();
+    const { rerender } = render(<AppHeader signedIn active="library" onHome={() => {}} onCreate={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(screen.queryByRole("menuitem", { name: "One-minute tests" })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    rerender(<AppHeader signedIn active="library" onHome={() => {}} onCreate={() => {}} onLongRender={navigate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "One-minute tests" }));
+    expect(navigate).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
 });

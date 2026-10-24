@@ -94,6 +94,31 @@ describe("character-first scrolling scene review", () => {
     for (const video of document.querySelectorAll("video")) expect(video).toHaveAttribute("src", trackingUrl);
     expect(screen.getByText("Selected. Tap again to change the person.")).toBeInTheDocument();
   });
+  it("seeks child previews locally but submits selected anchors in the parent timeline", async () => {
+    const props = properties();
+    const sections = [
+      { ...props.segments[1], id: "part2-cut", start: 15, end: 30, start_frame: 360, end_frame: 720, seek_time: 16.5 },
+      { ...props.segments[2], id: "part3-cut", start: 30, end: 45, start_frame: 720, end_frame: 1080, seek_time: 33.5 },
+    ];
+    const previews = { "part2-cut": { url: "https://storage.googleapis.com/test/part2-masks.mp4", offset: 15 },
+      "part3-cut": { url: "https://storage.googleapis.com/test/part3-masks.mp4", offset: 30 } };
+    render(<SceneTrackingReview {...props} duration={60} segments={sections} sceneTrackingPreviews={previews} generateAfterReview={false} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Show detected people" }));
+    const regions = screen.getAllByRole("region");
+    const first = readyFrame(regions[0]);
+    expect(first).toHaveAttribute("src", previews["part2-cut"].url);
+    expect(first.currentTime).toBe(reviewFrameTime(36));
+    fireEvent.keyDown(within(regions[0]).getByRole("button", { name: "Select the person in this frame" }), { key: "Enter" });
+    const second = readyFrame(regions[1]);
+    expect(second).toHaveAttribute("src", previews["part3-cut"].url);
+    expect(second.currentTime).toBe(reviewFrameTime(84));
+    fireEvent.keyDown(within(regions[1]).getByRole("button", { name: "Select the person in this frame" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Save scene matches" }));
+    await waitFor(() => expect(props.onApply).toHaveBeenCalledWith([
+      { segment_id: "part2-cut", absent: false, anchor: { x: .5, y: .5, time: 15 + reviewFrameTime(36) } },
+      { segment_id: "part3-cut", absent: false, anchor: { x: .5, y: .5, time: 30 + reviewFrameTime(84) } },
+    ]));
+  });
   it("uses exact scene stills where available", () => {
     const props = properties();
     render(<SceneTrackingReview {...props} segments={props.segments.map((section) => ({...section, thumbnail_url: `https://storage.googleapis.com/test/${section.id}.jpg`}))} />);

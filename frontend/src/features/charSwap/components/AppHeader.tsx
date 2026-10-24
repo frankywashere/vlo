@@ -24,6 +24,7 @@ interface AppHeaderProps {
   onCreate: () => void;
   onLibrary?: () => void;
   onAdmin?: () => void;
+  onLongRender?: () => void;
   onSettings?: () => void;
   onAccount?: () => void;
   onCreateAccount?: () => void;
@@ -46,6 +47,7 @@ export function AppHeader({
   onLibrary,
   onTemplates,
   onAdmin,
+  onLongRender,
   onSettings,
   onAccount,
   onCreateAccount,
@@ -65,6 +67,8 @@ export function AppHeader({
   // Account navigation is local to this standalone app; the shared shell
   // renderer keeps menu grouping, keyboard behavior, and closure consistent.
   const menuItems: HostMenuItemDescriptor[] = [
+    ...(onLongRender ? [{ kind: "action" as const, id: "one-minute", group: "1_account",
+      label: "One-minute tests", run: onLongRender }] : []),
     ...(onAdmin
       ? [
           {
