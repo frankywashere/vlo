@@ -125,4 +125,9 @@ deploy the test feature; the first real clip remains a separate measured test.
 - Full local suites: 2,438 backend tests and 607 frontend tests passed; later
   focused recovery, isolation and deployment-script regressions also passed.
 - Production still serves `charswap-DZOrIgVg.js`; only the connected preview
-  serves `charswap-Mz9WLZqA.js`. Production's ordinary provider route is unchanged.
+  serves `charswap-DpsXHtlQ.js`. Production's ordinary provider route is unchanged.
+- Chrome verified the real signed-in preview, the enabled test toggle and
+  separate 10,000 test credits while production credits remained 135. Prompt
+  option 6, depth off and masked face mesh on were copied correctly. Admins
+  retain their per-run face-mesh switch even when it is hidden from other users.
+- The temporary connection-check job was deleted after both successful runs.

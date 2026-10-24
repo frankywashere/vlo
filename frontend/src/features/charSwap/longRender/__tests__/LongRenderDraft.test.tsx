@@ -83,4 +83,29 @@ describe("one-minute intake", () => {
     fireEvent.change(screen.getByLabelText("Length (seconds)"), { target: { value: "59" } });
     expect(screen.getByText("Source person not selected yet")).toBeInTheDocument();
   });
+
+  it("lets an admin override face mesh when the switch is hidden from public users", async () => {
+    render(<LongRenderDraft capability={{ ...capability, settings: { revision: 0, enabled: true,
+      face_mesh_enabled: true, face_mesh_user_control: false, face_mesh_masked_default: true } }} onJob={vi.fn()} onReserved={vi.fn()} />);
+    await selectClip();
+    const toggle = screen.getByRole("switch", { name: "Face mesh" });
+    expect(toggle).toBeChecked(); expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+  });
+
+  it("shows an admin the face mesh switch off and disabled when the master setting is off", async () => {
+    render(<LongRenderDraft capability={{ ...capability, settings: { revision: 0, enabled: true,
+      face_mesh_enabled: false, face_mesh_user_control: false, face_mesh_masked_default: true } }} onJob={vi.fn()} onReserved={vi.fn()} />);
+    await selectClip();
+    const toggle = screen.getByRole("switch", { name: "Face mesh" });
+    expect(toggle).not.toBeChecked(); expect(toggle).toBeDisabled();
+  });
+
+  it("hides the face mesh switch from a regular tester when user control is disabled", async () => {
+    render(<LongRenderDraft capability={{ ...capability, is_admin: false, settings: { revision: 0, enabled: true,
+      face_mesh_enabled: true, face_mesh_user_control: false, face_mesh_masked_default: true } }} onJob={vi.fn()} onReserved={vi.fn()} />);
+    await selectClip();
+    expect(screen.queryByRole("switch", { name: "Face mesh" })).not.toBeInTheDocument();
+  });
 });

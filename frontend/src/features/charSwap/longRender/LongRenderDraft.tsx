@@ -169,9 +169,9 @@ export function LongRenderDraft({ capability, onJob, onReserved, onBusyChange }:
           onChange={(_, checked) => { setReplaceAll(checked); setSelected(0); }} />} />
         {!settings?.hide_audio_toggle && <FormControlLabel label="Submit without audio" control={<Switch checked={silent} disabled={busy || reserved} onChange={(_, checked) => setSilent(checked)} />} />}
         <FormControlLabel label="Add watermark" control={<Switch checked={watermark} disabled={busy || reserved} onChange={(_, checked) => setWatermark(checked)} />} />
-        {settings?.face_mesh_user_control && settings.face_mesh_enabled !== false && <FormControlLabel label="Face mesh" control={<Switch
-          checked={mesh ?? (enhanced ? settings.face_mesh_masked_default ?? true : settings.face_mesh_unmasked_default ?? false)}
-          disabled={busy || reserved} onChange={(_, checked) => setMesh(checked)} />} />}
+        {(capability.is_admin || settings?.face_mesh_user_control) && <FormControlLabel label="Face mesh" control={<Switch
+          checked={settings?.face_mesh_enabled === false ? false : mesh ?? (enhanced ? settings?.face_mesh_masked_default ?? true : settings?.face_mesh_unmasked_default ?? false)}
+          disabled={busy || reserved || settings?.face_mesh_enabled === false} onChange={(_, checked) => setMesh(checked)} />} />}
       </Stack>
       {easy && !replaceAll && <Typography variant="body2" color="text.secondary">Easy Mode uses Cloudflare to locate your selected people in each part, including with older prompt options. If a match cannot be resolved, the test may ask you to review those scenes.</Typography>}
       {!replaceAll && <>
