@@ -29,6 +29,11 @@ class Settings:
     task_queue: str = "swapmein-jobs"
     render_task_queue: str = "recastfx-renders"
     task_worker_url: str = ""
+    control_task_worker_url: str = ""
+    control_task_queue: str = ""
+    task_worker_lane: str = "heavy"
+    request_scaled_audio: bool = False
+    processing_capacity_enabled: bool = False
     reliable_tasks: bool = False
     task_worker_mode: bool = False
     shutdown_service_account: str = "proof-shutdown@charswap-franky-20261013.iam.gserviceaccount.com"
@@ -60,6 +65,11 @@ class Settings:
             task_queue=os.getenv("TASK_QUEUE", cls.task_queue),
             render_task_queue=os.getenv("RENDER_TASK_QUEUE", cls.render_task_queue),
             task_worker_url=os.getenv("TASK_WORKER_URL", "").rstrip("/"),
+            control_task_worker_url=os.getenv("CONTROL_TASK_WORKER_URL", "").rstrip("/"),
+            control_task_queue=os.getenv("CONTROL_TASK_QUEUE", ""),
+            task_worker_lane=os.getenv("TASK_WORKER_LANE", "heavy"),
+            request_scaled_audio=os.getenv("REQUEST_SCALED_AUDIO", "false").lower() == "true",
+            processing_capacity_enabled=os.getenv("PROCESSING_CAPACITY_ENABLED", "false").lower() == "true",
             reliable_tasks=os.getenv("RELIABLE_TASKS", "false").lower() == "true",
             task_worker_mode=os.getenv("TASK_WORKER_MODE", "false").lower() == "true",
             shutdown_service_account=os.getenv("SHUTDOWN_SERVICE_ACCOUNT", cls.shutdown_service_account),

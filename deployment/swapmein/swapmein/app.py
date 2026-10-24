@@ -26,6 +26,8 @@ from .errors import PublicError
 from .limits import MAX_SOURCE_BYTES, MAX_REFERENCE_BYTES, LEGACY_SOURCE_BYTES, UPLOAD_SECONDS
 from .media import Anchor, Setup, normalize_reference, strip_audio
 from .pipeline import Pipeline
+from .processing_capacity import ProcessingCapacity
+from .task_delivery import worker_audience
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .provider_failure import provider_failure, failure_message
 from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot, enforce_character_limit
@@ -607,6 +609,28 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records), "watermark": watermark_settings(records), "cloudflare_key": cloudflare_credential_view()}
 
 
+class CapacityUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: int = Field(ge=0)
+    heavy_jobs: int = Field(ge=1, le=4)
+    reapi_jobs: int = Field(ge=1, le=8)
+
+
+@app.get("/api/commerce/admin/capacity")
+def capacity_admin(x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, actor, {"owner", "pricing_admin", "viewer"})
+    return ProcessingCapacity(settings, records).view()
+
+
+@app.post("/api/commerce/admin/capacity")
+def save_capacity_admin(body: CapacityUpdate, x_firebase_token: str | None = Header(default=None)):
+    actor = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return ProcessingCapacity(settings, records).save(actor, body.revision, body.heavy_jobs, body.reapi_jobs)
+
+
 class WatermarkSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     revision: int = Field(ge=0)
@@ -845,7 +869,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if options.auto_generate and active_session.get("access_mode") == "api-key" else None)
     await run_in_threadpool(records.update, "control/preparation.json", lambda current: reserve_preparation(
-        current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+        current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations,
+        **preparation_limits(records)))
     record_created = False
     enqueue_attempted = False
     try:
@@ -947,10 +972,20 @@ class UploadRequest(BaseModel):
 def check_available_preparation(records, now):
     preparation, _ = records.read("control/preparation.json")
     checker = check_queue_capacity if settings.require_account else check_preparation_capacity
-    checker(preparation, now, settings.monthly_preparations, settings.daily_preparations)
+    checker(preparation, now, settings.monthly_preparations, settings.daily_preparations,
+            **({} if settings.require_account else preparation_limits(records)))
     uploads, _ = records.read("control/uploads.json")
     check_preparation_capacity(uploads, now, settings.monthly_preparations, settings.daily_preparations,
                                limit_prefix="upload")
+
+
+def preparation_limits(records, job=None):
+    capacity = ProcessingCapacity(settings, records)
+    if not capacity.enabled():
+        return {}
+    capacity.require_ready()
+    provider = (job or {}).get("preparation_provider") or pipeline_settings(records)["preparation_provider"]
+    return {"maximum": capacity.limits()["heavy_jobs"], "requires_gpu": provider == "workers"}
 
 
 @app.get("/api/preparation-capacity")
@@ -1069,7 +1104,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         records.update("control/preparation.json", lambda current: reserve_queued_preparation(
             current, time.time(), settings.monthly_preparations, settings.daily_preparations)
             if settings.require_account else reserve_preparation(
-                current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+                current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations,
+                **preparation_limits(records)))
         reserved = True
         defaults = pipeline_settings(records)
         enforce_character_limit(options, len(reference_uris), defaults["multi_characters"])
@@ -1232,7 +1268,8 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                     if current.get("status") == "ready" else current)
         return view(job, review_thumbnails=False)
     current, _ = records.read("control/preparation.json")
-    check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations)
+    check_preparation_capacity(current, time.time(), settings.monthly_preparations, settings.daily_preparations,
+                               **preparation_limits(records, job))
     reserved = claimed = queued = False
     attempt_id = uuid.uuid4().hex
     choices = [choice.model_dump() for choice in review.choices]
@@ -1254,7 +1291,8 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     auto_key = approved_review_key() if auto_submit else job.get("auto_key_ciphertext")
     try:
         records.update("control/preparation.json", lambda current: reserve_preparation(
-            current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations))
+            current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations,
+            **preparation_limits(records, job)))
         reserved = True
         task_token = uuid.uuid4().hex
         def claim(current):
@@ -1572,6 +1610,31 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         balance = provider.balance(key)
         if balance < round(job_estimate(job) * 1000):
             raise PublicError("Your provider allowance is below the current estimate. Check credits and token limits before generating.", 402)
+    capacity = ProcessingCapacity(settings, records)
+    managed = job.get("provider", "reAPI") == "reAPI" and capacity.enabled()
+    if managed and not capacity.claim_provider(job_id):
+        # Approval survives a closed browser, but no credit debit or paid POST
+        # occurs until a provider slot is available. Each continuation has a
+        # fresh semantic token so stale duplicate instructions become no-ops.
+        token = uuid.uuid4().hex
+        cipher = protect_key(job_id, key) if not credits_mode else None
+        queued = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+            "capacity_generation_authorized": True,
+            "capacity_approval_revision": current.get("tracking_applied_revision"),
+            "generation_capacity_token": token, "review_generation_queued": True,
+            **({"auto_key_ciphertext": cipher} if cipher else {}),
+            "message": "Your render is queued. Waiting for an available reAPI generation slot."}
+            if current.get("status") == "ready" else current)
+        if queued.get("status") == "ready":
+            try:
+                cloud.enqueue("generate", job_id, task_token=token, delay_seconds=30)
+            except Exception as error:
+                emit("provider_capacity_queue_pending", job_id=job_id, error=error)
+                queued = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "review_generation_queued": False, "queue_recovery_status": "required",
+                    "message": "Your render approval is saved, but queue confirmation needs attention. Continue from your Library; no generation was charged."}
+                    if current.get("status") == "ready" and current.get("generation_capacity_token") == token else current)
+        return view(queued)
     try:
         records.update(f"jobs/{job_id}.json", lambda current: {
             **claim_job(current, {"ready"}, "submitting"),
@@ -1596,6 +1659,8 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
                 apply_wallet_change(records, job["account_id"], "refund:" + job_id, charge, "refund")
             records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed" if debited else "ready"}
                            if current["status"] == "submitting" else current)
+            if managed:
+                capacity.release_provider(job_id)
             raise
     try:
         with timed_stage("provider_submit_request", job_id=job_id):
@@ -1606,10 +1671,14 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
             apply_wallet_change(records, job["account_id"], "refund:" + job_id, charge, "refund")
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": status,
             "auto_key_ciphertext": None, "message": error.message})
+        if managed and status == "failed":
+            capacity.release_provider(job_id)
         return view(updated)
     try:
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "generating",
-            "generation_started_at": time.time(), "provider_task": task_id, "message": "MiniMax H3 is generating your replacement.", "updated_at": time.time()})
+            "generation_started_at": time.time(), "provider_task": task_id, "generation_capacity_token": None,
+            "capacity_generation_authorized": False, "review_generation_queued": False,
+            "message": "MiniMax H3 is generating your replacement.", "updated_at": time.time()})
     except Exception:
         # The durable submitting claim is retained. A caller timeout may not retry the charge.
         raise PublicError("Submitted to the provider, but its task could not be saved. Check its dashboard; do not submit again.", 502) from None
@@ -1651,6 +1720,9 @@ def provider_status(job_id: str, job: dict, key: str):
     body = provider.status(key, job["provider_task"])
     billing = provider_billing(body, job.get("provider", "reAPI"))
     if body.get("status") in ("completed", "failed"):
+        # A provider terminal response proves this slot is no longer billable
+        # work, even if a later export or accounting write needs to be retried.
+        ProcessingCapacity(settings, records).release_provider(job_id)
         recorded_now = False
         def record_cost(current):
             nonlocal recorded_now
@@ -1729,8 +1801,7 @@ class InternalTask(BaseModel):
 
 
 def internal_pipeline(task: InternalTask, authorization: str | None):
-    verify_task_identity(authorization, settings.task_worker_url if settings.task_worker_mode else settings.service_url,
-                         settings.task_service_account)
+    verify_task_identity(authorization, worker_audience(settings), settings.task_service_account)
     if not ID_PATTERN.fullmatch(task.job_id):
         raise PublicError("Invalid task.")
     records, cloud, _ = services()
@@ -1757,12 +1828,16 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     job, _ = records.read(f"jobs/{task.job_id}.json")
     if not job or job.get("status") != "ready":
         return {"ok": True}
+    if job.get("generation_capacity_token") and job["generation_capacity_token"] != task.task_token:
+        return {"ok": True}
     reviewed_submission = bool(job.get("generation_after_review_revision")
         and job.get("generation_after_review_revision") == job.get("tracking_applied_revision")
         and job.get("tracking_reviewed")
         and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed")))
     easy_auto = bool(job.get("setup", {}).get("auto_generate") and job.get("setup", {}).get("easy_mode"))
-    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_submission):
+    capacity_approved = (job.get("capacity_generation_authorized") is True
+        and job.get("capacity_approval_revision") == job.get("tracking_applied_revision"))
+    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_submission or capacity_approved):
         return {"ok": True}
     try:
         key = (key_for_session({"access_mode": "credits"}, None)
@@ -1822,11 +1897,12 @@ def admit_preparation(task: InternalTask, authorization: str | None = Header(def
     job, _ = records.read(f"jobs/{task.job_id}.json")
     if not job or job.get("status") != "queued" or job.get("admission_token") != task.task_token:
         return {"ok": True}
-    if time.time() - job.get("created_at", 0) > 7200:
+    if time.time() - job.get("preparation_queued_at", job.get("created_at", 0)) > 7200:
         records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "status": "failed", "message": "The preparation queue timed out. No generation was submitted."})
         return {"ok": True}
     try:
-        records.update("control/preparation.json", lambda current: claim_queued_slot(current, task.job_id, time.time()))
+        records.update("control/preparation.json", lambda current: claim_queued_slot(current, task.job_id, time.time(),
+            **preparation_limits(records, job)))
     except PublicError as error:
         if error.code != "preparation_busy":
             records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "status": "failed", "message": error.message})
@@ -1837,7 +1913,10 @@ def admit_preparation(task: InternalTask, authorization: str | None = Header(def
         cloud.enqueue("admit", task.job_id, task_token=next_token, delay_seconds=30)
         return {"ok": True}
     emit("queued_preparation_admitted", job_id=task.job_id)
-    pipeline.prepare(task.job_id)
+    if ProcessingCapacity(settings, records).enabled():
+        cloud.enqueue("prepare", task.job_id, task_token=job.get("tracking_task_token"))
+    else:
+        pipeline.prepare(task.job_id)
     return {"ok": True}
 
 

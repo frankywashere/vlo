@@ -16,7 +16,7 @@ from .limits import MAX_SOURCE_BYTES
 from .media import Setup, create_poster, finish, normalize, original_guide, sam_input_video, select_label, validate_guide_media
 from .mask_geometry import resize_label_archive
 from .multi_tracking import build_selected_masks, selected_tracks, style_targets
-from .storage import Records, claim_job, release_preparation
+from .storage import Records, claim_job, release_preparation, preparation_leases, set_preparation_lease
 from .tracking import analyze_tracking, analyze_multi_tracking, merge_all_people_masks
 from .tracking_preview import create_selection_preview
 from .accounts import archive_completed, LIBRARY_SECONDS
@@ -24,6 +24,7 @@ from .cleanup import cleanup_completed_media
 from .watermark import award_watermark_bonus
 from .replicate_preparation import ReplicatePreparation
 from .comparison import create_comparison
+from .processing_capacity import ProcessingCapacity
 
 
 class Pipeline:
@@ -44,15 +45,30 @@ class Pipeline:
         self.cloud.job_id = job_id
         emit("preparation_started", job_id=job_id)
         def claim_slot(current):
-            if (not current or current.get("active", {}).get("job_id") != job_id or current["active"].get("blocked")
-                    or current["active"].get("until", 0) <= time.time()):
+            lease = preparation_leases(current).get(job_id)
+            if not lease or lease.get("blocked") or lease.get("until", 0) <= time.time():
                 raise PublicError("The preparation slot expired before work started. No generation was submitted.", 409)
-            return {**current, "active": {"job_id": job_id, "until": time.time() + 1800}}
+            return set_preparation_lease(current, job_id, {**lease, "until": time.time() + 1800})
         try:
             self.records.update("control/preparation.json", claim_slot)
         except PublicError:
             current, _ = self.records.read(f"jobs/{job_id}.json")
             if current and current["status"] == "queued" and current.get("tracking_task_token") == task_token:
+                leases, _ = self.records.read("control/preparation.json")
+                lease = preparation_leases(leases).get(job_id)
+                if (ProcessingCapacity(self.settings, self.records).enabled() and lease
+                        and not lease.get("blocked") and lease.get("until", 0) <= time.time()):
+                    # No preparation has started. A delayed delivery may safely
+                    # release its own expired reservation and return to admission.
+                    self.records.update("control/preparation.json", lambda state: release_preparation(state, job_id)
+                        if not preparation_leases(state).get(job_id, {}).get("blocked")
+                        and preparation_leases(state).get(job_id, {}).get("until", 0) <= time.time() else state)
+                    token = uuid.uuid4().hex
+                    self.update_job(job_id, admission_token=token, tracking_task_token=uuid.uuid4().hex,
+                                    preparation_queued_at=time.time(),
+                                    message="Waiting for an available preparation worker.")
+                    self.cloud.enqueue("admit", job_id, task_token=token, delay_seconds=30)
+                    return
                 self.records.update(f"jobs/{job_id}.json", lambda latest: {**latest,
                     "status": "failed", "message": "The preparation slot expired before work started. No generation was submitted.",
                     "updated_at": time.time()} if latest and latest["status"] == "queued"
@@ -457,10 +473,11 @@ class Pipeline:
             else:
                 def retain(current):
                     current = dict(current or {})
-                    if current.get("active", {}).get("job_id") == job_id:
-                        current["active"]["until"] = max(current["active"]["until"], self.cloud.shutdown_deadline)
-                        current["active"]["blocked"] = True
-                        current["active"]["shutdown_tasks"] = list(getattr(self.cloud, "shutdown_tasks", []))
+                    lease = preparation_leases(current).get(job_id)
+                    if lease:
+                        current = set_preparation_lease(current, job_id, {**lease,
+                            "until": max(lease["until"], self.cloud.shutdown_deadline), "blocked": True,
+                            "shutdown_tasks": list(getattr(self.cloud, "shutdown_tasks", []))})
                     return current
                 self.records.update("control/preparation.json", retain)
 

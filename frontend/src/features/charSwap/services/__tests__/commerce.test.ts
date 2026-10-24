@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { savePipelineSettings, saveReplicateApiKey, saveCloudflareApiKey } from "../commerce";
+import { savePipelineSettings, saveReplicateApiKey, saveCloudflareApiKey, loadProcessingCapacity, saveProcessingCapacity } from "../commerce";
 
 const api = vi.hoisted(() => ({token: vi.fn()}));
 vi.mock("../accountContext", () => ({accountToken: api.token}));
@@ -66,4 +66,28 @@ it.each([true, false])("saves matching_no_review=%s without changing the selecte
   await savePipelineSettings({revision: 9, matching_no_review});
   expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");
   expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 9, matching_no_review});
+});
+
+
+it("reads processing capacity with authenticated no-store access", async () => {
+  await loadProcessingCapacity();
+  expect(requests).toHaveBeenCalledWith("/api/commerce/admin/capacity", {
+    method: "GET", headers: {"X-Firebase-Token": "account-token"}, body: undefined,
+    credentials: "omit", cache: "no-store",
+  });
+});
+
+it("saves only bounded capacity fields and their revision through the admin endpoint", async () => {
+  const settings = {revision: 4, heavy_jobs: 2, reapi_jobs: 3};
+  await saveProcessingCapacity(settings);
+  expect(requests).toHaveBeenCalledWith("/api/commerce/admin/capacity", {
+    method: "POST", headers: {"X-Firebase-Token": "account-token", "Content-Type": "application/json"},
+    body: JSON.stringify(settings), credentials: "omit", cache: "no-store",
+  });
+});
+
+it("refuses processing capacity updates while signed out", async () => {
+  api.token.mockResolvedValue(null);
+  await expect(saveProcessingCapacity({revision: 0, heavy_jobs: 2, reapi_jobs: 2})).rejects.toThrow("Sign in");
+  expect(requests).not.toHaveBeenCalled();
 });

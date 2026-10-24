@@ -71,6 +71,23 @@ export interface CreditAdmin {
   };
 }
 
+export interface ProcessingCapacity {
+  revision: number;
+  heavy_jobs: number;
+  reapi_jobs: number;
+  active: { heavy: number; reapi: number };
+  infrastructure: { configured: boolean; heavy_ceiling: number; control_ceiling: number };
+  updated_at?: number;
+}
+
+export function loadProcessingCapacity() {
+  return commerceRequest<ProcessingCapacity>("/api/commerce/admin/capacity");
+}
+
+export function saveProcessingCapacity(settings: Pick<ProcessingCapacity, "revision" | "heavy_jobs" | "reapi_jobs">) {
+  return commerceRequest<ProcessingCapacity>("/api/commerce/admin/capacity", settings);
+}
+
 export type PreparationProvider = "workers" | "replicate";
 
 export type PromptVariant = "current" | "favorite_v2" | "structured_v1" | "identity_colors_v1" | "identity_tint_tracking_v1" | "cloudflare_identity_v1";

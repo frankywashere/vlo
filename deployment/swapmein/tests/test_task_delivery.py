@@ -200,3 +200,120 @@ def test_watchdog_path_cannot_be_swallowed_by_generic_task_route(runtime,monkeyp
         response=client.post('/maintenance/recover-deliveries',json={})
         assert response.status_code==200
         assert response.json()['checked']==0
+
+
+def production_lanes(settings):
+    return replace(settings, app_bucket=settings.project+'-app',
+        task_worker_url='https://recastfx-worker-63lqoskl5q-uk.a.run.app',
+        task_queue='recastfx-work', render_task_queue='recastfx-work',
+        control_task_worker_url='https://recastfx-control-worker-63lqoskl5q-uk.a.run.app',
+        control_task_queue='recastfx-control')
+
+
+@pytest.mark.parametrize('kind,lane',[('admit','control'),('generate','control'),('poll-provider','control'),
+                                     ('prepare','heavy'),('finish','heavy')])
+def test_production_lanes_isolate_quick_work_from_heavy_processing(runtime,kind,lane):
+    settings,records,tasks,_,_=runtime; settings=production_lanes(settings)
+    TaskDelivery(settings,records,tasks).enqueue(kind,JOB,task_token=TOKEN)
+    task=next(iter(tasks.tasks.values()))
+    queue='recastfx-control' if lane=='control' else 'recastfx-work'
+    target=settings.control_task_worker_url if lane=='control' else settings.task_worker_url
+    assert task.name.startswith(queue+'/')
+    assert task.http_request.url==target+'/internal/'+kind
+    assert task.http_request.oidc_token.audience==target
+    receipt=next(value for path,value in records.data.items() if path.startswith('task-delivery/'))
+    assert receipt['lane']==lane and receipt['queue']==queue
+
+
+def test_watchdog_preserves_original_heavy_lane_after_split_rollout(runtime):
+    settings,records,tasks,clock,_=runtime; settings=production_lanes(settings)
+    legacy=replace(settings,control_task_worker_url='',control_task_queue='')
+    TaskDelivery(legacy,records,tasks).enqueue('generate',JOB,task_token=TOKEN)
+    tasks.tasks.clear();clock[0]+=100
+    assert TaskDelivery(settings,records,tasks).sweep()['requeued']==1
+    task=next(iter(tasks.tasks.values()))
+    assert task.name.startswith('recastfx-work/') and task.http_request.oidc_token.audience==settings.task_worker_url
+
+
+def test_receipts_from_before_lanes_still_run_on_heavy_worker(runtime):
+    settings,records,tasks,_,_=runtime;settings=production_lanes(settings)
+    TaskDelivery(settings,records,tasks).enqueue('generate',JOB,task_token=TOKEN)
+    path=next(key for key in records.data if key.startswith('task-delivery/'))
+    records.data[path].pop('lane');records.data[path].pop('queue')
+    assert TaskDelivery(settings,records,tasks).begin('generate',JOB,TOKEN,expected_lane='heavy')[3]
+
+
+def test_worker_authenticates_its_lane_and_rejects_cross_lane_before_execution(runtime,monkeypatch):
+    settings,records,tasks,_,_=runtime;settings=production_lanes(settings)
+    TaskDelivery(settings,records,tasks).enqueue('generate',JOB,task_token=TOKEN)
+    body=json.loads(next(iter(tasks.tasks.values())).http_request.body)
+    source=FastAPI();executed=[];authenticated=[]
+    @source.post('/internal/generate')
+    def generate():executed.append(True);return {'ok':True}
+    @source.post('/internal/prepare')
+    def prepare():pytest.fail('Control must not execute heavy preparation')
+    monkeypatch.setattr('swapmein.task_worker.verify_task_identity',lambda *args:authenticated.append(args))
+    heavy=create_task_worker(source,lambda:(settings,records,SimpleNamespace(tasks=tasks)))
+    with TestClient(heavy) as client:assert client.post('/internal/generate',json=body).status_code==409
+    receipt=next(value for key,value in records.data.items() if key.startswith('task-delivery/'))
+    assert receipt.get('executions',0)==0 and not executed
+    control_settings=replace(settings,task_worker_lane='control')
+    control=create_task_worker(source,lambda:(control_settings,records,SimpleNamespace(tasks=tasks)))
+    with TestClient(control) as client:
+        assert client.post('/internal/prepare',json=body).status_code==404
+        assert client.post('/internal/generate',json=body).status_code==200
+    assert executed==[True]
+    assert authenticated[-1][1]==settings.control_task_worker_url
+
+
+def test_preview_never_uses_configured_production_control_lane(runtime):
+    settings,records,tasks,_,_=runtime
+    settings=replace(settings,control_task_worker_url='https://recastfx-control-worker-63lqoskl5q-uk.a.run.app',
+                     control_task_queue='recastfx-control')
+    TaskDelivery(settings,records,tasks).enqueue('generate',JOB,task_token=TOKEN)
+    task=next(iter(tasks.tasks.values()))
+    assert task.name.startswith('recastfx-long-work/') and task.http_request.oidc_token.audience==settings.task_worker_url
+
+
+def test_capacity_wait_does_not_consume_delivery_execution_or_repeat_started_preparation(runtime,monkeypatch):
+    from swapmein.processing_capacity import STATE_PATH
+    settings,records,tasks,clock,_=runtime
+    settings=replace(production_lanes(settings),processing_capacity_enabled=True,request_scaled_audio=True)
+    records.data[STATE_PATH]={'initialized':1,'heavy':{
+        'other1':{'until':clock[0]+100},'other2':{'until':clock[0]+100}}}
+    TaskDelivery(settings,records,tasks).enqueue('prepare',JOB,task_token=TOKEN)
+    body=json.loads(next(iter(tasks.tasks.values())).http_request.body)
+    receipt_path=next(path for path in records.data if path.startswith('task-delivery/'))
+    source=FastAPI();executed=[]
+    @source.post('/internal/prepare')
+    def prepare():executed.append(True);return {'ok':True}
+    monkeypatch.setattr('swapmein.task_worker.verify_task_identity',lambda *args:None)
+    app=create_task_worker(source,lambda:(settings,records,SimpleNamespace(tasks=tasks)))
+    with TestClient(app) as client:
+        assert client.post('/internal/prepare',json=body).status_code==503
+        assert records.data[receipt_path].get('executions',0)==0 and not executed
+        records.data[STATE_PATH]['heavy']={}
+        assert client.post('/internal/prepare',json=body).status_code==200
+    assert executed==[True] and records.data[receipt_path]['executions']==1
+    assert records.data[STATE_PATH]['heavy']=={}
+
+
+def test_incomplete_capacity_rollout_fails_closed_before_handler(runtime,monkeypatch):
+    settings,records,tasks,_,_=runtime
+    settings=replace(production_lanes(settings),processing_capacity_enabled=True,request_scaled_audio=False)
+    TaskDelivery(settings,records,tasks).enqueue('finish',JOB,task_token=TOKEN)
+    body=json.loads(next(iter(tasks.tasks.values())).http_request.body)
+    source=FastAPI()
+    @source.post('/internal/finish')
+    def finish():pytest.fail('Incomplete capacity configuration must not run heavy work')
+    monkeypatch.setattr('swapmein.task_worker.verify_task_identity',lambda *args:None)
+    app=create_task_worker(source,lambda:(settings,records,SimpleNamespace(tasks=tasks)))
+    with TestClient(app) as client:assert client.post('/internal/finish',json=body).status_code==503
+
+
+def test_missing_control_queue_does_not_leave_poisoned_delivery_records(runtime):
+    settings,records,tasks,_,_=runtime
+    settings=replace(production_lanes(settings),control_task_queue='')
+    with pytest.raises(PublicError,match='queue is not configured'):
+        TaskDelivery(settings,records,tasks).enqueue('generate',JOB,task_token=TOKEN)
+    assert not records.data and tasks.posts==0
