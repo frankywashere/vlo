@@ -82,7 +82,7 @@ def deploy_worker(image, *, preview):
     current=deploy.gcloud('scheduler','jobs','describe',scheduler,'--location='+deploy.REGION,optional=True)
     command='update' if current else 'create'
     deploy.gcloud('scheduler','jobs',command,'http',scheduler,'--location='+deploy.REGION,'--schedule=*/5 * * * *',
-        '--time-zone=UTC','--uri='+api_url+'/internal/recover-deliveries','--http-method=POST','--message-body={}',
+        '--time-zone=UTC','--uri='+api_url+'/maintenance/recover-deliveries','--http-method=POST','--message-body={}',
         '--headers=Content-Type=application/json','--oidc-service-account-email='+env['TASK_SERVICE_ACCOUNT'],
         '--oidc-token-audience='+api_url,'--attempt-deadline=180s','--max-retry-attempts=0')
     for service in (api,worker):

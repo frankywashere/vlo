@@ -147,7 +147,7 @@ def test_watchdog_authenticates_without_paid_calls(runtime,monkeypatch):
     settings,records,tasks,_,_=runtime; authenticated=[]
     monkeypatch.setattr('swapmein.task_worker.verify_task_identity',lambda *args:authenticated.append(args))
     app=FastAPI();register_delivery_recovery(app,lambda:(settings,records,SimpleNamespace(tasks=tasks)))
-    with TestClient(app) as client:assert client.post('/internal/recover-deliveries',headers={'Authorization':'Bearer scheduler'}).status_code==200
+    with TestClient(app) as client:assert client.post('/maintenance/recover-deliveries',headers={'Authorization':'Bearer scheduler'}).status_code==200
     assert authenticated[0][1]==settings.service_url and tasks.posts==0
 
 
@@ -185,3 +185,18 @@ def test_completed_receipt_cannot_be_reopened_after_lost_finish_ack(runtime):
     delivery.finish(key,claim,successful=True)
     delivery.finish(key,claim,successful=False)
     assert delivery.begin('long-generate',JOB,TOKEN)[3] is False
+
+
+def test_watchdog_path_cannot_be_swallowed_by_generic_task_route(runtime,monkeypatch):
+    from pydantic import BaseModel
+    settings,records,tasks,_,_=runtime
+    monkeypatch.setattr('swapmein.task_worker.verify_task_identity',lambda *args:None)
+    source=FastAPI()
+    class TaskBody(BaseModel):job_id:str
+    @source.post('/internal/{operation}')
+    def task(operation:str,body:TaskBody):pytest.fail('Watchdog must not enter a processing handler')
+    register_delivery_recovery(source,lambda:(settings,records,SimpleNamespace(tasks=tasks)))
+    with TestClient(source) as client:
+        response=client.post('/maintenance/recover-deliveries',json={})
+        assert response.status_code==200
+        assert response.json()['checked']==0
