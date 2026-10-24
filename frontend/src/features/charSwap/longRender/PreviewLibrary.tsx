@@ -168,6 +168,7 @@ export function PreviewLibrary({ onCreate }: PreviewLibraryProps) {
       {selected.status === "ready" && !selected.auto_generate && <Button variant="contained" disabled={busy} onClick={() => setConfirm("generate")}>Approve and generate</Button>}
       {accountJob?.status === "tracking_review" && !reviewPage && <Button disabled={busy} onClick={() => setReviewPage(true)}>Check scene matches</Button>}
       {selected.can_resume_status && <Button disabled={busy} onClick={() => void act("retry", { kind: "status" })}>Resume status checks</Button>}
+      {selected.can_resume_assembly && <Button variant="contained" disabled={busy} onClick={() => void act("retry", { kind: "assembly" })}>Resume finishing</Button>}
       {!terminal && !draft && <Button color="warning" disabled={busy} onClick={() => setConfirm("cancel")}>Cancel remaining work</Button>}
       {(draft || terminal) && <Button color="error" disabled={busy} onClick={() => setConfirm("remove")}>Remove from library</Button>}
       {selected.status === "failed" && (["preparation", "assembly", "comparison"] as const).map(kind => <Button key={kind} disabled={busy}

@@ -70,8 +70,9 @@ def services():
     expected = settings.project + "-long-test"
     if (settings.app_bucket != expected or settings.worker_bucket != expected
             or not isolated_run_url(settings.service_url, "recastfx-long-test", settings)
-            or settings.task_queue != "recastfx-long-prep"
-            or settings.render_task_queue != "recastfx-long-render"):
+            or (settings.task_queue, settings.render_task_queue) not in {
+                ("recastfx-long-prep", "recastfx-long-render"), ("recastfx-long-work", "recastfx-long-work")}
+            or settings.reliable_tasks and not isolated_run_url(settings.task_worker_url, "recastfx-long-worker", settings)):
         raise PublicError("The one-minute test isolation is not configured.", 503)
     records, cloud = Records(expected), LongCloud(settings)
     # One shared lifetime matching guard; an isolated bucket must not reset it.
@@ -141,6 +142,10 @@ def view(parent):
                   preparation_estimate_usd=.5, estimated_cost_usd=round(parent["duration"] * .148 + .5, 3))
     result["children"] = [{key: child[key] for key in ("index", "status", "duration", "passthrough", "message")
                            if key in child} for child in parent.get("children", [])]
+    result["can_resume_assembly"] = (parent.get("status") == "finalizing"
+        and time.time() - parent.get("updated_at", time.time()) > 120
+        and bool(parent.get("children"))
+        and all(child.get("status") == "succeeded" or child.get("passthrough") for child in parent["children"]))
     result["can_resume_status"] = not any(child.get("status") in {"submitting", "submission_unknown"}
         for child in parent.get("children", [])) and (bool(parent.get("queue_pending")) or
         parent.get("status") == "ready" and parent.get("auto_generate_authorized", False) and not parent.get("generation_queue_confirmed") or any(
@@ -423,12 +428,14 @@ def remove_parent(job_id: str, x_firebase_token: str | None = Header(default=Non
 class Task(BaseModel):
     job_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     task_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    delivery_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 @app.post("/internal/{operation}")
 def task(operation: str, body: Task, authorization: str | None = Header(default=None)):
     settings, _, _, pipeline = services()
-    verify_task_identity(authorization, settings.service_url, settings.task_service_account)
+    verify_task_identity(authorization, settings.task_worker_url if settings.task_worker_mode else settings.service_url,
+                         settings.task_service_account)
     methods = {"long-prepare": "prepare", "long-generate": "generate", "long-poll": "poll",
                "long-assemble": "assemble", "long-comparison": "comparison"}
     if operation == "long-review":
@@ -442,3 +449,13 @@ def task(operation: str, body: Task, authorization: str | None = Header(default=
 
 
 register_diagnostics(app, account, owned)
+
+from .task_worker import register_delivery_recovery
+
+
+def delivery_context():
+    settings, records, cloud, _ = services()
+    return settings, records, cloud
+
+
+register_delivery_recovery(app, delivery_context)

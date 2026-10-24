@@ -36,6 +36,9 @@ class LongCloud(Cloud):
             raise ValueError("Unknown long-render task")
         queue = (self.settings.render_task_queue if kind in {"long-generate", "long-poll"}
                  else self.settings.task_queue)
+        if self.settings.reliable_tasks and (not isolated_run_url(self.settings.task_worker_url,
+                "recastfx-long-worker", self.settings) or queue != "recastfx-long-work"):
+            raise PublicError("The isolated background worker is not configured.", 503)
         scoped = Cloud(replace(self.settings, task_queue=queue), self.storage, self.tasks, self.http)
         return scoped.enqueue(kind, job_id, task_token=task_token, delay_seconds=delay_seconds)
 

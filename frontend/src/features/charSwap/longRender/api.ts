@@ -84,6 +84,7 @@ export interface LongRenderJob {
   provider_estimate_usd?: number;
   max_spend_usd?: number;
   can_resume_status?: boolean;
+  can_resume_assembly?: boolean;
   children?: { index: number; status: string; duration?: number; message?: string }[];
 }
 

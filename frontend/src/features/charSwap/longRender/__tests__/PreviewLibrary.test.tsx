@@ -149,3 +149,12 @@ it("maps orchestration states to the shared presentation contract without droppi
   expect(toPreviewAccountJob({ ...finished, status: "unexpected" }).status).toBe("submission_unknown");
   expect(toPreviewAccountJob(finished)).toMatchObject({ source_preview_url: finished.before_url, comparison_layout: "side_by_side", consumer_credits_used: 600 });
 });
+
+it("resumes only saved finishing work when the server identifies a stalled assembly", async () => {
+  api.jobs.mockResolvedValue([{...finished,status:"finalizing",output_url:undefined,can_resume_assembly:true}]);
+  render(<PreviewLibrary onCreate={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button",{name:"View reference images"}));
+  fireEvent.click(screen.getByRole("button",{name:"Resume finishing"}));
+  await waitFor(()=>expect(api.action).toHaveBeenCalledWith("render-a","retry",{kind:"assembly"}));
+  expect(api.action).toHaveBeenCalledTimes(1);
+});

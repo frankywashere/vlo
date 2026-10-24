@@ -196,3 +196,61 @@ Production and the isolated CPU service stayed unchanged. After the revision
 was verified ready, the original failed job was retried once through Library's
 Retry preparation action and visibly returned to In queue. It reuses the saved
 uploads, choices and spending reservation; no replacement job was created.
+
+## Durable background delivery and saved-part recovery (October 24, 2026)
+
+The first minute render generated all four parts successfully, but its original
+assembly instruction was rejected while the one-slot API was still wrapping up
+the prior request. The old queue allowed one attempt, leaving saved videos in
+`finalizing`. No video file was missing.
+
+Background work now targets a private CPU worker rather than the public website
+API. Preview and production use separate workers, queues, records and recovery
+watchdogs. Both workers scale to zero and have one concurrent request; existing
+GPU capacity and provider routing are unchanged. Production receives only the
+shared delivery layer from main, not the minute runtime or preview UI.
+
+| Scope | Queued phase | Work inside that phase |
+| --- | --- | --- |
+| Short render | admit / prepare | Capacity admission, normalization, cuts, SAM/depth, identity matching, guide and review data |
+| Short render | generate | Saved approval and wallet checks, guarded provider submission |
+| Short render | poll-provider | Check an existing provider task and schedule its next check |
+| Short render | finish | Save output, audio/watermark and comparison/export work |
+| Minute preview | long-prepare / long-review | Parent normalization, child preparation and scene review/mapping |
+| Minute preview | long-generate / long-poll | Guarded child submission and polling of existing provider tasks |
+| Minute preview | long-assemble | Recombine saved child outputs, audio and main Library export |
+| Minute preview | long-comparison | Build and save the before/after download |
+
+These are background phase queues, not separate queues for every ffmpeg command
+or every individual mask operation. Heavy model work retains the original
+provider selection and preparation safeguards.
+
+Each instruction has a private durable outbox record, atomic execution lease and
+completion receipt. Queue concurrency is one, failed delivery backs off from
+5 to 300 seconds, and delivery is bounded to 20 attempts per Cloud Task. A
+five-minute authenticated watchdog checks up to 50 active instructions per run,
+repairs missing/exhausted delivery using versioned task names, and eventually
+marks repeated failures for attention. Completed instructions are no-ops when
+redelivered. The watchdog path is `/maintenance/recover-deliveries`; an actual
+live check caught and fixed a collision with the preview's generic internal
+operation route.
+
+Resumption is conservative: completed output/assembly work can resume from
+saved results; ambiguous paid submissions are held for reconciliation rather
+than submitted again. Interrupted started preparation is flagged for review
+instead of blindly repeating potentially paid SAM/depth/matching calls.
+
+The existing Library job `4e9160c552bf4a98be1dbf28182427eb` was resumed once
+through **Resume finishing** and completed from its original four saved parts.
+No new generation was submitted. Main and comparison outputs both decode
+successfully, run exactly 60 seconds, contain 1,440 video frames and include
+audio. The main output is 1024×768; its landscape comparison is correctly
+stacked at 1024×1536. The Library shows Complete and both download actions.
+Its original 600 test-credit charge and 9,400 test-credit balance are unchanged.
+
+Validation before rollout: 2,507 preview backend tests, 2,293 production-only
+backend tests, 644 frontend tests, then 11 focused Library tests including the
+new resume action; TypeScript/build and extension-impact checks passed. The
+watchdog-route correction added a further regression and all 30 focused shared
+worker/deployment tests passed in both source trees. Codec/decode validation is
+technical verification; creative acceptance remains with the user.
