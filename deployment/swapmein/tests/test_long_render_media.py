@@ -55,6 +55,25 @@ def test_normalize_full_minute_then_extract_all_children_once(media):
         assert decoded_audio_samples(path) >= 15 * 44100 - 1024
 
 
+def test_minute_normalization_has_long_timeout_while_short_jobs_keep_default(media, monkeypatch):
+    from swapmein import media as short_media
+    root, source = media
+    original_run = short_media.run
+    encoding_timeouts = []
+
+    def recording_run(command, timeout=90):
+        if command[0] == "ffmpeg" and "libx264" in command:
+            encoding_timeouts.append(timeout)
+        return original_run(command, timeout=timeout)
+
+    monkeypatch.setattr(short_media, "run", recording_run)
+    normalize_parent(source, root / "long-timeout.mp4",
+        LongSetup(trim=(0, 60), anchor={"x": .5, "y": .5, "time": 42}))
+    short_media.normalize(source, root / "short-timeout.mp4",
+        short_media.Setup(trim=(0, 4), anchor={"x": .5, "y": .5, "time": 0}))
+    assert encoding_timeouts == [600, 90]
+
+
 @pytest.mark.parametrize("restore_audio", [True, False])
 def test_minute_assembly_preserves_order_canvas_exact_frames_and_audio_policy(media, restore_audio):
     root, original = media

@@ -56,7 +56,9 @@ def normalize_parent(source: Path, output: Path, setup: LongSetup):
     if not isinstance(setup, LongSetup):
         raise PublicError("The long-render setup is invalid.", 400)
     _separate_output(output, [source])
-    metadata = normalize(source, output, setup)
+    # Longer parents need their own encoding allowance; short production jobs
+    # retain normalize()'s existing 90-second default.
+    metadata = normalize(source, output, setup, timeout=LONG_MEDIA_TIMEOUT)
     if metadata["frames"] != round(setup.trim[1] - setup.trim[0]) * FPS:
         raise PublicError("The normalized parent timeline has missing frames.")
     return {**metadata, "fps": FPS}

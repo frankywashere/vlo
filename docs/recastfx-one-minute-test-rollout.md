@@ -177,3 +177,22 @@ deploy the test feature; the first real clip remains a separate measured test.
   wallet, one Admin prompt selector, and absent test-page menu were verified.
 - No paid model request or real render was submitted during this release.
   Prompt option 6 and the one-minute switch remain on; depth remains off.
+
+## One-minute conversion timeout follow-up
+
+The first actual sixty-second submission failed during parent normalization
+before any SAM/matching/generation call. That path reused the short encoder's
+90-second process timeout. The one-minute caller now supplies the existing
+600-second long-media allowance explicitly; the shared encoder's default stays
+90 seconds, including for future short-render deployments. Audio repair within
+that normalization uses the same caller-provided allowance.
+
+Real media tests verify both limits (600 seconds for a minute, 90 for the short
+path). The media suites passed 58 tests; related runtime/API/isolation/short
+pipeline regressions passed 287. Extension impact and diff checks passed.
+Only the isolated gateway advanced to `recastfx-long-test-00004-s2j`, image
+`sha256:fe68cf54b5cbead4c103694ac1a168f960c4bd9171da5fcd7564d0fa71ef27da`.
+Production and the isolated CPU service stayed unchanged. After the revision
+was verified ready, the original failed job was retried once through Library's
+Retry preparation action and visibly returned to In queue. It reuses the saved
+uploads, choices and spending reservation; no replacement job was created.

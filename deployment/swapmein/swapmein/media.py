@@ -177,7 +177,7 @@ def decoded_audio_samples(path: Path, start: float = 0, duration: float | None =
 
 
 @timed("normalize")
-def normalize(source: Path, output: Path, setup: Setup):
+def normalize(source: Path, output: Path, setup: Setup, *, timeout: int = 90):
     metadata = probe(source)
     streams = metadata.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
@@ -207,7 +207,7 @@ def normalize(source: Path, output: Path, setup: Setup):
          "-vf", f"fps=24,tpad=stop_mode=clone:stop=1,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,scale={sw}:{sh},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
          "-c:v", "libx264", "-threads", "2", "-crf", "18", "-pix_fmt", "yuv420p",
          "-af", "apad", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-         "-movflags", "+faststart", str(output)])
+         "-movflags", "+faststart", str(output)], timeout=timeout)
     normalized = probe(output)
     normalized_video = next(s for s in normalized["streams"] if s["codec_type"] == "video")
     if int(normalized_video.get("nb_frames", 0)) != duration * 24:
@@ -224,9 +224,9 @@ def normalize(source: Path, output: Path, setup: Setup):
             run(["ffmpeg", "-v", "error", "-y", "-protocol_whitelist", "file,pipe",
                  "-ss", str(start), "-i", str(source), "-t", str(duration), "-vn",
                  "-af", f"apad,atrim=duration={duration},asetpts=PTS-STARTPTS",
-                 "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k", str(audio)])
+                 "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k", str(audio)], timeout=timeout)
             run(["ffmpeg", "-v", "error", "-y", "-i", str(output), "-i", str(audio),
-                 "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", str(repaired)])
+                 "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", str(repaired)], timeout=timeout)
             checked = probe(repaired)
             require_audio_duration(checked, duration)
             shutil.copyfile(repaired, output)
