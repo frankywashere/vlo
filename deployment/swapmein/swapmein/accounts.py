@@ -74,6 +74,7 @@ def archive_completed(records, job: dict):
         "expires_at": (current or {}).get("expires_at") or job.get("library_expires_at") or completed_at + LIBRARY_SECONDS,
         "output_uri": job["output_uri"], "thumbnail_uri": job.get("thumbnail_uri"),
         "before_uri": job.get("before_uri") or (current or {}).get("before_uri"),
+        **{key: job[key] for key in ("comparison_uri", "comparison_status", "comparison_layout") if key in job},
         "settings_used": settings_used(job),
         "duration": job.get("duration"), "width": job.get("width"), "height": job.get("height"),
         "selection_targets": job.get("normalized_targets") or job.get("setup", {}).get("targets"),

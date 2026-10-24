@@ -7,10 +7,11 @@ from swapmein.config import Settings
 from swapmein.pipeline import Pipeline
 
 
+@pytest.mark.parametrize("comparison_fails", [False, True])
 @pytest.mark.parametrize("submit_without_audio", [False, True])
 @pytest.mark.parametrize("audio_processing", [None, True, False])
 @pytest.mark.parametrize("account_id", [None, "b" * 64])
-def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing, submit_without_audio):
+def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing, submit_without_audio, comparison_fails):
     # This test isolates export/re-export. Cleanup safety is covered separately.
     monkeypatch.setattr("swapmein.pipeline.cleanup_completed_media", lambda *_: None)
     monkeypatch.setattr(Pipeline, "ensure_library_poster", lambda self, job, source=None: job)
@@ -41,7 +42,7 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
                 destination.write_bytes(b"normalized-shape")
 
         def upload(self, bucket, key, source, content_type):
-            assert source.read_bytes() == b"exported" and content_type == "video/mp4"
+            assert source.read_bytes() in {b"exported", b"comparison"} and content_type == "video/mp4"
             self.uploads.append(key)
             return f"gs://{bucket}/{key}"
     def finish(raw, original, output, duration, audio_source=None, audio_start=0, restore_audio=True):
@@ -55,6 +56,14 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
         assert duration == 5
         output.write_bytes(b"exported")
         return {"width": 1344, "height": 768}
+    def comparison(original, recast, destination, duration):
+        assert original.read_bytes() == b"normalized-shape"
+        assert recast.read_bytes() == b"exported"
+        if comparison_fails:
+            raise RuntimeError("comparison failed")
+        destination.write_bytes(b"comparison")
+        return {"width": 1344, "height": 1536, "layout": "stacked"}
+    monkeypatch.setattr("swapmein.pipeline.create_comparison", comparison)
     monkeypatch.setattr("swapmein.pipeline.finish", finish)
     records, cloud = Records(), Cloud()
     if audio_processing is not None:
@@ -65,17 +74,22 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     assert records.data[path]["status"] == "completed"
     assert (records.data[path]["width"], records.data[path]["height"]) == (1344, 768)
     pipeline.finalize(job_id)
-    assert len(cloud.uploads) == 1  # A task retry cannot repeat a claimed export.
+    outputs_per_run = 2 if account_id and not comparison_fails else 1
+    assert len(cloud.uploads) == outputs_per_run  # Completed task retries do not re-export.
     records.data[path]["status"] = "finalizing"  # Explicit operator re-export.
     pipeline.finalize(job_id)
     assert records.data[path]["output_uri"] != first_uri
-    assert len(set(cloud.uploads)) == 2
+    assert len(set(cloud.uploads)) == outputs_per_run * 2
     prefix = f"library/{account_id}/{job_id}" if account_id else f"outputs/{job_id}"
-    assert all(re.fullmatch(rf"{prefix}/recastfx-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
+    assert all(re.fullmatch(rf"{prefix}/(?:recastfx|comparison)-[a-f0-9]{{32}}\.mp4", key) for key in cloud.uploads)
     if account_id:
         archived = records.data[f"accounts/{account_id}/jobs/{job_id}.json"]
         assert archived["output_uri"] == records.data[path]["output_uri"]
         assert archived["status"] == "completed"
+        assert archived["comparison_status"] == ("failed" if comparison_fails else "ready")
+        if not comparison_fails:
+            assert archived["comparison_uri"] == records.data[path]["comparison_uri"]
+            assert archived["comparison_layout"] == "stacked"
 
 
 @pytest.mark.parametrize("submit_without_audio", [False, True])

@@ -49,14 +49,14 @@ const job = {
 };
 
 describe("private account library", () => {
-  it("shows actual consumer credits and refunds on completed cards without opening a dialog", async () => {
+  it("shows actual consumer credits and refunds in completed clip settings", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "completed", access_mode: "credits",
       output_url: "https://storage.googleapis.com/result.mp4",
       consumer_credits_used: 58, consumer_credits_returned: 20, generation_credits: 999}]);
     render(<AccountLibrary onCreate={vi.fn()} />);
-    expect(await screen.findByRole("button", {name: "Download video"})).toBeVisible();
+    await userEvent.click(await screen.findByRole("button", {name: "Open My clip"}));
     expect(screen.queryByRole("button", {name: "View details"})).not.toBeInTheDocument();
-    await userEvent.click(screen.getByText("Settings used"));
+    await userEvent.click(screen.getByRole("tab", {name: "Settings"}));
     expect(screen.getByText("Credits used")).toBeVisible();
     expect(screen.getByText("58")).toBeVisible();
     expect(screen.getByText("Credits refunded")).toBeVisible();
@@ -111,9 +111,7 @@ describe("private account library", () => {
     ).toBeInTheDocument();
     expect(within(current).getByText("Finished clip")).toBeInTheDocument();
     expect(screen.getByText("2 videos in progress")).toBeInTheDocument();
-    expect(
-      screen.getByLabelText("Uploaded clip for Rendering clip"),
-    ).toHaveAttribute("src", "https://storage.googleapis.com/source.mp4");
+    expect(within(current).getAllByRole("button", { name: "View reference images" })).toHaveLength(2);
     expect(
       screen.queryByRole("region", { name: "Current processing jobs" }),
     ).not.toBeInTheDocument();
@@ -144,8 +142,9 @@ describe("private account library", () => {
     vi.mocked(setJobHidden).mockImplementation(() => new Promise(resolve => {finish = resolve;}));
     const user = userEvent.setup();
     render(<AccountLibrary onCreate={vi.fn()} />);
-    await user.click(await screen.findByRole("button", {name: "Remove"}));
-    expect(screen.getByRole("button", {name: "Removing…"})).toBeDisabled();
+    await user.click(await screen.findByRole("button", {name: "Open My clip"}));
+    await user.click(screen.getByRole("button", {name: "Remove from library"}));
+    expect(screen.getByRole("button", {name: "Removing from library"})).toBeDisabled();
     expect(setJobHidden).toHaveBeenCalledTimes(1);
     finish({});
     expect(await screen.findByText("Removed from your library.")).toBeVisible();
@@ -156,12 +155,14 @@ describe("private account library", () => {
   it("keeps a clip visible and re-enables Remove when saving fails", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "failed"}]);
     vi.mocked(setJobHidden).mockRejectedValue(new Error("Could not save removal"));
+    vi.mocked(loadJobRecovery).mockResolvedValue({ action: "support", message: "Contact support" });
     const user = userEvent.setup();
     render(<AccountLibrary onCreate={vi.fn()} />);
-    await user.click(await screen.findByRole("button", {name: "Remove"}));
+    await user.click(await screen.findByRole("button", {name: "View details"}));
+    await user.click(screen.getByRole("button", {name: "Remove from library"}));
     expect(await screen.findByText("Could not save removal")).toBeVisible();
-    expect(screen.getByRole("button", {name: "Remove"})).toBeEnabled();
-    expect(screen.getByRole("article")).toBeVisible();
+    expect(screen.getByRole("button", {name: "Remove from library"})).toBeEnabled();
+    expect(screen.getByRole("dialog")).toBeVisible();
   });
 
   it("requires explicit paid approval and re-entered key before generation; closing clears it", async () => {
@@ -225,14 +226,13 @@ describe("private account library", () => {
     vi.mocked(setJobHidden).mockResolvedValue({});
     const user = userEvent.setup();
     render(<AccountLibrary onCreate={() => {}} />);
-    expect(
-      await screen.findByRole("button", { name: "Download video" }),
-    ).toBeEnabled();
-    expect(screen.getByLabelText(complete.title, {selector: "video"})).toHaveAttribute("poster", complete.thumbnail_url);
-    await user.click(screen.getByText("Settings used"));
+    await user.click(await screen.findByRole("button", { name: "Open My clip" }));
+    expect(screen.getByRole("button", { name: "Download full video" })).toBeEnabled();
+    expect(screen.getByLabelText(`Video preview: ${complete.title}`, {selector: "video"})).toHaveAttribute("poster", complete.thumbnail_url);
+    await user.click(screen.getByRole("tab", {name: "Settings"}));
     expect(screen.getByText("Enhanced masking")).toBeVisible();
     expect(screen.getAllByText("Off")).toHaveLength(2);
-    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(screen.getByRole("button", { name: "Remove from library" }));
     await waitFor(() =>
       expect(setJobHidden).toHaveBeenCalledWith(job.id, true),
     );

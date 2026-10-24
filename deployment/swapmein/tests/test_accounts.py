@@ -96,12 +96,15 @@ def test_saved_video_survives_short_lived_preparation_records(api, monkeypatch):
     job = {"id": "b" * 32, "account_id": account, "key_fingerprint": digest("key"), "status": "completed", "created_at": time.time(), "title": "Saved", "completed_at": time.time() - 10, "output_uri": "gs://private-app/library/saved.mp4"}
     accounts.bind_job(records, job, job, "Saved")
     job["thumbnail_uri"] = "gs://private-app/library/poster.jpg"
+    job.update(comparison_uri="gs://private-app/library/comparison.mp4", comparison_status="ready", comparison_layout="stacked")
     job["setup"] = {"easy_mode": False, "enhanced_character_masking": True, "trim": [1.3, 6.3]}
     job["audio_processing"] = False
     accounts.archive_completed(records, job)
     result = client.get("/api/account/jobs").json()["jobs"][0]
     assert result["status"] == "completed" and "output_url" in result
     assert "thumbnail_url" in result
+    assert "comparison.mp4?" in result["comparison_url"]
+    assert result["comparison_layout"] == "stacked"
     assert result["settings_used"]["easy_mode"] is False
     assert result["settings_used"]["enhanced_masking"] is True
     assert result["settings_used"]["audio_processing"] is False
@@ -112,6 +115,7 @@ def test_saved_video_survives_short_lived_preparation_records(api, monkeypatch):
     result = client.get("/api/account/jobs").json()["jobs"][0]
     assert result["status"] == "expired" and "output_url" not in result
     assert "thumbnail_url" not in result
+    assert "comparison_url" not in result
 
 
 def test_queue_counts_without_stealing_active_worker_and_fails_closed():
@@ -208,3 +212,17 @@ def test_grant_recipient_resolves_only_active_verified_google_identity(monkeypat
             accounts.lookup_credit_recipient("project", "customer@example.com")
     else:
         assert accounts.lookup_credit_recipient("project", "customer@example.com")["account_id"] == digest("firebase-uid")
+
+
+def test_live_comparison_link_expires_with_private_library_video(api):
+    _, records, *_ = api
+    _, owner = authenticated(api)
+    job_id = ready_job(records, owner)
+    job = records.data[f"jobs/{job_id}.json"]
+    job.update(status="completed", comparison_uri="gs://private-app/library/comparison.mp4",
+               comparison_status="ready", comparison_layout="side_by_side", library_expires_at=time.time() + 100)
+    public = gateway.view(job)
+    assert "comparison.mp4?" in public["comparison_url"]
+    assert public["comparison_layout"] == "side_by_side"
+    job["library_expires_at"] = time.time() - 1
+    assert "comparison_url" not in gateway.view(job)

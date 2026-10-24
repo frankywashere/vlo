@@ -813,3 +813,22 @@ outside. The compositor no longer collapses those new depth guides to maximum
 RGB-channel brightness. Existing jobs without the saved opacity keep their
 previous composition. Deploy the CPU `/compose` schema before the gateway that
 sends `depth_opacity`.
+
+### Automatic before/after exports
+
+New account renders create an optional comparison during the existing CPU finish
+step, using the local trimmed RGB original and the finalized recast (including
+its chosen soundtrack and watermark). Portrait originals use side-by-side panels;
+landscape and square originals use before-above / after-below. Panels retain their
+aspect ratio with padding when provider dimensions differ; each panel's longest
+edge is capped at 1536 pixels and playback is 24 fps. Comparison encoding has a
+120-second bound and uses no GPU or generation-provider call.
+
+The private `comparison_uri` lives beside the main video under `library/` and
+shares its 30-day retention. Account and archived Library responses return a
+short-lived `comparison_url` only during that window. Existing completed videos
+are not backfilled. Completed-task retries do not recreate comparisons. Optional
+comparison failure logs `comparison_export_failed` and preserves the successful
+main render; the Library falls back to an on-screen paired preview if the original
+is available. `comparison_export` timings and `comparison_export_saved` record
+encoding duration, canvas dimensions and layout.
