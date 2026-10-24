@@ -58,7 +58,7 @@ def create_task_worker(source_app, context):
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.exception_handlers.update(source_app.exception_handlers)
     app.router.routes.extend(route for route in source_app.routes if getattr(route, "path", "").startswith("/internal/")
-                             and route.path != "/internal/recover-deliveries")
+                             and route.path != "/maintenance/recover-deliveries")
 
     @app.middleware("http")
     async def delivery(request, call_next):
@@ -101,7 +101,7 @@ def create_task_worker(source_app, context):
 
 
 def register_delivery_recovery(app, context):
-    @app.post("/internal/recover-deliveries")
+    @app.post("/maintenance/recover-deliveries")
     def recover(authorization: str | None = Header(default=None)):
         settings, records, cloud = context()
         verify_task_identity(authorization, settings.service_url, settings.task_service_account)
