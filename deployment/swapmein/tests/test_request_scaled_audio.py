@@ -129,3 +129,17 @@ def test_legacy_cpu_mode_keeps_explicit_backup_and_shutdown(monkeypatch):
     assert ("scale", "audio", 0) in events
     assert ("delete", "backup-task") in events
     assert not any(event[0] == "GET" and event[1].startswith("https://run.googleapis.com") for event in events)
+
+
+def test_isolated_cpu_identity_is_verified_without_accessing_legacy_service(monkeypatch):
+    body = state()
+    body['name'] = body['name'].replace('proof-audio', 'recastfx-audio')
+    body['uri'] = body['uri'].replace('proof-audio', 'recastfx-audio')
+    cloud, events = audio_cloud(monkeypatch, service_state=body)
+    cloud.settings.audio_service = 'recastfx-audio'
+    with cloud.worker('audio') as invoke:
+        invoke('/compose', {'run_id': 'isolated'})
+    assert not any('proof-audio' in str(event) for event in events)
+    cloud.settings.audio_service = 'unrelated-service'
+    with pytest.raises(ValueError, match='Unknown worker service'):
+        cloud._admin_url('audio')

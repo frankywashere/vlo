@@ -135,7 +135,7 @@ class Records:
 def check_preparation_capacity(current: dict | None, now: float,
                                monthly_limit: int = Settings.monthly_preparations,
                                daily_limit: int = Settings.daily_preparations, *,
-                               limit_prefix: str = "preparation", maximum: int = 1, requires_gpu: bool = False):
+                               limit_prefix: str = "preparation", maximum: int = 1, requires_gpu: bool = False, legacy_guard: bool = False):
     """Read-only preflight; reservation must still check inside its atomic update."""
     current = current or {}
     clock = datetime.fromtimestamp(now, timezone.utc)
@@ -145,7 +145,7 @@ def check_preparation_capacity(current: dict | None, now: float,
         if lease.get("until", 0) <= now or lease.get("blocked"):
             raise PublicError("A previous preparation needs operator recovery before new clips can run.", 503,
                               code="preparation_recovery")
-    if len(active) >= maximum or requires_gpu and any(lease.get("requires_gpu", True) for lease in active.values()):
+    if (legacy_guard and current.get("active") and not (current.get("pool_version") == 1 and current["active"].get("job_id") == "capacity-pool")) or len(active) >= maximum or requires_gpu and any(lease.get("requires_gpu", True) for lease in active.values()):
         raise PublicError("Another clip is being prepared. Try again when it finishes.", 429,
                           code="preparation_busy", retry_after=max(1, math.ceil(min(lease["until"] for lease in active.values()) - now)))
     month_count = current.get("month_count", 0) if current.get("month") == month else 0
@@ -166,13 +166,13 @@ def check_preparation_capacity(current: dict | None, now: float,
 def reserve_preparation(current: dict | None, job_id: str, now: float,
                         monthly_limit: int = Settings.monthly_preparations,
                         daily_limit: int = Settings.daily_preparations, *,
-                        limit_prefix: str = "preparation", maximum: int = 1, requires_gpu: bool = False):
+                        limit_prefix: str = "preparation", maximum: int = 1, requires_gpu: bool = False, legacy_guard: bool = False):
     available = check_preparation_capacity(current, now, monthly_limit, daily_limit, limit_prefix=limit_prefix,
-                                          maximum=maximum, requires_gpu=requires_gpu)
+                                          maximum=maximum, requires_gpu=requires_gpu, legacy_guard=legacy_guard)
     reserved = {**(current or {}), **available, "month_count": available["month_count"] + 1,
                 "day_count": available["day_count"] + 1}
     return set_preparation_lease(reserved, job_id, {"job_id": job_id, "until": now + 1800,
-        **({"requires_gpu": requires_gpu} if maximum > 1 else {})}, pooled=maximum > 1)
+        **({"requires_gpu": requires_gpu} if maximum > 1 or legacy_guard else {})}, pooled=maximum > 1, legacy_guard=legacy_guard)
 
 
 def check_queue_capacity(current, now, monthly_limit, daily_limit):
@@ -193,31 +193,36 @@ def reserve_queued_preparation(current, now, monthly_limit, daily_limit):
 def preparation_leases(current):
     current = current or {}
     leases = dict(current.get("active_jobs", {}))
-    if current.get("active"):
+    if current.get("active") and not (current.get("pool_version") == 1 and current["active"].get("job_id") == "capacity-pool"):
         leases[current["active"].get("job_id", "legacy-unidentified")] = current["active"]
     return leases
 
 
-def set_preparation_lease(current, job_id, lease, *, pooled=False):
+def set_preparation_lease(current, job_id, lease, *, pooled=False, legacy_guard=False):
     current = dict(current or {})
-    if pooled or current.get("active_jobs"):
+    if pooled or legacy_guard or current.get("pool_version") == 1 or current.get("active_jobs"):
         leases = preparation_leases(current)
         leases[job_id] = lease
         current.pop("active", None)
-        return {**current, "active_jobs": leases}
+        current["active_jobs"] = leases
+        if legacy_guard or current.get("pool_version") == 1:
+            current["pool_version"] = 1
+            current["active"] = {"job_id": "capacity-pool", "until": max(item["until"] for item in leases.values()),
+                                 "blocked": any(item.get("blocked") for item in leases.values())}
+        return current
     return {**current, "active": lease}
 
 
-def claim_queued_slot(current, job_id, now, *, maximum=1, requires_gpu=False):
+def claim_queued_slot(current, job_id, now, *, maximum=1, requires_gpu=False, legacy_guard=False):
     current = current or {}
     leases = preparation_leases(current)
     active = leases.get(job_id)
     if any(lease.get("blocked") or lease.get("until", 0) <= now for lease in leases.values()):
         raise PublicError("Preparation requires operator recovery.", 503, code="preparation_recovery")
-    if not active and (len(leases) >= maximum or requires_gpu and any(lease.get("requires_gpu", True) for lease in leases.values())):
+    if not active and ((legacy_guard and current.get("active") and not (current.get("pool_version") == 1 and current["active"].get("job_id") == "capacity-pool")) or len(leases) >= maximum or requires_gpu and any(lease.get("requires_gpu", True) for lease in leases.values())):
         raise PublicError("Waiting for the current preparation to finish.", 429, code="preparation_busy")
     return set_preparation_lease(current, job_id, {"job_id": job_id, "until": now + 1800,
-        **({"requires_gpu": requires_gpu} if maximum > 1 else {})}, pooled=maximum > 1)
+        **({"requires_gpu": requires_gpu} if maximum > 1 or legacy_guard else {})}, pooled=maximum > 1, legacy_guard=legacy_guard)
 
 
 def release_preparation(current: dict | None, job_id: str):
@@ -226,6 +231,14 @@ def release_preparation(current: dict | None, job_id: str):
         updated.pop("active", None)
     if "active_jobs" in updated:
         updated["active_jobs"] = {key: value for key, value in updated["active_jobs"].items() if key != job_id}
+    if updated.get("pool_version") == 1:
+        leases = updated.get("active_jobs", {})
+        updated.pop("active", None)
+        if not leases:
+            updated.pop("pool_version", None)
+        if leases:
+            updated["active"] = {"job_id": "capacity-pool", "until": max(item["until"] for item in leases.values()),
+                                 "blocked": any(item.get("blocked") for item in leases.values())}
     return updated
 
 

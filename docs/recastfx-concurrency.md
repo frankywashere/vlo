@@ -43,7 +43,7 @@ allowance can use the same existing key. Saving a higher Admin value within
 | --- | --- | --- |
 | Admission, guarded provider submission, status checks | `recastfx-control` / `recastfx-control-worker` | 128 concurrent deliveries; 16 instances, eight requests each; 16 dispatches/second |
 | Preparation, reviewed guide rebuild, finishing/comparison export | `recastfx-work` / `recastfx-worker` | 256 concurrent deliveries; 256 instances, one request each; 32 dispatches/second |
-| CPU guide/face mesh/audio work | existing private `proof-audio` | Automatic min zero/max 256, one request per instance |
+| CPU guide/face mesh/audio work | isolated private `recastfx-audio` | Automatic min zero/max 256, one request per instance |
 | Local SAM/depth GPU route | existing private `proof-gpu` | Existing single-worker lifecycle and exclusive preparation lease |
 
 The application heavy permit is checked before claiming a delivery execution.
@@ -60,7 +60,7 @@ local-worker GPU preparation can hold a lease; Replicate preparations may run
 alongside it within the overall heavy limit. Cleanup releases only its own
 reservation, and uncertain GPU shutdown retains a blocked recovery lease.
 
-CPU requests in the new mode verify the exact private `proof-audio` identity,
+CPU requests in the new mode verify the exact private configured CPU service identity,
 automatic bounded scaling, request billing, concurrency and readiness. They
 never manually scale that shared service or schedule its shutdown. Legacy CPU
 and GPU behavior remain available when the new configuration flags are off.
@@ -106,11 +106,11 @@ Before a production migration:
    service back into manual zero while another request is using it.
 3. Build the tested production image and run `deploy_task_workers.py` with the
    production target, immutable image and verified pause assertion. It validates
-   the existing private CPU endpoint/IAM and spend configuration, adopts current
+   the CPU image and spend configuration, adopts current
    submitting/generating/unknown reAPI jobs, and refuses a migration scan above
    10,000 job records. An already initialized capacity ledger is retained.
-4. The tool provisions the two queues/private workers, changes only the existing
-   CPU service to bounded automatic scaling, resolves each exact worker URL, then
+4. The tool provisions the two queues/private workers and an isolated
+   `recastfx-audio` CPU service with bounded automatic scaling, resolves each exact worker URL, then
    activates `PROCESSING_CAPACITY_ENABLED`, `REQUEST_SCALED_AUDIO` and the control
    queue routing. Secrets stay as existing Secret Manager references under the
    existing service account. GPU capacity and provider keys do not change.
@@ -189,3 +189,8 @@ TypeScript/build and extension-impact/diff checks. Boundary tests accept 256 and
 reject 257; deployment tests preserve min zero/private IAM, keep preview/GPU
 limits unchanged and verify dispatch rates do not grow with the instance ceiling.
 No live deployment or paid provider request was performed.
+
+The production deployment clones the installed CPU image into `recastfx-audio`,
+leaving the older site’s `proof-audio` lifecycle unchanged. Guarded preparation
+pools maintain a legacy-readable busy lease while any parallel preparation runs.
+This prevents an old-version request from overwriting the pool or sharing its GPU.

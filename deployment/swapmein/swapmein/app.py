@@ -985,7 +985,7 @@ def preparation_limits(records, job=None):
         return {}
     capacity.require_ready()
     provider = (job or {}).get("preparation_provider") or pipeline_settings(records)["preparation_provider"]
-    return {"maximum": capacity.limits()["heavy_jobs"], "requires_gpu": provider == "workers"}
+    return {"maximum": capacity.limits()["heavy_jobs"], "requires_gpu": provider == "workers", "legacy_guard": True}
 
 
 @app.get("/api/preparation-capacity")

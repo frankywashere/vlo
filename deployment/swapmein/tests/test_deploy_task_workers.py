@@ -42,6 +42,7 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
     monkeypatch.setattr(release.deploy,'verify_cap',lambda:None)
     monkeypatch.setattr(release,'bound_service',lambda service,maximum:bounds.append((service,maximum)))
     monkeypatch.setattr(release,'prepare_capacity_migration',lambda env,**kw:migrations.append(kw))
+    monkeypatch.setattr(release,'deploy_isolated_audio',lambda env,account: 'https://recastfx-audio-63lqoskl5q-uk.a.run.app')
     monkeypatch.setattr(release.deploy,'google_get',lambda url:{'name':f'projects/{release.deploy.PROJECT}/locations/{release.deploy.REGION}/services/proof-audio',
         'uri':env['AUDIO_URL']})
     result=release.deploy_worker('us-east4-docker.pkg.dev/charswap-franky-20261013/proof/gateway@sha256:'+'a'*64,
@@ -53,7 +54,7 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
         assert values['TASK_QUEUE']==values['RENDER_TASK_QUEUE']==queue
         assert values['TASK_WORKER_MODE']=='true'
         assert 'RECASTFX_JOB_KEY' not in values
-    expected={api,worker} if preview else {api,worker,'recastfx-control-worker','proof-audio'}
+    expected={api,worker} if preview else {api,worker,'recastfx-control-worker','recastfx-audio'}
     writes=[c for c in calls if c[:2]==('run','deploy') or c[:2]==('run','services') and c[2] not in {'describe','get-iam-policy'}]
     assert all((c[2] if c[:2]==('run','deploy') else c[3]) in expected for c in writes)
     queues={c[3]:c for c in calls if c[:3]==('tasks','queues','create')}
@@ -81,7 +82,8 @@ def test_release_is_scoped_private_bounded_and_preserves_api_settings(release,mo
         assert worker_env['recastfx-control-worker']['TASK_WORKER_LANE']=='control'
         assert worker_env[worker]['REQUEST_SCALED_AUDIO']=='true'
         assert worker_env[worker]['PROCESSING_CAPACITY_ENABLED']=='false'  # Activated only after canonical routing exists.
-        assert ('proof-audio',256) in bounds
+        assert worker_env[worker]['AUDIO_SERVICE']=='recastfx-audio'
+        assert worker_env[worker]['AUDIO_URL']=='https://recastfx-audio-63lqoskl5q-uk.a.run.app'
         api_update=next(c for c in calls if c[:4]==('run','services','update',api))
         assert any('PROCESSING_CAPACITY_ENABLED=true' in arg for arg in api_update)
 
@@ -135,3 +137,26 @@ def test_capacity_migration_never_overrides_active_legacy_cpu_work(release,monke
         with pytest.raises(release.deploy.SetupError):
             release.prepare_capacity_migration({'APP_BUCKET':release.deploy.APP_BUCKET},submissions_paused=True)
         assert not calls
+
+
+def test_cpu_clone_preserves_image_identity_and_never_updates_legacy(release,monkeypatch):
+    calls=[]
+    account='gateway@'+release.deploy.PROJECT+'.iam.gserviceaccount.com'
+    image='us-east4-docker.pkg.dev/charswap-franky-20261013/proof/audio@sha256:'+'b'*64
+    def gcloud(*args,**kwargs):
+        calls.append(args)
+        if args[:3]==('run','services','describe'):
+            return {'spec':{'template':{'spec':{'serviceAccountName':'proof-worker@'+release.deploy.PROJECT+'.iam.gserviceaccount.com',
+                'containers':[{'image':image,'env':[{'name':'ARTIFACT_BUCKET','value':'existing-bucket'}]}]}}}}
+        if args[:2]==('run','deploy'):
+            assert args[2]=='recastfx-audio' and '--image='+image in args
+            assert '--min-instances=0' in args and '--max-instances=256' in args
+            assert '--cpu-throttling' in args and '--no-allow-unauthenticated' in args
+            return {'status':{'url':'https://recastfx-audio.example'}}
+        return {'bindings':[]}
+    monkeypatch.setattr(release.deploy,'gcloud',gcloud)
+    monkeypatch.setattr(release,'bound_service',lambda service,maximum:None)
+    assert release.deploy_isolated_audio({},account)=='https://recastfx-audio.example'
+    assert not any(c[:4]==('run','services','update','proof-audio') for c in calls)
+    grants=[c for c in calls if c[:3]==('run','services','add-iam-policy-binding')]
+    assert len(grants)==2 and all(c[3]=='recastfx-audio' and '--member=serviceAccount:'+account in c for c in grants)
