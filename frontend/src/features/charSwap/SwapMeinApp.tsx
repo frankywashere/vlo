@@ -2,19 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Box,
-  Button,
   CssBaseline,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   GlobalStyles,
   LinearProgress,
-  Stack,
-  Typography,
 } from "@mui/material";
 import { ThemeProvider } from "@mui/material/styles";
-import Google from "@mui/icons-material/Google";
+import { SignInDialog } from "./components/SignInDialog";
 import { CharSwapWalkthrough } from "./CharSwapWalkthrough";
 import type { CharSwapWalkthroughHandle } from "./CharSwapWalkthrough";
 import { AppHeader } from "./components/AppHeader";
@@ -144,7 +137,6 @@ function AccountWorkspace({
   const [authMode, setAuthMode] = useState<"sign-in" | "create">("sign-in");
   const [busy, setBusy] = useState(false);
   const creationRef = useRef<CharSwapWalkthroughHandle>(null);
-  const [authBusy, setAuthBusy] = useState(false);
   const [staffRole, setStaffRole] = useState<string | null>(null);
   const [appError, setAppError] = useState("");
   const [jobStatus, setJobStatus] = useState("");
@@ -213,14 +205,6 @@ function AccountWorkspace({
       setAppError("Sign-out did not finish. Please try again.");
     }
   }
-  async function login() {
-    setAuthBusy(true);
-    try {
-      await account.signIn();
-    } finally {
-      setAuthBusy(false);
-    }
-  }
   return (
     <Box sx={{ minHeight: "100dvh", bgcolor: "background.default" }}>
       {account.loading && (
@@ -287,75 +271,17 @@ function AccountWorkspace({
           createdAt={account.user.metadata?.creationTime}
           lastSignInAt={account.user.metadata?.lastSignInTime}
           onUpdateName={account.updateName}
+          authProviders={account.user.providerData?.map(provider => provider.providerId)}
+          onAddPassword={account.addPassword}
+          onSendPasswordReset={account.sendAccountPasswordReset}
           onLibrary={() => navigate("library")}
           onSignOut={() => void signOut()}
           locked={busy}
         />
       )}
       {view === "admin" && account.user && staffRole && <AdminPage />}
-      <Dialog
-        open={accountOpen && !account.user}
-        onClose={() => {
-          if (!authBusy) setAccountOpen(false);
-        }}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>
-          {authMode === "create"
-            ? "Create your account"
-            : "Welcome to recastfx"}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2}>
-            <Typography>
-              {authMode === "create"
-                ? "Create your account with Google to start recasting and save your videos in your library."
-                : "Sign in with Google to pick up where you left off."}
-            </Typography>
-            <Button
-              startIcon={<Google />}
-              variant="contained"
-              disabled={authBusy || account.loading}
-              onClick={() => void login()}
-            >
-              Continue with Google
-            </Button>
-            <Typography variant="caption" color="text.secondary">
-              Your finished videos are saved to your account for 30 days.
-            </Typography>
-            <Button
-              disabled={authBusy}
-              onClick={() =>
-                setAuthMode(authMode === "create" ? "sign-in" : "create")
-              }
-              sx={{ alignSelf: "flex-start", px: 0 }}
-            >
-              {authMode === "create"
-                ? "Already have an account? Sign in"
-                : "New here? Create an account"}
-            </Button>
-            {account.error && <Alert severity="error">{account.error}</Alert>}
-            {account.errorCode === "auth/unauthorized-domain" && (
-              <Button
-                component="a"
-                href="https://recastfx.com/"
-                variant="outlined"
-              >
-                Open recastfx.com
-              </Button>
-            )}
-            {authBusy && (
-              <LinearProgress aria-label="Waiting for Google sign-in" />
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button disabled={authBusy} onClick={() => setAccountOpen(false)}>
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <SignInDialog account={account} open={accountOpen} mode={authMode}
+        onMode={setAuthMode} onClose={() => setAccountOpen(false)} />
     </Box>
   );
 }

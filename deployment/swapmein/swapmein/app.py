@@ -199,7 +199,7 @@ def authenticate(authorization: str | None):
     session, _ = records.read("sessions/" + session_id + ".json")
     session = check_session(session)
     if settings.require_account and not session.get("account_id"):
-        raise PublicError("Sign in with Google to continue.", 401)
+        raise PublicError("Sign in to continue.", 401)
     if settings.require_account and session.get("access_mode", "api-key") == "api-key" and not api_key_permission(records, session):
         raise PublicError("API-key access is not enabled for this account.", 403)
     return session.get("owner", session_id), session

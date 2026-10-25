@@ -95,7 +95,7 @@ def default_catalog() -> dict:
 
 
 def api_key_permission(records, account: dict) -> bool:
-    """BYOK is opt-in per verified Google account, including for staff."""
+    """BYOK is opt-in per verified account, including for staff."""
     email = account.get("email", "").strip().lower()
     if not email:
         return False

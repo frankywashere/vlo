@@ -57,7 +57,7 @@ export function CreditGrantPanel({ readOnly = false }: { readOnly?: boolean }) {
 
   const valid = email.trim() && Number.isInteger(Number(amount)) && Number(amount) >= 1 && Number(amount) <= 1000000 && reason.trim().length >= 3;
   return <Stack spacing={2}><AdminSection title="Grant user credits"><Stack spacing={2}>
-    <Typography color="text.secondary">Add credits to an existing Google account. This does not charge a card or purchase provider credits. Each grant records your identity and reason.</Typography>
+    <Typography color="text.secondary">Add credits to an existing verified account. This does not charge a card or purchase provider credits. Each grant records your identity and reason.</Typography>
     <Box component="fieldset" disabled={readOnly} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
     <CreditRecipientField value={email} disabled={readOnly || busy || !!pending} onChange={setEmail} />
     <TextField label="Credits to grant" type="number" value={amount} disabled={busy || !!pending} onChange={(event) => setAmount(event.target.value)} inputProps={{min: 1, max: 1000000, step: 1}} />

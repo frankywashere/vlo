@@ -20,6 +20,9 @@ interface AccountSettingsProps {
   createdAt?: string;
   lastSignInAt?: string;
   onUpdateName?: (name: string) => Promise<void>;
+  authProviders?: string[];
+  onAddPassword?: (password: string) => Promise<void>;
+  onSendPasswordReset?: () => Promise<void>;
   onLibrary: () => void;
   onSignOut: () => void;
 }
@@ -43,6 +46,9 @@ export function AccountSettings({
   createdAt,
   lastSignInAt,
   onUpdateName,
+  authProviders,
+  onAddPassword,
+  onSendPasswordReset,
   onLibrary,
   onSignOut,
 }: AccountSettingsProps) {
@@ -50,6 +56,13 @@ export function AccountSettings({
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [addingPassword, setAddingPassword] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [securityNotice, setSecurityNotice] = useState("");
+  const [securityError, setSecurityError] = useState("");
+  const providers = authProviders ?? ["google.com"];
+  const hasGoogle = providers.includes("google.com");
+  const hasPassword = providers.includes("password");
   const exportData = useLibraryExport();
   const clean = draft.trim();
   async function save() {
@@ -64,6 +77,20 @@ export function AccountSettings({
       setError("Your name could not be saved. Please try again.");
     } finally {
       setSaving(false);
+    }
+  }
+  async function sendPasswordReset() {
+    if (!onSendPasswordReset || resettingPassword) return;
+    setResettingPassword(true);
+    setSecurityNotice("");
+    setSecurityError("");
+    try {
+      await onSendPasswordReset();
+      setSecurityNotice("Password reset requested. Check your inbox for the next steps.");
+    } catch {
+      setSecurityError("The password reset email could not be sent. Please try again.");
+    } finally {
+      setResettingPassword(false);
     }
   }
   return (
@@ -164,7 +191,8 @@ export function AccountSettings({
           <Typography variant="body2" fontWeight={650}>
             Sign-in method
           </Typography>
-          <Chip size="small" label="Google" />
+          {hasGoogle && <Chip size="small" label="Google" />}
+          {hasPassword && <Chip size="small" label="Email and password" />}
           {emailVerified && (
             <Chip
               size="small"
@@ -175,18 +203,58 @@ export function AccountSettings({
           )}
         </Stack>
         <Typography variant="body2" color="text.secondary">
-          Your email, password, and sign-in security are managed by Google.
+          {hasPassword
+            ? hasGoogle
+              ? "You can sign in with Google or your email and password."
+              : "Sign in with your email and password. You can request a password reset below."
+            : "Your Google sign-in is managed by Google."}
         </Typography>
-        <Button
-          component="a"
-          href="https://myaccount.google.com/"
-          target="_blank"
-          rel="noopener noreferrer"
-          variant="outlined"
-          sx={{ mt: 2 }}
-        >
-          Manage Google account
-        </Button>
+        <Stack direction={{ xs: "column", sm: "row" }} gap={1.5} sx={{ mt: 2 }}>
+          {hasGoogle && (
+            <Button
+              component="a"
+              href="https://myaccount.google.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="outlined"
+            >
+              Manage Google account
+            </Button>
+          )}
+          {hasPassword && (
+            <Button
+              variant="outlined"
+              disabled={!onSendPasswordReset || resettingPassword}
+              onClick={() => void sendPasswordReset()}
+            >
+              {resettingPassword ? "Sending reset email…" : "Reset password"}
+            </Button>
+          )}
+          {hasGoogle && !hasPassword && emailVerified && onAddPassword && !addingPassword && (
+            <Button
+              variant="outlined"
+              onClick={() => {
+                setSecurityNotice("");
+                setSecurityError("");
+                setAddingPassword(true);
+              }}
+            >
+              Add email sign-in
+            </Button>
+          )}
+        </Stack>
+        {hasGoogle && !hasPassword && emailVerified && onAddPassword && addingPassword && (
+          <AddEmailPasswordForm
+            onAddPassword={onAddPassword}
+            onCancel={() => setAddingPassword(false)}
+            onAdded={() => {
+              setAddingPassword(false);
+              setSecurityNotice("Email sign-in has been added to your account.");
+            }}
+          />
+        )}
+        {securityError && <Alert severity="error" sx={{ mt: 2 }}>{securityError}</Alert>}
+        {securityNotice && <Alert severity="success" sx={{ mt: 2 }}>{securityNotice}</Alert>}
         {(createdAt || lastSignInAt) && (
           <Box
             sx={{
@@ -273,5 +341,61 @@ export function AccountSettings({
         </Button>
       </Stack>
     </Stack>
+  );
+}
+
+
+interface AddEmailPasswordFormProps {
+  onAddPassword: (password: string) => Promise<void>;
+  onCancel: () => void;
+  onAdded: () => void;
+}
+
+function AddEmailPasswordForm({ onAddPassword, onCancel, onAdded }: AddEmailPasswordFormProps) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const mismatch = confirmation.length > 0 && confirmation !== password;
+  async function addPassword() {
+    if (!password || !confirmation || mismatch || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      await onAddPassword(password);
+      setPassword("");
+      setConfirmation("");
+      onAdded();
+    } catch {
+      setError("Email sign-in could not be added. Try again, or sign in with Google again first.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <Box component="form" aria-label="Add email sign-in" aria-busy={pending}
+      onSubmit={(event) => { event.preventDefault(); void addPassword(); }} sx={{ mt: 2 }}>
+      <Stack spacing={2}>
+        <Typography variant="body2" color="text.secondary">
+          Add a password so you can also sign in with your email. Your library and credits stay with this account. You’ll verify your email before using the new password.
+        </Typography>
+        <TextField label="New password" type="password" autoComplete="new-password" required
+          value={password} disabled={pending} helperText="Use a strong, unique password."
+          slotProps={{ htmlInput: { maxLength: 4096 } }}
+          onChange={(event) => { setPassword(event.target.value); setError(""); }} />
+        <TextField label="Confirm new password" type="password" autoComplete="new-password" required
+          value={confirmation} disabled={pending} error={mismatch}
+          helperText={mismatch ? "Passwords must match." : "Enter the same password again."}
+          slotProps={{ htmlInput: { maxLength: 4096 } }}
+          onChange={(event) => { setConfirmation(event.target.value); setError(""); }} />
+        {error && <Alert severity="error">{error}</Alert>}
+        <Stack direction="row" gap={1} useFlexGap flexWrap="wrap">
+          <Button type="submit" variant="contained" disabled={!password || !confirmation || mismatch || pending}>
+            {pending ? "Adding email sign-in…" : "Save email sign-in"}
+          </Button>
+          <Button disabled={pending} onClick={() => { setPassword(""); setConfirmation(""); onCancel(); }}>Cancel</Button>
+        </Stack>
+      </Stack>
+    </Box>
   );
 }

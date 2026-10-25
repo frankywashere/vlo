@@ -27,7 +27,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     reportClientError("library_auth", error);
     throw new Error("Your Library sign-in could not be checked. Please try again.");
   }
-  if (!token) throw new Error("Sign in with Google to open your library.");
+  if (!token) throw new Error("Sign in to open your library.");
   const started = performance.now();
   let outcome: "returned" | "raised" = "returned";
   const controller = new AbortController();

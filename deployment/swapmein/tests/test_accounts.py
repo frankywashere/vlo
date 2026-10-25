@@ -26,16 +26,20 @@ def test_archived_consumer_total_can_use_saved_actual_charge():
     assert accounts.consumer_credit_usage({"id": "clip", "access_mode": "credits", "app_credits_charged": 78}, None)["consumer_credits_used"] == 78
 
 
-def test_google_identity_signature_audience_and_claims(monkeypatch):
+@pytest.mark.parametrize("provider", ["google.com", "password"])
+def test_supported_identity_signature_audience_and_verified_claims(monkeypatch, provider):
     calls = []
-    claims = {"sub": "user-a", "iss": "https://securetoken.google.com/project", "firebase": {"sign_in_provider": "google.com"}, "email_verified": True, "email": "user@example.com"}
+    claims = {"sub": "user-a", "iss": "https://securetoken.google.com/project", "firebase": {"sign_in_provider": provider}, "email_verified": True, "email": "USER@example.com"}
     def verify(token, request, *, audience):
         calls.append((token, audience))
         return claims
     monkeypatch.setattr(accounts.id_token, "verify_firebase_token", verify)
     assert accounts.verify_account("x" * 30, "project") == {"account_id": digest("user-a"), "email": "user@example.com"}
     assert calls == [("x" * 30, "project")]
-    for invalid in [{"iss": "wrong"}, {"sub": ""}, {"email_verified": False}, {"firebase": {"sign_in_provider": "password"}}]:
+    for invalid in [{"iss": "wrong"}, {"sub": ""}, {"sub": "x" * 129}, {"email_verified": False},
+                    {"email_verified": "true"}, {"email": None}, {"email": " "}, {"email": "x" * 255},
+                    {"firebase": {"sign_in_provider": "anonymous"}}, {"firebase": {"sign_in_provider": "custom"}},
+                    {"firebase": {"sign_in_provider": "facebook.com"}}, {"firebase": {}}]:
         original = dict(claims)
         claims.update(invalid)
         with pytest.raises(PublicError) as error:
@@ -48,6 +52,17 @@ def test_google_identity_signature_audience_and_claims(monkeypatch):
     with pytest.raises(PublicError) as error:
         accounts.verify_account("x" * 30, "project")
     assert "secret" not in error.value.message
+
+
+def test_linked_provider_keeps_uid_ownership_and_same_email_does_not_merge_accounts(monkeypatch):
+    claims = {"sub": "original-uid", "iss": "https://securetoken.google.com/project", "firebase": {"sign_in_provider": "google.com"}, "email_verified": True, "email": "person@example.com"}
+    monkeypatch.setattr(accounts.id_token, "verify_firebase_token", lambda *args, **kwargs: claims)
+    original = accounts.verify_account("x" * 30, "project")
+    claims["firebase"] = {"sign_in_provider": "password"}
+    assert accounts.verify_account("x" * 30, "project") == original
+    claims["sub"] = "different-uid"
+    other = accounts.verify_account("x" * 30, "project")
+    assert other["email"] == original["email"] and other["account_id"] != original["account_id"]
 
 
 def test_account_is_required_before_provider_request(api, monkeypatch):
@@ -196,12 +211,13 @@ def test_queue_wait_does_not_use_the_processing_watchdog(api):
     assert "shutdown has been scheduled" not in result["message"]
 
 
+@pytest.mark.parametrize("provider", ["google.com", "password"])
 @pytest.mark.parametrize("change", [{}, {"disabled": True}, {"emailVerified": False}, {"providerUserInfo": []}, {"email": "other@example.com"}])
-def test_grant_recipient_resolves_only_active_verified_google_identity(monkeypatch, change):
+def test_grant_recipient_resolves_only_active_verified_supported_identity(monkeypatch, change, provider):
     import httpx
     from swapmein import cloud
     monkeypatch.setattr(cloud, "access_token", lambda: "private-access-token")
-    user = {"localId": "firebase-uid", "email": "customer@example.com", "emailVerified": True, "providerUserInfo": [{"providerId": "google.com"}], **change}
+    user = {"localId": "firebase-uid", "email": "customer@example.com", "emailVerified": True, "providerUserInfo": [{"providerId": provider}], **change}
     def lookup(url, **kwargs):
         assert url == "https://identitytoolkit.googleapis.com/v1/projects/project/accounts:lookup"
         assert kwargs["json"] == {"email": ["customer@example.com"]}
@@ -226,3 +242,22 @@ def test_live_comparison_link_expires_with_private_library_video(api):
     assert public["comparison_layout"] == "side_by_side"
     job["library_expires_at"] = time.time() - 1
     assert "comparison_url" not in gateway.view(job)
+
+
+@pytest.mark.parametrize("provider", ["google.com", "password"])
+def test_unverified_identity_cannot_read_wallet_library_or_gain_owner_permissions(api, monkeypatch, provider):
+    client, records, cloud, service = api
+    # Match the real issuer/project while keeping signature verification local.
+    claims = {"sub": "new-user", "iss": "https://securetoken.google.com/" + gateway.settings.project,
+              "firebase": {"sign_in_provider": provider}, "email_verified": False, "email": "owner@example.com"}
+    monkeypatch.setattr(accounts.id_token, "verify_firebase_token", lambda *args, **kwargs: claims)
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "owner@example.com")
+    headers = {"X-Firebase-Token": "x" * 30}
+    for endpoint in ("/api/account/wallet", "/api/account/jobs", "/api/account/access", "/api/commerce/admin/capacity"):
+        assert client.get(endpoint, headers=headers).status_code == 401
+    assert client.post("/api/commerce/checkout", headers=headers, json={"pack_id": "starter"}).status_code == 401
+    assert records.data == {} and not service.submissions and not cloud.enqueued
+    claims["email_verified"] = True
+    assert client.get("/api/account/wallet", headers=headers).status_code == 200
+    assert client.get("/api/account/jobs", headers=headers).status_code == 200
+    assert client.get("/api/account/access", headers=headers).json()["role"] == "owner"
