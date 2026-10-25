@@ -1,6 +1,6 @@
 {
   "date": "2026-10-25",
-  "release_status": "local branch only; no deployment",
+  "release_status": "deployed to isolated one-minute test backend; production matching release verified separately on main",
   "base_branch": "1minute",
   "implementation_branch": "fix/matching-crops",
   "cause": "Disconnected mask pixels expanded the foreground shoulder matching crop across the man; matching assigned his identity to that shoulder track and excluded his real SAM mask.",
@@ -772,5 +772,29 @@
       "warnings": 1,
       "wall_seconds": 373.53
     }
+  },
+  "preview_deployment": {
+    "verified_at_utc": "2026-10-25T18:28:22.464911+00:00",
+    "source_commit": "7ae326bb4278548ec16b89a9c65a51c72e8a2c3f",
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-long-test@sha256:3cf1272f371cf01652016c0cafed15d439217272e0963632003be718977232bf",
+    "image_context_sha256": "0f961f30f3d5c58ca180ad3b013413b01fce287e35089333ea6fa6fa945e001a",
+    "repository_runtime_sha256": "78252fc9dbe5599dcf2e45ddcf94579bfd5a73b518cc487272ed7efb04a540e3",
+    "api_entrypoint": "swapmein.long_render_app:app",
+    "built_image_entrypoint_and_import_checked": true,
+    "revisions": {
+      "recastfx-long-worker": "recastfx-long-worker-00006-tmj",
+      "recastfx-long-test": "recastfx-long-test-00008-rkk"
+    },
+    "production_unchanged": true,
+    "settings_spending_limits_queues_schedulers_iam_and_runtime_preserved": true,
+    "frontend_bundles_unchanged": {
+      "production": "/assets/charswap-BlyWvzM_.js",
+      "preview": "/assets/charswap-DArgTw1h.js"
+    },
+    "preview_health": 200,
+    "unauthenticated_preview_library": 401,
+    "production_only_path_on_preview": 404,
+    "new_paid_provider_calls": 0,
+    "deployment_correction": "The first generic gateway image used the production default startup command. The environment health check failed, and original preview traffic was restored. A corrected image with the existing preview-specific Docker startup command was built and checked inside the container, then deployed and verified. Service commands, resources and environment settings remained unchanged."
   }
 }
