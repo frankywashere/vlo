@@ -9,6 +9,8 @@ export function getSignInErrorCode(error: unknown): string | null {
 
 export function getSignInErrorMessage(code: string | null): string {
   switch (code) {
+    case "auth/account-exists-with-different-credential":
+      return "Sign in using your existing method, such as your email and password, to keep your current account and library.";
     case "auth/unauthorized-domain":
       return "Google sign-in is not enabled for this web address. The site owner needs to add it to Firebase’s authorized domains. You can sign in at recastfx.com in the meantime.";
     case "auth/popup-blocked":

@@ -21,6 +21,9 @@ interface SettingsPageProps {
   createdAt?: string;
   lastSignInAt?: string;
   onUpdateName?: (name: string) => Promise<void>;
+  authProviders?: string[];
+  onAddPassword?: (password: string) => Promise<void>;
+  onSendPasswordReset?: () => Promise<void>;
   onLibrary: () => void;
   onSignOut: () => void;
   locked: boolean;
@@ -37,6 +40,9 @@ export function SettingsPage({
   createdAt,
   lastSignInAt,
   onUpdateName,
+  authProviders,
+  onAddPassword,
+  onSendPasswordReset,
   onLibrary,
   onSignOut,
 }: SettingsPageProps) {
@@ -97,6 +103,9 @@ export function SettingsPage({
             createdAt={createdAt}
             lastSignInAt={lastSignInAt}
             onUpdateName={onUpdateName}
+            authProviders={authProviders}
+            onAddPassword={onAddPassword}
+            onSendPasswordReset={onSendPasswordReset}
             onLibrary={onLibrary}
             onSignOut={onSignOut}
           />

@@ -10,6 +10,7 @@ from .security import digest
 from .job_settings import settings_used
 
 LIBRARY_SECONDS = 30 * 86400
+ACCOUNT_PROVIDERS = frozenset({"google.com", "password"})
 
 
 def consumer_credit_usage(job: dict, wallet: dict | None) -> dict:
@@ -24,18 +25,20 @@ def consumer_credit_usage(job: dict, wallet: dict | None) -> dict:
 
 def verify_account(token: str | None, project: str) -> dict:
     if not isinstance(token, str) or not 20 < len(token) < 10000:
-        raise PublicError("Sign in with Google to continue.", 401)
+        raise PublicError("Sign in to continue.", 401)
     try:
         claims = id_token.verify_firebase_token(token, Request(), audience=project)
         uid = claims.get("sub")
+        email = claims.get("email")
         if (claims.get("iss") != "https://securetoken.google.com/" + project
                 or not isinstance(uid, str) or not 0 < len(uid) <= 128
-                or claims.get("firebase", {}).get("sign_in_provider") != "google.com"
-                or claims.get("email_verified") is not True):
+                or claims.get("firebase", {}).get("sign_in_provider") not in ACCOUNT_PROVIDERS
+                or claims.get("email_verified") is not True
+                or not isinstance(email, str) or not email.strip() or len(email) > 254):
             raise ValueError("Invalid account claims")
     except Exception:
-        raise PublicError("Your Google sign-in expired. Sign in again to continue.", 401) from None
-    return {"account_id": digest(uid), "email": str(claims.get("email", "")).strip().lower()}
+        raise PublicError("Your sign-in could not be verified. Sign in again and verify your email to continue.", 401) from None
+    return {"account_id": digest(uid), "email": email.strip().lower()}
 
 
 def index_path(account_id: str, job_id: str) -> str:
@@ -98,9 +101,9 @@ def lookup_credit_recipient(project: str, email: str) -> dict:
         raise PublicError("Account lookup is unavailable. No credits were granted.", 503) from None
     matches = [user for user in users if user.get("email", "").strip().lower() == email
                and user.get("emailVerified") is True and not user.get("disabled")
-               and any(provider.get("providerId") == "google.com" for provider in user.get("providerUserInfo", []))]
+               and any(provider.get("providerId") in ACCOUNT_PROVIDERS for provider in user.get("providerUserInfo", []))]
     if len(matches) != 1 or not isinstance(matches[0].get("localId"), str) or not matches[0]["localId"]:
-        raise PublicError("No active Google account found. Ask the user to sign in to recastfx first.", 404)
+        raise PublicError("No active verified account found. Ask the user to sign in to recastfx and verify their email first.", 404)
     return {"account_id": digest(matches[0]["localId"]), "email": email}
 
 
@@ -119,7 +122,7 @@ def registered_accounts(project: str, cursor: str | None = None):
         for user in body.get("users", []):
             email = user.get("email")
             if (not isinstance(email, str) or not email or len(email) > 254
-                    or not any(provider.get("providerId") == "google.com" for provider in user.get("providerUserInfo", []))):
+                    or not any(provider.get("providerId") in ACCOUNT_PROVIDERS for provider in user.get("providerUserInfo", []))):
                 continue
             accounts.append({"email": email.strip().lower(),
                 "display_name": str(user.get("displayName") or "")[:200], "disabled": user.get("disabled") is True})

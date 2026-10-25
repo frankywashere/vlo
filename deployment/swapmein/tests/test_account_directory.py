@@ -16,9 +16,11 @@ def test_directory_requests_bounded_pages_and_returns_only_minimal_profile(monke
             {'email':'PERSON@example.com','displayName':'Person','providerUserInfo':[{'providerId':'google.com'}], 'disabled':True,
              'localId':'secret-uid','passwordHash':'secret-hash','customAttributes':'private','lastLoginAt':'1000'},
             {'email':'password@example.com','providerUserInfo':[{'providerId':'password'}]},
+            {'email':'unsupported@example.com','providerUserInfo':[{'providerId':'facebook.com'}]},
+            {'email':'anonymous@example.com','providerUserInfo':[]},
         ],'nextPageToken':'page-two'})
     monkeypatch.setattr('httpx.get', get)
-    assert registered_accounts('project', 'page-one') == {'accounts':[{'email':'person@example.com','display_name':'Person','disabled':True}],'next_cursor':'page-two'}
+    assert registered_accounts('project', 'page-one') == {'accounts':[{'email':'person@example.com','display_name':'Person','disabled':True}, {'email':'password@example.com','display_name':'','disabled':False}],'next_cursor':'page-two'}
     assert calls[0][0].endswith('/v1/projects/project/accounts:batchGet')
     assert calls[0][1]['params'] == {'maxResults':1000,'nextPageToken':'page-one'}
 
