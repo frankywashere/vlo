@@ -116,8 +116,8 @@ def test_matches_original_rgb_remaps_permuted_shot_ids_and_preserves_scenes(tmp_
     install_api(monkeypatch, observed=observed)
     result = matching.match_tracks(original, archive, metadata, targets, credentials=CREDENTIALS, workdir=tmp_path)
     assert result["coverage"] == [24 * 12 * 2] * 8
-    assert result["diagnostics"]["requests"] == 1
-    assert result["diagnostics"]["input_tokens"] == 800
+    assert result["diagnostics"]["requests"] == 2
+    assert result["diagnostics"]["input_tokens"] == 1600
     assert result["diagnostics"]["actual_billed_usd"] is None
     assert [item["color_name"] for item in result["targets"]] == ["cyan", "magenta"]
     for target in result["targets"]:
@@ -155,7 +155,7 @@ def test_five_references_use_multiple_batches_with_at_most_four_images(tmp_path,
     install_api(monkeypatch, observed=observed)
     result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
                                   credentials=CREDENTIALS, workdir=tmp_path)
-    assert result["diagnostics"]["requests"] == 9
+    assert result["diagnostics"]["requests"] == 18
     assert all(len(kwargs["json"]["images"]) <= 4 for _, kwargs in observed)
     assert all(not scene["absent"] for target in result["targets"] for scene in target["scenes"])
 
@@ -219,7 +219,9 @@ def test_network_or_invalid_response_fails_closed_with_no_retry_or_output(tmp_pa
         matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
                               credentials=CREDENTIALS, workdir=tmp_path)
     assert error.value.code == "cloudflare_matching_unavailable"
-    assert len(calls) == 1
+    # The two distinct frame checks may already be in flight. Neither is
+    # automatically retried after an HTTP/network/validation failure.
+    assert 1 <= len(calls) <= 2
     assert not (tmp_path / "identity-masks.zip").exists()
     assert "secret-token" not in capsys.readouterr().out
     assert not list(tmp_path.glob("identity-rgb-*"))
@@ -281,7 +283,8 @@ def test_shared_budget_reserves_before_call_and_settles_usage(tmp_path, monkeypa
     budget = Budget()
     matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
                           credentials=CREDENTIALS, workdir=tmp_path, budget=budget)
-    assert budget.events == ["reserve", "settle"]
+    assert budget.events.count("reserve") == budget.events.count("settle") == 2
+    assert budget.events[0] == "reserve" and budget.events[-1] == "settle"
     records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert {record["job_id"] for record in records} == {"matching-test-job"}
 
@@ -338,3 +341,115 @@ def test_single_shot_fragment_logs_reason_before_any_paid_call(tmp_path, monkeyp
     assert rejected["reason"] == "within_scene_track_change"
     assert rejected["requests_submitted"] == 0
     assert rejected["unseen_labels"]
+
+
+@pytest.mark.parametrize("bad_first_frame", ["wrong_person", "unmatched"])
+def test_another_frame_corrects_one_bad_identity_observation(tmp_path, monkeypatch, bad_first_frame):
+    archive, metadata, targets, images = fixture(tmp_path)
+    values = np.array(images[5])
+    if bad_first_frame == "wrong_person":
+        values[4:28, 2:14, 0], values[4:28, 16:28, 0] = 60, 20
+    else:
+        values[4:28, 2:14, 0] = 220
+    images[5] = Image.fromarray(values)
+    stub_decoder(monkeypatch, images)
+    install_api(monkeypatch)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    second = [item for item in result["assignments"] if item["start_frame"] == 4]
+    assert [item["selected_label"] for item in second] == [11, 10]
+    assert result["diagnostics"]["requests"] == 3
+    assert len(second[0]["evidence_frames"]) == 3
+
+
+def test_unresolved_multiframe_conflict_uses_existing_review_fallback(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path)
+    swapped = np.array(images[4])
+    swapped[4:28, 2:14, 0], swapped[4:28, 16:28, 0] = 60, 20
+    images[4] = Image.fromarray(swapped)
+    unknown = np.array(images[6])
+    unknown[4:28, 2:28, 0] = 220
+    images[6] = Image.fromarray(unknown)
+    stub_decoder(monkeypatch, images)
+    install_api(monkeypatch)
+    with pytest.raises(PublicError) as caught:
+        matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                              credentials=CREDENTIALS, workdir=tmp_path)
+    assert caught.value.code == "cloudflare_matching_unavailable"
+    assert not (tmp_path / "identity-masks.zip").exists()
+
+
+def test_recheck_cannot_exceed_existing_total_request_limit(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path, second_absent=True)
+    stub_decoder(monkeypatch, images)
+    observed = []
+    install_api(monkeypatch, observed=observed)
+    monkeypatch.setattr(matching, "MAX_REQUESTS", 2)
+    with pytest.raises(PublicError, match="request limit"):
+        matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                              credentials=CREDENTIALS, workdir=tmp_path)
+    assert len(observed) == 2
+
+
+def test_crop_cleanup_removes_other_face_from_matching_input(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path)
+    with zipfile.ZipFile(archive) as source:
+        frames = [np.array(Image.open(BytesIO(source.read(name)))) for name in sorted(source.namelist())]
+    for labels in frames:
+        labels[1, 78] = 11  # A detached speck should not drag the other person into the crop.
+    with zipfile.ZipFile(archive, "w") as output:
+        for index, labels in enumerate(frames):
+            data = BytesIO()
+            Image.fromarray(labels).save(data, "PNG")
+            output.writestr(f"labels/labels_{index:05d}.png", data.getvalue())
+    stub_decoder(monkeypatch, images)
+    install_api(monkeypatch)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    assert all(not scene["absent"] for target in result["targets"] for scene in target["scenes"])
+    assert result["diagnostics"]["scene_evidence"][1]["discarded_crop_pixels"][0] == [0, 1]
+    with zipfile.ZipFile(result["masks_path"]) as source:
+        selected = np.array(Image.open(BytesIO(source.read("labels/labels_00005.png"))))
+        assert selected[1, 78] == 1  # Rendering still uses the complete original mask.
+
+
+def test_weak_match_gets_third_observation_without_raising_acceptance_threshold(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path)
+    stub_decoder(monkeypatch, images)
+    def score(jobs, *args):
+        results = []
+        for job in jobs:
+            # The same original person is consistently recognized at the
+            # existing experimental floor, and must remain eligible.
+            answers = {}
+            for person in range(len(job["people"])):
+                for candidate in range(len(job["columns"])):
+                    answers[f"p{person}c{candidate}"] = .0446 if person != candidate else .001
+            results.append((job, (answers, {"input_tokens": 100}, .1)))
+        return results
+    monkeypatch.setattr(matching, "_score_jobs", score)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    assert result["diagnostics"]["requests"] == 3
+    assert result["diagnostics"]["threshold"] == .0446
+    assert all(not scene["absent"] for target in result["targets"] for scene in target["scenes"])
+
+
+def test_transient_unrelated_id_cannot_force_one_frame_identity_decision(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path)
+    with zipfile.ZipFile(archive) as source:
+        frames = [np.array(Image.open(BytesIO(source.read(name)))) for name in sorted(source.namelist())]
+    frames[4][1:3, 70:74] = 30
+    image = np.array(images[4]);image[1:3, 70:74] = [220, 160, 30];images[4] = Image.fromarray(image)
+    with zipfile.ZipFile(archive, "w") as output:
+        for index, labels in enumerate(frames):
+            data = BytesIO();Image.fromarray(labels).save(data, "PNG")
+            output.writestr(f"labels/labels_{index:05d}.png", data.getvalue())
+    stub_decoder(monkeypatch, images)
+    install_api(monkeypatch)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    assert all(not scene["absent"] for target in result["targets"] for scene in target["scenes"])
+    assignments = [item for item in result["assignments"] if item["start_frame"] == 4]
+    assert [item["selected_label"] for item in assignments] == [11, 10]
+    assert len(assignments[0]["evidence_frames"]) == 2
