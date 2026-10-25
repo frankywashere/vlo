@@ -164,7 +164,7 @@ def test_matching_uses_external_original_crops_without_fabricating_child_anchors
     metadata["anchor"] = {"frame": 0}
     result = matching.match_tracks(tmp_path / "original.mp4", raw, metadata, selected,
         credentials=CREDENTIALS, workdir=tmp_path, source_crops=crops, local_anchors={})
-    assert result["diagnostics"]["requests"] == 2
+    assert result["diagnostics"]["requests"] == 4
     assert all(item["source"] == "cloudflare" for item in result["assignments"])
     assert all(0 <= item["anchor"]["time"] < metadata["frames"] / 24 for item in result["assignments"])
     assert all(kwargs["json"]["images"][0] in crops.values() for _, kwargs in observed)
