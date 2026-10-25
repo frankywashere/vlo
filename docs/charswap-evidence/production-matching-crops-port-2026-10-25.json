@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-25",
+  "status": "local production-based branch; not deployed",
+  "branch": "fix/production-matching-crops",
+  "base_branch": "main",
+  "base_commit": "b32beeb975ea4e5cfebc403f8f3652dd4c34cae7",
+  "source_fix_branch": "fix/matching-crops",
+  "source_fix_commit": "7ae326bb",
+  "scope": [
+    "Dominant-component matching crops without modifying rendering masks",
+    "Two observations per shot; third for disagreement, absence, or weak scores",
+    "Unchanged 0.0446 acceptance cutoff; 0.20 triggers an additional check only",
+    "Existing request/lifetime budget and review/no-review contracts retained",
+    "Saved evidence frames, raw scores, crop geometry and fragment counts"
+  ],
+  "exclusions": [
+    "One-minute runtime and child jobs",
+    "One-minute external source_crops/local_anchors support",
+    "One-minute-specific tests and frontend",
+    "Deployment, queues, capacity, auth and provider configuration",
+    "Generation prompt changes"
+  ],
+  "verification": {
+    "independent_actual_diff_audit": "No port regression identified",
+    "production_match_tracks_signature": "AST-equivalent arguments to main",
+    "new_helper_and_regression_tests": "Byte-identical to source fix",
+    "focused_backend_tests_passed": 150,
+    "full_backend_suite": {
+      "passed": 2416,
+      "warnings": 1,
+      "wall_seconds": 204.19
+    },
+    "extension_impact": "No extension contract surface files changed",
+    "new_paid_provider_calls": 0,
+    "deployed": false
+  },
+  "known_limitations": [
+    "More matching requests may consume the unchanged 120-request allowance sooner.",
+    "The previously observed Wrong Angle bystander false match remains at the user-selected experimental cutoff.",
+    "Conflicting or insufficient evidence follows the existing review/no-review policy; crop cleanup does not repair fragmented SAM tracks."
+  ],
+  "source_experiment_evidence": "git show 7ae326bb:docs/charswap-evidence/matching-crops-multiframe-2026-10-25.json"
+}

@@ -12,6 +12,7 @@ import json
 import math
 from pathlib import Path
 import re
+from statistics import median
 import tempfile
 import time
 import zipfile
@@ -24,10 +25,13 @@ from .diagnostics import emit
 from .errors import PublicError
 from .media import run
 from .multi_tracking import style_targets
+from .matching_crops import dominant_region, sample_frames
 from .tracking import FPS, _maps, _metadata, _pixel_label
 
 MODEL = "@cf/cloudflare/clef-omni"
 MINIMUM_SAME_SCORE = .0446
+# Recheck weak evidence without raising the user-selected acceptance cutoff.
+RECHECK_SAME_SCORE = .20
 MAX_REQUESTS = 120
 MAX_CANDIDATES = 24
 MAX_CONCURRENCY = 4
@@ -86,15 +90,17 @@ def _credentials(credentials):
 
 
 def _box(labels, label):
-    ys, xs = np.nonzero(labels == label)
-    if not len(xs):
+    region = dominant_region(labels, label)
+    if region is None:
         raise _unavailable("A selected person has no mask. Check the scene selections.", reason="selected_mask_missing")
-    return (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    return region["box"]
 
 
-def _anchor(labels, label, frame):
+def _anchor(labels, label, frame, box=None):
     # A bounding-box centre can fall on background between an arm and torso.
-    ys, xs = np.nonzero(labels == label)
+    left, top, right, bottom = box or _box(labels, label)
+    ys, xs = np.nonzero(labels[top:bottom, left:right] == label)
+    ys, xs = ys + top, xs + left
     x, y = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
     closest = int(np.argmin((xs - x) ** 2 + (ys - y) ** 2))
     return {"x": (int(xs[closest]) + .5) / labels.shape[1],
@@ -253,6 +259,81 @@ def _score_jobs(jobs, credentials, deadline, budget):
     return results
 
 
+def _view_choices(shot, view):
+    return joint_assignment([view["scores"][index] for index in shot["people"]])
+
+
+def _apply_results(results):
+    for job, (answers, _, _) in results:
+        for local_person, person in enumerate(job["people"]):
+            for candidate, column in enumerate(job["columns"]):
+                job["view"]["scores"][person][column] = answers[f"p{local_person}c{candidate}"]
+
+
+def _view_jobs(shot, view, images, references):
+    visible = [(column, candidate) for column, candidate in enumerate(view["candidates"]) if candidate["box"] is not None]
+    candidates = [_image_url(images[view["frame"]], candidate["box"]) for _, candidate in visible]
+    jobs = []
+    for offset in range(0, len(shot["people"]), 2):
+        group = shot["people"][offset:offset + 2]
+        for candidate_offset in range(0, len(candidates), 2):
+            jobs.append({"view": view, "people": group,
+                         "columns": [column for column, _ in visible[candidate_offset:candidate_offset + 2]],
+                         "payload": _payload([references[index] for index in group], candidates[candidate_offset:candidate_offset + 2])})
+    return jobs
+
+
+def _needs_recheck(shot):
+    if not shot["people"] or not shot["candidates"]:
+        return False
+    choices = [_view_choices(shot, view) for view in shot["used_views"]]
+    return (any(choice != choices[0] for choice in choices[1:])
+            or any(candidate is None or view["scores"][person][candidate] < RECHECK_SAME_SCORE
+                   for view, choice in zip(shot["used_views"], choices)
+                   for person, candidate in zip(shot["people"], choice)))
+
+
+def _resolve_views(shot, job_id):
+    views = shot["used_views"]
+    shot["scores"] = [[median(view["scores"][person][candidate] for view in views)
+                       for candidate in range(len(shot["candidates"]))]
+                      for person in range(len(views[0]["scores"]))]
+    choices = joint_assignment([shot["scores"][index] for index in shot["people"]])
+    observations = [_view_choices(shot, view) for view in views]
+    if (any(choice is None for choice in choices)
+            and any(sum(view["candidates"][column]["box"] is not None for view in views) < min(2, len(views))
+                    for column in range(len(shot["candidates"])))):
+        # A brief entrant or fragmented track is not evidence that an unmatched
+        # selected person is absent. Let the established review policy decide.
+        emit("cloudflare_matching_evidence", job_id=job_id, scene=shot["scene"],
+             outcome="insufficient_observations", sample_frames=[view["frame"] for view in views],
+             candidate_labels=[item["label"] for item in shot["candidates"]],
+             scores=[view["scores"] for view in views], choices=observations)
+        raise _unavailable("Some person tracks have insufficient matching evidence. Check the scene matches.", reason="insufficient_frame_evidence")
+    # Conflicting evidence goes through the existing reviewed/no-review policy;
+    # never manufacture a confident whole-shot match from one favorable frame.
+    for person, choice in enumerate(choices):
+        votes = sum(observation[person] == choice for observation in observations)
+        if votes <= len(views) // 2:
+            emit("cloudflare_matching_evidence", job_id=job_id, scene=shot["scene"],
+                 outcome="conflict", sample_frames=[view["frame"] for view in views],
+                 candidate_labels=[item["label"] for item in shot["candidates"]],
+                 crop_boxes=[[item["box"] for item in view["candidates"]] for view in views],
+                 scores=[view["scores"] for view in views], choices=observations)
+            raise _unavailable("Person matches disagree between frames. Check the scene matches.", reason="frame_identity_conflict")
+        if choice is not None:
+            # The prompt fallback anchor must come from a frame that actually
+            # supports this identity, rather than an unscored third observation.
+            supporting = [view["candidates"][choice] for view, observation in zip(views, observations)
+                          if observation[person] == choice and view["candidates"][choice]["box"] is not None]
+            shot["candidates"][choice] = max(supporting, key=lambda item: item["pixels"])
+    emit("cloudflare_matching_evidence", job_id=job_id, scene=shot["scene"], outcome="resolved",
+         sample_frames=[view["frame"] for view in views],
+         candidate_labels=[item["label"] for item in shot["candidates"]],
+         crop_boxes=[[item["box"] for item in view["candidates"]] for view in views],
+         scores=[view["scores"] for view in views], choices=observations)
+
+
 def match_tracks(video_path, masks_path, metadata, targets, *, credentials, workdir,
                  output_path=None, deadline_seconds=180, budget=None):
     """Return reviewed-shape targets and shot-scoped stable masks for Easy Mode.
@@ -282,12 +363,15 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
     anchor_labels = {}
     with _maps(masks_path, {**metadata, "anchor": targets[0]["anchor"]}) as read:
         for index, target in enumerate(targets):
-            anchor_frame = _metadata({**metadata, "anchor": target["anchor"]})[3]
-            label = _pixel_label(read, anchor_frame, target["anchor"], width, height)
+            anchor = target["anchor"]
+            anchor_frame = _metadata({**metadata, "anchor": anchor})[3]
+            label = _pixel_label(read, anchor_frame, anchor, width, height)
             if not label:
                 raise _unavailable("An initial selection missed its person mask. Review the scene selections.", reason="anchor_mask_missing")
             anchor_labels[index] = (anchor_frame, label, _box(read(anchor_frame), label))
         for scene, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
+            if time.monotonic() >= deadline:
+                raise _unavailable("Automatic scene matching exceeded its time limit. Review the scenes to continue.", reason="deadline_exceeded")
             observed = set()
             samples = []
             for frame in range(start, end):
@@ -313,37 +397,63 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                 emit("cloudflare_matching_rejected", job_id=job_id, reason="within_scene_track_change",
                      scene=scene, unseen_labels=sorted(unseen), requests_submitted=0)
                 raise _unavailable("A person track changes inside a scene. Review the scene selections to keep identities correct.", reason="within_scene_track_change")
-            labels = read(sample)
-            candidates = [{"label": label, "box": _box(labels, label), "anchor": _anchor(labels, label, sample)}
-                          for label in sorted(visible - set(locked.values()))]
+            people = [index for index in range(len(targets)) if index not in locked]
+            chosen_frames = sample_frames(samples, start, end)
+            if not people:
+                chosen_frames = chosen_frames[:1]
+            views = []
+            candidate_labels = sorted(observed - set(locked.values()))
+            for frame in chosen_frames:
+                labels = read(frame)
+                candidates = []
+                for label in candidate_labels:
+                    region = dominant_region(labels, label)
+                    if region is None:
+                        candidates.append({"label": label, "box": None, "anchor": None, "discarded_pixels": 0})
+                        continue
+                    candidates.append({"label": label, "box": region["box"], "pixels": region["pixels"],
+                        "anchor": _anchor(labels, label, frame, box=region["box"]),
+                        "discarded_pixels": region["discarded_pixels"]})
+                views.append({"frame": frame, "candidates": candidates,
+                              "scores": [[0.0] * len(candidates) for _ in targets]})
+            candidates = [max((view["candidates"][column] for view in views), key=lambda item: item.get("pixels", 0))
+                          for column in range(len(candidate_labels))]
             shots.append({"scene": scene, "start": start, "end": end, "frame": sample,
-                          "locked": locked, "candidates": candidates})
-        decode_frames = [shot["frame"] for shot in shots] + [item[0] for item in anchor_labels.values()]
+                          "locked": locked, "candidates": candidates, "people": people,
+                          "views": views, "used_views": views[:2]})
+        decode_frames = [view["frame"] for shot in shots for view in shot["views"]] + [item[0] for item in anchor_labels.values()]
         with tempfile.TemporaryDirectory(prefix="identity-rgb-", dir=workdir) as temporary:
             images = _decode_frames(video_path, Path(temporary), decode_frames, width, height)
             references = [_image_url(images[anchor_labels[index][0]], anchor_labels[index][2]) for index in range(len(targets))]
             jobs = []
             for shot in shots:
-                shot["scores"] = [[0.0] * len(shot["candidates"]) for _ in targets]
-                people = [index for index in range(len(targets)) if index not in shot["locked"]]
-                candidates = [_image_url(images[shot["frame"]], candidate["box"]) for candidate in shot["candidates"]]
-                for offset in range(0, len(people), 2):
-                    group = people[offset:offset + 2]
-                    for candidate_offset in range(0, len(candidates), 2):
-                        jobs.append({"shot": shot, "people": group, "offset": candidate_offset,
-                                     "payload": _payload([references[index] for index in group], candidates[candidate_offset:candidate_offset + 2])})
+                for view in shot["used_views"]:
+                    jobs.extend(_view_jobs(shot, view, images, references))
             if len(jobs) > MAX_REQUESTS:
                 raise _unavailable("Automatic matching exceeds this clip's request limit. Review the scenes to continue.", reason="request_limit")
             emit("cloudflare_matching_requests_planned", job_id=job_id, requests=len(jobs),
                  locked_assignments=sum(len(shot["locked"]) for shot in shots))
             results = _score_jobs(jobs, credentials, deadline, budget)
+            _apply_results(results)
+            rechecks = []
+            for shot in shots:
+                if _needs_recheck(shot) and len(shot["views"]) > len(shot["used_views"]):
+                    view = shot["views"][2]
+                    shot["used_views"].append(view)
+                    rechecks.extend(_view_jobs(shot, view, images, references))
+                    emit("cloudflare_matching_recheck", job_id=job_id, scene=shot["scene"], sample_frame=view["frame"])
+            if len(jobs) + len(rechecks) > MAX_REQUESTS:
+                raise _unavailable("Automatic matching exceeds this clip's request limit. Review the scenes to continue.", reason="request_limit")
+            extra_results = _score_jobs(rechecks, credentials, deadline, budget)
+            _apply_results(extra_results)
+            results.extend(extra_results)
+            jobs.extend(rechecks)
+            for shot in shots:
+                _resolve_views(shot, job_id)
     usage_tokens, api_seconds = 0, []
-    for job, (answers, usage, elapsed) in results:
+    for _, (_, usage, elapsed) in results:
         usage_tokens += usage["input_tokens"]
         api_seconds.append(elapsed)
-        for local_person, person in enumerate(job["people"]):
-            for candidate in range(len(job["payload"]["images"]) - len(job["people"])):
-                job["shot"]["scores"][person][job["offset"] + candidate] = answers[f"p{local_person}c{candidate}"]
     assignments = []
     updated_targets = [{**target, "scenes": []} for target in targets]
     for shot in shots:
@@ -359,7 +469,8 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
             assignment = {"segment_id": f"cf-scene-{shot['scene']:03d}-t{index}", "target_id": target["id"],
                           "reference_index": target["reference_index"], "start_frame": shot["start"], "end_frame": shot["end"],
                           "selected_label": label, "absent": label is None, "anchor": anchor, "score": score,
-                          "source": "initial_selection" if locked else "cloudflare"}
+                          "source": "initial_selection" if locked else "cloudflare",
+                          "evidence_frames": [view["frame"] for view in shot["used_views"]]}
             assignments.append(assignment)
             updated_targets[index]["scenes"].append({"start": shot["start"] / FPS, "end": shot["end"] / FPS,
                                                     "absent": label is None, "anchor": anchor, "coordinate_fallback": False})
@@ -387,6 +498,14 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                    "scene_count": len(shots), "requests": len(jobs), "input_tokens": usage_tokens,
                    "estimated_cost_usd": usage_tokens * INPUT_USD_PER_MILLION / 1_000_000,
                    "actual_billed_usd": None, "elapsed_seconds": round(time.monotonic() - started, 6),
+                   "matching_version": 2, "crop_method": "largest_connected_component",
+                   "recheck_same_score": RECHECK_SAME_SCORE,
+                   "scene_evidence": [{"scene": shot["scene"], "frames": [view["frame"] for view in shot["used_views"]],
+                        "labels": [item["label"] for item in shot["candidates"]],
+                        "scores": [view["scores"] for view in shot["used_views"]],
+                        "crop_boxes": [[item["box"] for item in view["candidates"]] for view in shot["used_views"]],
+                        "discarded_crop_pixels": [[item["discarded_pixels"] for item in view["candidates"]]
+                                                  for view in shot["used_views"]]} for shot in shots],
                    "request_seconds": api_seconds, "absent_assignments": sum(item["absent"] for item in assignments)}
     job_id = getattr(budget, "job_id", None)
     emit("cloudflare_matching_completed", job_id=job_id if isinstance(job_id, str) else None, **diagnostics)
