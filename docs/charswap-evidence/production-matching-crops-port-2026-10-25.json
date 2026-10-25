@@ -1,6 +1,6 @@
 {
   "date": "2026-10-25",
-  "status": "local production-based branch; not deployed",
+  "status": "merged into main, pushed and deployed to production; live verification passed",
   "branch": "fix/production-matching-crops",
   "base_branch": "main",
   "base_commit": "b32beeb975ea4e5cfebc403f8f3652dd4c34cae7",
@@ -32,12 +32,32 @@
     },
     "extension_impact": "No extension contract surface files changed",
     "new_paid_provider_calls": 0,
-    "deployed": false
+    "deployed": true
   },
   "known_limitations": [
     "More matching requests may consume the unchanged 120-request allowance sooner.",
     "The previously observed Wrong Angle bystander false match remains at the user-selected experimental cutoff.",
     "Conflicting or insufficient evidence follows the existing review/no-review policy; crop cleanup does not repair fragmented SAM tracks."
   ],
-  "source_experiment_evidence": "git show 7ae326bb:docs/charswap-evidence/matching-crops-multiframe-2026-10-25.json"
+  "source_experiment_evidence": "git show 7ae326bb:docs/charswap-evidence/matching-crops-multiframe-2026-10-25.json",
+  "deployment": {
+    "verified_at_utc": "2026-10-25T18:15:52.442442+00:00",
+    "source_commit": "7698e3c82579faee057bb100c2763e3de18b0eef",
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:01dcbf9450e90a0a3c48feb9c941b4c98f0ae69ae41ffe01ceee8bd0e92f22cb",
+    "runtime_source_sha256": "933fcade2a02fd2f81dae0159e239b5425b0cdb5833d2d41e13e7d0e61724b95",
+    "revisions": {
+      "recastfx-worker": "recastfx-worker-00006-mfh",
+      "recastfx-control-worker": "recastfx-control-worker-00004-bdf",
+      "recastfx-api": "recastfx-api-00075-kmz"
+    },
+    "frontend_bundle_unchanged": "/assets/charswap-BlyWvzM_.js",
+    "pipeline_capacity_queue_iam_and_runtime_settings_preserved": true,
+    "guide_legacy_preview_and_gpu_services_unchanged": true,
+    "api_health": 200,
+    "unauthenticated_library": 401,
+    "new_paid_provider_calls": 0,
+    "processing_job_limit": 8,
+    "reapi_job_limit": 8,
+    "deployment_metadata_note": "The initial safety check rejected only the generated gcloud client-version annotation; old worker traffic was restored. Retried with only that metadata key excluded, reusing the already-created matching revision. All runtime and other revision annotations remain checked."
+  }
 }
