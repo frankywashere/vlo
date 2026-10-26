@@ -73,12 +73,31 @@
       "resolution": "1920x1080",
       "video": "h264",
       "audio": "aac"
-    },
-    "pending": "Live deployment checks recorded separately after release"
+    }
   },
   "limitations": [
     "Sites may block datacenter downloads or require sign-in; no cookies/login bypass provided",
     "Only X, Instagram, YouTube, Vimeo and TikTok entry URLs accepted",
     "Browser-local copy disappears on navigation; user must save first"
-  ]
+  ],
+  "release": {
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:21883c8919e609d3170745feb1e4e531eb9541661000edd2f17759ec4252c095",
+    "revision": "recastfx-api-00076-ks2",
+    "health": 200,
+    "unauthenticated_download": 401,
+    "unauthenticated_settings": 401,
+    "production_CORS": true,
+    "runtime_preserved": true,
+    "other_workers_and_preview_preserved": true,
+    "frontend_bundle": "/assets/charswap-DcuY9QXG.js",
+    "live_bundle_matches_built_bytes": true,
+    "all_users_default": false,
+    "hosting_routes_require_auth": true,
+    "cloud_container_real_video_download": "passed",
+    "mobile_browser_layout_playback_and_save": "passed on WebKit and Chromium; physical phones not tested",
+    "source_commit": "84eff299",
+    "hosting_site": "recastfx-franky",
+    "production_url": "https://recastfx.com/?page=video-downloader",
+    "authenticated_live_browser": "Not exercised: verification browser had no active account session. Access behavior covered by service and UI tests; live unauthenticated endpoints reject requests."
+  }
 }
