@@ -111,6 +111,25 @@
     "frontend_tests": "4 passed",
     "build": "RecastFX TypeScript and production build passed",
     "compatibility": "Old visibility-only saves preserve a previously saved size limit. Missing stored size defaults to 500 MB.",
-    "enforcement": "Admin value is passed to yt-dlp and used for final-file and temporary-workspace checks; download page reads current value from authenticated settings endpoint."
+    "enforcement": "Admin value is passed to yt-dlp and used for final-file and temporary-workspace checks; download page reads current value from authenticated settings endpoint.",
+    "release": {
+      "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:d87c3680b1846b6cde24e92b1ac9da2be74eef25361aad07a77d3bc5599951fe",
+      "revision": "recastfx-api-00077-btr",
+      "health": 200,
+      "unauthenticated_download": 401,
+      "unauthenticated_settings": 401,
+      "production_CORS": true,
+      "runtime_preserved": true,
+      "other_workers_and_preview_preserved": true,
+      "frontend_bundle": "/assets/charswap-Cal0MRr0.js",
+      "live_bundle_matches_built_bytes": true,
+      "all_users_default": false,
+      "max_download_mb": 500,
+      "hosting_routes_require_auth": true,
+      "cloud_container_real_video_download": "passed",
+      "source_commit": "bd6796b4",
+      "hosting_site": "recastfx-franky",
+      "production_url": "https://recastfx.com/?page=video-downloader"
+    }
   }
 }
