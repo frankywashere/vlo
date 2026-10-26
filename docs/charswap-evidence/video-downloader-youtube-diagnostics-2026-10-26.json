@@ -32,7 +32,39 @@
     "real_conversion": "FFmpeg WebM VP9/Opus conversion produced H.264/AAC; compatible MP4 bytes stayed identical.",
     "privacy": "Tested failure logs omit signed URL and token text.",
     "extension_surface": "No extension contract files changed.",
-    "cloud_and_release": "Pending final container tests and deployment verification."
+    "cloud_and_release": {
+      "youtube_download": {
+        "bytes": 108598256,
+        "duration_seconds": 360.746,
+        "preparation_seconds": 11.71,
+        "video": "h264",
+        "audio": "aac"
+      },
+      "x_regression": {
+        "bytes": 15084076,
+        "preparation_seconds": 3.58
+      },
+      "synthetic_webm_vp9_opus": "Converted to H.264/AAC MP4 in the built Linux image.",
+      "runtime": "Deno 2.9.6 and yt-dlp-ejs 0.8.0 verified; missing-JS-runtime diagnostic false."
+    }
   },
-  "reference": "https://github.com/yt-dlp/yt-dlp/wiki/EJS"
+  "reference": "https://github.com/yt-dlp/yt-dlp/wiki/EJS",
+  "release": {
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:17c237d554515d47a1d1e3bb9e1fcdd9e63d55144eff901a7257bfd76a4e561a",
+    "revision": "recastfx-api-00078-l2q",
+    "health": 200,
+    "unauthenticated_download": 401,
+    "unauthenticated_settings": 401,
+    "production_CORS": true,
+    "runtime_preserved": true,
+    "other_workers_and_preview_preserved": true,
+    "frontend_bundle": "/assets/charswap-Cal0MRr0.js",
+    "live_bundle_matches_built_bytes": true,
+    "all_users_default": false,
+    "max_download_mb": 500,
+    "hosting_routes_require_auth": true,
+    "cloud_container_real_video_download": "passed",
+    "source_commit": "3e17b1c9",
+    "authenticated_website_retest": "User retry still needed; original 422 cause was not reproducible."
+  }
 }
