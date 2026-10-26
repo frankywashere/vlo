@@ -136,6 +136,7 @@ export interface CreditFeatures {
 }
 
 export interface AccountAccess {
+  video_downloader?: boolean;
   api_key_enabled: boolean;
   role: "owner" | "pricing_admin" | "viewer" | null;
 }

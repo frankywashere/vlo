@@ -113,7 +113,7 @@ def test_owner_controls_api_key_access_and_revocation_blocks_existing_session(ap
     owner = {"account_id": digest("owner"), "email": "frank@whipsnapfilms.com"}
     monkeypatch.setattr(gateway, "verify_account", lambda token, project: owner if token == "owner" else account)
     headers = {"X-Firebase-Token": "user", "X-Reapi-Key": "valid-example-key"}
-    assert client.get("/api/account/access", headers=headers).json() == {"api_key_enabled": False, "role": None}
+    assert client.get("/api/account/access", headers=headers).json() == {"api_key_enabled": False, "role": None, "video_downloader": False}
     assert client.post("/api/session", headers=headers, json={"access_mode": "api-key"}).status_code == 403
     assert client.post("/api/commerce/admin/api-key-access", headers={"X-Firebase-Token": "user"},
                        json={"email": account["email"], "enabled": True}).status_code == 403

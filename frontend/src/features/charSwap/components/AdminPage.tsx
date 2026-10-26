@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Container, FormControl, FormControlLabel, FormLabel, Radio, RadioGroup, Stack, Switch, TextField, Typography } from "@mui/material";
 import { loadCreditAdmin, saveWatermarkSettings, savePipelineSettings, saveCreditCatalog, saveCreditFeatures, savePrivateProviderKey, saveReplicateApiKey, saveCloudflareApiKey } from "../services/commerce";
+import { VideoDownloaderSettings } from "./VideoDownloaderSettings";
 import { FinancePanel } from "./FinancePanel";
 import { AdminSection } from "./AdminSection";
 import { ProcessingCapacityPanel } from "./ProcessingCapacityPanel";
@@ -115,6 +116,7 @@ export function AdminPage() {
           <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
+          <VideoDownloaderSettings canEdit={can("service_controls")} />
           <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
             disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}
             onChange={(event) => {

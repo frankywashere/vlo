@@ -24,6 +24,7 @@ interface AppHeaderProps {
   onCreate: () => void;
   onLibrary?: () => void;
   onAdmin?: () => void;
+  onVideoDownloader?: () => void;
   onSettings?: () => void;
   onAccount?: () => void;
   onCreateAccount?: () => void;
@@ -46,6 +47,7 @@ export function AppHeader({
   onLibrary,
   onTemplates,
   onAdmin,
+  onVideoDownloader,
   onSettings,
   onAccount,
   onCreateAccount,
@@ -76,6 +78,7 @@ export function AppHeader({
           },
         ]
       : []),
+    ...(onVideoDownloader ? [{ kind: "action" as const, id: "video-downloader", group: "1_account", label: "Video downloader", run: onVideoDownloader }] : []),
     { kind: "action", id: "credits", group: "1_account", label: "Credits", run: () => onCredits?.() },
     {
       kind: "action",

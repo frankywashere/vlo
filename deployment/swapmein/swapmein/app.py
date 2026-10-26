@@ -14,7 +14,8 @@ from typing import Literal
 from fastapi import Body, FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from . import video_downloader
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
@@ -536,7 +537,55 @@ def account_access(x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
     return {"api_key_enabled": api_key_permission(records, account),
-            "role": staff_role(records, account)}
+            "role": staff_role(records, account), "video_downloader": video_downloader.allowed(records, account)}
+
+
+class TemporaryVideoResponse(FileResponse):
+    """Delete temporary media even if the browser disconnects during transfer."""
+    def __init__(self, output, directory):
+        super().__init__(output, media_type="video/mp4", filename="recastfx-download.mp4",
+                         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+        self.directory = directory
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            video_downloader.cleanup(self.directory)
+
+
+class VideoDownloadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    url: str = Field(min_length=10, max_length=2048)
+
+
+class VideoDownloadSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: int = Field(ge=0)
+    all_users: bool
+
+
+@app.get("/api/commerce/admin/video-downloader")
+def video_download_settings(x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, account, {"owner", "pricing_admin", "viewer"})
+    return video_downloader.configuration(records)
+
+
+@app.post("/api/commerce/admin/video-downloader")
+def save_video_download_settings(body: VideoDownloadSettings, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    return video_downloader.save_configuration(records, account, body.revision, body.all_users)
+
+
+@app.post("/api/video-downloader")
+def video_download(body: VideoDownloadRequest, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    output, directory = video_downloader.prepare(records, account, body.url)
+    return TemporaryVideoResponse(output, directory)
 
 
 @app.get("/api/commerce/catalog")

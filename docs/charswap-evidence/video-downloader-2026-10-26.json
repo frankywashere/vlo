@@ -1,0 +1,84 @@
+{
+  "feature": "Admin video downloader",
+  "date": "2026-10-26",
+  "branch": "video-downloader",
+  "base": "6cd5cab1",
+  "access": {
+    "default": "owner and pricing_admin only",
+    "optional": "Experimental switch allows all Firebase-authenticated users",
+    "save_permission": "service_controls",
+    "server_enforced": true
+  },
+  "flow": [
+    "Public HTTPS link validated against supported platforms",
+    "Account lease and instance slot prevent overlapping downloads",
+    "Isolated yt-dlp subprocess fetches compatible MP4",
+    "ffprobe checks H.264 video, AAC/MP3 audio, duration and size",
+    "Authenticated response transfers bytes into a browser-local blob",
+    "Temporary directory deleted on response completion or disconnect",
+    "Download and optional Web Share save browser-local copy"
+  ],
+  "limits": {
+    "final_bytes": 209715200,
+    "temporary_bytes": 471859200,
+    "download_seconds": 240,
+    "video_seconds": 1800,
+    "per_instance_downloads": 1
+  },
+  "storage": "No video uploaded to persistent cloud storage. Tiny access settings and expiring account lease records use the existing private ledger.",
+  "security": [
+    "No browser cookies or provider credentials passed to yt-dlp",
+    "No shell interpolation",
+    "Private/loopback/metadata socket destinations denied in subprocess",
+    "Generic extractor disabled",
+    "Private/no-store responses",
+    "No raw source URLs or downloader output recorded in logs"
+  ],
+  "hosting": "Existing production API, accessed directly for long transfers to avoid Firebase Hosting proxy timeout. No new always-on service.",
+  "extension_surface": {
+    "classification": "shared host seam",
+    "detail": "Native menu action uses existing AppMenu normalized runtime. Shared menu behavior and visibility tested; no SDK API additions."
+  },
+  "validation": {
+    "service_suite": "2433 passed; one expected account-access response equality updated for additive field, then all 48 focused downloader/access tests passed",
+    "frontend_suite": "629 passed; Admin grant test hit time limit under load. Admin/shared-menu retest: 41 passed. Final downloader component: 2 passed.",
+    "build": "TypeScript and RecastFX production build passed; existing bundle-size warning remains",
+    "mobile": [
+      {
+        "name": "iphone",
+        "width": 390,
+        "scrollWidth": 390,
+        "videoWidth": 1920,
+        "download": "recastfx-download.mp4"
+      },
+      {
+        "name": "android",
+        "width": 412,
+        "scrollWidth": 412,
+        "videoWidth": 1920,
+        "download": "recastfx-download.mp4"
+      },
+      {
+        "name": "desktop",
+        "width": 1280,
+        "scrollWidth": 1280,
+        "videoWidth": 1920,
+        "download": "recastfx-download.mp4"
+      }
+    ],
+    "physical_devices": "Not tested on physical iPhone/Android hardware",
+    "live_source_download": {
+      "source": "User-provided X post",
+      "seconds": 51.093333,
+      "resolution": "1920x1080",
+      "video": "h264",
+      "audio": "aac"
+    },
+    "pending": "Live deployment checks recorded separately after release"
+  },
+  "limitations": [
+    "Sites may block datacenter downloads or require sign-in; no cookies/login bypass provided",
+    "Only X, Instagram, YouTube, Vimeo and TikTok entry URLs accepted",
+    "Browser-local copy disappears on navigation; user must save first"
+  ]
+}

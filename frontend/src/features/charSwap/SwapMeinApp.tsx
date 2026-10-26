@@ -15,6 +15,7 @@ import { LandingPage } from "./components/LandingPage";
 import { AccountLibrary } from "./components/AccountLibrary";
 import { SettingsPage } from "./components/SettingsPage";
 import type { SettingsTab } from "./components/SettingsPage";
+import { VideoDownloaderPage } from "./components/VideoDownloaderPage";
 import { AdminPage } from "./components/AdminPage";
 import { loadAccountAccess } from "./services/commerce";
 import { useAccount } from "./hooks/useAccount";
@@ -22,7 +23,7 @@ import { useLiveCredits } from "./hooks/useLiveCredits";
 import { useCharSwapStore } from "./useCharSwapStore";
 import { swapMeinTheme, swapMeinDarkTheme } from "./theme";
 
-type AppView = "home" | "create" | "library" | "settings" | "admin";
+type AppView = "home" | "create" | "library" | "settings" | "admin" | "video-downloader";
 type AccountState = ReturnType<typeof useAccount>;
 
 function readDestination(): AppView {
@@ -33,7 +34,7 @@ function readDestination(): AppView {
   return page === "create" ||
     page === "library" ||
     page === "settings" ||
-    page === "admin"
+    page === "admin" || page === "video-downloader"
     ? page
     : "home";
 }
@@ -137,6 +138,7 @@ function AccountWorkspace({
   const [authMode, setAuthMode] = useState<"sign-in" | "create">("sign-in");
   const [busy, setBusy] = useState(false);
   const creationRef = useRef<CharSwapWalkthroughHandle>(null);
+  const [canDownload, setCanDownload] = useState(false);
   const [staffRole, setStaffRole] = useState<string | null>(null);
   const [appError, setAppError] = useState("");
   const [jobStatus, setJobStatus] = useState("");
@@ -159,10 +161,10 @@ function AccountWorkspace({
     let active = true;
     void loadAccountAccess()
       .then((access) => {
-        if (active) setStaffRole(access.role);
+        if (active) { setStaffRole(access.role); setCanDownload(access.video_downloader === true); }
       })
       .catch(() => {
-        if (active) setStaffRole(null);
+        if (active) { setStaffRole(null); setCanDownload(false); }
       });
     return () => {
       active = false;
@@ -219,6 +221,7 @@ function AccountWorkspace({
         onCreate={() => navigate("create")}
         onLibrary={() => navigate("library")}
         onAdmin={staffRole ? () => navigate("admin") : undefined}
+        onVideoDownloader={canDownload ? () => navigate("video-downloader") : undefined}
         onSettings={() => showSettings("account")}
         locked={account.loading}
         accountName={account.displayName ?? account.user?.displayName}
@@ -279,6 +282,7 @@ function AccountWorkspace({
           locked={busy}
         />
       )}
+      {view === "video-downloader" && account.user && (canDownload ? <VideoDownloaderPage /> : <Alert severity="info">Video downloader is available to authorized accounts only.</Alert>)}
       {view === "admin" && account.user && staffRole && <AdminPage />}
       <SignInDialog account={account} open={accountOpen} mode={authMode}
         onMode={setAuthMode} onClose={() => setAccountOpen(false)} />

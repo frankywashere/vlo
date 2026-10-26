@@ -77,3 +77,17 @@ describe("account menu shared shell contract", () => {
     ).toBe(false);
   });
 });
+
+
+it("only offers the downloader when access is granted and dispatches it through the shared menu", async () => {
+  const download = vi.fn();
+  const view = render(<AppHeader signedIn active="library" onHome={() => {}} onCreate={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+  expect(screen.queryByRole("menuitem", { name: "Video downloader" })).not.toBeInTheDocument();
+  view.unmount();
+  render(<AppHeader signedIn active="library" onHome={() => {}} onCreate={() => {}} onVideoDownloader={download} />);
+  fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Video downloader" }));
+  expect(download).toHaveBeenCalledOnce();
+  await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+});
