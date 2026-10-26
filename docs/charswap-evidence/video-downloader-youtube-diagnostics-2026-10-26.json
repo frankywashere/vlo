@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-26",
+  "branch": "video-downloader",
+  "investigation": {
+    "original_website_failure": "YouTube request failed after about 2.56 seconds; previous logs did not retain detailed subprocess error.",
+    "root_cause": "Not established; do not label the runtime gap as the confirmed cause.",
+    "local_reproduction": "Exact worker successfully downloaded the supplied link.",
+    "old_cloud_image_reproduction": "Same image also successfully downloaded the video in Cloud Build: 108598256 bytes.",
+    "confirmed_environment_gap": "Old cloud image reported no supported JavaScript runtime; local machine has Deno."
+  },
+  "changes": {
+    "youtube_setup": "Pinned Deno 2.9.6 copied from official binary image; yt-dlp[default] includes matching yt-dlp-ejs 0.8.0.",
+    "formats": "Prefer existing H.264/MP4 + compatible audio, then allow native fallback formats. Remux supported codecs or transcode unsupported video/audio into H.264/AAC MP4 as needed.",
+    "guards": "Existing admin size limit, total 240-second runtime budget, temporary workspace limit and cleanup remain. Conversion rejects size-limited truncated output rather than returning a shortened clip.",
+    "diagnostics": "Drain subprocess output into at most 32 KiB of memory; only known reason codes and safe metrics enter structured logs. No raw URLs, query tokens, cookies or subprocess output in production logs.",
+    "error_categories": [
+      "verification_required",
+      "login_required",
+      "format_unavailable",
+      "unavailable",
+      "rate_limited",
+      "http_403",
+      "destination_blocked",
+      "network_error",
+      "size_limit",
+      "timeout",
+      "conversion_failed"
+    ]
+  },
+  "validation": {
+    "focused_service_tests": 66,
+    "real_conversion": "FFmpeg WebM VP9/Opus conversion produced H.264/AAC; compatible MP4 bytes stayed identical.",
+    "privacy": "Tested failure logs omit signed URL and token text.",
+    "extension_surface": "No extension contract files changed.",
+    "cloud_and_release": "Pending final container tests and deployment verification."
+  },
+  "reference": "https://github.com/yt-dlp/yt-dlp/wiki/EJS"
+}

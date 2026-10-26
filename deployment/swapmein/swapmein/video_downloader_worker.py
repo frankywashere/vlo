@@ -31,8 +31,8 @@ def main():
          "--max-filesize", f"{size}M", "--match-filter", "!is_live & duration <=? 1800",
          "--downloader", "native", "--hls-prefer-native", "--use-extractors", "default,-generic",
          "-S", "vcodec:h264,res,acodec:m4a",
-         "-f", "bestvideo[vcodec^=avc1]+bestaudio[ext~='^(m4a|mp4)$']/best[vcodec^=avc1]/best[ext=mp4]",
-         "--merge-output-format", "mp4", "--remux-video", "mp4",
+         "-f", "bestvideo[vcodec^=avc1]+bestaudio[ext~='^(m4a|mp4)$']/best[vcodec^=avc1]/best[ext=mp4]/bestvideo+bestaudio/best",
+         "--merge-output-format", "mp4/mkv",
          "-o", directory + "/video.%(ext)s", "--", url])
 
 

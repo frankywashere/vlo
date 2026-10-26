@@ -1,6 +1,5 @@
 """Temporary downloader: authenticated policy, bounded subprocess, no retained media."""
 import os
-import json
 from pathlib import Path
 import shutil
 import signal
@@ -13,6 +12,8 @@ from urllib.parse import urlsplit
 
 from .commerce import require_permission, staff_role
 from .diagnostics import emit
+from .downloader_diagnostics import DiagnosticTail, failure
+from .downloader_media import compatible_video, workspace_bytes
 from .errors import PublicError
 from .security import digest
 
@@ -89,37 +90,39 @@ def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB):
     max_work_bytes = max_bytes * 2 + 50 * 1024 * 1024
     started = time.monotonic()
     command = [sys.executable, "-m", "swapmein.video_downloader_worker", url, str(directory), str(max_download_mb)]
-    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    diagnostics = DiagnosticTail(process.stdout)
     try:
         while process.poll() is None:
             if time.monotonic() - started > TIMEOUT:
-                raise PublicError("Download timed out. Try a shorter video or another link.", 504)
-            if sum(p.stat().st_size for p in directory.rglob("*") if p.is_file()) > max_work_bytes:
-                raise PublicError(f"This video exceeds the {max_download_mb} MB download limit.", 413)
+                raise PublicError("Download timed out. Try a shorter video or another link.", 504, code="download_timeout")
+            if workspace_bytes(directory) > max_work_bytes:
+                raise PublicError(f"This video exceeds the {max_download_mb} MB download limit.", 413, code="download_size_limit")
             time.sleep(0.2)
-        output = directory / "video.mp4"
+        output = next((path for path in directory.glob("video.*") if path.stem == "video" and path.is_file()), directory / "video.mp4")
         if process.returncode != 0 or not output.is_file():
-            raise PublicError("The site could not provide a public MP4. Private, restricted, or blocked videos may not be downloadable.", 422)
+            error = failure(diagnostics.text(), max_download_mb)
+            emit("video_download_source_rejected", reason=error.code, exit_code=process.returncode,
+                 seconds=round(time.monotonic() - started, 2), site=urlsplit(url).hostname,
+                 max_download_mb=max_download_mb)
+            raise error
         if not 0 < output.stat().st_size <= max_bytes:
-            raise PublicError(f"This video exceeds the {max_download_mb} MB download limit.", 413)
-        try:
-            checked = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name:format=duration", "-of", "json", str(output)], capture_output=True, timeout=10, check=True)
-            metadata = json.loads(checked.stdout)
-            streams = metadata.get("streams", [])
-            if not any(stream.get("codec_type") == "video" and stream.get("codec_name") == "h264" for stream in streams):
-                raise ValueError("No mobile-compatible video")
-            if any(stream.get("codec_type") == "audio" and stream.get("codec_name") not in {"aac", "mp3"} for stream in streams):
-                raise ValueError("No mobile-compatible audio")
-            if not 0 < float(metadata.get("format", {}).get("duration", 0)) <= 1800:
-                raise ValueError("Invalid duration")
-        except (subprocess.SubprocessError, ValueError, TypeError) as error:
-            raise PublicError("This source did not provide a compatible MP4 under 30 minutes. Try another link.", 422) from error
+            raise PublicError(f"This video exceeds the {max_download_mb} MB download limit.", 413, code="download_size_limit")
+        compatible_video(output, directory, max_bytes, max_work_bytes, started + TIMEOUT)
+        if output.name != "video.mp4":
+            output = output.replace(directory / "video.mp4")
         emit("video_download_ready", bytes=output.stat().st_size, seconds=round(time.monotonic() - started, 2))
         return output
     finally:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
         process.wait()
+        output_tail = diagnostics.text()
+        emit("video_download_process_finished", exit_code=process.returncode,
+             seconds=round(time.monotonic() - started, 2), max_download_mb=max_download_mb,
+             javascript_runtime_missing="no supported javascript runtime" in output_tail.lower())
+        if process.stdout is not None:
+            process.stdout.close()
 
 
 def prepare(records, account, url):
@@ -142,8 +145,9 @@ def prepare(records, account, url):
             _SLOT.release()
         raise
     try:
-        emit("video_download_started", actor_id=digest(account["email"]), site=urlsplit(url).hostname)
-        output = download(url, directory, configuration(records)["max_download_mb"])
+        maximum = configuration(records)["max_download_mb"]
+        emit("video_download_started", actor_id=digest(account["email"]), site=urlsplit(url).hostname, max_download_mb=maximum)
+        output = download(url, directory, maximum)
         return output, directory
     except Exception as error:
         cleanup(directory)

@@ -140,6 +140,8 @@ def test_saved_size_is_passed_to_subprocess_and_final_file_is_rejected(monkeypat
     with output.open("wb") as handle: handle.truncate(101 * 1024 * 1024)
     commands = []
     class Process:
+        from io import BytesIO
+        stdout = BytesIO()
         returncode = 0
         def poll(self): return 0
         def wait(self): return 0
@@ -147,3 +149,21 @@ def test_saved_size_is_passed_to_subprocess_and_final_file_is_rejected(monkeypat
     with pytest.raises(PublicError, match="100 MB"):
         downloader.download("https://x.com/a/status/1", tmp_path, 100)
     assert commands[0][-1] == "100"
+
+
+def test_source_failure_logs_reason_without_raw_urls(monkeypatch, tmp_path, capsys):
+    from io import BytesIO
+    import json
+    class Process:
+        stdout = BytesIO(b"ERROR: HTTP Error 403: Forbidden https://cdn.example/video?token=SECRET")
+        returncode = 1
+        def poll(self): return 1
+        def wait(self): return 1
+    monkeypatch.setattr(downloader.subprocess, "Popen", lambda *args, **kwargs: Process())
+    with pytest.raises(PublicError) as caught:
+        downloader.download("https://youtu.be/example?token=SECRET", tmp_path)
+    assert caught.value.code == "source_http_403"
+    logs = capsys.readouterr().out
+    assert "SECRET" not in logs and "cdn.example" not in logs
+    events = [json.loads(line) for line in logs.splitlines()]
+    assert any(event.get("reason") == "source_http_403" for event in events)
