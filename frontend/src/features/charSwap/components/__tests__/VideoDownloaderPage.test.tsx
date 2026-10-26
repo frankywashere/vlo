@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { VideoDownloaderPage } from "../VideoDownloaderPage";
-const api = vi.hoisted(() => ({ request: vi.fn() }));
-vi.mock("../../services/videoDownloader", () => ({ downloaderRequest: api.request }));
+const api = vi.hoisted(() => ({ request: vi.fn(), limits: vi.fn().mockResolvedValue({ max_download_mb: 500 }) }));
+vi.mock("../../services/videoDownloader", () => ({ downloaderRequest: api.request, downloaderLimits: api.limits }));
 beforeEach(() => {
   api.request.mockReset();
   globalThis.URL.createObjectURL = vi.fn(() => "blob:download");
@@ -12,6 +12,7 @@ afterEach(cleanup);
 it("prepares an MP4 with a device-local download link and revokes it on leaving", async () => {
   api.request.mockResolvedValue(new Response(new Blob(["video"], { type: "video/mp4" })));
   const view = render(<VideoDownloaderPage />);
+  await screen.findByText(/up to 500 MB/);
   fireEvent.change(screen.getByLabelText(/Video link/), { target: { value: "https://x.com/person/status/1" } });
   fireEvent.click(screen.getByRole("button", { name: "Get video" }));
   const link = await screen.findByRole("link", { name: "Download video" });
@@ -24,6 +25,7 @@ it("prepares an MP4 with a device-local download link and revokes it on leaving"
 it("shows a server error without creating a download link", async () => {
   api.request.mockRejectedValue(new Error("Video is private"));
   render(<VideoDownloaderPage />);
+  await screen.findByText(/up to 500 MB/);
   fireEvent.change(screen.getByLabelText(/Video link/), { target: { value: "https://x.com/person/status/1" } });
   fireEvent.click(screen.getByRole("button", { name: "Get video" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Video is private");

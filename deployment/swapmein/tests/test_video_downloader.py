@@ -26,7 +26,7 @@ def test_default_policy_and_revision_guard(monkeypatch):
     assert downloader.allowed(records, OWNER)
     assert not downloader.allowed(records, USER)
     with pytest.raises(PublicError): downloader.save_configuration(records, USER, 0, True)
-    assert downloader.save_configuration(records, OWNER, 0, True) == {"revision": 1, "all_users": True}
+    assert downloader.save_configuration(records, OWNER, 0, True) == {"revision": 1, "all_users": True, "max_download_mb": 500}
     assert downloader.allowed(records, USER)
     with pytest.raises(PublicError): downloader.save_configuration(records, OWNER, 0, False)
     downloader.save_configuration(records, OWNER, 1, False)
@@ -48,7 +48,7 @@ def test_api_enforces_access_and_cleans_after_transfer(api, monkeypatch, tmp_pat
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
     monkeypatch.setattr(gateway, "verify_account", lambda *_: USER)
     calls = []
-    def fake_download(url, directory):
+    def fake_download(url, directory, max_download_mb):
         calls.append(directory)
         output = directory / "video.mp4"
         output.write_bytes(b"fake-mp4-test-data")
@@ -75,7 +75,7 @@ def test_failure_cleans_files_and_releases_slot(monkeypatch):
     records = MemoryRecords()
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
     directories = []
-    def fail(url, directory):
+    def fail(url, directory, max_download_mb):
         directories.append(directory)
         (directory / "video.part").write_bytes(b"unfinished")
         raise PublicError("Failed")
@@ -96,3 +96,54 @@ def test_disconnect_still_cleans_temporary_files(monkeypatch, tmp_path):
     with pytest.raises(OSError):
         asyncio.run(response({"type": "http", "method": "GET", "headers": []}, receive, send))
     assert cleaned == [tmp_path]
+
+
+def test_size_default_custom_value_and_legacy_toggle_preservation(monkeypatch):
+    records = MemoryRecords()
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
+    assert downloader.configuration(records)["max_download_mb"] == 500
+    downloader.save_configuration(records, OWNER, 0, False, 625)
+    assert downloader.configuration(records)["max_download_mb"] == 625
+    # Old open tabs can still change visibility without resetting the limit.
+    downloader.save_configuration(records, OWNER, 1, True)
+    assert downloader.configuration(records)["max_download_mb"] == 625
+    for value in (0, 751, 2.5, True):
+        with pytest.raises(PublicError): downloader.save_configuration(records, OWNER, 2, True, value)
+
+
+def test_settings_api_validates_limit_and_download_uses_saved_value(api, monkeypatch):
+    client, records, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: OWNER)
+    path = "/api/commerce/admin/video-downloader"
+    assert client.get(path).json()["max_download_mb"] == 500
+    assert client.post(path, json={"revision": 0, "all_users": False, "max_download_mb": 600}).status_code == 200
+    for invalid in (0, 751, True, 1.5):
+        assert client.post(path, json={"revision": 1, "all_users": False, "max_download_mb": invalid}).status_code == 422
+    assert client.get("/api/video-downloader/settings").json() == {"max_download_mb": 600}
+    limits = []
+    def fake_download(url, directory, maximum):
+        limits.append(maximum)
+        output = directory / "video.mp4"
+        output.write_bytes(b"test")
+        return output
+    monkeypatch.setattr(downloader, "download", fake_download)
+    assert client.post("/api/video-downloader", json={"url": "https://x.com/a/status/1"}).status_code == 200
+    assert limits == [600]
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: USER)
+    assert client.get("/api/video-downloader/settings").status_code == 403
+    assert client.post(path, json={"revision": 1, "all_users": False, "max_download_mb": 500}).status_code == 403
+
+
+def test_saved_size_is_passed_to_subprocess_and_final_file_is_rejected(monkeypatch, tmp_path):
+    output = tmp_path / "video.mp4"
+    with output.open("wb") as handle: handle.truncate(101 * 1024 * 1024)
+    commands = []
+    class Process:
+        returncode = 0
+        def poll(self): return 0
+        def wait(self): return 0
+    monkeypatch.setattr(downloader.subprocess, "Popen", lambda command, **kwargs: commands.append(command) or Process())
+    with pytest.raises(PublicError, match="100 MB"):
+        downloader.download("https://x.com/a/status/1", tmp_path, 100)
+    assert commands[0][-1] == "100"

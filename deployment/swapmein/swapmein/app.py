@@ -563,6 +563,7 @@ class VideoDownloadSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     revision: int = Field(ge=0)
     all_users: bool
+    max_download_mb: StrictInt | None = Field(default=None, ge=1, le=video_downloader.MAX_DOWNLOAD_MB)
 
 
 @app.get("/api/commerce/admin/video-downloader")
@@ -577,7 +578,16 @@ def video_download_settings(x_firebase_token: str | None = Header(default=None))
 def save_video_download_settings(body: VideoDownloadSettings, x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return video_downloader.save_configuration(records, account, body.revision, body.all_users)
+    return video_downloader.save_configuration(records, account, body.revision, body.all_users, body.max_download_mb)
+
+
+@app.get("/api/video-downloader/settings")
+def video_download_public_settings(x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    if not video_downloader.allowed(records, account):
+        raise PublicError("Video downloader is currently available to admins only.", 403)
+    return {"max_download_mb": video_downloader.configuration(records)["max_download_mb"]}
 
 
 @app.post("/api/video-downloader")

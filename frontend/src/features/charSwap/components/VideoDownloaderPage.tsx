@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Box, Button, Container, LinearProgress, Stack, TextField, Typography } from "@mui/material";
-import { downloaderRequest } from "../services/videoDownloader";
+import { downloaderLimits, downloaderRequest } from "../services/videoDownloader";
 
 export function VideoDownloaderPage() {
   const [url, setUrl] = useState("");
+  const [maxDownloadMb, setMaxDownloadMb] = useState<number | null>(null);
+  useEffect(() => { let active = true; void downloaderLimits().then(value => { if (active) setMaxDownloadMb(value.max_download_mb); }).catch(() => { if (active) setError("Download limits could not be loaded. Reload this page to try again."); }); return () => { active = false; }; }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ url: string; file: File } | null>(null);
@@ -40,10 +42,10 @@ export function VideoDownloaderPage() {
         <Stack spacing={2}>
           <TextField label="Video link" type="url" required fullWidth value={url} disabled={busy}
             onChange={(event) => setUrl(event.target.value)} slotProps={{ htmlInput: { maxLength: 2048, autoCapitalize: "none", autoCorrect: "off" } }} />
-          <Button type="submit" variant="contained" disabled={busy || !url.trim()} sx={{ minHeight: 48 }}>{busy ? "Preparing video…" : "Get video"}</Button>
+          <Button type="submit" variant="contained" disabled={busy || !url.trim() || maxDownloadMb === null} sx={{ minHeight: 48 }}>{busy ? "Preparing video…" : "Get video"}</Button>
         </Stack>
       </Box>
-      <Typography variant="body2" color="text.secondary">X, Instagram, YouTube, Vimeo, and TikTok. Public videos only, up to 200 MB and 30 minutes. Some sites may block downloads.</Typography>
+      <Typography variant="body2" color="text.secondary">X, Instagram, YouTube, Vimeo, and TikTok. Public videos only, {maxDownloadMb !== null ? `up to ${maxDownloadMb} MB and 30 minutes` : "up to 30 minutes"}. Some sites may block downloads.</Typography>
       {busy && <Box role="status"><LinearProgress /><Typography sx={{ mt: 1 }}>Downloading and preparing your MP4. Keep this page open.</Typography></Box>}
       {error && <Alert severity="error">{error}</Alert>}
       {result && <Stack spacing={2}>

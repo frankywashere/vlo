@@ -19,11 +19,17 @@
     "Download and optional Web Share save browser-local copy"
   ],
   "limits": {
-    "final_bytes": 209715200,
-    "temporary_bytes": 471859200,
+    "final_bytes": 524288000,
+    "temporary_bytes": 1101004800,
     "download_seconds": 240,
     "video_seconds": 1800,
-    "per_instance_downloads": 1
+    "per_instance_downloads": 1,
+    "admin_configurable_mb": {
+      "default": 500,
+      "minimum": 1,
+      "maximum": 750,
+      "applies_to": "new downloads; no redeployment required"
+    }
   },
   "storage": "No video uploaded to persistent cloud storage. Tiny access settings and expiring account lease records use the existing private ledger.",
   "security": [
@@ -99,5 +105,12 @@
     "hosting_site": "recastfx-franky",
     "production_url": "https://recastfx.com/?page=video-downloader",
     "authenticated_live_browser": "Not exercised: verification browser had no active account session. Access behavior covered by service and UI tests; live unauthenticated endpoints reject requests."
+  },
+  "size_limit_update": {
+    "service_tests": "51 passed",
+    "frontend_tests": "4 passed",
+    "build": "RecastFX TypeScript and production build passed",
+    "compatibility": "Old visibility-only saves preserve a previously saved size limit. Missing stored size defaults to 500 MB.",
+    "enforcement": "Admin value is passed to yt-dlp and used for final-file and temporary-workspace checks; download page reads current value from authenticated settings endpoint."
   }
 }

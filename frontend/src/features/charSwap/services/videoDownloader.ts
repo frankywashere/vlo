@@ -1,6 +1,6 @@
 import { accountToken } from "./accountContext";
 
-export interface DownloaderSettings { revision: number; all_users: boolean }
+export interface DownloaderSettings { revision: number; all_users: boolean; max_download_mb: number }
 
 export async function downloaderRequest(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
   const token = await accountToken();
@@ -22,4 +22,8 @@ export async function downloaderRequest(path: string, body?: unknown, signal?: A
 
 export async function downloaderSettings(body?: DownloaderSettings): Promise<DownloaderSettings> {
   return (await downloaderRequest("/api/commerce/admin/video-downloader", body)).json() as Promise<DownloaderSettings>;
+}
+
+export async function downloaderLimits(): Promise<{ max_download_mb: number }> {
+  return (await downloaderRequest("/api/video-downloader/settings")).json() as Promise<{ max_download_mb: number }>;
 }

@@ -22,10 +22,13 @@ def public_connection(event, args):
 def main():
     sys.addaudithook(public_connection)
     from yt_dlp import main as run
-    url, directory = sys.argv[1:]
+    url, directory, size = sys.argv[1:]
+    size = int(size)
+    if not 1 <= size <= 750:
+        raise ValueError("Invalid download size limit")
     run(["--ignore-config", "--no-playlist", "--playlist-items", "1", "--no-cache-dir",
          "--no-progress", "--socket-timeout", "20", "--retries", "1", "--fragment-retries", "1",
-         "--max-filesize", "200M", "--match-filter", "!is_live & duration <=? 1800",
+         "--max-filesize", f"{size}M", "--match-filter", "!is_live & duration <=? 1800",
          "--downloader", "native", "--hls-prefer-native", "--use-extractors", "default,-generic",
          "-S", "vcodec:h264,res,acodec:m4a",
          "-f", "bestvideo[vcodec^=avc1]+bestaudio[ext~='^(m4a|mp4)$']/best[vcodec^=avc1]/best[ext=mp4]",

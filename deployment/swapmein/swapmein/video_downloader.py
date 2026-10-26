@@ -17,8 +17,9 @@ from .errors import PublicError
 from .security import digest
 
 SETTINGS_PATH = "commerce/video-downloader.json"
-MAX_BYTES = 200 * 1024 * 1024
-MAX_WORK_BYTES = 450 * 1024 * 1024
+DEFAULT_MAX_DOWNLOAD_MB = 500
+# Leave headroom for Python/ffmpeg within the existing 2 GiB instance.
+MAX_DOWNLOAD_MB = 750
 TIMEOUT = 240
 _SLOT = threading.BoundedSemaphore(1)
 HOSTS = {"x.com", "www.x.com", "twitter.com", "www.twitter.com", "instagram.com", "www.instagram.com", "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "vimeo.com", "www.vimeo.com", "tiktok.com", "www.tiktok.com", "vm.tiktok.com"}
@@ -27,22 +28,26 @@ HOSTS = {"x.com", "www.x.com", "twitter.com", "www.twitter.com", "instagram.com"
 def configuration(records):
     saved, _ = records.read(SETTINGS_PATH)
     saved = saved or {}
-    return {"revision": saved.get("revision", 0), "all_users": saved.get("all_users") is True}
+    return {"revision": saved.get("revision", 0), "all_users": saved.get("all_users") is True,
+            "max_download_mb": saved.get("max_download_mb", DEFAULT_MAX_DOWNLOAD_MB)}
 
 
 def allowed(records, account):
     return staff_role(records, account) in {"owner", "pricing_admin"} or configuration(records)["all_users"]
 
 
-def save_configuration(records, actor, revision, all_users):
+def save_configuration(records, actor, revision, all_users, max_download_mb=None):
     require_permission(records, actor, "service_controls")
+    if max_download_mb is not None and (type(max_download_mb) is not int or not 1 <= max_download_mb <= MAX_DOWNLOAD_MB):
+        raise PublicError(f"Set a download limit between 1 and {MAX_DOWNLOAD_MB} MB.")
     def mutate(current):
         current = current or {}
         if current.get("revision", 0) != revision:
             raise PublicError("Settings changed. Reload before saving.", 409)
-        return {"revision": revision + 1, "all_users": all_users}
+        return {"revision": revision + 1, "all_users": all_users,
+                "max_download_mb": max_download_mb if max_download_mb is not None else current.get("max_download_mb", DEFAULT_MAX_DOWNLOAD_MB)}
     records.update(SETTINGS_PATH, mutate)
-    emit("video_downloader_access_changed", actor_id=digest(actor["email"]), all_users=all_users)
+    emit("video_downloader_access_changed", actor_id=digest(actor["email"]), all_users=all_users, max_download_mb=configuration(records)["max_download_mb"])
     return configuration(records)
 
 
@@ -76,23 +81,27 @@ def release(records, key, token):
     records.update(key, mutate)
 
 
-def download(url, directory):
+def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB):
     """Run the network downloader outside the API process; kill its whole process group."""
+    if type(max_download_mb) is not int or not 1 <= max_download_mb <= MAX_DOWNLOAD_MB:
+        raise PublicError("Invalid download size limit.")
+    max_bytes = max_download_mb * 1024 * 1024
+    max_work_bytes = max_bytes * 2 + 50 * 1024 * 1024
     started = time.monotonic()
-    command = [sys.executable, "-m", "swapmein.video_downloader_worker", url, str(directory)]
+    command = [sys.executable, "-m", "swapmein.video_downloader_worker", url, str(directory), str(max_download_mb)]
     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:
         while process.poll() is None:
             if time.monotonic() - started > TIMEOUT:
                 raise PublicError("Download timed out. Try a shorter video or another link.", 504)
-            if sum(p.stat().st_size for p in directory.rglob("*") if p.is_file()) > MAX_WORK_BYTES:
-                raise PublicError("This video exceeds the 200 MB download limit.", 413)
+            if sum(p.stat().st_size for p in directory.rglob("*") if p.is_file()) > max_work_bytes:
+                raise PublicError(f"This video exceeds the {max_download_mb} MB download limit.", 413)
             time.sleep(0.2)
         output = directory / "video.mp4"
         if process.returncode != 0 or not output.is_file():
             raise PublicError("The site could not provide a public MP4. Private, restricted, or blocked videos may not be downloadable.", 422)
-        if not 0 < output.stat().st_size <= MAX_BYTES:
-            raise PublicError("This video exceeds the 200 MB download limit.", 413)
+        if not 0 < output.stat().st_size <= max_bytes:
+            raise PublicError(f"This video exceeds the {max_download_mb} MB download limit.", 413)
         try:
             checked = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name:format=duration", "-of", "json", str(output)], capture_output=True, timeout=10, check=True)
             metadata = json.loads(checked.stdout)
@@ -134,7 +143,7 @@ def prepare(records, account, url):
         raise
     try:
         emit("video_download_started", actor_id=digest(account["email"]), site=urlsplit(url).hostname)
-        output = download(url, directory)
+        output = download(url, directory, configuration(records)["max_download_mb"])
         return output, directory
     except Exception as error:
         cleanup(directory)
