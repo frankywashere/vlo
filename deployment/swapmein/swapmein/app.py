@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, File, Form, Header, Query, Request, UploadFil
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from . import video_downloader
+from . import video_downloader, youtube_session
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
@@ -66,7 +66,7 @@ class BodyLimitMiddleware:
         path = scope.get("path", "")
         maximum = (31 * 1024 * 1024 if path == "/api/jobs" else
                    100 * 1024 if path == "/api/commerce/stripe-webhook" else
-                   128 * 1024 if path.endswith("/tracking-review") else 8192)
+                   128 * 1024 if path.endswith("/tracking-review") or path == "/api/commerce/admin/youtube-session" else 8192)
         async def bounded_receive():
             nonlocal total
             message = await receive()
@@ -579,6 +579,34 @@ def save_video_download_settings(body: VideoDownloadSettings, x_firebase_token: 
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
     return video_downloader.save_configuration(records, account, body.revision, body.all_users, body.max_download_mb)
+
+
+class YouTubeSessionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    cookies: SecretStr = Field(default=SecretStr(""), max_length=60 * 1024)
+    account_label: str = Field(default="", max_length=100)
+    disconnect: bool = False
+    dedicated_account_confirmed: bool = False
+
+
+@app.get("/api/commerce/admin/youtube-session")
+def youtube_session_status(x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_staff(records, account, {"owner", "pricing_admin", "viewer"})
+    return youtube_session.view()
+
+
+@app.post("/api/commerce/admin/youtube-session")
+def save_youtube_session(body: YouTubeSessionUpdate, x_firebase_token: str | None = Header(default=None)):
+    account = verify_account(x_firebase_token, settings.project)
+    records, _, _ = services()
+    require_permission(records, account, "service_controls")
+    if not body.disconnect and not body.dedicated_account_confirmed:
+        raise PublicError("Confirm that this session belongs to the dedicated YouTube account.")
+    result = youtube_session.save_managed(records, account, body.cookies.get_secret_value(), body.account_label, body.disconnect)
+    emit("admin_youtube_session_changed", actor_id=digest(account["email"]), configured=result["configured"])
+    return result
 
 
 @app.get("/api/video-downloader/settings")

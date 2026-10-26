@@ -14,6 +14,7 @@ from .commerce import require_permission, staff_role
 from .diagnostics import emit
 from .downloader_diagnostics import DiagnosticTail, failure
 from .downloader_media import compatible_video, workspace_bytes
+from . import youtube_session
 from .errors import PublicError
 from .security import digest
 
@@ -82,7 +83,7 @@ def release(records, key, token):
     records.update(key, mutate)
 
 
-def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB):
+def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB, cookie_file=None):
     """Run the network downloader outside the API process; kill its whole process group."""
     if type(max_download_mb) is not int or not 1 <= max_download_mb <= MAX_DOWNLOAD_MB:
         raise PublicError("Invalid download size limit.")
@@ -90,6 +91,8 @@ def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB):
     max_work_bytes = max_bytes * 2 + 50 * 1024 * 1024
     started = time.monotonic()
     command = [sys.executable, "-m", "swapmein.video_downloader_worker", url, str(directory), str(max_download_mb)]
+    if cookie_file is not None:
+        command.append(str(cookie_file))
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
     diagnostics = DiagnosticTail(process.stdout)
     try:
@@ -147,7 +150,8 @@ def prepare(records, account, url):
     try:
         maximum = configuration(records)["max_download_mb"]
         emit("video_download_started", actor_id=digest(account["email"]), site=urlsplit(url).hostname, max_download_mb=maximum)
-        output = download(url, directory, maximum)
+        with youtube_session.cookie_file(records, account, url, directory) as cookies:
+            output = download(url, directory, maximum, cookies) if cookies is not None else download(url, directory, maximum)
         return output, directory
     except Exception as error:
         cleanup(directory)

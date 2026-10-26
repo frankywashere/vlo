@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-26",
+  "feature": "One central dedicated YouTube session for admin downloads",
+  "activation": "Not active: private account label is prepared; no real YouTube cookies have been supplied.",
+  "storage": {
+    "service": "Google Secret Manager",
+    "secret_id": "recastfx-youtube-session",
+    "permissions": "Gateway identity has access plus a secret-scoped custom role containing only versions.add and versions.disable.",
+    "private_label_initialized": true,
+    "google_session_credential_created": false
+  },
+  "access": {
+    "management": "Existing service_controls permission required.",
+    "use": "Only owner/pricing-admin downloads of YouTube links receive the shared session. Ordinary users never receive it even when downloads are globally enabled.",
+    "readback": "Admin returns configured/expired state, account label and saved timestamp only."
+  },
+  "safeguards": [
+    "Netscape cookie format and YouTube-only domains validated before storage; client also rejects other website cookies before transmission.",
+    "Dedicated-account authorization checkbox required.",
+    "Session values never stored in job/account records or included in logs.",
+    "Temporary cookie file mode 0600, removed after the download step succeeds or fails.",
+    "Each reconnect/disconnect replaces the latest secret version and disables its predecessor.",
+    "Global management lease serializes credential updates.",
+    "Disconnect stops future uses, not the Google account session itself."
+  ],
+  "validation": {
+    "service_tests": 79,
+    "frontend_tests": 8,
+    "production_ui_build": "passed",
+    "actual_signed_in_download": "Pending user sign-in/session export; not claimed verified."
+  },
+  "setup_guide": "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
+}

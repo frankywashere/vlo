@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
+import { YouTubeSessionPanel } from "./YouTubeSessionPanel";
 import { downloaderSettings } from "../services/videoDownloader";
 import type { DownloaderSettings } from "../services/videoDownloader";
 
@@ -28,6 +29,7 @@ export function VideoDownloaderSettings({ canEdit }: { canEdit: boolean }) {
       <Button variant="outlined" disabled={!canEdit || busy || !settings || !valid || limit === settings.max_download_mb} onClick={() => void save({ max_download_mb: limit })}>Save download limit</Button>
     </Stack>
     <Typography variant="body2" color="text.secondary">Saved limits apply to new downloads without redeploying. Downloads already running keep their starting limit.</Typography>
+    <YouTubeSessionPanel canEdit={canEdit} />
     {saved && <Alert severity="success">Downloader settings saved.</Alert>}
     {error && <Alert severity="error">{error}</Alert>}
   </Stack>;
