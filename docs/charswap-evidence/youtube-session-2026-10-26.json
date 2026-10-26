@@ -27,7 +27,27 @@
     "service_tests": 79,
     "frontend_tests": 8,
     "production_ui_build": "passed",
-    "actual_signed_in_download": "Pending user sign-in/session export; not claimed verified."
+    "actual_signed_in_download": "Pending user sign-in/session export; not claimed verified.",
+    "cloud_guest_download": "Passed using final built container. No real sign-in cookies tested.",
+    "setup_panel": "Authenticated live UI verified; screenshot saved locally. Account activation remains pending."
   },
-  "setup_guide": "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
+  "setup_guide": "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies",
+  "release": {
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:17cf6d233e6602e9f93383f2e2f7efeb29336f23473a261af52f4a25545328e1",
+    "revision": "recastfx-api-00079-94s",
+    "health": 200,
+    "unauthenticated_download": 401,
+    "unauthenticated_settings": 401,
+    "production_CORS": true,
+    "runtime_preserved": true,
+    "other_workers_and_preview_preserved": true,
+    "frontend_bundle": "/assets/charswap-CDX3BIN_.js",
+    "live_bundle_matches_built_bytes": true,
+    "all_users_default": false,
+    "max_download_mb": 500,
+    "hosting_routes_require_auth": true,
+    "cloud_container_real_video_download": "passed",
+    "source_commit": "d88bbcc4",
+    "authenticated_admin_ui": "Verified live in existing Chrome admin session. Dedicated account label loaded; no YouTube session stored."
+  }
 }
