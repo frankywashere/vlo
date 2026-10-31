@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { YouTubeSessionPanel } from "../YouTubeSessionPanel";
 const api = vi.hoisted(() => ({ session: vi.fn(), cookies: vi.fn() }));
 vi.mock("../../services/youtubeSession", () => ({ youtubeSession: api.session, youtubeCookieFile: api.cookies }));
@@ -15,7 +15,7 @@ it("requires confirmation before uploading and clears the selected session after
   fireEvent.click(screen.getByRole("checkbox"));
   api.session.mockResolvedValueOnce({ configured: true, expired: false, account_label: "Dedicated account", saved_at: 1 });
   fireEvent.click(save);
-  await screen.findByText("Dedicated YouTube session stored. Admin YouTube downloads will use it.");
+  await screen.findByText("Dedicated YouTube session stored. Authorized YouTube downloads will use it.");
   expect(api.session).toHaveBeenLastCalledWith({ cookies: "TEST_ONLY_COOKIES", account_label: "Dedicated account", dedicated_account_confirmed: true });
   expect(screen.queryByText("Selected: youtube.txt")).not.toBeInTheDocument();
   expect(save).toBeDisabled();

@@ -1,4 +1,4 @@
-"""One private, dedicated YouTube session for staff downloads only."""
+"""One private, dedicated YouTube session for authorized downloader requests."""
 import base64
 from contextlib import contextmanager
 import json
@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .cloud import access_token
-from .commerce import staff_role, require_permission
+from .commerce import require_permission
 from .diagnostics import emit
 from .errors import PublicError
 
@@ -142,8 +142,10 @@ def save_managed(records, actor, cookies, account_label, disconnect=False):
 
 @contextmanager
 def cookie_file(records, account, url, directory):
-    # A shared session never follows a download made by an ordinary user.
-    if urlsplit(url).hostname not in YOUTUBE_HOSTS or staff_role(records, account) not in {"owner", "pricing_admin"}:
+    # Use the same access policy as prepare(), including the all-users toggle.
+    # Import locally because the downloader also imports this session helper.
+    from .video_downloader import allowed
+    if urlsplit(url).hostname not in YOUTUBE_HOSTS or not allowed(records, account):
         yield None
         return
     bundle, _ = _read()
@@ -158,7 +160,7 @@ def cookie_file(records, account, url, directory):
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle: handle.write(text)
-        emit("youtube_session_used_for_admin_download")
+        emit("youtube_session_used_for_download")
         yield path
     finally:
         path.unlink(missing_ok=True)

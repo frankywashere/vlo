@@ -25,13 +25,26 @@ def test_valid_youtube_export_and_http_only_are_preserved():
     assert "#HttpOnly_.youtube.com" in youtube.validate_cookies(COOKIE.replace(".youtube.com", "#HttpOnly_.youtube.com"))
 
 
-def test_session_file_is_admin_only_youtube_only_private_and_deleted(monkeypatch, tmp_path):
+def test_session_file_requires_downloader_access_and_is_youtube_only_private_and_deleted(monkeypatch, tmp_path):
     records = MemoryRecords()
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
     reads = []
     monkeypatch.setattr(youtube, "_read", lambda: reads.append(True) or ({"cookies": COOKIE}, "version"))
     for account, url in [(USER, "https://youtu.be/video"), (OWNER, "https://x.com/a/status/1")]:
         with youtube.cookie_file(records, account, url, tmp_path) as path: assert path is None
+    assert not reads
+    records.data[downloader.SETTINGS_PATH] = {"all_users": True}
+    with youtube.cookie_file(records, USER, "https://x.com/a/status/1", tmp_path) as path:
+        assert path is None
+    assert not reads
+    with youtube.cookie_file(records, USER, "https://youtu.be/video", tmp_path) as path:
+        assert path.read_text() == COOKIE
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert not path.exists()
+    records.data[downloader.SETTINGS_PATH] = {"all_users": False}
+    reads.clear()
+    with youtube.cookie_file(records, USER, "https://youtu.be/video", tmp_path) as path:
+        assert path is None
     assert not reads
     with youtube.cookie_file(records, OWNER, "https://youtu.be/video", tmp_path) as path:
         assert path.read_text() == COOKIE
@@ -92,9 +105,11 @@ def test_management_requires_staff_permission_and_dedicated_account_confirmation
     assert calls == ["save"]
 
 
-def test_prepare_passes_session_only_for_admin_youtube_and_cleans_it(monkeypatch):
+@pytest.mark.parametrize("account", [OWNER, USER])
+def test_prepare_passes_session_for_authorized_youtube_download_and_cleans_it(monkeypatch, account):
     records = MemoryRecords()
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
+    records.data[downloader.SETTINGS_PATH] = {"all_users": True}
     monkeypatch.setattr(youtube, "_read", lambda: ({"cookies": COOKIE}, "version"))
     seen = []
     def fake_download(url, directory, maximum, cookie_file=None):
@@ -102,9 +117,42 @@ def test_prepare_passes_session_only_for_admin_youtube_and_cleans_it(monkeypatch
         assert cookie_file and cookie_file.exists()
         output = directory / "video.mp4"; output.write_bytes(b"test"); return output
     monkeypatch.setattr(downloader, "download", fake_download)
-    output, directory = downloader.prepare(records, OWNER, "https://youtu.be/video")
+    output, directory = downloader.prepare(records, account, "https://youtu.be/video")
     assert not seen[0].exists()
     downloader.cleanup(directory)
+
+
+def test_disabled_downloader_rejects_user_before_reading_session(api, monkeypatch):
+    client, _, _, _ = api
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: USER)
+    def unexpected_read():
+        pytest.fail("Denied downloads must not load the private session")
+    monkeypatch.setattr(youtube, "_read", unexpected_read)
+    assert client.post("/api/video-downloader", json={"url": "https://youtu.be/video"}).status_code == 403
+
+
+def test_api_shared_session_for_regular_user_never_exposes_credential(api, monkeypatch, capsys):
+    client, records, _, _ = api
+    records.data[downloader.SETTINGS_PATH] = {"all_users": True}
+    monkeypatch.setenv("COMMERCE_OWNER_EMAILS", OWNER["email"])
+    monkeypatch.setattr(gateway, "verify_account", lambda *_: USER)
+    monkeypatch.setattr(youtube, "_read", lambda: ({"cookies": COOKIE}, "version"))
+    paths = []
+    def fake_download(url, directory, maximum, cookie_file=None):
+        assert cookie_file and cookie_file.read_text() == COOKIE
+        paths.append(cookie_file)
+        output = directory / "video.mp4"
+        output.write_bytes(b"fake-mp4-test-data")
+        return output
+    monkeypatch.setattr(downloader, "download", fake_download)
+    response = client.post("/api/video-downloader", json={"url": "https://youtu.be/video"})
+    assert response.status_code == 200
+    assert response.content == b"fake-mp4-test-data"
+    assert not paths[0].parent.exists()
+    logs = capsys.readouterr().out
+    assert "youtube_session_used_for_download" in logs
+    assert "TEST_ONLY_SESSION" not in logs + response.text + str(response.headers)
 
 
 def test_shared_connection_updates_are_serialized_and_recover_after_failure(monkeypatch):
