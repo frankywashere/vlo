@@ -91,3 +91,16 @@ it("only offers the downloader when access is granted and dispatches it through 
   expect(download).toHaveBeenCalledOnce();
   await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
 });
+
+it("combines the visible balance with the account trigger and opens the menu before choosing credits", () => {
+  const credits = vi.fn();
+  render(<AppHeader signedIn active="library" credits={1280} onHome={() => {}} onCreate={() => {}} onCredits={credits} />);
+  const trigger = screen.getByRole("button", { name: "Account menu" });
+  expect(trigger).toHaveTextContent("1,280");
+  expect(trigger).toHaveAttribute("aria-description", "1,280 credits available");
+  fireEvent.click(trigger);
+  expect(credits).not.toHaveBeenCalled();
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Credits" }));
+  expect(credits).toHaveBeenCalledOnce();
+});

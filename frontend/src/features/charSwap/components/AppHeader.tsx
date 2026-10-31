@@ -11,7 +11,6 @@ import { alpha, useTheme } from "@mui/material/styles";
 import DarkModeOutlined from "@mui/icons-material/DarkModeOutlined";
 import LightModeOutlined from "@mui/icons-material/LightModeOutlined";
 import PersonOutlineRounded from "@mui/icons-material/PersonOutlineRounded";
-import TollOutlined from "@mui/icons-material/TollOutlined";
 import KeyboardArrowDownRounded from "@mui/icons-material/KeyboardArrowDownRounded";
 import { AppMenu } from "../../../core/shell/AppMenu";
 import type { HostMenuItemDescriptor } from "../../../core/shell/menuDescriptors";
@@ -219,54 +218,20 @@ export function AppHeader({
                 </Stack>
               )}
               <Button
-                onClick={onCredits}
-                aria-label={
-                  credits === undefined
-                    ? "Credit balance unavailable"
-                    : credits.toLocaleString() + " credits available"
-                }
-                sx={{
-                  minWidth: 0,
-                  color: "primary.contrastText",
-                  bgcolor: "primary.main",
-                  border: "1px solid",
-                  borderColor: "primary.main",
-                  px: { xs: 0.75, sm: 2 },
-                  "@media (max-width: 359px)": { display: "none" },
-                  py: 1,
-                  gap: 0.75,
-                  minHeight: 42,
-                  fontSize: { xs: 12, sm: 14 },
-                  whiteSpace: "nowrap",
-                  boxShadow: "0 3px 10px #cc3f3714",
-                  "&:hover": { bgcolor: "primary.dark" },
-                }}
-              >
-                <TollOutlined sx={{ fontSize: 17, opacity: 0.85 }} />
-                <Box component="span" sx={{ fontWeight: 800 }}>
-                  {credits === undefined ? "—" : credits.toLocaleString()}
-                </Box>
-                <Box
-                  component="span"
-                  sx={{
-                    fontSize: { xs: 10, sm: 12 },
-                    display: { xs: "none", sm: "inline" },
-                  }}
-                >
-                  credits
-                </Box>
-              </Button>
-              <IconButton
                 aria-label="Account menu"
+                aria-description={credits === undefined ? "Credit balance unavailable" : `${credits.toLocaleString()} credits available`}
                 aria-controls={menuAnchor ? "account-menu" : undefined}
                 aria-haspopup="menu"
                 aria-expanded={Boolean(menuAnchor)}
                 onClick={(event) => setMenuAnchor(event.currentTarget)}
                 sx={{
-                  width: mobile ? 38 : 62,
-                  height: 44,
-                  gap: 0.5,
-                  p: 0.5,
+                  minWidth: 0,
+                  minHeight: 44,
+                  gap: { xs: 0.75, md: 1.25 },
+                  px: { xs: 0.875, md: 1.5 },
+                  py: 0.75,
+                  color: "text.primary",
+                  whiteSpace: "nowrap",
                   border: "1px solid",
                   borderColor: menuAnchor ? "primary.main" : "divider",
                   bgcolor: menuAnchor ? "action.selected" : "background.paper",
@@ -276,8 +241,9 @@ export function AppHeader({
                 <Avatar
                   src={photoUrl ?? undefined}
                   sx={{
-                    width: 28,
-                    height: 28,
+                    width: { xs: 24, md: 28 },
+                    height: { xs: 24, md: 28 },
+                    "@media (max-width: 359px)": { display: "none" },
                     bgcolor: "action.selected",
                     color: "primary.main",
                   }}
@@ -286,8 +252,11 @@ export function AppHeader({
                     <PersonOutlineRounded sx={{ fontSize: 21 }} />
                   )}
                 </Avatar>
+                <Box component="span" sx={{ display: "flex", alignItems: "baseline", gap: 0.5, fontSize: { xs: 12, md: 14 } }}>
+                  <Box component="span" sx={{ fontWeight: 750 }}>{credits === undefined ? "—" : credits.toLocaleString()}</Box>
+                  <Box component="span" sx={{ display: { xs: "none", sm: "inline" }, color: "text.secondary", fontSize: 12 }}>credits</Box>
+                </Box>
                 <KeyboardArrowDownRounded
-                  style={{ display: mobile ? "none" : undefined }}
                   sx={{
                     fontSize: 17,
                     color: "text.secondary",
@@ -295,7 +264,7 @@ export function AppHeader({
                     transition: "transform 160ms ease",
                   }}
                 />
-              </IconButton>
+              </Button>
             </>
           ) : (
             <>
