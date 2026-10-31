@@ -1,7 +1,9 @@
 import asyncio
+import json
 from pathlib import Path
 import socket
 import pytest
+from starlette.requests import ClientDisconnect
 import swapmein.app as gateway
 from swapmein import video_downloader as downloader
 from swapmein.video_downloader_worker import public_connection
@@ -58,11 +60,14 @@ def test_api_enforces_access_and_cleans_after_transfer(api, monkeypatch, tmp_pat
     assert client.post(endpoint, json={"url": "https://x.com/a/status/1"}).status_code == 403
     assert not calls
     monkeypatch.setattr(gateway, "verify_account", lambda *_: OWNER)
-    response = client.post(endpoint, json={"url": "https://x.com/a/status/1"})
+    response = client.post(endpoint, json={"url": "https://x.com/a/status/1"}, headers={"Origin": "https://site.web.app"})
     assert response.status_code == 200
     assert response.content == b"fake-mp4-test-data"
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["content-type"] == "video/mp4"
+    assert response.headers["x-download-size"] == str(len(response.content))
+    assert response.headers["access-control-expose-headers"] == "X-Download-Size"
+    assert "content-length" not in response.headers
     assert not calls[0].exists()
     assert client.post("/api/commerce/admin/video-downloader", json={"revision": 0, "all_users": True}).status_code == 200
     monkeypatch.setattr(gateway, "verify_account", lambda *_: USER)
@@ -85,17 +90,50 @@ def test_failure_cleans_files_and_releases_slot(monkeypatch):
     assert all(not path.exists() for path in directories)
 
 
-def test_disconnect_still_cleans_temporary_files(monkeypatch, tmp_path):
+@pytest.mark.parametrize("disconnect_at", ["http.response.start", "http.response.body"])
+def test_disconnect_still_cleans_temporary_files(monkeypatch, tmp_path, disconnect_at, capsys):
     output = tmp_path / "video.mp4"
     output.write_bytes(b"test")
     cleaned = []
     monkeypatch.setattr(downloader, "cleanup", lambda directory: cleaned.append(directory))
     response = gateway.TemporaryVideoResponse(output, tmp_path)
-    async def send(message): raise OSError("client disconnected")
+    async def send(message):
+        if message["type"] == disconnect_at:
+            raise OSError("client disconnected")
     async def receive(): return {"type": "http.disconnect"}
-    with pytest.raises(OSError):
-        asyncio.run(response({"type": "http", "method": "GET", "headers": []}, receive, send))
+    with pytest.raises(ClientDisconnect):
+        asyncio.run(response({"type": "http", "method": "GET", "headers": [], "asgi": {"spec_version": "2.4"}}, receive, send))
     assert cleaned == [tmp_path]
+    assert json.loads(capsys.readouterr().out)["completed"] is False
+
+
+def test_large_download_is_streamed_without_content_length_and_cleaned(monkeypatch, tmp_path, capsys):
+    output = tmp_path / "video.mp4"
+    size = 33 * 1024 * 1024
+    with output.open("wb") as handle:
+        handle.truncate(size)
+    cleaned = []
+    monkeypatch.setattr(downloader, "cleanup", lambda directory: cleaned.append(directory))
+    response = gateway.TemporaryVideoResponse(output, tmp_path)
+    chunk_sizes = []
+    async def send(message):
+        if message["type"] == "http.response.start":
+            headers = dict(message["headers"])
+            assert b"content-length" not in headers
+            assert headers[b"x-download-size"] == str(size).encode()
+            assert headers[b"content-disposition"] == b'attachment; filename="recastfx-download.mp4"'
+            assert headers[b"cache-control"] == b"no-store"
+            assert not cleaned
+        else:
+            chunk_sizes.append(len(message.get("body", b"")))
+            assert not cleaned
+    async def receive():
+        pytest.fail("ASGI 2.4 does not need a disconnect listener")
+    asyncio.run(response({"type": "http", "method": "POST", "headers": [], "asgi": {"spec_version": "2.4"}}, receive, send))
+    assert sum(chunk_sizes) == size
+    assert max(chunk_sizes) <= 256 * 1024
+    assert cleaned == [tmp_path]
+    assert json.loads(capsys.readouterr().out)["completed"] is True
 
 
 def test_size_default_custom_value_and_legacy_toggle_preservation(monkeypatch):

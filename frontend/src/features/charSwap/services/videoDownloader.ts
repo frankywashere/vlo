@@ -1,6 +1,43 @@
 import { accountToken } from "./accountContext";
 
 export interface DownloaderSettings { revision: number; all_users: boolean; max_download_mb: number }
+export interface DownloadProgress { receivedBytes: number; totalBytes: number | null }
+
+export async function downloadVideoBlob(response: Response, onProgress: (progress: DownloadProgress) => void, signal?: AbortSignal): Promise<Blob> {
+  // Keep Content-Length unset on the server so large responses remain streamed.
+  const advertised = Number(response.headers.get("X-Download-Size") ?? response.headers.get("Content-Length"));
+  const totalBytes = Number.isSafeInteger(advertised) && advertised > 0 ? advertised : null;
+  let receivedBytes = 0;
+  onProgress({ receivedBytes, totalBytes });
+  if (!response.body) {
+    const blob = await response.blob();
+    if (totalBytes !== null && blob.size !== totalBytes) throw new Error("The video transfer was interrupted. Please try again.");
+    onProgress({ receivedBytes: blob.size, totalBytes });
+    return blob;
+  }
+  if (signal?.aborted) {
+    await response.body.cancel().catch(() => undefined);
+    throw new DOMException("Download cancelled", "AbortError");
+  }
+  let reportedAt = 0;
+  const stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(value, controller) {
+      if (signal?.aborted) throw new DOMException("Download cancelled", "AbortError");
+      receivedBytes += value.byteLength;
+      const now = performance.now();
+      if (reportedAt === 0 || now - reportedAt >= 100 || receivedBytes === totalBytes) {
+        onProgress({ receivedBytes, totalBytes });
+        reportedAt = now;
+      }
+      controller.enqueue(value);
+    },
+  }));
+  // Let the browser assemble the Blob instead of retaining a second JS copy.
+  const blob = await new Response(stream, { headers: { "Content-Type": "video/mp4" } }).blob();
+  if (totalBytes !== null && receivedBytes !== totalBytes) throw new Error("The video transfer was interrupted. Please try again.");
+  onProgress({ receivedBytes, totalBytes });
+  return blob;
+}
 
 export async function downloaderRequest(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
   const token = await accountToken();

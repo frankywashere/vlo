@@ -11,10 +11,11 @@ import uuid
 
 from typing import Literal
 
+import anyio
 from fastapi import Body, FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from . import video_downloader, youtube_session
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
@@ -52,7 +53,8 @@ from .replicate_preparation import preparation_snapshot
 settings = Settings.from_env()
 app = FastAPI(title="recastfx character replacement", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins),
-    allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key", "X-Firebase-Token"], max_age=600)
+    allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Reapi-Key", "X-Firebase-Token"],
+    expose_headers=["X-Download-Size"], max_age=600)
 
 
 class BodyLimitMiddleware:
@@ -540,18 +542,37 @@ def account_access(x_firebase_token: str | None = Header(default=None)):
             "role": staff_role(records, account), "video_downloader": video_downloader.allowed(records, account)}
 
 
-class TemporaryVideoResponse(FileResponse):
-    """Delete temporary media even if the browser disconnects during transfer."""
+class TemporaryVideoResponse(StreamingResponse):
+    """Stream without Content-Length to avoid Cloud Run's 32 MiB response cap."""
     def __init__(self, output, directory):
-        super().__init__(output, media_type="video/mp4", filename="recastfx-download.mp4",
-                         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+        super().__init__(self.chunks(output), media_type="video/mp4",
+                         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                                  "Content-Disposition": 'attachment; filename="recastfx-download.mp4"',
+                                  "X-Download-Size": str(output.stat().st_size)})
         self.directory = directory
 
+    async def chunks(self, output):
+        async with await anyio.open_file(output, "rb") as handle:
+            while chunk := await handle.read(256 * 1024):
+                yield chunk
+
     async def __call__(self, scope, receive, send):
+        sent_bytes, completed = 0, False
+        async def tracked_send(message):
+            nonlocal sent_bytes, completed
+            await send(message)
+            if message["type"] == "http.response.body":
+                sent_bytes += len(message.get("body", b""))
+                completed = not message.get("more_body", False)
         try:
-            await super().__call__(scope, receive, send)
+            await super().__call__(scope, receive, tracked_send)
         finally:
-            video_downloader.cleanup(self.directory)
+            try:
+                with anyio.CancelScope(shield=True):
+                    await self.body_iterator.aclose()
+            finally:
+                video_downloader.cleanup(self.directory)
+                emit("video_download_transfer_finished", bytes=sent_bytes, completed=completed)
 
 
 class VideoDownloadRequest(BaseModel):
