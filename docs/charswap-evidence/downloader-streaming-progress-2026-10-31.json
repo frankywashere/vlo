@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-31",
+  "source_commit": "bf66b083",
+  "incident": {
+    "download_bytes": 50080286,
+    "download_seconds": 12.51,
+    "session_used": true,
+    "outgoing_http": 500,
+    "platform_warning": "Response size was too large. Please consider reducing response size."
+  },
+  "changes": [
+    "Stream the MP4 without Content-Length to avoid Cloud Run non-streamed response limits.",
+    "Expose X-Download-Size for cross-origin progress with received bytes and total size.",
+    "Show preparation separately from transfer progress; validate complete received size.",
+    "Log transfer byte count and completion; close streams and remove temporary files on success or disconnect."
+  ],
+  "validation": {
+    "backend_tests": 54,
+    "frontend_tests": 10,
+    "frontend_build": "passed",
+    "extension_surface": "no contract changes",
+    "real_http_transfer": {
+      "http": 200,
+      "bytes_received": 52428800,
+      "advertised_bytes": 52428800,
+      "chunk_count": 5720,
+      "content_length_absent": true,
+      "size_header_exposed": true,
+      "checksum_verified": true,
+      "seconds": 2.66
+    },
+    "transfer_logs_confirm_completion_and_cleanup": true,
+    "temporary_private_test_service_deleted": true
+  },
+  "release": {
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:734e111654de359d1a68d7949cfc1f1fecf38b3742ca3d9d05541e03e6796d49",
+    "revision": "recastfx-api-00081-47x",
+    "runtime_configuration_preserved": true,
+    "live_verification": {
+      "live_bundle_matches_build": true,
+      "configuration_http": 200,
+      "unauthenticated_download_http": 401,
+      "download_size_exposed": true
+    }
+  }
+}
