@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-31",
+  "source_commit": "fb162b4f",
+  "change": "Use the private dedicated YouTube session for all authenticated users permitted by the downloader access policy, including ordinary users when all_users is enabled.",
+  "management": "Session status and updates retain existing staff and service_controls restrictions. No credentials are returned to download users.",
+  "validation": {
+    "focused_backend_tests": 52,
+    "focused_frontend_tests": 4,
+    "frontend_production_build": "passed",
+    "extension_surface_check": "passed; no extension contract surface changes",
+    "ordinary_user_api_regression": "passed with mocked external download; covers credential use, response privacy and cleanup",
+    "disabled_access_regression": "passed; denied before reading the session",
+    "real_cloud_download": {
+      "environment": "Temporary us-east4 Cloud Run job using the deployed immutable image and existing gateway identity; in-memory ordinary-user access records, real private session and real yt-dlp download",
+      "video": "https://youtu.be/iSkrdtkbdpY",
+      "success": true,
+      "bytes": 108598256,
+      "seconds_including_session_load": 14.79,
+      "cookie_file_deleted": true,
+      "temporary_video_deleted": true,
+      "temporary_job_deleted": true,
+      "earlier_probes": "The original yt-dlp sample video was unavailable. The supplied video exceeded the initial 100 MB test limit, then passed using the actual 500 MB production limit."
+    }
+  },
+  "release": {
+    "service": "recastfx-api",
+    "revision": "recastfx-api-00080-ssv",
+    "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:81fc7e452438ca05391e0edea4565a819dbe17e6d9b8898f28a357ee032e061a",
+    "traffic_percent": 100,
+    "runtime_configuration_preserved": true,
+    "hosting_site": "recastfx-franky",
+    "live_bundle_matches_build": true,
+    "configuration_http": 200,
+    "unauthenticated_download_http": 401,
+    "unauthenticated_settings_http": 401,
+    "existing_all_users_setting": true,
+    "existing_max_download_mb": 500
+  }
+}
