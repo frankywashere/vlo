@@ -1,0 +1,20 @@
+{
+  "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:54682a7f67cbbcef3f335cc64d6e0b788f422b1945625a7250937a1c09f5163c",
+  "revision": "recastfx-api-00082-n42",
+  "runtime_configuration_preserved": true,
+  "commit": "38818c38",
+  "service": "recastfx-api",
+  "region": "us-east4",
+  "traffic_percent": 100,
+  "health": {
+    "status": "ready",
+    "available": true
+  },
+  "checks": {
+    "character_retention_and_accounts_tests": 53,
+    "prior_targeted_backend_tests": 315,
+    "frontend_generation_details_tests": 4
+  },
+  "behavior": "Private reference photos and source selection previews archived before cleanup; signed URLs served to the owning Library view within 30-day retention. Old deleted photos cannot be recovered.",
+  "verification_limit": "No new paid user generation performed for live UI verification."
+}
