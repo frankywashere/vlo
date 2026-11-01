@@ -105,9 +105,9 @@ def run(command: list[str], timeout: int = 90):
 
 
 @timed("create_poster")
-def create_poster(source: Path, output: Path):
+def create_poster(source: Path, output: Path, *, seek_time: float = 0):
     """Extract a small first-frame JPEG without decoding the entire video."""
-    run(["ffmpeg", "-v", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", str(source),
+    run(["ffmpeg", "-v", "error", "-y", "-protocol_whitelist", "file,pipe", "-ss", str(seek_time), "-i", str(source),
          "-map", "0:v:0", "-frames:v", "1", "-vf",
          "scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
          "-q:v", "3", str(output)], timeout=30)

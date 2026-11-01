@@ -114,12 +114,24 @@ def test_saved_video_survives_short_lived_preparation_records(api, monkeypatch):
     job.update(comparison_uri="gs://private-app/library/comparison.mp4", comparison_status="ready", comparison_layout="stacked")
     job["setup"] = {"easy_mode": False, "enhanced_character_masking": True, "trim": [1.3, 6.3]}
     job["audio_processing"] = False
+    job.update(library_reference_uris=["gs://private-app/library/reference-0.png", "gs://private-app/library/reference-1.png"],
+               library_selection_thumbnail_uris={"24": "gs://private-app/library/selection-24.jpg"},
+               normalized_targets=[{"id": "selected", "name": "Person", "reference_index": 1, "anchor": {"time": 1, "x": .5, "y": .5}}])
     accounts.archive_completed(records, job)
+    records.data[f"jobs/{job['id']}.json"] = {**job, "temporary_media_cleanup_started_at": time.time(),
+        "library_expires_at": time.time() + 3600, "reference_uri": "gs://private-app/uploads/deleted.png"}
     result = client.get("/api/account/jobs").json()["jobs"][0]
     assert result["status"] == "completed" and "output_url" in result
     assert "thumbnail_url" in result
     assert "comparison.mp4?" in result["comparison_url"]
     assert result["comparison_layout"] == "stacked"
+    assert len(result["reference_urls"]) == 2
+    assert "reference-1.png?" in result["reference_urls"][result["selection_targets"][0]["reference_index"]]
+    assert "selection-24.jpg?" in result["selection_targets"][0]["thumbnail_url"]
+    records.data.pop(f"jobs/{job['id']}.json")
+    archived_only = client.get("/api/account/jobs").json()["jobs"][0]
+    assert archived_only["reference_urls"] == result["reference_urls"]
+    assert archived_only["selection_targets"] == result["selection_targets"]
     assert result["settings_used"]["easy_mode"] is False
     assert result["settings_used"]["enhanced_masking"] is True
     assert result["settings_used"]["audio_processing"] is False
@@ -131,6 +143,8 @@ def test_saved_video_survives_short_lived_preparation_records(api, monkeypatch):
     assert result["status"] == "expired" and "output_url" not in result
     assert "thumbnail_url" not in result
     assert "comparison_url" not in result
+    assert "reference_urls" not in result
+    assert all("thumbnail_url" not in target for target in result.get("selection_targets", []))
 
 
 def test_queue_counts_without_stealing_active_worker_and_fails_closed():

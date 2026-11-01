@@ -225,3 +225,55 @@ def test_before_copy_retry_accepts_existing_verified_object(prepared):
     Pipeline(SETTINGS, records, cloud).finalize(JOB)
     assert records.data[index_path(ACCOUNT, JOB)]["before_uri"] == "gs://app/" + before
     assert ("app", before) in storage.objects
+
+
+def test_character_photos_and_selected_frames_survive_cleanup_and_retries(prepared, monkeypatch):
+    records, storage, cloud, _ = prepared
+    job = records.data[f"jobs/{JOB}.json"]
+    job.update(reference_uris=[f"gs://app/uploads/{JOB}/reference.jpg", f"gs://app/uploads/{JOB}/reference-1.png"],
+               before_uri=f"gs://app/library/{ACCOUNT}/{JOB}/before.mp4", duration=15,
+               normalized_targets=[{"id": "first", "name": "One", "reference_index": 0, "anchor": {"time": 0, "x": .5, "y": .5}},
+                                   {"id": "second", "name": "Two", "reference_index": 1, "anchor": {"time": 7.4583333, "x": .3, "y": .6}}])
+    storage.add("app", f"uploads/{JOB}/reference-1.png")
+    copied = []
+    def copy(source, bucket, key):
+        copied.append(key)
+        storage.add(bucket, key)
+    cloud.copy = copy
+    cloud.download = lambda uri, path: path.write_bytes(b"source")
+    cloud.upload = lambda bucket, key, path, kind: (storage.add(bucket, key), f"gs://{bucket}/{key}")[1]
+    times = []
+    def poster(source, destination, *, seek_time=0):
+        times.append(seek_time)
+        destination.write_bytes(b"preview")
+    monkeypatch.setattr("swapmein.library_characters.create_poster", poster)
+    pipeline = Pipeline(SETTINGS, records, cloud)
+    pipeline.finalize(JOB)
+    saved = records.data[index_path(ACCOUNT, JOB)]
+    assert len(saved["library_reference_uris"]) == 2
+    assert set(saved["library_selection_thumbnail_uris"]) == {"0", "179"}
+    assert times == [0, 7.4583333]
+    assert all(("app", uri[len("gs://app/"):]) in storage.objects for uri in saved["library_reference_uris"])
+    assert ("app", f"uploads/{JOB}/reference-1.png") not in storage.objects
+    pipeline.finalize(JOB)
+    assert len(copied) == 2
+
+
+def test_character_copy_failure_defers_cleanup_without_regenerating(prepared):
+    records, storage, cloud, _ = prepared
+    records.data[f"jobs/{JOB}.json"]["reference_uri"] = f"gs://app/uploads/{JOB}/reference.jpg"
+    def unavailable(*_):
+        raise RuntimeError("character copy unavailable")
+    cloud.copy = unavailable
+    with pytest.raises(RuntimeError):
+        Pipeline(SETTINGS, records, cloud).finalize(JOB)
+    assert not storage.deleted
+    assert not records.data[f"jobs/{JOB}.json"].get("temporary_media_cleanup_started_at")
+
+
+def test_direct_cleanup_waits_for_archived_character_photos(prepared):
+    records, storage, cloud, _ = prepared
+    records.data[f"jobs/{JOB}.json"]["reference_uri"] = f"gs://app/uploads/{JOB}/reference.jpg"
+    with pytest.raises(PublicError, match="saved Library character photos"):
+        cleanup_completed_media(SETTINGS, records, cloud, JOB)
+    assert not storage.deleted

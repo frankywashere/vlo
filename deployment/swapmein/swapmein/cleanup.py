@@ -23,6 +23,12 @@ def cleanup_completed_media(settings, records, cloud, job_id):
     if not isinstance(account, str) or not re.fullmatch(r"[a-f0-9]{64}", account):
         raise PublicError("Invalid cleanup account identifier.", 400)
     library, _ = records.read(index_path(account, job_id))
+    references = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
+    saved_references = job.get("library_reference_uris", [])
+    if references and not job.get("temporary_media_cleanup_started_at") and (
+            len(saved_references) != len(references) or not library
+            or library.get("library_reference_uris") != saved_references):
+        raise PublicError("Temporary cleanup is waiting for saved Library character photos.", 503)
     output = job.get("output_uri", "")
     expected = f"gs://{settings.app_bucket}/library/{account}/{job_id}/"
     if (not isinstance(output, str) or not output.startswith(expected) or not re.fullmatch(r"[A-Za-z0-9_.-]+\.mp4", output[len(expected):])

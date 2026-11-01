@@ -24,6 +24,7 @@ from .cleanup import cleanup_completed_media
 from .watermark import award_watermark_bonus
 from .replicate_preparation import ReplicatePreparation
 from .comparison import create_comparison
+from .library_characters import retain_characters
 from .processing_capacity import ProcessingCapacity
 
 
@@ -752,6 +753,7 @@ class Pipeline:
         # The exported video remains completed: no regeneration or export repeats.
         try:
             job = self.ensure_library_before(job)
+            job = retain_characters(self, job)
             job = self.ensure_library_poster(job)
             archive_completed(self.records, job)
             award_watermark_bonus(self.records, job)

@@ -49,6 +49,7 @@ from .provider_credentials import server_provider_key, save_server_provider_key
 from .preparation_credentials import save_server_replicate_key
 from .cloudflare_credentials import cloudflare_credential_view, save_server_cloudflare_key
 from .replicate_preparation import preparation_snapshot
+from .library_characters import character_view
 
 settings = Settings.from_env()
 app = FastAPI(title="recastfx character replacement", docs_url=None, redoc_url=None, openapi_url=None)
@@ -266,6 +267,8 @@ def view(job: dict, *, review_thumbnails: bool = True):
     if reference_uris and temporary_media_available:
         result["reference_urls"] = [cloud.signed_url(uri) for uri in reference_uris]
         result["reference_url"] = result["reference_urls"][0]
+    if status == "completed" and job.get("library_expires_at", 0) > time.time():
+        result.update(character_view(job, cloud))
     if "duration" in job:
         result["duration"] = job["duration"]
         if not credits_mode:
@@ -1499,6 +1502,7 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
             if item.get("output_uri") and item.get("expires_at", 0) > time.time():
                 public.update(status="completed", output_url=cloud.signed_url(item["output_uri"]),
                               message="Your saved video is ready.")
+                public.update(character_view(item, cloud))
                 if item.get("thumbnail_uri"):
                     public["thumbnail_url"] = cloud.signed_url(item["thumbnail_uri"])
                 if item.get("before_uri"):
