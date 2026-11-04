@@ -165,6 +165,21 @@ Both masking-off and SAM-enabled normal preparation were checked in the live
 controlled fixture. SAM review retains the normal human-review requirement;
 fallback does not silently treat the H3 shot assignments as SAM identities.
 
+The live four-second fixture completed in the same Library entry after SAM3,
+manual scene review, normal MiniMax generation and existing finishing. It used
+96 masked frames, one provider submission and one 52-credit reservation. The
+API reported US$0.293 generation cost; SAM's measured 12.79-second runtime
+estimates US$0.0125 using the finance ledger's published hardware rate. Cloud
+CPU, storage and network costs are separate. The first fixture exposed an
+immutable-path collision before provider generation and its reservation was
+fully returned; the fixed fixture verified both masking-off and SAM-enabled
+preparation before its single paid generation. The final video and stacked
+comparison both contain 96 frames/4 seconds with audio; two character photos
+and two selection previews are retained.
+
+See `docs/charswap-evidence/recastfx-google-on-demand-fallback-release-2026-11-04.json`
+from the repository root for images, revisions, costs and validation limits.
+
 ## Release boundary
 
 New destinations must pass local configuration checks and a bounded live GPU

@@ -1,0 +1,173 @@
+{
+  "date": "2026-11-04",
+  "implementation_commit": "9c7034ee",
+  "branch": "multi-person-self-hosted",
+  "api_image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:c1732c2efd588b2d81219851ce5c57aac06495af694ac545866fd1b6ab1ba85f",
+  "services": {
+    "recastfx-worker": {
+      "revision": "recastfx-worker-gh3-20261104-3",
+      "seconds": 16.5,
+      "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:c1732c2efd588b2d81219851ce5c57aac06495af694ac545866fd1b6ab1ba85f",
+      "configuration_preserved": true
+    },
+    "recastfx-control-worker": {
+      "revision": "recastfx-control-worker-gh3-20261104-3",
+      "seconds": 13.18,
+      "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:c1732c2efd588b2d81219851ce5c57aac06495af694ac545866fd1b6ab1ba85f",
+      "configuration_preserved": true
+    },
+    "recastfx-api": {
+      "revision": "recastfx-api-gh3-20261104-3",
+      "seconds": 16.44,
+      "image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:c1732c2efd588b2d81219851ce5c57aac06495af694ac545866fd1b6ab1ba85f",
+      "configuration_preserved": true
+    }
+  },
+  "frontend": {
+    "bundle": "charswap-BA3jBkeg.js",
+    "sha256": "6589dc166578615cf0717c38aa9e2a93acc66ee8b302a91960aa9c01569c4735",
+    "production_bytes_verified": true
+  },
+  "google": {
+    "zone": "europe-west1-b",
+    "instance": "recastfx-h3-google-worker",
+    "model_disk": {
+      "id": "3455257156357077361",
+      "name": "recastfx-h3-be-models-20261101",
+      "sizeGb": "500",
+      "status": "READY",
+      "provisionedIops": "3000",
+      "provisionedThroughput": "140"
+    },
+    "maximum_vm_uptime_seconds": 14400,
+    "idle_stop_seconds": 120,
+    "one_fresh_job_per_boot": true,
+    "native_gpu_execution_verified": false,
+    "live_allocation_result": "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS",
+    "live_capacity_fallback_verified": true,
+    "running_compute_vms_at_handoff": 0,
+    "new_model_disks": 0,
+    "model_region_copies": 0,
+    "worker_artifacts": {
+      "release_sha256": "dc886b7ac9f423b1345b8bd59e47b68638192ee7dbf65476a6d7aba55d3b0b10",
+      "release_bytes": 31711,
+      "config_sha256": "bd338f12d86e3fcb8bd00bd09d212a3776b6afc8f2ea3f0086d13e40db95f622",
+      "startup_sha256": "f2da656063721874a24669e4b0b68ed968633774110020931f642ccbd6e65c9b",
+      "package_files": 17,
+      "root": "/opt/recastfx/site-worker-20261104-v1",
+      "api_url": "https://recastfx-api-63lqoskl5q-uk.a.run.app",
+      "worker_id": "google-character-swap-1"
+    },
+    "cpu_preflight_passed": true,
+    "native_cpu_graph_validation": "encode/render with one and two references",
+    "cpu_inspection_compute_estimate_usd": 0.022,
+    "unit_list_gpu_compute_usd_per_hour": 4.949923,
+    "unit_price_basis": "Live Cloud Billing SKU catalog checked 2026-11-04; excludes disk/IP/network/taxes."
+  },
+  "fallback": {
+    "job_id": "dbbac91b9bb6419195d9e96631fdcaa4",
+    "status": "completed",
+    "actual_generation_destination": "current",
+    "full_normal_sam_preparation_verified": true,
+    "mask_frames": 96,
+    "sam_review_screenshot": "Private experiment directory: sam-review.jpg",
+    "same_library_job_and_credit_reservation": true,
+    "provider_post_count": 1,
+    "site_credit_debit": 52,
+    "first_failed_fixture_refunded": true,
+    "provider_billing": {
+      "provider_credits": 293,
+      "provider_credit_unit": "reapi_credit",
+      "provider_cost_usd": 0.293,
+      "provider_cost_status": "reported",
+      "provider_cost_source": "usage.credits"
+    },
+    "replicate_predictions": {
+      "sam": {
+        "version": "8digit/gener8-sam3:a6f50615da4cfa8b03fe95ec56681bc252a5e60c2ed368938f72bfa4f55dfcd1",
+        "status": "succeeded",
+        "submitted_at": 1793803467.0400684,
+        "id": "d34b45xtv5rmw0d1mw2bah0fvc",
+        "predict_seconds": 12.792356161,
+        "total_seconds": 35.192463706,
+        "estimated_cost_usd": 0.012472547256975
+      }
+    },
+    "provider_to_library_seconds": 279.4,
+    "active_processing_seconds": 450.14,
+    "assets": {
+      "output_uri": {
+        "filename": "fallback-final.mp4",
+        "bytes": 1028716,
+        "sha256": "1146b197a00b09c60ac0b1d978f5e15835102a85ad557c6ac5be57082e5887ad",
+        "duration": 4.0,
+        "frames": 96,
+        "fps": "24/1",
+        "width": 1344,
+        "height": 768,
+        "audio_present": true,
+        "full_decode_passed": true
+      },
+      "comparison_uri": {
+        "filename": "fallback-comparison.mp4",
+        "bytes": 2247015,
+        "sha256": "dcf6bc74353c40a5696e58fc17ca8fa227446823384dcca6d884a98d2d916e2b",
+        "duration": 4.0,
+        "frames": 96,
+        "fps": "24/1",
+        "width": 1344,
+        "height": 1536,
+        "audio_present": true,
+        "full_decode_passed": true
+      },
+      "before_uri": {
+        "filename": "fallback-before.mp4",
+        "bytes": 712099,
+        "sha256": "5d31072c9308992f017fa3573c3157aaa5560dae32f20acfe24aae1e0e2bdf45",
+        "duration": 4.0,
+        "frames": 96,
+        "fps": "24/1",
+        "width": 852,
+        "height": 480,
+        "audio_present": true,
+        "full_decode_passed": true
+      }
+    },
+    "retained_character_images": 2,
+    "retained_selection_previews": 2,
+    "audio_qa": {
+      "decoded_seconds": 4.0,
+      "rms": 0.040113870054483414,
+      "basis": "Nonempty decoded soundtrack; no speech or lip-sync quality claim."
+    },
+    "visual_qa": "Sampled both shots in the stacked comparison; nonempty outputs. No broad character-replacement quality or lip-sync acceptance claimed.",
+    "fixture_scope": "Four-second reviewed benchmark. Masking-off fallback succeeded first; explicitly re-prepared this fixture with Enhanced Masking on, a new artifact token and the same unused credit receipt before any generation. SAM guide reviewed, then one normal MiniMax render submitted. Not an arbitrary-footage automatic-matching proof.",
+    "prompt_reconstruction": {
+      "basis": "Reconstructed from saved job and implementation 9c7034ee; private media links excluded.",
+      "sha256": "8c6d46ad30f5a0907043cd86e1ceb55164b229f9ab5093b3401e09dddedf8f43",
+      "characters": 4818
+    }
+  },
+  "current_default": {
+    "multi_person_route": "paperspace_h3",
+    "pipeline_revision": 15,
+    "google_option_selectable_when_cold": true,
+    "single_person_route": "current",
+    "reason_paperspace_retained": "Google native GPU runtime awaits available capacity for a real render."
+  },
+  "verification": {
+    "backend_focused_tests": 481,
+    "frontend_focused_tests": 150,
+    "frontend_build": "passed",
+    "extension_surface": "No extension contract surface files changed. Deployment-specific CharSwap capability is outside the Vlo editor extension surface.",
+    "untouched_cloud_run_services": 9,
+    "audit_findings": [],
+    "preview": "No preview Hosting deployment or long-test service changes."
+  },
+  "boundaries": [
+    "Only documented capacity failure before a GPU claim may fall back.",
+    "Transport timeouts, permission/quota/model/bootstrap failures and possibly started generations never trigger a second automatic paid generation.",
+    "Google native GPU render/start-to-ready/idle-stop timings are not measured because allocation failed.",
+    "Retained disk storage remains billable; no disk performance increase or model transfer occurred."
+  ]
+}
