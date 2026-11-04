@@ -147,6 +147,9 @@ export function AdminPage() {
                 </Box>;
               })}
             </Stack>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              CharacterSwap uses its own fixed recipe, skips SAM, face mesh and depth, and restores the original audio.
+            </Typography>
           </Box>
           <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
             disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}
@@ -158,7 +161,7 @@ export function AdminPage() {
                 setMessage(`${provider === "replicate" ? "Replicate" : "Our workers"} selected for preparation of new jobs. Existing jobs keep their saved provider.`);
               });
             }} />} label="Use Replicate for SAM and depth" />
-          <Typography variant="body2" color="text.secondary">Routes SAM masks, mask retries, and enabled depth processing through Replicate. Off uses our workers. Existing jobs keep their saved provider.</Typography>
+          <Typography variant="body2" color="text.secondary">For normal-route jobs, routes SAM masks, mask retries, and enabled depth processing through Replicate. Off uses our workers. Existing jobs keep their saved provider.</Typography>
           {!admin.pipeline?.replicate_api_key_configured && <Typography variant="body2" color="text.secondary">Save a Replicate API key under System API key before enabling.</Typography>}
           <FormControl disabled={busy || !can("pipeline_settings")}>
             <FormLabel id="prompt-variant-label">Generation prompts</FormLabel>
@@ -179,7 +182,7 @@ export function AdminPage() {
               <FormControlLabel value="cloudflare_identity_v1" control={<Radio />} label="Cloudflare character matching" />
             </RadioGroup>
           </FormControl>
-          <Typography variant="body2" color="text.secondary">Applies to new jobs in every mode. Existing jobs keep their saved prompt version.</Typography>
+          <Typography variant="body2" color="text.secondary">Applies to new normal-route jobs in every mode. Existing jobs keep their saved prompt version.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.matching_no_review ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
@@ -190,7 +193,7 @@ export function AdminPage() {
                 setMessage(`Automatic matching failure review ${enabled ? "disabled" : "enabled"} for new jobs.`);
               });
             }} />} label="No review on automatic matching failure" />
-          <Typography variant="body2" color="text.secondary">If Cloudflare matching cannot complete, continue with Option 5 Easy Mode instead of asking for scene review. Applies to new jobs.</Typography>
+          <Typography variant="body2" color="text.secondary">For new normal-route jobs, if Cloudflare matching cannot complete, continue with Option 5 Easy Mode instead of asking for scene review. CharacterSwap still requires scene review for uncertain matches.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.multi_characters ?? true}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

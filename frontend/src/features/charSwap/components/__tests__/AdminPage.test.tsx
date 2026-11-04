@@ -554,6 +554,24 @@ it("defaults both self-hosted destinations off and does not assume missing worke
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 
+it("explains the separate CharacterSwap recipe and scopes normal preparation controls without changing settings", async () => {
+  api.pipelineSettings = {revision: 3, audio_processing: false, multi_person_generation_route: "paperspace_h3",
+    preparation_provider: "replicate", replicate_api_key_configured: true,
+    prompt_variant: "cloudflare_identity_v1", matching_no_review: true,
+    self_hosted_workers: {paperspace_h3: {ready: true}}};
+  await renderExpandedAdmin();
+  const group = screen.getByRole("region", {name: "Multi-person generation destination"});
+  expect(within(group).getByText("CharacterSwap uses its own fixed recipe, skips SAM, face mesh and depth, and restores the original audio.")).toBeVisible();
+  expect(screen.getByText("Applies to new normal-route jobs in every mode. Existing jobs keep their saved prompt version.")).toBeVisible();
+  expect(screen.getByText(/For normal-route jobs, routes SAM masks, mask retries/)).toBeVisible();
+  expect(screen.getByText(/For new normal-route jobs, if Cloudflare matching cannot complete/)).toHaveTextContent(
+    "CharacterSwap still requires scene review for uncertain matches.");
+  expect(screen.queryByText("Applies to new jobs in every mode. Existing jobs keep their saved prompt version.")).not.toBeInTheDocument();
+  expect(within(group).getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "No review on automatic matching failure"})).toBeChecked();
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
 it("saves one multi-person destination at a time and returns to normal when the active switch is turned off", async () => {
   api.pipelineSettings = {revision: 7, audio_processing: true, preparation_provider: "replicate", replicate_api_key_configured: true,
     self_hosted_workers: {google_h3: {ready: true}, paperspace_h3: {ready: true}}};
