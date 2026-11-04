@@ -25,6 +25,7 @@ interface SceneTrackingReviewProps {
   errorMessage?: string | null;
   message?: string;
   initialChoices?: TrackingReviewChoice[];
+  requireExplicitChoices?: boolean;
   onApply: (choices: TrackingReviewChoice[]) => Promise<boolean>;
   onRefresh: () => void;
 }
@@ -39,13 +40,14 @@ interface SceneChoiceCardProps {
   height: number;
   busy: boolean;
   choice?: TrackingReviewChoice;
+  requireExplicitChoices?: boolean;
   error?: string | null;
   onChoose: (choice: TrackingReviewChoice) => void;
   onRefresh: () => void;
 }
 
 /** Offscreen decoders are released so a long review doesn't exhaust phone memory. */
-function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected, width, height, busy, choice, error, onChoose, onRefresh }: SceneChoiceCardProps) {
+function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected, width, height, busy, choice, requireExplicitChoices = false, error, onChoose, onRefresh }: SceneChoiceCardProps) {
   const container = useRef<HTMLElement | null>(null);
   const [visible, setVisible] = useState(typeof IntersectionObserver === "undefined");
   const [selectedFrame, setSelectedFrame] = useState<number>();
@@ -85,12 +87,16 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
         onSelect={(point, time) => onChoose({ segment_id: section.id, absent: false, anchor: { ...point, time } })} />}
     </Box>
     <Typography variant="body2" color={choice?.anchor ? "success.main" : "text.secondary"} sx={{ mt: 1.5 }}>
-      {choice?.anchor ? "Selected. Tap again to change the person." : "No selection — not in this scene."}
+      {choice?.anchor ? "Selected. Tap again to change the person." : requireExplicitChoices
+        ? choice?.absent ? "Confirmed: not in this scene." : "Not yet checked. Select the person or confirm they are not in this scene."
+        : "No selection — not in this scene."}
     </Typography>
     <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: "wrap", gap: 1 }}>
       <Button startIcon={<RefreshRounded />} disabled={busy || frames.length < 2}
         onClick={() => { setSelectedFrame(frames[(frames.indexOf(frame) + 1) % frames.length]); setFailed(false); }}>Show another frame</Button>
-      {choice?.anchor && <Button disabled={busy} onClick={() => onChoose({ segment_id: section.id, absent: true, anchor: null })}>Clear selection</Button>}
+      {requireExplicitChoices ? <Button disabled={busy} aria-pressed={choice?.absent === true}
+        onClick={() => onChoose({segment_id: section.id, absent: true, anchor: null})}>Not in this scene</Button>
+        : choice?.anchor && <Button disabled={busy} onClick={() => onChoose({ segment_id: section.id, absent: true, anchor: null })}>Clear selection</Button>}
       {failed && <Button disabled={busy} onClick={onRefresh}>Refresh preview</Button>}
     </Stack>
   </Box>;
@@ -99,7 +105,7 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
 /** Both Library and Create review one character across all scenes before moving on. */
 export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackingUrl, segments,
   target: fallbackTarget, targets = [], references = [], width, height, busy, errorSegmentId,
-  errorMessage, initialChoices = [], onApply, onRefresh }: SceneTrackingReviewProps) {
+  errorMessage, initialChoices = [], requireExplicitChoices = false, onApply, onRefresh }: SceneTrackingReviewProps) {
   // Single-person plans omit target_id; bind those sections to the supplied
   // person rather than the Library's generic fallback placeholder.
   const implicitTargetId = targets.length === 1 ? targets[0].id : fallbackTarget.id;
@@ -134,16 +140,20 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
   const personSections = sections.filter((section) => (section.target_id ?? implicitTargetId) === person.id);
   const reference = references.find((item) => item.targetId === person.id)?.asset;
   const last = activeIndex === people.length - 1;
+  const unconfirmed = requireExplicitChoices && (personSections.some((section) => !choices[section.id])
+    || last && sections.some((section) => !choices[section.id]));
 
   function choose(choice: TrackingReviewChoice) {
     setChoices((previous) => ({ ...previous, [choice.segment_id]: choice }));
     setNavigation({ index: activeIndex, acknowledgedError: errorSegmentId ?? null });
   }
   async function advance() {
-    if (locked) return;
+    if (locked || unconfirmed) return;
     // The API still receives one explicit decision for every required section.
     const completed = { ...choices };
-    for (const section of personSections) completed[section.id] ??= { segment_id: section.id, absent: true, anchor: null };
+    if (!requireExplicitChoices) {
+      for (const section of personSections) completed[section.id] ??= { segment_id: section.id, absent: true, anchor: null };
+    }
     setChoices(completed);
     if (!last) {
       setNavigation({ index: activeIndex + 1, acknowledgedError: errorSegmentId ?? null });
@@ -151,7 +161,8 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
     }
     setSubmitting(true);
     try {
-      await onApply(sections.map((section) => completed[section.id] ?? { segment_id: section.id, absent: true, anchor: null }));
+      await onApply(requireExplicitChoices ? sections.map((section) => completed[section.id])
+        : sections.map((section) => completed[section.id] ?? { segment_id: section.id, absent: true, anchor: null }));
     } finally { setSubmitting(false); }
   }
 
@@ -175,7 +186,8 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
         </Stack>}
       </Stack>
       <Typography component="p" variant="h6" sx={{ mt: 2, fontSize: {xs: 18, sm: 20}, fontWeight: 500 }}>
-        Tap the person in each box below. Leave it blank if they’re not there.
+        {requireExplicitChoices ? "Check every scene below. Select the person or choose Not in this scene."
+          : "Tap the person in each box below. Leave it blank if they’re not there."}
       </Typography>
       {!enhancedMasking && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Masking stays off. Your selections tell the model who to replace.</Typography>}
       <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Submit starts generation automatically.</Typography>
@@ -189,14 +201,16 @@ export function SceneTrackingReview({ enhancedMasking = true, sourceUrl, trackin
         {checks.map((section, checkIndex) => <SceneChoiceCard key={`${person.id}:${section.id}`} section={section}
           label={`Scene ${index + 1}${checks.length > 1 ? ` · Tracking check ${checkIndex + 1} of ${checks.length}` : ""}`}
           sourceUrl={sourceUrl} trackingUrl={trackingUrl} showDetected={showDetected} width={width} height={height}
-          busy={locked} choice={choices[section.id]} onChoose={choose} onRefresh={onRefresh}
+          busy={locked} choice={choices[section.id]} requireExplicitChoices={requireExplicitChoices} onChoose={choose} onRefresh={onRefresh}
           error={section.id === errorSegmentId ? errorMessage || "This scene needs another look. Review the selected person, or use Show another frame." : null} />)}
       </Stack>;
     })}
-    <Typography variant="body2" color="text.secondary">Untapped images will be saved as “not in this scene” for {person.name}.</Typography>
+    <Typography variant="body2" color="text.secondary">{requireExplicitChoices
+      ? "Confirm a selection or Not in this scene for every scene before continuing."
+      : <>Untapped images will be saved as “not in this scene” for {person.name}.</>}</Typography>
     <Stack direction="row" spacing={2} justifyContent="space-between">
       {activeIndex > 0 ? <Button disabled={locked} onClick={() => setNavigation({ index: activeIndex - 1, acknowledgedError: errorSegmentId ?? null })}>Previous character</Button> : <Box />}
-      <Button variant="contained" disabled={locked} onClick={() => void advance()}>{submitting ? "Submitting…" : last ? "Submit and generate" : "Next character"}</Button>
+      <Button variant="contained" disabled={locked || unconfirmed} onClick={() => void advance()}>{submitting ? "Submitting…" : last ? "Submit and generate" : "Next character"}</Button>
     </Stack>
   </Stack>;
 }

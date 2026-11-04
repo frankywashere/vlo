@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getLiveJob, resolveLiveTracking, validateLiveSetup } from "../livePipeline";
+import { generateLiveJob, getLiveJob, pollLiveProvider, resolveLiveTracking, validateLiveSetup } from "../livePipeline";
 
 const requests = vi.fn<typeof fetch>();
 
@@ -30,6 +30,80 @@ afterEach(() => {
 });
 
 describe("live job charge parsing", () => {
+  it("keeps a reconciled credit-reservation failure readable without implying a new render", async () => {
+    const failed = {id: "job-1", status: "failed", generation_destination: "google_h3",
+      message: "Credits could not be reserved. No GPU generation was started.",
+      self_hosted_progress: {phase: "credit_reservation_failed", completed_shots: 0, total_shots: 8}};
+    requests.mockResolvedValue(new Response(JSON.stringify(failed)));
+    expect(await getLiveJob("job-1", "session", new AbortController().signal)).toEqual(failed);
+    expect(requests).toHaveBeenCalledTimes(1);
+    expect(requests.mock.calls[0][1]?.method).toBeUndefined();
+  });
+
+  it.each(["current", "google_h3", "paperspace_h3"] as const)("retains validated %s saved recipe and audio settings", async (route) => {
+    const settings_used = {multi_person_generation_route: route, generation_recipe: "characterswap_v1", restore_original_audio: true};
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "completed", settings_used})));
+    expect((await getLiveJob("job-1", "session", new AbortController().signal)).settings_used).toEqual(settings_used);
+  });
+
+  it.each([null, [], {}, "unknown", 1])("omits invalid saved self-hosted settings (%j)", async (invalid) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "completed", settings_used: {
+      multi_person_generation_route: invalid, generation_recipe: invalid, restore_original_audio: invalid, easy_mode: false}})));
+    expect((await getLiveJob("job-1", "session", new AbortController().signal)).settings_used).toEqual({easy_mode: false});
+  });
+
+  it("preserves an explicitly disabled original-audio restoration setting", async () => {
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "completed", settings_used: {restore_original_audio: false}})));
+    expect((await getLiveJob("job-1", "session", new AbortController().signal)).settings_used).toEqual({restore_original_audio: false});
+  });
+
+  it.each(["google_h3", "paperspace_h3"] as const)("does not require or transmit a hosted key for a saved %s job", async (destination) => {
+    requests.mockImplementation(async () => new Response(JSON.stringify({id: "job-1", status: "generating",
+      generation_destination: destination})));
+    const signal = new AbortController().signal;
+    await generateLiveJob("job-1", "session", "", signal, "api-key", destination);
+    await pollLiveProvider("job-1", "session", "unneeded-provider-secret", signal, "api-key", destination);
+    expect(requests).toHaveBeenCalledTimes(2);
+    for (const [, request] of requests.mock.calls) {
+      expect(request?.headers).toMatchObject({Authorization: "Bearer session"});
+      expect(request?.headers).not.toHaveProperty("X-Reapi-Key");
+    }
+    expect(requests.mock.calls[0][1]?.body).toBe(JSON.stringify({approved: true}));
+  });
+
+  it("keeps hosted generation and polling gated on a provider key", async () => {
+    const signal = new AbortController().signal;
+    await expect(generateLiveJob("job-1", "session", "", signal)).rejects.toThrow();
+    await expect(pollLiveProvider("job-1", "session", "", signal, "api-key", "current")).rejects.toThrow();
+    expect(requests).not.toHaveBeenCalled();
+  });
+
+  it.each(["submitting", "rendering"])("preserves a validated self-hosted destination and bounded shot progress (%s)", async (phase) => {
+    const progress = {phase, completed_shots: 3, total_shots: 8};
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "generating",
+      generation_destination: "paperspace_h3", self_hosted_progress: progress})));
+    expect(await getLiveJob("job-1", "session", new AbortController().signal)).toMatchObject({
+      generation_destination: "paperspace_h3", self_hosted_progress: progress});
+  });
+
+  it.each(["unknown", null, [], {}])("rejects an invalid saved generation destination (%j)", async (generation_destination) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "ready", generation_destination})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/generation destination/);
+  });
+
+  it.each([
+    {phase: "rendering", completed_shots: 9, total_shots: 8},
+    {phase: "rendering", completed_shots: -1, total_shots: 8},
+    {phase: "rendering", completed_shots: 1.5, total_shots: 8},
+    {phase: "rendering", completed_shots: 1, total_shots: 61},
+    {phase: ["rendering"], completed_shots: 1, total_shots: 8},
+    {phase: "unknown", completed_shots: 1, total_shots: 8},
+  ])("rejects malformed worker progress (%j)", async (self_hosted_progress) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "generating",
+      generation_destination: "google_h3", self_hosted_progress})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/worker progress/);
+  });
+
   it("shows controlled reference-validation guidance rather than the generic request error", async () => {
     requests.mockResolvedValue(new Response(JSON.stringify({code: "reference_dimensions", message: "private upstream detail"}), {status: 400}));
     await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/Crop it or choose a different image/);
@@ -96,6 +170,26 @@ const reviewSegment = {id: "segment-001", start_frame: 48, end_frame: 120, start
 const reviewJob = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 1, tracking_segments: [reviewSegment]};
 
 describe("scene tracking review contract", () => {
+  it("accepts validated partial matching suggestions only while scene review is pending", async () => {
+    const next = {...reviewSegment, id: "segment-002", start_frame: 0, end_frame: 48, start: 0, end: 2, seek_time: 1};
+    const tracking_segments = [next, reviewSegment];
+    const tracking_choices = [{segment_id: "segment-002", absent: false, anchor: {x: .3, y: .5, time: 1}}];
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_segments, tracking_choices})));
+    expect((await getLiveJob("job-1", "session", new AbortController().signal)).tracking_choices).toEqual(tracking_choices);
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_choices: []})));
+    expect((await getLiveJob("job-1", "session", new AbortController().signal)).tracking_choices).toEqual([]);
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, status: "ready", tracking_segments, tracking_choices})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/saved scene matches/);
+  });
+
+  it("rejects duplicate or unrelated partial suggestions before showing scene review", async () => {
+    const choice = {segment_id: reviewSegment.id, absent: true, anchor: null};
+    for (const tracking_choices of [[choice, choice], [{...choice, segment_id: "other-scene"}]]) {
+      requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_choices})));
+      await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/saved scene matches/);
+    }
+  });
+
   it("accepts an unresolved initial tap as a scene requiring a fresh selection", async () => {
     const segment = {...reviewSegment, reason: "unmatched_anchor", selected_label: null};
     requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, tracking_segments: [segment]})));

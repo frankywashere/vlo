@@ -7,6 +7,7 @@ from .errors import PublicError
 from .security import digest
 from .preparation_credentials import replicate_key_ready
 from .prompt_variants import DEFAULT_PROMPT_VARIANT, PROMPT_VARIANTS
+from .self_hosted_route import MULTI_PERSON_GENERATION_ROUTES, validate_generation_route
 
 PATH = "control/pipeline-settings.json"
 
@@ -15,10 +16,12 @@ def pipeline_settings(records):
     current, _ = records.read(PATH)
     current = current or {}
     provider = current.get("preparation_provider", "workers")
+    route = current.get("multi_person_generation_route", "current")
     return {"revision": current.get("revision", 0),
             "audio_processing": current.get("audio_processing") is True,
             "hide_audio_toggle": current.get("hide_audio_toggle") is True,
             "multi_characters": current.get("multi_characters", True) is not False,
+            "multi_person_generation_route": route if isinstance(route, str) and route in MULTI_PERSON_GENERATION_ROUTES else "current",
             "depth_guidance": current.get("depth_guidance", False) is not False,
             "face_mesh_enabled": current.get("face_mesh_enabled", True) is not False,
             "face_mesh_masked_default": current.get("face_mesh_masked_default", True) is not False,
@@ -33,8 +36,10 @@ def pipeline_settings(records):
 
 def save_pipeline_settings(records, actor, revision, audio_processing=None, preparation_provider=None,
                            retry_missing_masks_with_sam=None, depth_guidance=None,
-                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None, matching_no_review=None):
+                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None, matching_no_review=None, multi_person_generation_route=None):
     require_permission(records, actor, "pipeline_settings")
+    if multi_person_generation_route is not None:
+        validate_generation_route(multi_person_generation_route)
     if matching_no_review is not None and type(matching_no_review) is not bool:
         raise PublicError("Choose whether automatic matching may continue without scene review.")
     if prompt_variant is not None and prompt_variant not in PROMPT_VARIANTS:
@@ -52,7 +57,12 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
         current = current or {}
         if current.get("revision", 0) != revision:
             raise PublicError("Pipeline settings changed in another session. Reload before saving.", 409)
+        stored_route = current.get("multi_person_generation_route", "current")
+        if not isinstance(stored_route, str) or stored_route not in MULTI_PERSON_GENERATION_ROUTES:
+            stored_route = "current"
         return {"revision": revision + 1,
+                "multi_person_generation_route": (multi_person_generation_route if multi_person_generation_route is not None
+                    else stored_route),
                 "audio_processing": current.get("audio_processing") is True if audio_processing is None else audio_processing,
                 "depth_guidance": current.get("depth_guidance", False) is not False if depth_guidance is None else depth_guidance,
                 "retry_missing_masks_with_sam": (current.get("retry_missing_masks_with_sam") is True
@@ -78,7 +88,8 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
          matching_no_review=saved["matching_no_review"],
          face_mesh_enabled=saved["face_mesh_enabled"], face_mesh_masked_default=saved["face_mesh_masked_default"],
          face_mesh_unmasked_default=saved["face_mesh_unmasked_default"],
-         face_mesh_user_control=saved["face_mesh_user_control"], hide_audio_toggle=saved["hide_audio_toggle"], multi_characters=saved["multi_characters"], prompt_variant=saved["prompt_variant"])
+         face_mesh_user_control=saved["face_mesh_user_control"], hide_audio_toggle=saved["hide_audio_toggle"], multi_characters=saved["multi_characters"], prompt_variant=saved["prompt_variant"],
+         multi_person_generation_route=saved["multi_person_generation_route"])
     return pipeline_settings(records)
 
 

@@ -4,6 +4,7 @@ import swapmein.app as gateway
 from swapmein import accounts
 from swapmein.security import digest
 from test_api import api
+from test_self_hosted_jobs import workers, start, save_output
 
 
 def owned_failed(api, monkeypatch, **extra):
@@ -64,6 +65,56 @@ def test_paid_result_missing_export_files_does_not_offer_paid_retry(api, monkeyp
     assert client.get(endpoint + '/recovery').json()['action'] == 'support'
     assert client.post(endpoint + '/retry-saving', json={'approved': True}).status_code == 409
     assert not cloud.enqueued
+
+
+def test_private_worker_result_retries_only_saving_and_restores_original_audio(api, monkeypatch):
+    job_id = "a" * 32
+    client, records, cloud, provider, job = owned_failed(api, monkeypatch,
+        multi_person_generation_route="paperspace_h3", restore_original_audio=True,
+        private_provider_output_uri=f"gs://private-app/self-hosted/{job_id}/attempt/result.bin",
+        audio_processing=False)
+    endpoint = f"/api/account/jobs/{job_id}"
+    assert client.get(endpoint + "/recovery").json()["action"] == "save"
+    for _ in range(2):
+        assert client.post(endpoint + "/retry-saving", json={"approved": True}).status_code == 202
+    assert cloud.enqueued == [("finish", job_id)] and not provider.submissions
+    assert not any("wallet" in key for key in records.data)
+
+
+def test_private_result_with_missing_original_audio_never_offers_new_paid_render(api, monkeypatch):
+    client, _, cloud, _, job = owned_failed(api, monkeypatch,
+        multi_person_generation_route="paperspace_h3", restore_original_audio=True, audio_processing=False,
+        private_provider_output_uri=f"gs://private-app/self-hosted/{'a' * 32}/attempt/result.bin")
+    monkeypatch.setattr(cloud, "asset_exists", lambda uri: not uri.endswith("source.bin"))
+    endpoint = f"/api/account/jobs/{job['id']}"
+    assert client.get(endpoint + "/recovery").json()["action"] == "support"
+    assert client.post(endpoint + "/retry-saving", json={"approved": True}).status_code == 409
+    assert not cloud.enqueued
+
+
+def test_privileged_self_hosted_job_can_resume_without_hosted_provider_key(api, monkeypatch):
+    client, records, _, _, job = owned_failed(api, monkeypatch,
+        multi_person_generation_route="paperspace_h3", access_mode="api-key", status="ready")
+    monkeypatch.setattr(gateway, "provider_key", lambda *_: pytest.fail("Hosted provider key must not be requested"))
+    result = client.post(f"/api/account/jobs/{job['id']}/session")
+    assert result.status_code == 200 and result.json()["token"]
+
+
+def test_self_hosted_status_refresh_recovers_finalizer_dispatch_without_rerender(workers):
+    client, records, cloud, _, headers = workers
+    route, lease, _ = start(workers)
+    save_output(workers, route, lease)
+    cloud.enqueue_error = True
+    result = client.post(f"/worker/self-hosted/{route}/complete", headers=headers[route], json=lease)
+    assert result.status_code == 200
+    job = records.data[f"jobs/{lease['job_id']}.json"]
+    assert job["status"] == "finalizing" and job["queue_recovery_status"] == "required"
+    cloud.enqueue_error = False
+    current = gateway.refresh_stale_job(job)
+    assert current["status"] == "finalizing" and current["queue_recovery_status"] is None
+    assert len(cloud.logical_tasks) == 1 and len(cloud.enqueue_attempts) == 2
+    assert cloud.enqueued == [("finish", job["id"])]
+    assert records.data[f"control/self-hosted/{route}.json"]["active"] is None
 
 
 @pytest.mark.parametrize('status', ['preparing', 'generating', 'submission_unknown', 'completed'])

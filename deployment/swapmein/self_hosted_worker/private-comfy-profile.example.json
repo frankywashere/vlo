@@ -1,0 +1,26 @@
+{
+  "private_runtime": true,
+  "entrypoint": "/opt/recastfx-tested-runtime/launcher_native.py",
+  "runtime_directory": "/opt/recastfx-tested-runtime/runtime",
+  "extra_model_paths": "/opt/recastfx-tested-runtime/model_paths.yaml",
+  "loader_variants": {
+    "encode": "/opt/recastfx-tested-runtime/distorch_encode.py",
+    "render": "/opt/recastfx-tested-runtime/distorch_render.py"
+  },
+  "loader_destination": "custom_nodes/ComfyUI-MultiGPU/distorch_2.py",
+  "whitelist": [
+    "ComfyUI-MultiGPU",
+    "recastfx_worker_nodes"
+  ],
+  "arguments": [
+    "--disable-dynamic-vram",
+    "--lowvram",
+    "--reserve-vram",
+    "2",
+    "--disable-cuda-malloc"
+  ],
+  "required_paths": [
+    "/opt/recastfx-tested-runtime/source/main.py",
+    "/opt/recastfx-tested-runtime/attention_rows_patch.py"
+  ]
+}

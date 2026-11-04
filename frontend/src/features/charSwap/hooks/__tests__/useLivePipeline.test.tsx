@@ -89,6 +89,44 @@ afterEach(() => {
 });
 
 describe("live BYOK pipeline", () => {
+  it.each(["google_h3", "paperspace_h3"] as const)("uses the saved %s destination for generation and both status checks", async (destination) => {
+    vi.useFakeTimers();
+    requests.mockImplementation((input) => {
+      if (input === "/api/uploads/job-1/complete") return Promise.resolve(json({id: "job-1", status: "ready", generation_destination: destination}));
+      if (input === "/api/jobs/job-1/generate" || input === "/api/jobs/job-1/provider")
+        return Promise.resolve(json({id: "job-1", status: "generating", generation_destination: destination}));
+      return defaultRequest(input);
+    });
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    expect(result.current.job?.generation_destination).toBe(destination);
+    await act(async () => {await result.current.generate();});
+    await act(async () => {await result.current.refresh();});
+    await act(async () => {await vi.advanceTimersByTimeAsync(5000);});
+    expect(calls("/api/session")[0][1]?.headers).toMatchObject({"X-Reapi-Key": USER_KEY});
+    expect(calls("/api/jobs/job-1/generate")).toHaveLength(1);
+    expect(calls("/api/jobs/job-1/provider")).toHaveLength(2);
+    for (const [, request] of [...calls("/api/jobs/job-1/generate"), ...calls("/api/jobs/job-1/provider")]) {
+      expect(request?.headers).toMatchObject({Authorization: `Bearer ${SESSION_TOKEN}`});
+      expect(request?.headers).not.toHaveProperty("X-Reapi-Key");
+    }
+  });
+
+  it("does not attach the hosted key when resolving an existing self-hosted review", async () => {
+    const review = {id: "job-1", status: "tracking_review", generation_destination: "paperspace_h3", mask_style: "none",
+      duration: 5, width: 854, height: 480, tracking_revision: 1,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", tracking_segments: [
+        {id: "s0", start: 0, end: 5, start_frame: 0, end_frame: 120, seek_time: 1, needs_review: true, reason: "scene_selection"}]};
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? Promise.resolve(json(review))
+      : input === "/api/jobs/job-1/tracking-review" ? Promise.resolve(json({id: "job-1", status: "queued", generation_destination: "paperspace_h3"}))
+        : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    await act(async () => {expect(await result.current.resolveTracking([{segment_id: "s0", absent: true, anchor: null}])).toBe(true);});
+    expect(calls("/api/jobs/job-1/tracking-review")[0][1]?.headers).not.toHaveProperty("X-Reapi-Key");
+    expect(JSON.parse(String(calls("/api/jobs/job-1/tracking-review")[0][1]?.body))).toMatchObject({generate_after_review: true});
+  });
+
   it("warns on browser exit only until upload confirmation and removes the guard afterward", async () => {
     const pending = deferred<Response>();
     requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? pending.promise : defaultRequest(input));

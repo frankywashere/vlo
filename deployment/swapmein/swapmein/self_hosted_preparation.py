@@ -1,0 +1,90 @@
+"""Original-RGB shot plans for CharacterSwap; no segmentation or guide overlays."""
+import math
+import time
+
+from .errors import PublicError
+
+
+def conditioning_frames(frames):
+    return max(56, 5 + 17 * math.ceil((frames - 5) / 17))
+
+
+def shot_prompt(targets):
+    instructions = []
+    for index, target in enumerate(targets, 1):
+        x = target["anchor"]["x"]
+        position = "on the left" if x < .4 else "on the right" if x > .6 else "in the center"
+        if len(targets) > 1:
+            # Two selected people may both occupy the broad "center" bucket.
+            # Preserve every reference mapping and identify its actual anchor
+            # rather than giving contradictory replacements for one person.
+            y = target["anchor"]["y"]
+            position += f" (at {x * 100:.2f}% from the left and {y * 100:.2f}% from the top)"
+        instructions.append(f"Replace the person {position} in <Video 1> with the person in <Picture {index}>. "
+                            f"Use that reference person's face, hair and clothing. "
+                            "Follow the source person's movements and expressions.")
+    return " ".join(instructions) + (" Leave other people and the setting unchanged. "
+        "Keep each reference's clothing consistent throughout. "
+        "Show only the filmed scene, without written text, captions, logos or graphics.")
+
+
+def reviewed_shots(metadata, targets):
+    from .tracking import _metadata
+    _, _, frames, _, cuts = _metadata(metadata)
+    bounds = [0, *cuts, frames]
+    if any(type(n) is not int for n in bounds) or bounds != sorted(set(bounds)) or frames > 15 * 24:
+        raise PublicError("This CharacterSwap route requires valid scene cuts and a clip up to15 seconds.", 409)
+    result = []
+    for index, (start, end) in enumerate(zip(bounds, bounds[1:]), 1):
+        present = []
+        for target in targets:
+            scenes = target.get("scenes", [])
+            scene = next((s for s in scenes if abs(s["start"] - start / 24) < 1e-6
+                          and abs(s["end"] - end / 24) < 1e-6), None)
+            if scene is None:
+                raise PublicError("Review each selected person's presence in every shot.", 409,
+                                  code="tracking_review_invalid")
+            if not scene["absent"]:
+                present.append({"id": target["id"], "reference_index": target["reference_index"],
+                                "anchor": scene["anchor"]})
+        result.append({"index": index, "start_frame": start, "end_frame": end,
+                       "conditioning_frames": conditioning_frames(end - start),
+                       "targets": present, "prompt": shot_prompt(present) if present else ""})
+    return result
+
+
+def prepare(pipeline, job, options, source, metadata, targets, root):
+    from .scene_selection import analyze
+    from .self_hosted_matching import prepare_shot_assignments
+    plan = analyze(metadata, targets)
+    matched = {"review_required": True, "tracking_plan": plan, "suggested_choices": []}
+    if options.easy_mode:
+        try:
+            matched = prepare_shot_assignments(source, metadata, targets, root,
+                job=job, records=pipeline.records, deadline=time.monotonic() + 600)
+        except PublicError:
+            # Failed or exhausted matching must never silently substitute a
+            # weaker generation route or trigger SAM/paid provider generation.
+            matched = {"review_required": True, "tracking_plan": plan, "suggested_choices": []}
+    guide = pipeline.cloud.copy(job["normalized_uri"], pipeline.settings.app_bucket,
+                                f"outputs/{job['id']}/guide.mp4")
+    common = dict(guide_uri=guide, mask_style="none", face_mesh=False, depth_guidance=False,
+                  audio_processing=False, restore_original_audio=True, tracking_performed=False,
+                  mask_frames=0, normalized_anchor=metadata["anchor"], normalized_targets=targets,
+                  tracking_metadata=metadata, tracking_plan=plan,
+                  tracking_revision=1, scene_cut_count=len(metadata.get("scene_cuts", [])),
+                  self_hosted_matching_evidence=matched.get("assignments", []))
+    if matched["review_required"]:
+        pipeline.save_scene_thumbnails(job["id"], source, root, plan)
+        pipeline.update_job(job["id"], **common, status="tracking_review", review_required=True,
+            tracking_reviewed=False, tracking_choices=matched.get("suggested_choices", []),
+            message="Check each person's shot assignments before experimental CharacterSwap. No masks or generation were submitted.")
+        return
+    shots = matched["shots"]
+    for shot in shots:
+        shot["prompt"] = shot_prompt(shot["targets"]) if shot["targets"] else ""
+    pipeline.update_job(job["id"], **common, status="ready", review_required=False,
+        tracking_reviewed=True, self_hosted_shots=shots,
+        message="Shot assignments are ready for experimental CharacterSwap.")
+    if options.auto_generate:
+        pipeline.cloud.enqueue("generate", job["id"], task_token=job.get("tracking_task_token"))

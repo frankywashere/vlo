@@ -7,7 +7,7 @@ import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
 import { reportClientError, timeClientStage } from "./diagnostics";
 import { accountToken } from "./accountContext";
 import { isReferenceCleanupEndpoint } from "./referenceCleanup";
-import type { PromptVariant } from "./commerce";
+import type { MultiPersonGenerationRoute, PromptVariant } from "./commerce";
 
 export type GenerationProvider = "reAPI" | "ToAPIs";
 export type GenerationAccessMode = "api-key" | "credits";
@@ -51,6 +51,9 @@ const MASK_STYLES = ["depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", 
 export type MaskStyle = typeof MASK_STYLES[number];
 
 export interface JobSettingsUsed {
+  multi_person_generation_route?: MultiPersonGenerationRoute;
+  generation_recipe?: "characterswap_v1";
+  restore_original_audio?: boolean;
   prompt_variant?: PromptVariant;
   depth_overlay_opacity?: number;
   easy_mode?: boolean;
@@ -77,6 +80,12 @@ export interface JobSettingsUsed {
 }
 
 export interface LivePipelineJob {
+  generation_destination?: MultiPersonGenerationRoute;
+  self_hosted_progress?: {
+    phase: "queued" | "submitting" | "encoding" | "rendering" | "assembling" | "complete" | "reconciliation_required" | "credit_reservation_failed";
+    completed_shots: number;
+    total_shots: number;
+  };
   processing_stage?: "guide_rebuild" | "mask_recovery" | "generation_queue" | "guide_review";
   settings_used?: JobSettingsUsed;
   /** Browser-only: the upload finished but queue acknowledgement was lost. */
@@ -361,12 +370,36 @@ function readJob(value: unknown): LivePipelineJob {
     id: value.id,
     status: value.status as LiveJobStatus,
   };
+  if (value.generation_destination !== undefined) {
+    if (value.generation_destination !== "current" && value.generation_destination !== "google_h3"
+        && value.generation_destination !== "paperspace_h3")
+      throw new LivePipelineError("The service returned an unreadable generation destination. Refresh the job before continuing.");
+    job.generation_destination = value.generation_destination;
+  }
+  if (value.self_hosted_progress !== undefined) {
+    const progress = value.self_hosted_progress;
+    if ((job.generation_destination !== "google_h3" && job.generation_destination !== "paperspace_h3")
+        || !isRecord(progress) || typeof progress.phase !== "string"
+        || !["queued", "submitting", "encoding", "rendering", "assembling", "complete", "reconciliation_required", "credit_reservation_failed"].includes(progress.phase)
+        || typeof progress.completed_shots !== "number" || !Number.isInteger(progress.completed_shots)
+        || typeof progress.total_shots !== "number" || !Number.isInteger(progress.total_shots)
+        || progress.completed_shots < 0 || progress.total_shots < 0 || progress.total_shots > 60
+        || progress.completed_shots > progress.total_shots)
+      throw new LivePipelineError("The service returned unreadable worker progress. Refresh the job before continuing.");
+    job.self_hosted_progress = {phase: progress.phase as NonNullable<LivePipelineJob["self_hosted_progress"]>["phase"],
+      completed_shots: progress.completed_shots, total_shots: progress.total_shots};
+  }
   if (isRecord(value.settings_used)) {
     const saved: JobSettingsUsed = {};
+    const route = value.settings_used.multi_person_generation_route;
+    if (route === "current" || route === "google_h3" || route === "paperspace_h3")
+      saved.multi_person_generation_route = route;
+    if (value.settings_used.generation_recipe === "characterswap_v1")
+      saved.generation_recipe = "characterswap_v1";
     const promptVariant = value.settings_used.prompt_variant;
     if (promptVariant === "current" || promptVariant === "favorite_v2" || promptVariant === "structured_v1" || promptVariant === "identity_colors_v1" || promptVariant === "identity_tint_tracking_v1" || promptVariant === "cloudflare_identity_v1")
       saved.prompt_variant = promptVariant;
-    for (const field of ["easy_mode", "enhanced_masking", "depth_guidance", "face_mesh", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark"] as const)
+    for (const field of ["easy_mode", "enhanced_masking", "depth_guidance", "face_mesh", "audio_processing", "replace_all_people", "submit_without_audio", "add_watermark", "restore_original_audio"] as const)
       if (typeof value.settings_used[field] === "boolean") saved[field] = value.settings_used[field];
     for (const field of ["depth_overlay_opacity", "watermark_bonus_credits", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps"] as const) {
       const number = value.settings_used[field];
@@ -516,7 +549,11 @@ function readJob(value: unknown): LivePipelineJob {
     const choices = value.tracking_choices;
     const required = job.tracking_segments?.filter((segment) => segment.needs_review) ?? [];
     const chosenIds = new Set<string>();
-    if (!Array.isArray(choices) || choices.length > 300 || choices.length !== required.length || choices.some((choice: unknown) => {
+    // Automatic matching may prefill confirmed sections while uncertain ones
+    // still need the user's decision. Applied reviews remain complete sets.
+    if (!Array.isArray(choices) || choices.length > 300
+      || (job.status === "tracking_review" ? choices.length > required.length : choices.length !== required.length)
+      || choices.some((choice: unknown) => {
       if (!isRecord(choice) || typeof choice.segment_id !== "string" || chosenIds.has(choice.segment_id) || typeof choice.absent !== "boolean") return true;
       chosenIds.add(choice.segment_id);
       const section = required.find((segment) => segment.id === choice.segment_id);
@@ -862,15 +899,18 @@ export async function generateLiveJob(
   key: string,
   signal: AbortSignal,
   accessMode: GenerationAccessMode = "api-key",
+  generationDestination: MultiPersonGenerationRoute = "current",
 ): Promise<LivePipelineJob> {
-  if (accessMode === "api-key") assertLiveKey(key);
+  const hostedKeyRequired = accessMode === "api-key" &&
+    generationDestination !== "google_h3" && generationDestination !== "paperspace_h3";
+  if (hostedKeyRequired) assertLiveKey(key);
   return readJob(
     await requestJson(
       `/api/jobs/${encodeURIComponent(id)}/generate`,
       {
         method: "POST",
         headers: {
-          ...sessionHeaders(token, accessMode === "api-key" ? key : undefined),
+          ...sessionHeaders(token, hostedKeyRequired ? key : undefined),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ approved: true }),
@@ -886,12 +926,15 @@ export async function pollLiveProvider(
   key: string,
   signal: AbortSignal,
   accessMode: GenerationAccessMode = "api-key",
+  generationDestination: MultiPersonGenerationRoute = "current",
 ): Promise<LivePipelineJob> {
-  if (accessMode === "api-key") assertLiveKey(key);
+  const hostedKeyRequired = accessMode === "api-key" &&
+    generationDestination !== "google_h3" && generationDestination !== "paperspace_h3";
+  if (hostedKeyRequired) assertLiveKey(key);
   return readJob(
     await requestJson(
       `/api/jobs/${encodeURIComponent(id)}/provider`,
-      { headers: sessionHeaders(token, accessMode === "api-key" ? key : undefined) },
+      { headers: sessionHeaders(token, hostedKeyRequired ? key : undefined) },
       signal,
     ),
   );

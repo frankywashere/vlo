@@ -95,6 +95,24 @@ def test_cleanup_preserves_final_audits_models_other_jobs_and_is_idempotent(prep
     assert len(storage.deleted) == 6
 
 
+def test_self_hosted_scratch_is_removed_only_after_confirmed_delivery_and_preserves_other_jobs(prepared):
+    records, storage, cloud, _ = prepared
+    own = ("app", f"self-hosted/{JOB}/attempt/result.bin")
+    other = ("app", f"self-hosted/{'d' * 32}/attempt/result.bin")
+    storage.add(*own)
+    storage.add(*other)
+    job = records.data[f"jobs/{JOB}.json"]
+    job.update(multi_person_generation_route="paperspace_h3", status="generating")
+    cleanup_completed_media(SETTINGS, records, cloud, JOB)
+    assert own in storage.objects
+    job["status"] = "completed"
+    cleanup_completed_media(SETTINGS, records, cloud, JOB)
+    assert own not in storage.objects and other in storage.objects
+    assert records.data[f"jobs/{JOB}.json"]["temporary_media_cleanup"]["deleted_objects"] == 7
+    cleanup_completed_media(SETTINGS, records, cloud, JOB)
+    assert len(storage.deleted) == 7
+
+
 @pytest.mark.parametrize("status", ["uploading", "queued", "preparing", "tracking_review", "ready", "generating", "submission_unknown", "finishing", "failed"])
 def test_never_cleans_unfinished_failed_or_uncertain_jobs(prepared, status):
     records, storage, cloud, _ = prepared

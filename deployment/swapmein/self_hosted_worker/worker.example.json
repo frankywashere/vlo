@@ -1,0 +1,24 @@
+{
+  "base_url": "https://YOUR-EXISTING-RECASTFX-API-DOMAIN",
+  "route": "paperspace_h3",
+  "worker_id": "paperspace-character-swap-1",
+  "spool": "/var/lib/recastfx-character-swap/private-jobs",
+  "comfy_url": "http://127.0.0.1:8201",
+  "launch_commands": {
+    "encode": ["/opt/ComfyUI/.venv/bin/python", "-m", "self_hosted_worker.launcher", "--profile", "/etc/recastfx/private-comfy-profile.json", "--phase", "encode"],
+    "render": ["/opt/ComfyUI/.venv/bin/python", "-m", "self_hosted_worker.launcher", "--profile", "/etc/recastfx/private-comfy-profile.json", "--phase", "render"]
+  },
+  "model_paths": {
+    "model": "/opt/ComfyUI/models/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors",
+    "text": "/opt/ComfyUI/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+    "vae": "/opt/ComfyUI/models/vae/minimax_h3_video_vae_fp16.safetensors",
+    "audio_vae": "/opt/ComfyUI/models/vae/minimax_h3_audio_vae_fp32.safetensors",
+    "turbo": "/opt/ComfyUI/models/loras/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+    "character": "/opt/ComfyUI/models/loras/h3_character_swap_v1.5.safetensors"
+  },
+  "guard_comfy_urls": ["http://127.0.0.1:8192", "http://127.0.0.1:8199", "http://127.0.0.1:8200"],
+  "maximum_job_seconds": 14400,
+  "minimum_free_disk_gib": 20,
+  "minimum_available_ram_gib": 12,
+  "startup_available_ram_gib": 48
+}

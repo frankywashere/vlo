@@ -540,3 +540,79 @@ it("shows a saved no-review setting and requires pipeline permission to edit it"
   expect(toggle).toBeDisabled();
   expect(api.pipeline).not.toHaveBeenCalled();
 });
+
+it("defaults both self-hosted destinations off and does not assume missing worker readiness", async () => {
+  await renderExpandedAdmin();
+  const group = screen.getByRole("region", {name: "Multi-person generation destination"});
+  for (const name of ["Multi-person swaps: Google CharacterSwap", "Multi-person swaps: Paperspace CharacterSwap"]) {
+    const toggle = within(group).getByRole("switch", {name});
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeDisabled();
+  }
+  expect(within(group).getByText(/One-person jobs and Replace all people keep the normal route/)).toBeInTheDocument();
+  expect(within(group).getByText("Google worker readiness has not been confirmed.")).toBeInTheDocument();
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+it("saves one multi-person destination at a time and returns to normal when the active switch is turned off", async () => {
+  api.pipelineSettings = {revision: 7, audio_processing: true, preparation_provider: "replicate", replicate_api_key_configured: true,
+    self_hosted_workers: {google_h3: {ready: true}, paperspace_h3: {ready: true}}};
+  await renderExpandedAdmin();
+  const google = screen.getByRole("switch", {name: "Multi-person swaps: Google CharacterSwap"});
+  const paperspace = screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"});
+  await userEvent.click(google);
+  await waitFor(() => expect(google).toBeChecked());
+  expect(paperspace).not.toBeChecked();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 7, multi_person_generation_route: "google_h3"});
+  await userEvent.click(paperspace);
+  await waitFor(() => expect(paperspace).toBeChecked());
+  expect(google).not.toBeChecked();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, multi_person_generation_route: "paperspace_h3"});
+  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
+  await userEvent.click(paperspace);
+  await waitFor(() => expect(paperspace).not.toBeChecked());
+  expect(google).not.toBeChecked();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 9, multi_person_generation_route: "current"});
+  expect(api.grant).not.toHaveBeenCalled();
+  expect(api.save).not.toHaveBeenCalled();
+});
+
+it("allows disabling a saved offline destination while blocking activation of an unready worker", async () => {
+  api.pipelineSettings = {revision: 3, audio_processing: false, multi_person_generation_route: "paperspace_h3",
+    self_hosted_workers: {google_h3: {ready: false, message: "Google worker is offline."}, paperspace_h3: {ready: false}}};
+  await renderExpandedAdmin();
+  const paperspace = screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"});
+  expect(paperspace).toBeChecked();
+  expect(paperspace).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Google CharacterSwap"})).toBeDisabled();
+  expect(screen.getByText("Google worker is offline.")).toBeInTheDocument();
+  await userEvent.click(paperspace);
+  await waitFor(() => expect(paperspace).not.toBeChecked());
+  expect(paperspace).toBeDisabled();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, multi_person_generation_route: "current"});
+});
+
+it("requires pipeline permission to change self-hosted destinations even when workers are ready", async () => {
+  api.role = "viewer";
+  api.permissions = ["provider_key"];
+  api.pipelineSettings = {revision: 2, audio_processing: false, multi_person_generation_route: "google_h3",
+    self_hosted_workers: {google_h3: {ready: true}, paperspace_h3: {ready: true}}};
+  await renderExpandedAdmin();
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Google CharacterSwap"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Google CharacterSwap"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"})).toBeDisabled();
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+it("keeps the saved destination when switching workers fails", async () => {
+  api.pipelineSettings = {revision: 5, audio_processing: false, multi_person_generation_route: "google_h3",
+    self_hosted_workers: {google_h3: {ready: true}, paperspace_h3: {ready: true}}};
+  api.pipeline.mockRejectedValueOnce(new Error("Pipeline settings changed. Reload and try again."));
+  await renderExpandedAdmin();
+  await userEvent.click(screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"}));
+  await screen.findByText("Pipeline settings changed. Reload and try again.");
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Google CharacterSwap"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"})).not.toBeChecked();
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, multi_person_generation_route: "paperspace_h3"});
+});

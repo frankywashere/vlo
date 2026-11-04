@@ -152,12 +152,13 @@ describe("recastfx workspace", () => {
     expect(screen.getAllByRole("banner")).toHaveLength(1);
   });
 
-  it("shows real credits in the header and links directly to the credits tab", async () => {
+  it("shows real credits in the account menu and opens the credits tab", async () => {
     const user = userEvent.setup();
     render(<SwapMeinApp />);
-    await user.click(
-      screen.getByRole("button", { name: "2,000 credits available" }),
-    );
+    const accountMenu = screen.getByRole("button", { name: "Account menu" });
+    expect(accountMenu).toHaveAccessibleDescription("2,000 credits available");
+    await user.click(accountMenu);
+    await user.click(screen.getByRole("menuitem", { name: "Credits" }));
     expect(screen.getByRole("tab", { name: "Credits" })).toHaveAttribute(
       "aria-selected",
       "true",

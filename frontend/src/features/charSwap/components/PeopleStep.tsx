@@ -125,6 +125,7 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
       </Box>}
       {maxPeople === 1 && <Alert severity="info">Select one person and one reference image. Multi-characters is currently off.</Alert>}
       {maxPeople === 1 && (targets.length > 1 || replaceAllPeople) && <Alert severity="warning">Remove extra selections before continuing. Your existing selections have been kept.</Alert>}
+      {targets.length > 1 && <Alert severity="warning">Replacing multiple people is experimental and may not produce the intended result.</Alert>}
       <VideoPreview
         clip={clip}
         trim={trim}

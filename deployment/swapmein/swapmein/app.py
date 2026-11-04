@@ -33,6 +33,7 @@ from .task_delivery import worker_audience
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .provider_failure import provider_failure, failure_message
 from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot, enforce_character_limit
+from .self_hosted_route import generation_route_snapshot, SELF_HOSTED_GENERATION_ROUTES
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
                        digest, provider_key, verify_task_identity, validate_media_url)
@@ -182,14 +183,14 @@ def job_estimate(job):
     return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
 
 
-def check_generation_funding(records, setup: Setup, active_session: dict):
+def check_generation_funding(records, setup: Setup, active_session: dict, *, generation_route="current"):
     if setup.auto_generate and not setup.easy_mode:
         raise PublicError("Automatic generation requires Easy mode.", 409)
     if active_session.get("access_mode") != "credits":
         if setup.auto_generate and active_session.get("access_mode") != "api-key":
             raise PublicError("Choose recastfx credits or an authorized API key.", 409)
         return
-    if not feature_view(records)["credit_generation"]:
+    if not feature_view(records, generation_route=generation_route)["credit_generation"]:
         raise PublicError("Credit-funded generation is not available yet.", 503)
     catalog = public_catalog(records)
     expected_charge = generation_credit_cost(setup.trim[1] - setup.trim[0], catalog["credits_per_generation"])
@@ -220,6 +221,8 @@ def owned_job(job_id: str, authorization: str | None):
 
 def view(job: dict, *, review_thumbnails: bool = True):
     _, cloud, _ = services()
+    from .self_hosted_jobs import is_self_hosted
+    self_hosted = is_self_hosted(job)
     status = job["status"]
     if status == "ready" and job.get("review_generation_queued"):
         status = "queued"
@@ -231,7 +234,7 @@ def view(job: dict, *, review_thumbnails: bool = True):
         status = "queued"
     credits_mode = job.get("access_mode") == "credits"
     result = {"id": job["id"], "status": status,
-              "message": ("Your video is processing." if credits_mode and status in {"generating", "finalizing"}
+              "message": ("Your video is processing." if credits_mode and not self_hosted and status in {"generating", "finalizing"}
                           else failure_message(job.get("provider_failure"), True) if credits_mode and status == "failed" and job.get("provider_failure")
                           else "Generation needs review." if credits_mode and status == "failed"
                           else job.get("message", "")),
@@ -271,7 +274,7 @@ def view(job: dict, *, review_thumbnails: bool = True):
         result.update(character_view(job, cloud))
     if "duration" in job:
         result["duration"] = job["duration"]
-        if not credits_mode:
+        if not credits_mode and not self_hosted:
             result["estimated_cost_usd"] = job_estimate(job)
             result["estimate_note"] = "Provider estimate only, using rounded published 768P rate; Google preparation costs are separate."
             result["estimate_source"] = "https://reapi.ai/models/minimax-h3"
@@ -279,6 +282,12 @@ def view(job: dict, *, review_thumbnails: bool = True):
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
+    if self_hosted:
+        result["generation_destination"] = job["multi_person_generation_route"]
+        result["estimate_note"] = "Self-hosted processing; actual server cost is not yet reported."
+        result["self_hosted_progress"] = {"phase": job.get("self_hosted_phase", "queued"),
+            "completed_shots": len(job.get("self_hosted_completed_shots", [])),
+            "total_shots": len(job.get("self_hosted_shots", []))}
     for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing", "watermark_applied", "watermark_bonus_awarded"]:
         if field in job:
             result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
@@ -717,7 +726,9 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     records, _, _ = services()
     role = require_staff(records, account, {"owner", "pricing_admin", "viewer"})
     catalog, _ = records.read(CATALOG_PATH)
-    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline_settings(records), "watermark": watermark_settings(records), "cloudflare_key": cloudflare_credential_view()}
+    from .self_hosted_jobs import worker_views
+    pipeline = {**pipeline_settings(records), "self_hosted_workers": worker_views(settings, records)}
+    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline, "watermark": watermark_settings(records), "cloudflare_key": cloudflare_credential_view()}
 
 
 class CapacityUpdate(BaseModel):
@@ -769,6 +780,7 @@ class PipelineSettingsUpdate(BaseModel):
     face_mesh_user_control: bool | None = None
     hide_audio_toggle: bool | None = None
     multi_characters: bool | None = None
+    multi_person_generation_route: Literal["current", "google_h3", "paperspace_h3"] | None = None
     face_mesh_enabled: bool | None = None
     prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"] | None = None
 
@@ -777,9 +789,16 @@ class PipelineSettingsUpdate(BaseModel):
 def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str | None = Header(default=None)):
     actor = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
+    require_permission(records, actor, "pipeline_settings")
+    from .self_hosted_jobs import require_worker_ready, worker_views
+    if (body.multi_person_generation_route in SELF_HOSTED_GENERATION_ROUTES
+            and body.multi_person_generation_route != pipeline_settings(records)["multi_person_generation_route"]):
+        require_worker_ready(settings, records, body.multi_person_generation_route)
+    saved = save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
-                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant, body.matching_no_review)
+                                  body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant, body.matching_no_review,
+                                  body.multi_person_generation_route)
+    return {**saved, "self_hosted_workers": worker_views(settings, records)}
 
 
 @app.post("/api/commerce/admin/features")
@@ -973,12 +992,16 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     except ValidationError:
         raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
     validate_reference_mapping(options, 1)
-    enforce_character_limit(options, 1, pipeline_settings(records)["multi_characters"])
-    check_generation_funding(records, options, active_session)
+    defaults = pipeline_settings(records)
+    enforce_character_limit(options, 1, defaults["multi_characters"])
+    route_snapshot = generation_route_snapshot(options, defaults["multi_person_generation_route"])
+    self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
+    check_generation_funding(records, options, active_session,
+                             generation_route=route_snapshot["multi_person_generation_route"])
     watermark_offer = watermark_snapshot(records, options, active_session)
     job_id = uuid.uuid4().hex
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
-                if options.auto_generate and active_session.get("access_mode") == "api-key" else None)
+                if not self_hosted and options.auto_generate and active_session.get("access_mode") == "api-key" else None)
     await run_in_threadpool(records.update, "control/preparation.json", lambda current: reserve_preparation(
         current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations,
         **preparation_limits(records)))
@@ -999,7 +1022,6 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             transparent = (reference_details or {}).get("output_format") == "PNG"
             extension, content_type = ("png", "image/png") if transparent else ("jpg", "image/jpeg")
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.{extension}", image, content_type)
-        defaults = pipeline_settings(records)
         enforce_character_limit(options, 1, defaults["multi_characters"])
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
@@ -1013,7 +1035,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "depth_identity_colors_version": 1,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **watermark_offer,
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))}
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
+               **route_snapshot}
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
@@ -1114,12 +1137,15 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     records, cloud, _ = services()
     defaults = pipeline_settings(records)
     enforce_character_limit(options.setup, len(options.reference_sizes), defaults["multi_characters"])
+    route_snapshot = generation_route_snapshot(options.setup, defaults["multi_person_generation_route"])
+    self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
-    check_generation_funding(records, options.setup, active_session)
+    check_generation_funding(records, options.setup, active_session,
+                             generation_route=route_snapshot["multi_person_generation_route"])
     watermark_offer = watermark_snapshot(records, options.setup, active_session)
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
-                if options.setup.auto_generate and active_session.get("access_mode") == "api-key" else None)
+                if not self_hosted and options.setup.auto_generate and active_session.get("access_mode") == "api-key" else None)
     # Bound abandoned upload storage separately; no preparation slot or worker is
     # activated until the complete endpoint verifies both immutable objects.
     records.update("control/uploads.json", lambda current: release_preparation(reserve_preparation(
@@ -1139,6 +1165,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
         "prompt_variant": defaults["prompt_variant"],
         "matching_no_review": defaults["matching_no_review"],
+        **route_snapshot,
         **watermark_offer,
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
@@ -1169,14 +1196,18 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
     if manifest["expires_at"] <= time.time():
         raise PublicError("This upload expired. Prepare the clip again.", 409)
     options = Setup.model_validate({"preparation_version": 1, **manifest["setup"]})
+    # Older upload tickets retain the current provider even after Admin switches.
+    route_snapshot = generation_route_snapshot(options, manifest.get("multi_person_generation_route") or "current")
+    self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
     raw_reference_uris = manifest.get("raw_reference_uris") or [manifest["raw_reference_uri"]]
     reference_sizes = manifest.get("reference_sizes") or [manifest["reference_bytes"]]
     if len(raw_reference_uris) != len(reference_sizes):
         raise PublicError("Reference uploads are incomplete. Prepare the clip again.", 409)
     validate_reference_mapping(options, len(raw_reference_uris))
     enforce_character_limit(options, len(raw_reference_uris), pipeline_settings(records)["multi_characters"])
-    check_generation_funding(records, options, active_session)
-    if (manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
+    check_generation_funding(records, options, active_session,
+                             generation_route=route_snapshot["multi_person_generation_route"])
+    if (not self_hosted and manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
             and not manifest.get("auto_key_ciphertext")):
         raise PublicError("Re-enter your API key before submitting this job.", 409)
     # A lost confirmation never creates a second job or duplicate task.
@@ -1234,7 +1265,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (prompt_variant == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))}
+               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (prompt_variant == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
+               **route_snapshot}
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         if manifest.get("generation_credits") is not None:
@@ -1274,7 +1306,27 @@ def job_status(job_id: str, authorization: str | None = Header(default=None)):
 def refresh_stale_job(job: dict):
     # Admission waits do not own a worker yet and have a separate two-hour
     # bound. Processing still has the original 35-minute watchdog.
-    records, _, _ = services()
+    records, cloud, _ = services()
+    from .self_hosted_jobs import SelfHostedJobs, is_self_hosted
+    if is_self_hosted(job) and job.get("access_mode") == "credits":
+        if (job.get("status") == "submitting" and job.get("credit_reservation_reference")
+                and time.time() - job.get("updated_at", time.time()) > 90):
+            job = records.update(f"jobs/{job['id']}.json", lambda current: {**current,
+                "status": "submission_unknown", "credit_reconciliation_required": True,
+                "credit_reservation_no_generation": True,
+                "message": "Credit reservation needs reconciliation. No new generation will be submitted."}
+                if (current.get("status") == "submitting" and current.get("credit_reservation_reference")
+                    and time.time() - current.get("updated_at", time.time()) > 90) else current)
+        if job.get("credit_reconciliation_required"):
+            return reconcile_self_hosted_credit_reservation(job, records)
+    if is_self_hosted(job):
+        manager = SelfHostedJobs(settings, records, cloud)
+        if job.get("status") in {"generating", "failed"}:
+            return manager.reconcile_status(job)
+        if job.get("status") == "finalizing":
+            # A lost queue acknowledgement must be recoverable from the same
+            # authenticated status refresh, without any GPU resubmission.
+            job = manager.reconcile_status(job)
     def timed_out(current):
         if current["status"] == "queued" and current.get("account_id") and current.get("admission_token"):
             return time.time() - current["created_at"] > 7200
@@ -1342,6 +1394,9 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     def approved_review_key():
         if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
             raise PublicError("This clip needs its original access method.", 403)
+        from .self_hosted_jobs import is_self_hosted
+        if is_self_hosted(job):
+            return None
         key = key_for_session(active_session, x_reapi_key)
         return (protect_key(job_id, key) if active_session.get("access_mode", "api-key") == "api-key"
                 else job.get("auto_key_ciphertext"))
@@ -1349,12 +1404,16 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
         from .scene_selection import resolve
         choices = [choice.model_dump() for choice in review.choices]
         targets = resolve(job["tracking_metadata"], plan, choices)
+        from .self_hosted_jobs import is_self_hosted
+        from .self_hosted_preparation import reviewed_shots
+        shot_fields = ({"self_hosted_shots": reviewed_shots(job["tracking_metadata"], targets)}
+                       if is_self_hosted(job) else {})
         auto_key = approved_review_key() if review.generate_after_review else job.get("auto_key_ciphertext")
         task_token = uuid.uuid4().hex
         def apply_scene_choices(current):
             if current.get("tracking_revision") != review.revision or current.get("status") != "tracking_review":
                 raise PublicError(invalid, 409, code="tracking_review_invalid")
-            return {**current, "status": "ready", "normalized_targets": targets,
+            return {**current, **shot_fields, "status": "ready", "normalized_targets": targets,
                 "tracking_applied_revision": review.revision, "tracking_reviewed": True,
                 "generation_after_review_revision": review.revision if review.generate_after_review else None,
                 "recover_missing_masks": False, "review_generation_queued": review.generate_after_review,
@@ -1533,11 +1592,16 @@ def retry_assets(job, cloud):
 
 
 def export_recoverable(job, cloud):
-    if not job or not job.get("provider_output") or not job.get("normalized_uri"):
+    if not job or not (job.get("provider_output") or job.get("private_provider_output_uri")) or not job.get("normalized_uri"):
+        return False
+    private = job.get("private_provider_output_uri")
+    if private and (not isinstance(private, str)
+                    or not private.startswith(f"gs://{settings.app_bucket}/self-hosted/{job['id']}/")
+                    or not cloud.asset_exists(private)):
         return False
     if job.get("temporary_media_cleanup_started_at") or not cloud.asset_exists(job["normalized_uri"]):
         return False
-    return not (job.get("audio_processing", True) or job.get("setup", {}).get("submit_without_audio", False)) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
+    return not (job.get("restore_original_audio") or job.get("audio_processing", True) or job.get("setup", {}).get("submit_without_audio", False)) or bool(job.get("source_uri") and cloud.asset_exists(job["source_uri"]))
 
 
 @app.get("/api/account/jobs/{job_id}/recovery")
@@ -1547,7 +1611,7 @@ def account_job_recovery(job_id: str, x_firebase_token: str | None = Header(defa
         raise PublicError("This job is still active or already finished. Refresh its status.", 409)
     records, cloud, _ = services()
     # Never offer a second paid render while a completed provider result can be saved.
-    if job and job.get("provider_output"):
+    if job and (job.get("provider_output") or job.get("private_provider_output_uri")):
         can_save = export_recoverable(job, cloud)
         return {"action": "save" if can_save else "support", "no_new_charge": True,
                 "message": ("Your render finished. Retry saving it without another generation charge." if can_save
@@ -1589,7 +1653,8 @@ def retry_saving_video(job_id: str, approval: Approval, x_firebase_token: str | 
         if current and current.get("status") in {"finalizing", "finishing", "completed"}:
             return current
         updated = claim_job(current, {"failed"}, "finalizing")
-        if current.get("provider_output") != job.get("provider_output"):
+        if (current.get("provider_output") != job.get("provider_output")
+                or current.get("private_provider_output_uri") != job.get("private_provider_output_uri")):
             raise PublicError("The job changed. Refresh its details.", 409)
         claimed = True
         return {**updated, "message": "Retrying the save of your existing render. No new generation charge."}
@@ -1617,9 +1682,13 @@ def resume_account_job(job_id: str, x_firebase_token: str | None = Header(defaul
         records, _, _ = services()
         if settings.require_account and not api_key_permission(records, account):
             raise PublicError("API-key access is not enabled for this account.", 403)
-        key = provider_key(x_reapi_key)
-        check_key_binding(job, key)
-        key_fingerprint = digest(key)
+        from .self_hosted_jobs import is_self_hosted
+        if is_self_hosted(job):
+            key_fingerprint = digest("recastfx-self-hosted:" + job["multi_person_generation_route"])
+        else:
+            key = provider_key(x_reapi_key)
+            check_key_binding(job, key)
+            key_fingerprint = digest(key)
     records, _, _ = services()
     token = secrets.token_urlsafe(32)
     expires_at = time.time() + settings.session_seconds
@@ -1653,7 +1722,8 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     job = refresh_stale_job(job)
     if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
         raise PublicError("This clip needs its original access method.", 403)
-    key = key_for_session(active_session, x_reapi_key)
+    from .self_hosted_jobs import is_self_hosted
+    key = "" if is_self_hosted(job) else key_for_session(active_session, x_reapi_key)
     if not approval.approved:
         raise PublicError("Review the guide and approve the selected person before generating.")
     return submit_generation(job_id, job, active_session, key)
@@ -1667,6 +1737,9 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     if job.get("tracking_plan", {}).get("review_required") and not job.get("tracking_reviewed"):
         raise PublicError("Confirm your scene matches before generating.", 409, code="tracking_review_invalid")
     records, cloud, provider = services()
+    from .self_hosted_jobs import is_self_hosted
+    if is_self_hosted(job):
+        return submit_self_hosted_generation(job_id, job, active_session, records, cloud)
     provider = selected_provider(job.get("provider", "reAPI"))
     options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True, **job["setup"]})
     if (job.get("prompt_variant") == "cloudflare_identity_v1" and options.easy_mode
@@ -1808,6 +1881,157 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     return view(updated)
 
 
+def reconcile_self_hosted_credit_reservation(job, records):
+    """Settle only an explicitly quarantined reservation that never reached a worker."""
+    from .commerce import wallet_path
+    from .self_hosted_jobs import is_self_hosted
+    if not is_self_hosted(job) or not job.get("credit_reconciliation_required"):
+        return job
+    charge = job.get("credit_reservation_credits")
+    reference = "generation:" + job["id"]
+    refund_reference = "refund:" + job["id"]
+    valid = (job.get("access_mode") == "credits" and type(charge) is int and 0 < charge <= 1000000
+             and job.get("status") in {"submitting", "submission_unknown", "failed"}
+             and job.get("credit_reservation_reference") == reference
+             and job.get("credit_reservation_no_generation") is True
+             and not job.get("worker_started_at") and not job.get("self_hosted_lease"))
+    if not valid:
+        return job
+    def resolved(state, charged):
+        def update(current):
+            if (not current or not current.get("credit_reconciliation_required")
+                    or current.get("status") not in {"submitting", "submission_unknown", "failed"}
+                    or current.get("credit_reservation_reference") != reference
+                    or current.get("credit_reservation_credits") != charge
+                    or current.get("worker_started_at") or current.get("self_hosted_lease")):
+                return current
+            return {**current, "status": "failed", "credit_reconciliation_required": False,
+                    "credit_reservation_state": state, "app_credits_charged": charged,
+                    "self_hosted_phase": "credit_reservation_failed", "updated_at": time.time(),
+                    "message": ("Credit reservation was interrupted; the reserved credits were returned. No GPU generation was submitted."
+                                if state == "refunded" else
+                                "Credit reservation could not be completed. No credits were charged and no GPU generation was submitted.")}
+        return records.update(f"jobs/{job['id']}.json", update)
+    try:
+        control, _ = records.read(f"control/self-hosted/{job['multi_person_generation_route']}.json")
+        control = control or {}
+        if job["id"] in control.get("queue", []) or (control.get("active") or {}).get("job_id") == job["id"]:
+            return job  # Unknown queue delivery is a different recovery path; never refund a possible render.
+        path = wallet_path(job["account_id"])
+        wallet, _ = records.read(path)
+        applied = (wallet or {}).get("applied", {})
+        if not isinstance(applied, dict):
+            return job
+        debit, refund = applied.get(reference), applied.get(refund_reference)
+        if debit is None and refund is None:
+            # A definitive insufficient-credit rejection performs no wallet write.
+            # Transport errors without a receipt remain unknown until reconciled.
+            return resolved("not_charged", 0) if job.get("credit_reservation_definite_no_debit") is True else job
+        if type(debit) is not int or debit != -charge:
+            return job
+        if refund is not None:
+            return resolved("refunded", charge) if type(refund) is int and refund == charge else job
+        try:
+            returned = apply_wallet_change(records, job["account_id"], refund_reference, charge, "refund")
+        except Exception:
+            # A refund may itself have committed before its acknowledgement was lost.
+            returned, _ = records.read(path)
+        receipts = (returned or {}).get("applied", {})
+        if (isinstance(receipts, dict) and type(receipts.get(reference)) is int and receipts[reference] == -charge
+                and type(receipts.get(refund_reference)) is int and receipts[refund_reference] == charge):
+            return resolved("refunded", charge)
+    except Exception:
+        # Leave the durable quarantine/amount intact for the next authenticated
+        # status refresh. Never speculate about an unreadable financial receipt.
+        return job
+    return job
+
+
+def submit_self_hosted_generation(job_id, job, active_session, records, cloud):
+    from .self_hosted_jobs import SelfHostedJobs, validate_prepared_job
+    from .self_hosted_preparation import reviewed_shots
+    if job.get("tracking_plan", {}).get("review_required") and not job.get("tracking_reviewed"):
+        raise PublicError("Confirm your shot assignments before generating.", 409)
+    if not job.get("self_hosted_shots"):
+        shots = reviewed_shots(job["tracking_metadata"], job["normalized_targets"])
+    else:
+        shots = job["self_hosted_shots"]
+    shots = validate_prepared_job({**job, "self_hosted_shots": shots}, settings)
+    # The normal wallet debit key is shared with hosted generation. Repeated
+    # approvals cannot charge twice or turn a saved self-hosted job into reAPI.
+    credits_mode = active_session.get("access_mode") == "credits"
+    charge = job.get("generation_credits", generation_credit_cost(job["duration"], public_catalog(records)["credits_per_generation"]))
+    if credits_mode and (type(charge) is not int or not 0 < charge <= 1000000):
+        raise PublicError("Credit pricing is not configured yet.", 503)
+    try:
+        records.update(f"jobs/{job_id}.json", lambda current: {
+            **claim_job(current, {"ready"}, "submitting"), "self_hosted_shots": shots,
+            "generation_settings": {"model": "MiniMax-H3", "recipe": "characterswap_v1"},
+            **({"credit_reservation_credits": charge, "credit_reservation_reference": "generation:" + job_id,
+                "credit_reservation_state": "pending", "credit_reconciliation_required": False} if credits_mode else {}),
+            "self_hosted_phase": "submitting", "updated_at": time.time()})
+    except PublicError as error:
+        if error.status_code == 409:
+            return view(records.read(f"jobs/{job_id}.json")[0])
+        raise
+    if credits_mode:
+        debited = False
+        try:
+            receipt = apply_wallet_change(records, job["account_id"], "generation:" + job_id, -charge, "generation")
+            debited = True
+            if "refund:" + job_id in receipt.get("applied", {}):
+                raise PublicError("This reservation was already returned. Prepare a new job before generating.", 409)
+            def reserved(current):
+                if current.get("status") != "submitting" or current.get("credit_reconciliation_required"):
+                    raise PublicError("Credit reservation needs reconciliation before generation.", 409)
+                return {**current, "app_credits_charged": charge, "credit_reservation_state": "reserved", "updated_at": time.time()}
+            records.update(f"jobs/{job_id}.json", reserved)
+        except Exception as error:
+            # The debit RPC can commit and lose its acknowledgement. Only the
+            # authoritative exact ledger receipt authorizes the compensating refund.
+            quarantined = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                "status": "submission_unknown", "credit_reconciliation_required": True,
+                "credit_reservation_no_generation": True,
+                "credit_reservation_definite_no_debit": (not debited and isinstance(error, PublicError) and error.status_code == 402),
+                "message": "Credit reservation needs reconciliation. No GPU generation was submitted; do not submit it again.",
+                "updated_at": time.time()}
+                if current.get("status") in {"submitting", "submission_unknown"} else current)
+            settled = reconcile_self_hosted_credit_reservation(quarantined, records)
+            if settled.get("credit_reconciliation_required"):
+                raise PublicError("Credit reservation needs reconciliation. No GPU generation was submitted; do not submit again.", 503) from None
+            if isinstance(error, PublicError):
+                raise
+            raise PublicError(settled.get("message", "Credit reservation was interrupted. No GPU generation was submitted."), 503) from None
+    try:
+        updated = SelfHostedJobs(settings, records, cloud).enqueue(job_id)
+    except PublicError as error:
+        if error.status_code == 429:
+            if credits_mode:
+                quarantined = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "status": "submission_unknown", "credit_reconciliation_required": True,
+                    "credit_reservation_no_generation": True,
+                    "message": "The CharacterSwap queue is full; the unused credit reservation is being reconciled."})
+                settled = reconcile_self_hosted_credit_reservation(quarantined, records)
+                if settled.get("credit_reconciliation_required"):
+                    raise PublicError("The queue was full. Credit return needs reconciliation; no GPU generation was submitted.", 503) from None
+            else:
+                records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                    "status": "failed", "message": "The CharacterSwap queue is full; no render was submitted."})
+            raise
+        records.update(f"jobs/{job_id}.json", lambda current: {**current,
+            "queue_recovery_status": "required",
+            "message": "Your self-hosted render is saved; its queue needs reconciliation. No fallback generation was submitted."})
+        raise
+    except Exception:
+        # Queue acknowledgement may have been lost. Preserve the durable job
+        # and debit; never silently fallback or issue a second generation.
+        records.update(f"jobs/{job_id}.json", lambda current: {**current,
+            "queue_recovery_status": "required",
+            "message": "Your self-hosted render is saved; its queue needs reconciliation. No fallback generation was submitted."})
+        raise PublicError("The saved CharacterSwap job needs queue reconciliation. Do not submit again.", 503) from None
+    return view(updated)
+
+
 def math_credits(duration: int):
     return round(estimate(duration, settings.h3_price_per_second_usd) * 1000)
 
@@ -1819,12 +2043,16 @@ def refresh_provider(job_id: str, authorization: str | None = Header(default=Non
     job = refresh_stale_job(job)
     if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
         raise PublicError("This clip needs its original access method.", 403)
-    key = key_for_session(active_session, x_reapi_key)
+    from .self_hosted_jobs import is_self_hosted
+    key = "" if is_self_hosted(job) else key_for_session(active_session, x_reapi_key)
     return provider_status(job_id, job, key)
 
 
 @timed("provider_poll", job_arg="job_id")
 def provider_status(job_id: str, job: dict, key: str):
+    from .self_hosted_jobs import is_self_hosted
+    if is_self_hosted(job):
+        return view(job)
     if job["status"] != "generating" or not job.get("provider_task"):
         return view(job)
     records, cloud, provider = services()
@@ -1952,7 +2180,8 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_submission or capacity_approved):
         return {"ok": True}
     try:
-        key = (key_for_session({"access_mode": "credits"}, None)
+        from .self_hosted_jobs import is_self_hosted
+        key = "" if is_self_hosted(job) else (key_for_session({"access_mode": "credits"}, None)
                if job["access_mode"] == "credits" else recover_key(job))
         submit_generation(task.job_id, job, {"access_mode": job["access_mode"]}, key)
     except PublicError as error:
@@ -2038,3 +2267,6 @@ def delivery_context():
 
 
 register_delivery_recovery(app, delivery_context)
+
+from .self_hosted_jobs import register_worker_routes
+register_worker_routes(app, delivery_context)

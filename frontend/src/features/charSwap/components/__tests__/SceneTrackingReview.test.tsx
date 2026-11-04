@@ -30,6 +30,37 @@ function select(region = screen.getAllByRole("region")[0]) {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("character-first scrolling scene review", () => {
+  it("requires an explicit decision for both unresolved self-hosted scenes before submission", async () => {
+    const props = properties();
+    render(<SceneTrackingReview {...props} requireExplicitChoices />);
+    const submit = screen.getByRole("button", {name: "Submit and generate"});
+    expect(submit).toBeDisabled();
+    expect(screen.getAllByText(/Not yet checked/)).toHaveLength(2);
+    select();
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(props.onApply).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getAllByRole("region")[1]).getByRole("button", {name: "Not in this scene"}));
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await waitFor(() => expect(props.onApply).toHaveBeenCalledWith([
+      {segment_id: "cut", absent: false, anchor: {x: .5, y: .5, time: reviewFrameTime(36)}},
+      {segment_id: "gap", absent: true, anchor: null},
+    ]));
+  });
+
+  it("retains confirmed automatic suggestions while requiring the remaining uncertain section", async () => {
+    const props = properties();
+    const suggested = {segment_id: "cut", absent: false, anchor: {x: .3, y: .4, time: reviewFrameTime(42)}};
+    render(<SceneTrackingReview {...props} requireExplicitChoices initialChoices={[suggested]} />);
+    expect(screen.getByText("Selected. Tap again to change the person.")).toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Submit and generate"})).toBeDisabled();
+    fireEvent.click(within(screen.getAllByRole("region")[1]).getByRole("button", {name: "Not in this scene"}));
+    fireEvent.click(screen.getByRole("button", {name: "Submit and generate"}));
+    await waitFor(() => expect(props.onApply).toHaveBeenCalledWith([suggested,
+      {segment_id: "gap", absent: true, anchor: null}]));
+  });
+
   it("shows all scenes together with the original person's picture and absence guidance", () => {
     render(<SceneTrackingReview {...properties()} enhancedMasking={false} />);
     expect(screen.getByRole("heading", {name: "Character 1 of 1 · Person 1"})).toBeInTheDocument();

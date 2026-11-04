@@ -230,7 +230,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         if (!active || !POLL_STATUSES.has(active.status)) return;
         const access = await ensureSession(controller.signal, true);
         const next = active.status === "generating"
-          ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal, accessMode)
+          ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal, accessMode, active.generation_destination)
           : await getLiveJob(active.id, access.token, controller.signal);
         if (!controller.signal.aborted && epoch.current === version) publishJob(next);
       } catch (cause) {
@@ -328,7 +328,9 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     try {
       const access = await ensureSession(controller.signal, true);
       const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal,
-        {enabled: active.mask_style !== "none" || active.settings_used?.face_mesh === true, key: apiKey, generateAfterReview: true});
+        {enabled: active.mask_style !== "none" || active.settings_used?.face_mesh === true,
+          key: active.generation_destination === "google_h3" || active.generation_destination === "paperspace_h3" ? undefined : apiKey,
+          generateAfterReview: true});
       if (controller.signal.aborted || epoch.current !== version) return false;
       preparationStartedAt.current = Date.now();
       setPreparationElapsedSeconds(0);
@@ -363,7 +365,8 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       return;
     }
     try {
-      if (accessMode === "api-key") assertLiveKey(apiKey);
+      if (accessMode === "api-key" && active.generation_destination !== "google_h3" &&
+          active.generation_destination !== "paperspace_h3") assertLiveKey(apiKey);
     } catch (cause) {
       setError(cause instanceof LivePipelineError ? cause.message : "Add your own provider key first.");
       return;
@@ -382,7 +385,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       controller.signal.throwIfAborted();
       attemptedJobs.current.add(active.id);
       requestStarted = true;
-      const submitted = await generateLiveJob(active.id, access.token, apiKey, controller.signal, accessMode);
+      const submitted = await generateLiveJob(active.id, access.token, apiKey, controller.signal, accessMode, active.generation_destination);
       if (!controller.signal.aborted && epoch.current === version) publishJob(submitted);
     } catch (cause) {
       if (!controller.signal.aborted && epoch.current === version) {
@@ -422,7 +425,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     try {
       const access = await ensureSession(controller.signal, true);
       const next = active.status === "generating"
-        ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal, accessMode)
+        ? await pollLiveProvider(active.id, access.token, apiKey, controller.signal, accessMode, active.generation_destination)
         : await getLiveJob(active.id, access.token, controller.signal);
       if (controller.signal.aborted || epoch.current !== version) return;
       publishJob(next);

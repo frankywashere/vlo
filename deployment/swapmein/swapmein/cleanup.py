@@ -49,6 +49,8 @@ def cleanup_completed_media(settings, records, cloud, job_id):
     prefixes = [(settings.app_bucket, f"uploads/{job_id}/"),
                 (settings.app_bucket, f"outputs/{job_id}/"),
                 (settings.worker_bucket, f"inputs/swapmein-{job_id}/")]
+    if job.get("multi_person_generation_route") in {"google_h3", "paperspace_h3"}:
+        prefixes.append((settings.app_bucket, f"self-hosted/{job_id}/"))
     prefixes += [(settings.worker_bucket, f"outputs/{kind}-{job_id}/")
                  for kind in ("sm-depth", "sm-sam", "sm-audio", "sm-guide")]
     prefixes.append((settings.worker_bucket, f"outputs/sm-guide-review-{job_id}-"))

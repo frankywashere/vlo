@@ -635,6 +635,7 @@ export function CharSwapWalkthrough({
                     errorMessage={pipeline.error ?? (pipeline.job.tracking_review_error ? pipeline.job.message : undefined)}
                     message={pipeline.job.message}
                     initialChoices={pipeline.job.tracking_choices}
+                    requireExplicitChoices={pipeline.job.generation_destination === "google_h3" || pipeline.job.generation_destination === "paperspace_h3"}
                     onApply={pipeline.resolveTracking}
                     onRefresh={() => void pipeline.refresh()}
                   />

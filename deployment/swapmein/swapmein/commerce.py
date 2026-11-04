@@ -30,19 +30,42 @@ def stripe_key_ready() -> bool:
     return os.getenv("STRIPE_SECRET_KEY", "").startswith(prefixes)
 
 
-def feature_readiness() -> dict:
+def _generation_ready(records=None, generation_route=None):
+    # A normal single-person render still needs the hosted provider. A self-hosted
+    # upload uses its pinned route, even if Admin changes the default meanwhile.
+    from .self_hosted_route import SELF_HOSTED_GENERATION_ROUTES
+    if generation_route == "current":
+        return provider_key_ready()
+    if generation_route is None:
+        if provider_key_ready():
+            return True
+        if records is None:
+            return False
+        pipeline, _ = records.read("control/pipeline-settings.json")
+        pipeline = pipeline or {}
+        if pipeline.get("multi_characters", True) is False:
+            return False
+        generation_route = pipeline.get("multi_person_generation_route", "current")
+    if not isinstance(generation_route, str) or generation_route not in SELF_HOSTED_GENERATION_ROUTES or records is None:
+        return False
+    from .config import Settings
+    from .self_hosted_jobs import worker_views
+    return worker_views(Settings.from_env(), records).get(generation_route, {}).get("ready") is True
+
+
+def feature_readiness(records=None, *, generation_route=None) -> dict:
     """Server-side prerequisites; never expose credential values to the client."""
     return {
         "checkout": bool(stripe_key_ready()
                          and os.getenv("STRIPE_WEBHOOK_SECRET", "").startswith("whsec_")),
-        "credit_generation": provider_key_ready(),
+        "credit_generation": _generation_ready(records, generation_route),
     }
 
 
-def feature_view(records) -> dict:
+def feature_view(records, *, generation_route=None) -> dict:
     current, _ = records.read(FEATURES_PATH)
     current = current or {}
-    ready = feature_readiness()
+    ready = feature_readiness(records, generation_route=generation_route)
     return {"revision": current.get("revision", 0),
             "stripe_mode": "live" if stripe_livemode() else "test",
             "checkout": current.get("checkout") is True and ready["checkout"],
@@ -52,7 +75,7 @@ def feature_view(records) -> dict:
 
 def save_features(records, actor: dict, revision: int, checkout: bool, credit_generation: bool) -> dict:
     require_permission(records, actor, "service_controls")
-    ready = feature_readiness()
+    ready = feature_readiness(records)
     catalog, _ = records.read(CATALOG_PATH)
     catalog = catalog or default_catalog()
     if checkout and (not any(pack.get("active") for pack in catalog.get("packs", []))
@@ -61,7 +84,7 @@ def save_features(records, actor: dict, revision: int, checkout: bool, credit_ge
     if checkout and not ready["checkout"]:
         raise PublicError("Configure the matching Stripe key and webhook secret before enabling checkout.", 409)
     if credit_generation and not ready["credit_generation"]:
-        raise PublicError("Configure the private provider key before enabling credit-funded generation.", 409)
+        raise PublicError("Configure the private provider key or a ready self-hosted route before enabling credit-funded generation.", 409)
 
     def mutate(current):
         current = current or {}

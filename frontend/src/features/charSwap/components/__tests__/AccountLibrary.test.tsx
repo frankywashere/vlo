@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   act,
@@ -17,8 +17,9 @@ import {
   retrySavingVideo,
 } from "../../services/accounts";
 import { generateLiveJob, pollLiveProvider, resolveLiveTracking } from "../../services/livePipeline";
+import { loadAccountAccess } from "../../services/commerce";
 vi.mock("../../services/commerce", () => ({
-  loadAccountAccess: async () => ({ api_key_enabled: true, role: null }),
+  loadAccountAccess: vi.fn(),
 }));
 
 vi.mock("../../services/accounts", () => ({
@@ -33,6 +34,9 @@ vi.mock("../../services/livePipeline", () => ({
   pollLiveProvider: vi.fn(),
   resolveLiveTracking: vi.fn(),
 }));
+beforeEach(() => {
+  vi.mocked(loadAccountAccess).mockResolvedValue({api_key_enabled: true, role: null});
+});
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -49,6 +53,60 @@ const job = {
 };
 
 describe("private account library", () => {
+  it.each(["google_h3", "paperspace_h3"] as const)("can approve and refresh a saved %s job without a hosted key", async (destination) => {
+    const saved = {...job, access_mode: "api-key" as const, generation_destination: destination};
+    const generating = {...saved, status: "generating" as const};
+    vi.mocked(loadAccountJobs).mockResolvedValueOnce([saved]).mockResolvedValue([generating]);
+    vi.mocked(resumeAccountJob).mockResolvedValue({token: "self-hosted-session", expires_at: 9999999999});
+    vi.mocked(generateLiveJob).mockResolvedValue(generating);
+    vi.mocked(pollLiveProvider).mockResolvedValue(generating);
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Review prepared clip"}));
+    expect(screen.queryByLabelText("reAPI API key")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Approve and generate"})).toBeEnabled();
+    await user.click(screen.getByRole("button", {name: "Approve and generate"}));
+    await waitFor(() => expect(generateLiveJob).toHaveBeenCalledWith(job.id, "self-hosted-session", "",
+      expect.any(AbortSignal), "api-key", destination));
+    await user.click(await screen.findByRole("button", {name: "Refresh status"}));
+    await waitFor(() => expect(pollLiveProvider).toHaveBeenCalledWith(job.id, "self-hosted-session", "",
+      expect.any(AbortSignal), "api-key", destination));
+    expect(resumeAccountJob).toHaveBeenCalledWith(job.id, "");
+  });
+
+  it("keeps account API-key permission required for self-hosted jobs", async () => {
+    vi.mocked(loadAccountAccess).mockResolvedValue({api_key_enabled: false, role: null});
+    vi.mocked(loadAccountJobs).mockResolvedValue([{...job, access_mode: "api-key", generation_destination: "google_h3"}]);
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await userEvent.click(await screen.findByRole("button", {name: "Review prepared clip"}));
+    expect(screen.getByRole("button", {name: "Approve and generate"})).toBeDisabled();
+    expect(resumeAccountJob).not.toHaveBeenCalled();
+    expect(generateLiveJob).not.toHaveBeenCalled();
+  });
+
+  it("allows explicit self-hosted scene review without a hosted key", async () => {
+    const saved = {...job, status: "tracking_review" as const, access_mode: "api-key" as const,
+      generation_destination: "paperspace_h3" as const, mask_style: "none" as const,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4, tracking_revision: 1,
+      tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+        seek_time: 1, needs_review: true, reason: "scene_selection"}]};
+    vi.mocked(loadAccountJobs).mockResolvedValue([saved]);
+    vi.mocked(resumeAccountJob).mockResolvedValue({token: "self-hosted-session", expires_at: 9999999999});
+    vi.mocked(resolveLiveTracking).mockResolvedValue({...saved, status: "queued"});
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    expect(screen.queryByLabelText("reAPI API key")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Submit and generate"})).toBeDisabled();
+    await user.click(screen.getByRole("button", {name: "Not in this scene"}));
+    expect(screen.getByRole("button", {name: "Submit and generate"})).toBeEnabled();
+    await user.click(screen.getByRole("button", {name: "Submit and generate"}));
+    await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledWith(job.id, "self-hosted-session", 1,
+      [{segment_id: "s0", absent: true, anchor: null}], expect.any(AbortSignal),
+      {enabled: false, key: "", generateAfterReview: true}));
+    expect(resumeAccountJob).toHaveBeenCalledWith(job.id, "");
+  });
+
   it("shows actual consumer credits and refunds in completed clip settings", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "completed", access_mode: "credits",
       output_url: "https://storage.googleapis.com/result.mp4",

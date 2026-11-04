@@ -170,6 +170,7 @@ export function ReviewStep({
         )}
       </Stack>
       <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+        {targets.length > 1 && <Alert severity="warning">Replacing multiple people is experimental and may not produce the intended result.</Alert>}
         {cleanupIssue && <Alert severity="info">{cleanupIssue}</Alert>}
         {manualPreparationComplete ? (
           <Stack component="section" aria-label="Prepared settings" spacing={1}

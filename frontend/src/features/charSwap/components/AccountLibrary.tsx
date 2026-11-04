@@ -60,6 +60,10 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const hiddenJobs = useRef(new Set<string>());
   const [key, setKey] = useState("");
   const [apiKeyAllowed, setApiKeyAllowed] = useState(false);
+  const selectedSelfHosted = selected?.generation_destination === "google_h3" ||
+    selected?.generation_destination === "paperspace_h3";
+  const selectedAccessBlocked = selected?.access_mode !== "credits" &&
+    (!apiKeyAllowed || (!selectedSelfHosted && !key.trim()));
   useEffect(() => {
     let active = true;
     void loadAccountAccess()
@@ -212,13 +216,12 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
       controller.current = new AbortController();
       try {
         const session = await resumeAccountJob(selected.id, key);
-        const result = await (generate ? generateLiveJob : pollLiveProvider)(
-          selected.id,
-          session.token,
-          key,
-          controller.current.signal,
-          selected.access_mode === "credits" ? "credits" : "api-key",
-        );
+        const action = generate ? generateLiveJob : pollLiveProvider;
+        const mode = selected.access_mode === "credits" ? "credits" : "api-key";
+        const result = selectedSelfHosted
+          ? await action(selected.id, session.token, key, controller.current.signal, mode,
+            selected.generation_destination)
+          : await action(selected.id, session.token, key, controller.current.signal, mode);
         if (mounted.current) {
           setSelected({ ...selected, ...result });
           setAutoCheck(result.status === "generating");
@@ -236,14 +239,14 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
         if (mounted.current) setBusy(false);
       }
     },
-    [selected, busy, key, refresh],
+    [selected, selectedSelfHosted, busy, key, refresh],
   );
 
   useEffect(() => {
     if (
       !autoCheck ||
       busy ||
-      (selected?.access_mode !== "credits" && !key.trim()) ||
+      selectedAccessBlocked ||
       selected?.status !== "generating"
     )
       return;
@@ -251,7 +254,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
       void act(false);
     }, 10000);
     return () => globalThis.clearTimeout(timer);
-  }, [autoCheck, busy, key, selected?.status, selected?.access_mode, act]);
+  }, [autoCheck, busy, selectedAccessBlocked, selected?.status, act]);
 
   async function hide(job: AccountJob, hidden: boolean) {
     if (visibilityRequests.current.has(job.id)) return;
@@ -323,7 +326,10 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             ))}
             {selected?.status === "ready" && (
               <Alert severity="info">
-                {selected.easy_mode
+                {selectedSelfHosted ? <>
+                  Review the source and references. Approving below starts experimental CharacterSwap generation
+                  {selected.access_mode === "credits" ? " using your recastfx credits" : ""}
+                </> : <>{selected.easy_mode
                   ? "Easy mode has prepared your clip. Continuing starts a paid generation"
                   : "Review the guide and reference. Approving below starts a paid generation"}{" "}
                 using your{" "}
@@ -331,7 +337,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                   ? "recastfx credits"
                   : apiKeyAllowed
                     ? `${selected.provider} balance`
-                    : "account balance"}
+                    : "account balance"}</>}
                 {selected.estimated_cost_usd !== undefined
                   ? ` (estimated US$${selected.estimated_cost_usd.toFixed(2)})`
                   : ""}
@@ -339,6 +345,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
               </Alert>
             )}
             {apiKeyAllowed &&
+              !selectedSelfHosted &&
               selected?.access_mode !== "credits" &&
               selected &&
               ["ready", "generating", "tracking_review"].includes(
@@ -382,12 +389,9 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                   duration={selected.duration ?? 0}
                   width={selected.width ?? 854}
                   height={selected.height ?? 480}
-                  busy={
-                    busy ||
-                    (selected.access_mode !== "credits" &&
-                      (!apiKeyAllowed || !key.trim()))
-                  }
+                  busy={busy || selectedAccessBlocked}
                   initialChoices={selected.tracking_choices}
+                  requireExplicitChoices={selected.generation_destination === "google_h3" || selected.generation_destination === "paperspace_h3"}
                   errorSegmentId={trackingErrorSegmentId ?? selected.tracking_error_segment_id}
                   errorMessage={error ?? (selected.tracking_review_error ? selected.message : undefined)}
                   onRefresh={() => void refresh()}
@@ -446,11 +450,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           )}
           {selected?.status === "generating" && (
             <Button
-              disabled={
-                busy ||
-                (selected.access_mode !== "credits" &&
-                  (!apiKeyAllowed || !key.trim()))
-              }
+              disabled={busy || selectedAccessBlocked}
               onClick={() => void act(false)}
             >
               Refresh status
@@ -459,11 +459,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           {selected?.status === "ready" && (
             <Button
               variant="contained"
-              disabled={
-                busy ||
-                (selected.access_mode !== "credits" &&
-                  (!apiKeyAllowed || !key.trim()))
-              }
+              disabled={busy || selectedAccessBlocked}
               onClick={() => void act(true)}
             >
               {selected.easy_mode

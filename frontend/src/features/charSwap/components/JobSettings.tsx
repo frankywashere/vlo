@@ -4,11 +4,18 @@ import type { JobSettingsUsed } from "../services/livePipeline";
 export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode, expanded = false }: {
   settings?: JobSettingsUsed; creditsUsed?: number; creditsReturned?: number; accessMode?: string; expanded?: boolean;
 }) {
+  const selfHosted = settings?.multi_person_generation_route === "google_h3" ||
+    settings?.multi_person_generation_route === "paperspace_h3";
   const rows: [string, string][] = [];
   if (creditsUsed !== undefined) rows.push(["Credits used", creditsUsed.toLocaleString()]);
   if (creditsReturned) rows.push(["Credits refunded", creditsReturned.toLocaleString()]);
   const seconds = (value: number) => `${Number(value.toFixed(2))}s`;
   if (settings) {
+    if (selfHosted) {
+      rows.push(["Generation route", settings.multi_person_generation_route === "google_h3"
+        ? "Google CharacterSwap" : "Paperspace CharacterSwap"]);
+      if (settings.generation_recipe === "characterswap_v1") rows.push(["Generation recipe", "CharacterSwap V1"]);
+    }
     const promptLabels = {
       current: "Current prompts",
       favorite_v2: "Favorite prompt across modes",
@@ -17,7 +24,7 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
       identity_tint_tracking_v1: "Structured with Easy Mode tint tracking",
       cloudflare_identity_v1: "Cloudflare character matching",
     };
-    if (settings.prompt_variant) rows.push(["Generation prompts", promptLabels[settings.prompt_variant]]);
+    if (!selfHosted && settings.prompt_variant) rows.push(["Generation prompts", promptLabels[settings.prompt_variant]]);
     if (settings.trim?.length === 2) rows.push(["Source section", `${seconds(settings.trim[0])}–${seconds(settings.trim[1])}`]);
     if (settings.duration !== undefined) rows.push(["Clip length", seconds(settings.duration)]);
     if (settings.depth_guidance && settings.depth_overlay_opacity !== undefined)
@@ -29,6 +36,7 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
       ["Face mesh", settings.face_mesh],
       ["Audio processing", settings.audio_processing],
       ["Submit without audio", settings.submit_without_audio],
+      ["Restore original audio", settings.restore_original_audio],
       ["RecastFX watermark", settings.add_watermark],
     ] as const) if (value !== undefined) rows.push([label, value ? "On" : "Off"]);
     if (settings.replace_all_people) rows.push(["People", "Replace everyone"]);
@@ -45,10 +53,12 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
     if (settings.mask_style && styles[settings.mask_style]) rows.push(["Mask method", styles[settings.mask_style]]);
     if (settings.prep_width && settings.prep_height) rows.push(["Prepared video", `${settings.prep_width} × ${settings.prep_height}${settings.prep_fps ? ` · ${settings.prep_fps} fps` : ""}`]);
     if (settings.model) rows.push(["Model", settings.model]);
-    if (settings.requested_resolution) rows.push(["Render quality", settings.requested_resolution]);
+    if (!selfHosted && settings.requested_resolution) rows.push(["Render quality", settings.requested_resolution]);
     if (settings.width && settings.height) rows.push(["Video dimensions", `${settings.width} × ${settings.height}`]);
   }
-  const incomplete = !settings || [settings.easy_mode, settings.enhanced_masking, settings.audio_processing].some(value => value === undefined);
+  const incomplete = !settings || (selfHosted
+    ? settings.generation_recipe === undefined || settings.restore_original_audio === undefined
+    : [settings.easy_mode, settings.enhanced_masking, settings.audio_processing].some(value => value === undefined));
   return (
     <Box component="details" open={expanded || undefined} sx={{ mt: 2, borderTop: 1, borderColor: "divider", pt: 1.5 }}>
       <Box component="summary" sx={{ cursor: "pointer", typography: "body2", fontWeight: 600, py: 0.5 }}>Settings used</Box>
@@ -60,7 +70,9 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
           </Box>
         ))}
       </Box>
-      {accessMode === "api-key" && <Typography variant="caption" color="text.secondary">Provider API key used; no site credits charged.</Typography>}
+      {accessMode === "api-key" && <Typography variant="caption" color="text.secondary">{selfHosted
+        ? "Private worker used; no site credits charged."
+        : "Provider API key used; no site credits charged."}</Typography>}
       {incomplete && <Typography variant="caption" color="text.secondary">Some settings weren’t saved for this older clip.</Typography>}
     </Box>
   );

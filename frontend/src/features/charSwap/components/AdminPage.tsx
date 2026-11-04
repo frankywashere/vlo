@@ -117,6 +117,37 @@ export function AdminPage() {
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
           <VideoDownloaderSettings canEdit={can("service_controls")} />
+          <Box component="section" aria-label="Multi-person generation destination">
+            <Typography fontWeight={600}>Multi-person generation destination</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+              Applies only to jobs with two or more individually selected people. One-person jobs and Replace all people keep the normal route. Only one destination can be on; with both off, the normal route is used. Changes apply to new jobs only.
+            </Typography>
+            <Stack spacing={1}>
+              {([
+                ["google_h3", "Google"],
+                ["paperspace_h3", "Paperspace"],
+              ] as const).map(([route, label]) => {
+                const selected = admin.pipeline?.multi_person_generation_route === route;
+                const readiness = admin.pipeline?.self_hosted_workers?.[route];
+                const ready = readiness?.ready === true;
+                return <Box key={route}>
+                  <FormControlLabel control={<Switch checked={selected}
+                    disabled={busy || !can("pipeline_settings") || (!selected && !ready)}
+                    onChange={(event) => {
+                      const destination = event.target.checked ? route : "current";
+                      void run(async () => {
+                        const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, multi_person_generation_route: destination});
+                        setAdmin(current => current ? {...current, pipeline} : current);
+                        setMessage(`${destination === "current" ? "Normal route" : `${label} CharacterSwap`} saved for new multi-person jobs. Existing jobs keep their saved destination.`);
+                      });
+                    }} />} label={`Multi-person swaps: ${label} CharacterSwap`} />
+                  {!ready && <Typography variant="body2" color="text.secondary">
+                    {readiness?.message ?? `${label} worker readiness has not been confirmed.`}
+                  </Typography>}
+                </Box>;
+              })}
+            </Stack>
+          </Box>
           <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
             disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}
             onChange={(event) => {

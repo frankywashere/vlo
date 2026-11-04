@@ -154,7 +154,7 @@ def _payload(references, candidates):
             "questions": questions}
 
 
-def _call(payload, credentials, deadline, budget):
+def _call(payload, credentials, deadline, budget, *, detailed=False):
     account, token, gateway = _credentials(credentials)
     job_id = getattr(budget, "job_id", None)
     if not isinstance(job_id, str):
@@ -207,7 +207,8 @@ def _call(payload, credentials, deadline, budget):
                 raise _unavailable()
             if not math.isclose(sum(values), 1, abs_tol=.0001):
                 raise _unavailable()
-            answers[name] = float(probabilities["same"])
+            answers[name] = ({key: float(probabilities[key]) for key in ("same", "different", "uncertain")}
+                             if detailed else float(probabilities["same"]))
         raw_usage = result.get("usage", body.get("usage", {}))
         tokens = raw_usage.get("input_tokens", raw_usage.get("prompt_tokens")) if isinstance(raw_usage, dict) else None
         if type(tokens) is not int or not 0 <= tokens <= 65_536:

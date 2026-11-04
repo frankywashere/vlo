@@ -138,6 +138,12 @@ class Pipeline:
                      width=metadata["width"], height=metadata["height"], frames=metadata["frames"], fps=24,
                      elapsed_seconds=round(time.monotonic() - normalization_started, 3),
                      target_count=len(targets) or (0 if options.replace_all_people else 1))
+                from .self_hosted_jobs import is_self_hosted
+                if is_self_hosted(job):
+                    from .self_hosted_preparation import prepare as prepare_self_hosted
+                    current, _ = self.records.read(f"jobs/{job_id}.json")
+                    prepare_self_hosted(self, current, options, normalized, metadata, targets, root)
+                    return
                 label, coverage, preview = None, [], None
                 plan = None
                 tracking_continuous = False
@@ -641,10 +647,18 @@ class Pipeline:
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 raw, original, uploaded, output = root / "generated.mp4", root / "source.mp4", root / "upload.bin", root / "swapMEin.mp4"
-                self.cloud.download_provider(job["provider_output"], raw)
+                if job.get("private_provider_output_uri"):
+                    # Worker outputs are restricted to the app's own immutable
+                    # private path, never an arbitrary worker-provided URL.
+                    expected = f"gs://{self.settings.app_bucket}/self-hosted/{job_id}/"
+                    if not job["private_provider_output_uri"].startswith(expected):
+                        raise PublicError("The worker output location is invalid.", 409)
+                    self.cloud.download(job["private_provider_output_uri"], raw, 500 * 1024 * 1024)
+                else:
+                    self.cloud.download_provider(job["provider_output"], raw)
                 self.cloud.download(job["normalized_uri"], original)
                 audio_processing = job.get("audio_processing", True)
-                restore_audio = audio_processing or job.get("setup", {}).get("submit_without_audio", False)
+                restore_audio = job.get("restore_original_audio") is True or audio_processing or job.get("setup", {}).get("submit_without_audio", False)
                 if restore_audio:
                     self.cloud.download(job["source_uri"], uploaded, MAX_SOURCE_BYTES)
                     output_dimensions = finish(raw, original, output, job["duration"], audio_source=uploaded,

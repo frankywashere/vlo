@@ -67,3 +67,23 @@ it("retains restored selections so the user can remove extras without losing the
   fireEvent.click(screen.getByRole("button",{name:"Remove Person 2"}));
   expect(useCharSwapStore.getState().targets.map(t=>t.id)).toEqual(["p1"]);
 });
+
+it("shows the experimental notice as soon as a second person is selected and removes it with that selection", () => {
+  render(<PeopleStep demo={null} />);
+  expect(screen.queryByText(/Replacing multiple people is experimental/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Tap person 1"}));
+  expect(screen.queryByText(/Replacing multiple people is experimental/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Tap person 2"}));
+  expect(screen.getByText(/Replacing multiple people is experimental/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Remove Person 2"}));
+  expect(screen.queryByText(/Replacing multiple people is experimental/)).not.toBeInTheDocument();
+});
+
+it("does not count the Replace all people slot as multiple individual selections", () => {
+  render(<PeopleStep demo={null} />);
+  fireEvent.click(screen.getByRole("button", {name: "Tap person 1"}));
+  fireEvent.click(screen.getByRole("button", {name: "Tap person 2"}));
+  expect(screen.getByText(/Replacing multiple people is experimental/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Replace all people"}));
+  expect(screen.queryByText(/Replacing multiple people is experimental/)).not.toBeInTheDocument();
+});

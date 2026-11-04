@@ -11,7 +11,8 @@ from swapmein.pipeline import Pipeline
 @pytest.mark.parametrize("submit_without_audio", [False, True])
 @pytest.mark.parametrize("audio_processing", [None, True, False])
 @pytest.mark.parametrize("account_id", [None, "b" * 64])
-def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing, submit_without_audio, comparison_fails):
+@pytest.mark.parametrize("self_hosted", [False, True])
+def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports(monkeypatch, account_id, audio_processing, submit_without_audio, comparison_fails, self_hosted):
     # This test isolates export/re-export. Cleanup safety is covered separately.
     monkeypatch.setattr("swapmein.pipeline.cleanup_completed_media", lambda *_: None)
     monkeypatch.setattr(Pipeline, "ensure_library_poster", lambda self, job, source=None: job)
@@ -32,10 +33,15 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
             self.uploads = []
 
         def download_provider(self, _url, destination):
+            assert not self_hosted, "Private worker outputs must not use external provider downloads"
             destination.write_bytes(b"provider-video")
 
         def download(self, uri, destination, maximum=None):
-            if uri.endswith("upload.bin"):
+            if uri.endswith("result.bin"):
+                assert self_hosted and uri.startswith(f"gs://private-app/self-hosted/{job_id}/")
+                assert maximum == 500 * 1024 * 1024
+                destination.write_bytes(b"provider-video")
+            elif uri.endswith("upload.bin"):
                 assert maximum == 100 * 1024 * 1024
                 destination.write_bytes(b"original-upload")
             else:
@@ -48,7 +54,7 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     def finish(raw, original, output, duration, audio_source=None, audio_start=0, restore_audio=True):
         assert raw.read_bytes() == b"provider-video"
         assert original.read_bytes() == b"normalized-shape"
-        if audio_processing is False and not submit_without_audio:
+        if not self_hosted and audio_processing is False and not submit_without_audio:
             assert audio_source is None and not restore_audio
         else:
             assert audio_source.read_bytes() == b"original-upload"
@@ -66,6 +72,10 @@ def test_export_uses_original_upload_trim_and_keeps_versioned_operator_reexports
     monkeypatch.setattr("swapmein.pipeline.create_comparison", comparison)
     monkeypatch.setattr("swapmein.pipeline.finish", finish)
     records, cloud = Records(), Cloud()
+    if self_hosted:
+        records.data[path].pop("provider_output")
+        records.data[path].update(multi_person_generation_route="paperspace_h3", restore_original_audio=True,
+            private_provider_output_uri=f"gs://private-app/self-hosted/{job_id}/attempt/result.bin")
     if audio_processing is not None:
         records.data[path]["audio_processing"] = audio_processing
     pipeline = Pipeline(replace(Settings(), app_bucket="private-app"), records, cloud)

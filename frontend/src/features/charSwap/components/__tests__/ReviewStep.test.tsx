@@ -83,3 +83,17 @@ it("blocks final submission if a selected clean photo is still pending on the re
   expect(screen.getByRole("button",{name:"Generate video"})).toBeDisabled();
   expect(screen.getByText(/Wait for background cleanup/)).toBeInTheDocument();
 });
+
+it("warns at final review for two selected people even when they share one reference photo", () => {
+  const store = useCharSwapStore.getState();
+  store.selectTarget({id: "person-2", name: "Person 2", color: "#e76fb3", anchor: {x: .7, y: .5, time: 0}});
+  store.assignReference("person-2", {id: "bear", name: "Bear", url: "blob:bear"});
+  expect(useCharSwapStore.getState().references).toHaveLength(1);
+  render(<ReviewStep {...properties()} />);
+  expect(screen.getByText(/Replacing multiple people is experimental/)).toBeInTheDocument();
+});
+
+it("does not show the multi-person warning for a normal one-person review", () => {
+  render(<ReviewStep {...properties()} />);
+  expect(screen.queryByText(/Replacing multiple people is experimental/)).not.toBeInTheDocument();
+});
