@@ -1,6 +1,16 @@
 import type { LivePipelineJob } from "../services/livePipeline";
 
-export function processingStageCopy(job?: {processing_stage?: LivePipelineJob["processing_stage"]; status: string} | null) {
+export function processingStageCopy(job?: Pick<LivePipelineJob, "processing_stage" | "generation_destination" | "self_hosted_progress" | "generation_fallback"> & {status: string} | null) {
+  if (job && ["queued", "preparing", "generating"].includes(job.status) && job.generation_destination === "google_h3") {
+    if (job.self_hosted_progress?.phase === "starting_worker")
+      return {title: "Starting Google GPU", detail: "Your clip is saved. We’re starting the Google worker and loading its models before rendering."};
+    if (job.self_hosted_progress?.phase === "waiting_for_capacity")
+      return {title: "Waiting for Google GPU", detail: "Your clip is queued while Google GPU capacity is checked. No replacement video has been rendered yet."};
+  }
+  if (job && ["queued", "preparing"].includes(job.status) && job.generation_destination === "current" &&
+      job.generation_fallback?.from === "google_h3" && job.generation_fallback.reason === "capacity_unavailable" &&
+      (!job.processing_stage || job.processing_stage === "generation_queue"))
+    return {title: "Preparing with the normal API route", detail: "Google GPU capacity was unavailable. We’re restarting normal preparation, including SAM when enabled, with the normal route’s saved settings."};
   if (!job || ((job.processing_stage === "guide_rebuild" || job.processing_stage === "mask_recovery")
       && !["queued", "preparing"].includes(job.status))
       || (job.processing_stage === "generation_queue" && job.status !== "queued")

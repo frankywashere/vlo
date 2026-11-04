@@ -14,9 +14,11 @@ pipeline. The two Admin switches store one value:
 Selecting one switch replaces the other; disabling it returns to `current`.
 The route is pinned to the upload ticket and job. Changing Admin settings does
 not move or cancel existing jobs. Enabling a destination requires a configured
-worker token and a recent verified heartbeat. An offline route can always be
-disabled. New installations default to `current`. The Paperspace production
-activation is recorded below; these services do not provision a VM.
+worker token and a recent verified heartbeat, or an explicitly configured Google
+on-demand lifecycle. Missing readiness does not imply an available worker. An
+offline route can always be disabled. New installations default to `current`.
+The Paperspace production activation and the separate Google deployment boundary
+are recorded below.
 
 ## Processing
 
@@ -59,6 +61,10 @@ matching on arbitrary footage remain experimental; the reviewed alternating-shot
 benchmark does not prove those cases. Low-confidence assignments must not be
 replaced by shared tints, guessed absence, or another generation provider.
 
+The Google capacity fallback described below is a separate pre-generation
+infrastructure decision. It does not bypass uncertain character assignments or
+retry a render that may already have started.
+
 ## Private worker configuration
 
 Use a distinct random secret of at least 32 characters for each destination in
@@ -89,11 +95,82 @@ Existing privileged API-key account permissions remain unchanged. No automatic
 server-price claim is made; hosted-provider price estimates are hidden for this
 route because actual self-hosted cost has not been settled.
 
+## Google on-demand lifecycle
+
+The implementation can manage one `g4-standard-48` VM in `europe-west1-b`, using
+the existing `recastfx-h3-be-models-20261101` boot disk with `autoDelete=false`.
+It does not copy model disks, create snapshots, change the disk's economy
+performance, or move models between regions. Only the small pinned worker
+release, JSON configuration and startup script are fetched at boot. The native
+Google BF16 profile remains separate from the Paperspace runtime.
+
+`google_h3_config.build_google_config(manifest, maximum_uptime_seconds=14400)`
+builds the public `SELF_HOSTED_GOOGLE_H3_LIFECYCLE_CONFIG` JSON without reading
+files or contacting Google. The manifest provides `release_sha256`,
+`config_sha256`, `startup_sha256` and `api_url`; artifacts live under
+`gs://charswap-franky-20261013-proof/self-hosted-worker/releases/{release_sha256}/`.
+The config fixes the VM/disk identity, worker service account, default Belgium
+subnet, GVNIC, ephemeral external address, OS Login, and one numeric Secret
+Manager version. It contains the secret resource name, never the worker token.
+The operator must verify and publish artifacts without overwrite and preserve
+the other deployment environment variables when installing this JSON. Commas
+inside JSON require an explicit alternate delimiter if using
+`gcloud --update-env-vars`.
+
+Queued work wakes a durable controller; the independent maintenance sweep
+recovers a lost wake. The controller persists a Compute request UUID before
+start/create/stop, reuses it after uncertain acknowledgements, and checks the
+asynchronous operation's result. It waits for a new-boot worker heartbeat before
+opening claims. Worker claims and the stop reservation share the same atomic
+control record. Idle shutdown defaults to 120 seconds; GCE also enforces an
+independent VM uptime limit of four hours. A controlled smoke config can lower
+that hard limit to 1800 seconds. One fresh render is allowed per managed VM boot;
+the next queued job waits for a fresh boot rather than inheriting an almost
+expired VM lifetime. An active job can reconnect to its existing lease.
+
+Only a confirmed Google capacity error before any GPU lease/render can use
+automatic fallback. The controller first closes claims and atomically detaches
+the affected queued jobs. The job then changes to `current` and re-enters normal
+admission and preparation, including SAM, mask/depth routing, prompts, matching
+and review according to its saved normal-pipeline settings. The original trim,
+source people, reference slots and credit receipt are retained. This is a full
+normal-pipeline preparation, not submission of the self-hosted RGB input to a
+hosted renderer. Its audio behavior also follows the saved normal settings.
+API-key jobs retain the existing account permission and credential requirements.
+
+Timeouts, permission/quota/configuration errors, failed worker/model startup,
+and any possibly started render are not capacity fallback signals. They require
+reconnection or operator attention; the system must not guess that a second paid
+generation is safe. Stale fallback entries are isolated so they cannot prevent
+other handoffs or idle shutdown. A stopped GPU incurs no running GPU compute
+charge, but the retained disk and other retained resources remain billable.
+Cold model loading must be measured; startup is not an instant warm render.
+
+The lifecycle is deployed to the production API and both CPU task workers. The
+authenticated `recastfx-google-h3-lifecycle` scheduler calls the dedicated
+maintenance endpoint every minute. This is independent of browser polling.
+The installed Google runtime passed CPU preflight and native graph validation;
+the live allocation attempts returned `ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS`
+before a VM or GPU render started. Capacity failure exercised the actual queued
+fallback. Native GPU rendering and idle shutdown remain unverified on this
+release because capacity was unavailable. See
+`self_hosted_worker/GOOGLE_BOOTSTRAP.md` for the installed runtime, artifact and
+bootstrap contract and the Google release evidence for the live test scope.
+
+Fallback preparation writes immutable media under a stable
+`fallback-<token>/` subdirectory of the existing job's input/output prefixes.
+Its original H3 normalization, guide and scene previews remain intact. Scene
+review can rotate its task token without changing this artifact namespace.
+Both masking-off and SAM-enabled normal preparation were checked in the live
+controlled fixture. SAM review retains the normal human-review requirement;
+fallback does not silently treat the H3 shot assignments as SAM identities.
+
 ## Release boundary
 
 New destinations must pass local configuration checks and a bounded live GPU
 test before activation. Paperspace completed this gate on November 4, 2026;
-Google remains unconfigured and disabled. Production pipeline revision 15 routes
+Google is configured and selectable as an on-demand experiment, but its native
+GPU release gate remains blocked by availability. Production pipeline revision 15 still routes
 new jobs with two or more explicitly selected people to `paperspace_h3`.
 Single-person jobs and existing jobs keep their original route.
 
@@ -118,9 +195,11 @@ time is recorded without inventing a dollar charge.
 See `docs/charswap-evidence/recastfx-paperspace-route-release-2026-11-04.json`
 from the repository root for immutable images, revisions and verification scope.
 
-No Google VM is automatically started, disk copied or performance increased by
-these switches. The retained Belgium disk was separately reduced to the included
-performance baseline; enabling the Google route must not silently undo that.
+The earlier Paperspace release record predates Google lifecycle automation.
+Selecting the configured on-demand Google option can now request its VM for
+queued work or use the verified capacity fallback. The default remains
+Paperspace while native Google execution awaits a GPU. The retained Belgium disk was separately reduced to
+the included performance baseline; enabling Google must not silently undo that.
 
 These deployment-specific CharSwap services do not present extension-owned
 behavior or change the Vlo editor's extension contract surface. Run
@@ -149,4 +228,7 @@ CPU workers and the production frontend were released in place, preserving their
 existing configuration and secret bindings. The isolated one-minute preview was
 unchanged. Automatic matching remains experimental and uncertain assignments
 require scene review; the live smoke used reviewed assignments. No Google GPU
-worker or Google start-on-queue/stop-on-idle controller was deployed.
+worker rendered in the Google rollout: its controller was deployed, but actual
+GPU capacity was unavailable. The Google-focused verification additionally
+passed 481 backend tests and 150 frontend tests, with a successful production
+frontend build and no extension surface changes.

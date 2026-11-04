@@ -31,9 +31,11 @@ def recovery_before_work(settings, records, kind, job_id, receipt):
     if status in {"preparing", "reviewing", "assembling", "finishing", "submitting"} and not stale:
         raise PublicError("The saved stage is still within its processing lease.", 503)
     if status in {"preparing", "reviewing"}:
-        records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
+        failed = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
             "queue_recovery_status": "required", "updated_at": time.time(),
             "message": "Preparation was interrupted after it started. Saved inputs are retained; review before retrying paid services."})
+        from .google_fallback import refund_unsubmitted_fallback
+        refund_unsubmitted_fallback(records, failed)
         emit("task_stage_needs_review", severity="ERROR", job_id=job_id, kind=kind)
         return False
     if status == "submitting":
@@ -119,6 +121,13 @@ def create_task_worker(source_app, context):
 
 
 def register_delivery_recovery(app, context):
+    @app.post("/maintenance/google-worker")
+    def google_worker(authorization: str | None = Header(default=None)):
+        settings, records, cloud = context()
+        verify_task_identity(authorization, settings.service_url, settings.task_service_account)
+        from .google_lifecycle import wake_google
+        return wake_google(settings, records, cloud)
+
     @app.post("/maintenance/recover-deliveries")
     def recover(authorization: str | None = Header(default=None)):
         settings, records, cloud = context()
@@ -127,4 +136,12 @@ def register_delivery_recovery(app, context):
             raise PublicError("Durable task delivery is not enabled.", 409)
         from .processing_capacity import ProcessingCapacity
         ProcessingCapacity(settings, records).reconcile()
+        # This sweep is durable and independent of browser polling. A lost wake
+        # still starts queued GPU work, and idle workers still scale to zero.
+        from .google_lifecycle import wake_google
+        try:
+            wake_google(settings, records, cloud)
+        except Exception as error:
+            from .diagnostics import emit
+            emit("google_worker_lifecycle_delayed", error=error)
         return TaskDelivery(settings, records, cloud.tasks).sweep()

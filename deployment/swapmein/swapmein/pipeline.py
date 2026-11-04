@@ -26,6 +26,7 @@ from .replicate_preparation import ReplicatePreparation
 from .comparison import create_comparison
 from .library_characters import retain_characters
 from .processing_capacity import ProcessingCapacity
+from .preparation_artifacts import fallback_artifact_token, preparation_prefix
 
 
 class Pipeline:
@@ -99,6 +100,13 @@ class Pipeline:
                 if job.get("preparation_kind") == "tracking_rebuild":
                     self.rebuild_reviewed_guide(job, remaining)
                     return
+                artifact_token = fallback_artifact_token(job)
+                if artifact_token and not job.get("google_fallback_artifact_token"):
+                    # Scene review rotates tracking_task_token. Pin the initial
+                    # fallback namespace so later mask/guide rebuilds keep it.
+                    job = self.records.update(f"jobs/{job_id}.json", lambda current: {
+                        **current, "google_fallback_artifact_token": artifact_token}
+                        if not current.get("google_fallback_artifact_token") else current)
                 source, normalized = root / "source.bin", root / "normalized.mp4"
                 self.cloud.download(job["source_uri"], source, MAX_SOURCE_BYTES)
                 # Jobs created before the Easy mode option retain their scene-review policy.
@@ -128,7 +136,8 @@ class Pipeline:
                 tracking_needed = options.enhanced_character_masking or job.get("face_mesh", False) or automatic_identity
                 depth_enabled = options.enhanced_character_masking and job.get("depth_guidance", True)
                 fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
-                prefix = f"inputs/swapmein-{job_id}/"
+                prefix = preparation_prefix(job, "worker")
+                app_prefix = preparation_prefix(job, "app")
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
                 self.update_job(job_id, duration=metadata["duration"], width=metadata["width"], height=metadata["height"],
                                 normalized_uri=source_uri, normalized_targets=targets, preparation_version=options.preparation_version,
@@ -313,10 +322,10 @@ class Pipeline:
                             selection_preview = root / "selection-preview.mp4"
                             create_selection_preview(normalized, masks, selection_preview, metadata)
                             preview = self.cloud.upload(self.settings.app_bucket,
-                                f"outputs/{job_id}/tracking.mp4", selection_preview, "video/mp4")
+                                app_prefix + "tracking.mp4", selection_preview, "video/mp4")
                         else:
                             preview_uri = self.cloud.worker_output(result, sam_run, "sam_preview.mp4")
-                            preview = self.cloud.copy(preview_uri, self.settings.app_bucket, f"outputs/{job_id}/tracking.mp4")
+                            preview = self.cloud.copy(preview_uri, self.settings.app_bucket, app_prefix + "tracking.mp4")
                     elif tracking_needed:
                         emit("tracking_preview_skipped", job_id=job_id, reason="easy_mode_no_review",
                              preparation_provider=job.get("preparation_provider", "workers"),
@@ -367,7 +376,7 @@ class Pipeline:
                     emit("preparation_audio_skipped", job_id=job_id)
                 tracking_fields = {}
                 if plan:
-                    self.save_scene_thumbnails(job_id, normalized, root, plan)
+                    self.save_scene_thumbnails(job_id, normalized, root, plan, job)
                     tracking_fields = {"tracking_plan": plan, "tracking_metadata": metadata,
                         "tracking_masks_uri": raw_masks_uri, "tracking_depth_uri": depth_input,
                         "tracking_vocals_uri": vocals_input, "tracking_revision": 1,
@@ -398,7 +407,7 @@ class Pipeline:
                         self.cloud.download(prepared, checked_guide, 50 * 1024 * 1024)
                         verified = validate_guide_media(checked_guide, metadata)
                         emit("guide_media_verified", job_id=job_id, **verified)
-                    guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, f"outputs/{job_id}/guide.mp4")
+                    guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, app_prefix + "guide.mp4")
                 else:
                     vocals, guide = root / "vocals_plus3.wav", root / "guide.mp4"
                     if audio_processing:
@@ -409,7 +418,7 @@ class Pipeline:
                     if options.preparation_version >= 2:
                         verified = validate_guide_media(guide, metadata)
                         emit("guide_media_verified", job_id=job_id, **verified)
-                    guide_uri = self.cloud.upload(self.settings.app_bucket, f"outputs/{job_id}/guide.mp4", guide, "video/mp4")
+                    guide_uri = self.cloud.upload(self.settings.app_bucket, app_prefix + "guide.mp4", guide, "video/mp4")
                 if options.enhanced_character_masking:
                     message = "Review every scene. Only your selected person should be covered by colored depth imagery. Identity across cuts or gaps is not verified."
                 else:
@@ -433,7 +442,7 @@ class Pipeline:
                     scene_targets = targets or [{"id": "person", "name": options.target_name,
                         "anchor": metadata["anchor"], "reference_index": 0}]
                     plan = analyze(metadata, scene_targets)
-                    self.save_scene_thumbnails(job_id, normalized, root, plan)
+                    self.save_scene_thumbnails(job_id, normalized, root, plan, job)
                     self.update_job(job_id, status="tracking_review", guide_uri=guide_uri,
                         normalized_anchor=metadata["anchor"], normalized_targets=scene_targets,
                         tracking_plan=plan, tracking_metadata=metadata, tracking_revision=1,
@@ -449,7 +458,7 @@ class Pipeline:
                     mask_style=mask_style, tracking_performed=tracking_needed, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous,
                     **tracking_fields)
-                if options.auto_generate:
+                if options.auto_generate or job.get("google_fallback_approved") is True:
                     try:
                         self.cloud.enqueue("generate", job_id)
                     except Exception as error:
@@ -474,6 +483,13 @@ class Pipeline:
                 message="Your choices are saved, but applying them failed. Review and submit them again; no generation was submitted."
                     if job.get("preparation_kind") == "tracking_rebuild" else "Preparation failed. No provider generation was submitted.")
         finally:
+            from .google_fallback import is_google_fallback, refund_unsubmitted_fallback
+            if is_google_fallback(job):
+                try:
+                    latest, _ = self.records.read(f"jobs/{job_id}.json")
+                    refund_unsubmitted_fallback(self.records, latest)
+                except Exception as error:
+                    emit("google_fallback_credit_reconciliation_pending", job_id=job_id, error_type=type(error).__name__)
             emit("preparation_cleanup", job_id=job_id, shutdown_verified=self.cloud.shutdown_verified)
             if self.cloud.shutdown_verified:
                 self.records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
@@ -510,7 +526,7 @@ class Pipeline:
             combined = root / "selected-people-masks.zip"
             coverage = build_selected_masks(masks, metadata, tracks, combined, allow_cross_shot_ids=True)
             uri = self.cloud.upload(self.settings.worker_bucket,
-                f"inputs/swapmein-{job['id']}/selected-people-masks.zip", combined, "application/zip")
+                preparation_prefix(job, "worker") + "selected-people-masks.zip", combined, "application/zip")
             return uri, 1, coverage, targets
         label, coverage = select_label(masks, metadata, require_continuous=False)
         return masks_uri, label, coverage, targets
@@ -551,7 +567,7 @@ class Pipeline:
             # Shared guide colors cannot communicate identity across scene cuts.
             targets = reviewed_mask_targets(metadata, plan, choices, resolved["assignments"])
             uri = self.cloud.upload(self.settings.worker_bucket,
-                f"inputs/swapmein-{job_id}/reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
+                preparation_prefix(job, "worker") + f"reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
         saved = self.update_job(job_id, reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"],
             tracking_assignments=resolved["assignments"], normalized_targets=targets,
             coordinate_fallback_sections=fallback_count, recover_missing_masks=recover,
@@ -599,7 +615,7 @@ class Pipeline:
                 verified = validate_guide_media(checked, job["tracking_metadata"])
                 emit("guide_media_verified", job_id=job_id, **verified)
         guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
-            f"outputs/{job_id}/guide-reviewed-{uuid.uuid4().hex}.mp4")
+            preparation_prefix(job, "app") + f"guide-reviewed-{uuid.uuid4().hex}.mp4")
         auto_submit = bool(not job.get("mask_recovery_conflicts")
             and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
             and job.get("generation_after_review_revision") is not None
@@ -707,12 +723,13 @@ class Pipeline:
         self.complete_library_delivery(completed)
 
     @timed("scene_thumbnails_save", job_arg="job_id")
-    def save_scene_thumbnails(self, job_id, source, root, plan):
+    def save_scene_thumbnails(self, job_id, source, root, plan, job=None):
         from .media import scene_thumbnails
         frames = [math.floor(section["seek_time"] * 24 + 1e-7) for section in plan["segments"]]
         previews = scene_thumbnails(source, root / "scene-thumbnails", frames)
+        prefix = preparation_prefix(job or {"id": job_id}, "app")
         uris = {str(frame): self.cloud.upload(self.settings.app_bucket,
-            f"outputs/{job_id}/scenes/{frame}.jpg", image, "image/jpeg") for frame, image in previews.items()}
+            prefix + f"scenes/{frame}.jpg", image, "image/jpeg") for frame, image in previews.items()}
         # The still picker needs the exact same mask pixels as its video preview,
         # without requiring mobile Safari to seek/decode a video on first load.
         tracking_source = root / "selection-preview.mp4"
@@ -720,7 +737,7 @@ class Pipeline:
         if tracking_source.is_file():
             tracking_previews = scene_thumbnails(tracking_source, root / "scene-mask-thumbnails", frames)
             tracking_uris = {str(frame): self.cloud.upload(self.settings.app_bucket,
-                f"outputs/{job_id}/scenes-masked/{frame}.jpg", image, "image/jpeg")
+                prefix + f"scenes-masked/{frame}.jpg", image, "image/jpeg")
                 for frame, image in tracking_previews.items()}
         self.update_job(job_id, scene_thumbnail_uris=uris, scene_mask_thumbnail_uris=tracking_uris)
 

@@ -58,19 +58,30 @@ def worker_views(settings, records):
         state, _ = records.read(_path(route))
         state = state or {}
         configured = len(_token(route)) >= 32
+        blocked = bool(state.get("reconciliation_required") or route == "google_h3" and state.get("google_lifecycle_error"))
+        on_demand = False
+        if route == "google_h3" and not blocked:
+            from .google_lifecycle import on_demand_available
+            on_demand = configured and on_demand_available(settings, records)
         live = (state.get("recipe_version") == RECIPE_VERSION
                 and _fresh(state.get("heartbeat_at"), time.time(), HEARTBEAT_SECONDS)
-                and not state.get("reconciliation_required"))
+                and not blocked
+                and not (route == "google_h3" and (state.get("google_accepting_claims") is False
+                    or state.get("google_action") or state.get("google_boot_claimed_job") and not state.get("active"))))
         result[route] = {"ready": configured and live,
                          "message": ("A previous generation needs reconciliation before new work can start."
-                                     if state.get("reconciliation_required") else
+                                     if blocked else
                                      "Worker ready; jobs run one at a time." if configured and live else
+                                     "Google GPU starts on demand; unavailable capacity uses the normal API pipeline." if on_demand else
                                      "Connect and verify the private CharacterSwap worker before enabling this route.")}
+        if route == "google_h3":
+            result[route]["on_demand_available"] = on_demand
     return result
 
 
 def require_worker_ready(settings, records, route):
-    if not isinstance(route, str) or route not in ROUTES or not worker_views(settings, records)[route]["ready"]:
+    view = worker_views(settings, records).get(route, {}) if isinstance(route, str) and route in ROUTES else {}
+    if not (view.get("ready") is True or route == "google_h3" and view.get("on_demand_available") is True):
         raise PublicError("This CharacterSwap worker is offline or not configured. The current route was not changed.", 409)
 
 
@@ -224,6 +235,9 @@ class SelfHostedJobs:
             return job  # A missing control entry never authorizes a second GPU attempt.
         before, _ = self.records.read(_path(route))
         before = before or {}
+        if route == "google_h3" and job_id in [*before.get("google_capacity_fallback_jobs", []),
+                                               *before.get("google_fallback_attention_jobs", [])]:
+            return job
         if (job_id not in before.get("queue", []) and (before.get("active") or {}).get("job_id") != job_id
                 and len(before.get("queue", [])) >= MAX_QUEUE_LENGTH):
             raise PublicError("The CharacterSwap queue is full. Try again later.", 429)
@@ -252,6 +266,13 @@ class SelfHostedJobs:
                 queue.append(job_id)
             return {**current, "queue": queue}
         self.records.update(_path(route), append)
+        if route == "google_h3":
+            try:
+                from .google_lifecycle import wake_google
+                wake_google(self.settings, self.records, self.cloud)
+            except Exception as error:
+                from .diagnostics import emit
+                emit("google_lifecycle_wake_pending", job_id=job_id, error_type=type(error).__name__)
         return self.records.read(f"jobs/{job_id}.json")[0]
 
     def _owned_update(self, route, body, mutation):
@@ -325,6 +346,10 @@ class SelfHostedJobs:
 
     def claim(self, route, body):
         now, token = time.time(), secrets.token_urlsafe(32)
+        managed_google = False
+        if route == "google_h3":
+            from .google_lifecycle import configuration
+            managed_google = configuration(self.settings) is not None
         def take(current):
             current = current or {}
             if (current.get("worker_id") != body.worker_id or current.get("recipe_version") != RECIPE_VERSION
@@ -336,8 +361,15 @@ class SelfHostedJobs:
                 if current["active"]["worker_id"] != body.worker_id:
                     raise PublicError("The previous generation needs reconciliation.", 409)
                 return current
+            if route == "google_h3" and (current.get("google_accepting_claims") is False
+                    or current.get("google_lifecycle_error") or current.get("google_action")
+                    or managed_google and current.get("google_accepting_claims") is not True):
+                return current  # Capacity detachment and worker claims share this CAS gate.
+            if managed_google and current.get("google_boot_claimed_job"):
+                return current  # One fresh render per bounded VM boot; active resumes above remain valid.
             queue = list(current.get("queue", []))
             return {**current, "queue": queue[1:] if queue else [],
+                    **({"google_boot_claimed_job": queue[0]} if managed_google and queue else {}),
                     "active": {"job_id": queue[0], "worker_id": body.worker_id,
                                "token": token, "until": now + LEASE_SECONDS} if queue else None}
         state = self.records.update(_path(route), take)
@@ -549,6 +581,9 @@ class SelfHostedJobs:
             try:
                 control, _ = self.records.read(_path(route))
                 control = control or {}
+                if route == "google_h3" and job_id in [*control.get("google_capacity_fallback_jobs", []),
+                                                        *control.get("google_fallback_attention_jobs", [])]:
+                    return job  # Lifecycle owns the detached normal-pipeline handoff.
                 present = (job_id in control.get("queue", [])
                            or (control.get("active") or {}).get("job_id") == job_id)
                 if not present:
@@ -569,12 +604,24 @@ class SelfHostedJobs:
                                 if full else "Your saved render is waiting for queue confirmation. No fallback generation was submitted.")}
                     if current and current.get("status") == "generating"
                     and not current.get("worker_started_at") and not current.get("self_hosted_lease") else current)
-        online = worker_views(self.settings, self.records)[route]["ready"]
+        readiness = worker_views(self.settings, self.records)[route]
+        online = readiness["ready"]
+        on_demand = route == "google_h3" and readiness.get("on_demand_available") is True
         def message(current):
             if not current or current.get("status") != "generating":
                 return current
             if not current.get("worker_started_at"):
-                text = "Waiting for the CharacterSwap worker." if online else "Your CharacterSwap render is queued; its worker is offline. No fallback generation was submitted."
+                if online:
+                    text = "Waiting for the CharacterSwap worker."
+                elif on_demand:
+                    phase = current.get("self_hosted_phase", "queued")
+                    text = ("Starting Google GPU. Your clip is queued while its worker loads."
+                            if phase == "starting_worker" else
+                            "Waiting for Google GPU capacity. Your clip is queued."
+                            if phase == "waiting_for_capacity" else
+                            "Waiting for Google worker startup. Your clip is queued.")
+                else:
+                    text = "Your CharacterSwap render is queued; its worker is offline. No fallback generation was submitted."
             elif not _fresh(current.get("self_hosted_heartbeat_at"), now, LEASE_SECONDS):
                 text = "The worker connection paused. Saved progress needs reconnection; no automatic rerender was submitted."
             else:

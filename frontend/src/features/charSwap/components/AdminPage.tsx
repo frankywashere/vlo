@@ -130,9 +130,10 @@ export function AdminPage() {
                 const selected = admin.pipeline?.multi_person_generation_route === route;
                 const readiness = admin.pipeline?.self_hosted_workers?.[route];
                 const ready = readiness?.ready === true;
+                const onDemand = route === "google_h3" && readiness?.on_demand_available === true;
                 return <Box key={route}>
                   <FormControlLabel control={<Switch checked={selected}
-                    disabled={busy || !can("pipeline_settings") || (!selected && !ready)}
+                    disabled={busy || !can("pipeline_settings") || (!selected && !ready && !onDemand)}
                     onChange={(event) => {
                       const destination = event.target.checked ? route : "current";
                       void run(async () => {
@@ -142,7 +143,8 @@ export function AdminPage() {
                       });
                     }} />} label={`Multi-person swaps: ${label} CharacterSwap`} />
                   {!ready && <Typography variant="body2" color="text.secondary">
-                    {readiness?.message ?? `${label} worker readiness has not been confirmed.`}
+                    {readiness?.message ?? (onDemand ? "Google worker is configured to start on demand."
+                      : `${label} worker readiness has not been confirmed.`)}
                   </Typography>}
                 </Box>;
               })}
@@ -150,6 +152,10 @@ export function AdminPage() {
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               CharacterSwap uses its own fixed recipe, skips SAM, face mesh and depth, and restores the original audio.
             </Typography>
+            {admin.pipeline?.self_hosted_workers?.google_h3?.on_demand_available === true &&
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Google starts for queued work and stops when idle. If Google reports unavailable GPU capacity before rendering, the job restarts normal API preparation, including SAM when enabled, using the normal route’s settings.
+              </Typography>}
           </Box>
           <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
             disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}

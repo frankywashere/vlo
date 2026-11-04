@@ -50,7 +50,9 @@ def _generation_ready(records=None, generation_route=None):
         return False
     from .config import Settings
     from .self_hosted_jobs import worker_views
-    return worker_views(Settings.from_env(), records).get(generation_route, {}).get("ready") is True
+    worker = worker_views(Settings.from_env(), records).get(generation_route, {})
+    return (worker.get("ready") is True
+            or generation_route == "google_h3" and worker.get("on_demand_available") is True)
 
 
 def feature_readiness(records=None, *, generation_route=None) -> dict:

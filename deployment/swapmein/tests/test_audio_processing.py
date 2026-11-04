@@ -25,7 +25,8 @@ def test_audio_toggle_defaults_off_is_owner_only_and_rejects_stale_saves(api, mo
     assert response.json() == {"revision": 1, "audio_processing": True, "hide_audio_toggle": False, "multi_characters": True, "multi_person_generation_route": "current", "prompt_variant": "cloudflare_identity_v1",
         "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "matching_no_review": False, "depth_guidance": False, "face_mesh_enabled": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False,
         "self_hosted_workers": {route: {"ready": False,
-            "message": "Connect and verify the private CharacterSwap worker before enabling this route."}
+            "message": "Connect and verify the private CharacterSwap worker before enabling this route.",
+            **({"on_demand_available": False} if route == "google_h3" else {})}
             for route in ("google_h3", "paperspace_h3")}}
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json=body).status_code == 409
     assert client.get("/api/commerce/admin", headers={"X-Firebase-Token": "owner"}).json()["pipeline"] == response.json()

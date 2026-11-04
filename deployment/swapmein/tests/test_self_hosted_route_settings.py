@@ -5,6 +5,7 @@ import json
 import time
 
 from PIL import Image
+from cryptography.fernet import Fernet
 from pydantic import ValidationError
 import pytest
 
@@ -86,9 +87,10 @@ def test_missing_or_invalid_stored_setting_preserves_existing_provider(api, stor
 
 @pytest.mark.parametrize("initial", ROUTES)
 @pytest.mark.parametrize("shared_photo", (False, True))
-def test_direct_upload_route_is_pinned_before_admin_switch(api, initial, shared_photo):
+def test_direct_upload_route_is_pinned_before_admin_switch(api, monkeypatch, initial, shared_photo):
     client, records, cloud, provider = api
     headers, _ = authenticated(api)
+    monkeypatch.setenv("RECASTFX_JOB_KEY", Fernet.generate_key().decode())
     records.data[PATH] = {"multi_person_generation_route": initial,
                           "audio_processing": True, "depth_guidance": True}
     request = multi_upload()
@@ -117,14 +119,16 @@ def test_direct_upload_route_is_pinned_before_admin_switch(api, initial, shared_
 
 @pytest.mark.parametrize("route", ("google_h3", "paperspace_h3"))
 @pytest.mark.parametrize("direct", (False, True))
-def test_self_hosted_auto_upload_does_not_capture_reapi_key_or_replicate_credentials(api, monkeypatch, route, direct):
+def test_self_hosted_uploads_keep_provider_keys_optional_and_google_pins_normal_fallback_credentials(api, monkeypatch, route, direct):
     client, records, _, _ = api
     headers, _ = authenticated(api)
     headers.pop("X-Reapi-Key")
     def forbidden(*_args, **_kwargs):
         raise AssertionError("Self-hosted upload must not request provider credentials")
     monkeypatch.setattr(gateway, "key_for_session", forbidden)
-    monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version", forbidden)
+    version = "projects/test/secrets/recastfx-replicate-key/versions/3"
+    monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version",
+                        (lambda: version) if route == "google_h3" else forbidden)
     records.data[PATH] = {"multi_person_generation_route": route, "preparation_provider": "replicate"}
     request = multi_upload()
     request["setup"].update(auto_generate=True, easy_mode=True)
@@ -145,6 +149,10 @@ def test_self_hosted_auto_upload_does_not_capture_reapi_key_or_replicate_credent
     job = records.data[f"jobs/{response.json()['id']}.json"]
     assert job["multi_person_generation_route"] == route
     assert "auto_key_ciphertext" not in job and "replicate_credential_version" not in job
+    if route == "google_h3":
+        assert job["normal_generation_snapshot"]["settings"]["replicate_credential_version"] == version
+    else:
+        assert "normal_generation_snapshot" not in job
 
 
 @pytest.mark.parametrize("route", ("google_h3", "paperspace_h3"))

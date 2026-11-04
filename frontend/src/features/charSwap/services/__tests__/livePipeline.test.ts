@@ -78,12 +78,39 @@ describe("live job charge parsing", () => {
     expect(requests).not.toHaveBeenCalled();
   });
 
-  it.each(["submitting", "rendering"])("preserves a validated self-hosted destination and bounded shot progress (%s)", async (phase) => {
+  it.each(["starting_worker", "waiting_for_capacity", "submitting", "rendering"])("preserves a validated self-hosted destination and bounded shot progress (%s)", async (phase) => {
     const progress = {phase, completed_shots: 3, total_shots: 8};
     requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "generating",
       generation_destination: "paperspace_h3", self_hosted_progress: progress})));
     expect(await getLiveJob("job-1", "session", new AbortController().signal)).toMatchObject({
       generation_destination: "paperspace_h3", self_hosted_progress: progress});
+  });
+
+  it("preserves an explicit Google capacity fallback on the normal route without old worker progress", async () => {
+    const fallback = {id: "job-1", status: "preparing", generation_destination: "current",
+      generation_fallback: {from: "google_h3", reason: "capacity_unavailable"}};
+    requests.mockResolvedValue(new Response(JSON.stringify(fallback)));
+    expect(await getLiveJob("job-1", "session", new AbortController().signal)).toEqual(fallback);
+  });
+
+  it.each([
+    null, [], {}, {from: "paperspace_h3", reason: "capacity_unavailable"},
+    {from: "google_h3", reason: "timeout"}, {from: "google_h3", reason: ["capacity_unavailable"]},
+  ])("rejects invalid fallback metadata instead of silently authorizing a different route (%j)", async (generation_fallback) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "preparing",
+      generation_destination: "current", generation_fallback})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/generation fallback/);
+  });
+
+  it("requires a fallback to use the normal route and omit stale self-hosted progress", async () => {
+    const fallback = {from: "google_h3", reason: "capacity_unavailable"};
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "preparing",
+      generation_destination: "google_h3", generation_fallback: fallback})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/generation fallback/);
+    requests.mockResolvedValue(new Response(JSON.stringify({id: "job-1", status: "preparing",
+      generation_destination: "current", generation_fallback: fallback,
+      self_hosted_progress: {phase: "waiting_for_capacity", completed_shots: 0, total_shots: 8}})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/worker progress/);
   });
 
   it.each(["unknown", null, [], {}])("rejects an invalid saved generation destination (%j)", async (generation_destination) => {

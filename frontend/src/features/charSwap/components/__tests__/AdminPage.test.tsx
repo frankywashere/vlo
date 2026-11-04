@@ -554,6 +554,25 @@ it("defaults both self-hosted destinations off and does not assume missing worke
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 
+it("can select a stopped Google worker only when on-demand lifecycle is explicitly available", async () => {
+  api.pipelineSettings = {revision: 5, audio_processing: false,
+    self_hosted_workers: {google_h3: {ready: false, on_demand_available: true},
+      paperspace_h3: {ready: false, on_demand_available: true}}};
+  await renderExpandedAdmin();
+  const google = screen.getByRole("switch", {name: "Multi-person swaps: Google CharacterSwap"});
+  expect(google).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"})).toBeDisabled();
+  expect(screen.getByText("Google worker is configured to start on demand.")).toBeVisible();
+  expect(screen.getByText(/Google starts for queued work and stops when idle/)).toHaveTextContent(
+    "the job restarts normal API preparation, including SAM when enabled, using the normal route’s settings.");
+  await userEvent.click(google);
+  await waitFor(() => expect(google).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, multi_person_generation_route: "google_h3"});
+  await userEvent.click(google);
+  await waitFor(() => expect(google).not.toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 6, multi_person_generation_route: "current"});
+});
+
 it("explains the separate CharacterSwap recipe and scopes normal preparation controls without changing settings", async () => {
   api.pipelineSettings = {revision: 3, audio_processing: false, multi_person_generation_route: "paperspace_h3",
     preparation_provider: "replicate", replicate_api_key_configured: true,

@@ -198,6 +198,19 @@ def check_generation_funding(records, setup: Setup, active_session: dict, *, gen
         raise PublicError("Add enough recastfx credits before submitting this swap.", 402)
 
 
+def normal_generation_snapshot(defaults, options, active_session):
+    """Pin the ordinary pipeline before Google overrides masks/audio/mesh."""
+    mesh = face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(services()[0], active_session)))
+    tracking = (options.enhanced_character_masking or mesh["face_mesh"]
+        or defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people)
+    values = {key: defaults[key] for key in ("audio_processing", "multi_characters", "prompt_variant",
+        "matching_no_review", "retry_missing_masks_with_sam", "depth_guidance")}
+    values.update(guide_style_version=2, depth_overlay_opacity=.2, depth_identity_colors_version=1,
+                  restore_original_audio=False, **mesh,
+                  **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=tracking))
+    return {"version": 1, "settings": values, "provider": active_session.get("provider", "reAPI")}
+
+
 def authenticate(authorization: str | None):
     records, _, _ = services()
     session_id = digest(bearer_token(authorization))
@@ -288,6 +301,9 @@ def view(job: dict, *, review_thumbnails: bool = True):
         result["self_hosted_progress"] = {"phase": job.get("self_hosted_phase", "queued"),
             "completed_shots": len(job.get("self_hosted_completed_shots", [])),
             "total_shots": len(job.get("self_hosted_shots", []))}
+    from .google_fallback import is_google_fallback
+    if is_google_fallback(job):
+        result["generation_fallback"] = {"from": "google_h3", "reason": "capacity_unavailable"}
     for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing", "watermark_applied", "watermark_bonus_awarded"]:
         if field in job:
             result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
@@ -1000,6 +1016,10 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                              generation_route=route_snapshot["multi_person_generation_route"])
     watermark_offer = watermark_snapshot(records, options, active_session)
     job_id = uuid.uuid4().hex
+    fallback_snapshot = (normal_generation_snapshot(defaults, options, active_session)
+                         if route_snapshot["multi_person_generation_route"] == "google_h3" else None)
+    fallback_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
+                    if fallback_snapshot and x_reapi_key and active_session.get("access_mode") == "api-key" else None)
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                 if not self_hosted and options.auto_generate and active_session.get("access_mode") == "api-key" else None)
     await run_in_threadpool(records.update, "control/preparation.json", lambda current: reserve_preparation(
@@ -1037,6 +1057,10 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                **watermark_offer,
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
                **route_snapshot}
+        if fallback_snapshot:
+            job["normal_generation_snapshot"] = fallback_snapshot
+        if fallback_key:
+            job["google_fallback_key_ciphertext"] = fallback_key
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
@@ -1141,6 +1165,10 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
+    fallback_snapshot = (normal_generation_snapshot(defaults, options.setup, active_session)
+                         if route_snapshot["multi_person_generation_route"] == "google_h3" else None)
+    fallback_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
+                    if fallback_snapshot and x_reapi_key and active_session.get("access_mode") == "api-key" else None)
     check_generation_funding(records, options.setup, active_session,
                              generation_route=route_snapshot["multi_person_generation_route"])
     watermark_offer = watermark_snapshot(records, options.setup, active_session)
@@ -1171,6 +1199,10 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "access_mode": active_session.get("access_mode", "api-key"),
         "title": options.title,
     }
+    if fallback_snapshot:
+        manifest["normal_generation_snapshot"] = fallback_snapshot
+    if fallback_key:
+        manifest["google_fallback_key_ciphertext"] = fallback_key
     if auto_key:
         manifest["auto_key_ciphertext"] = auto_key
     if manifest["access_mode"] == "credits":
@@ -1267,6 +1299,9 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (prompt_variant == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
                **route_snapshot}
+        for field in ("normal_generation_snapshot", "google_fallback_key_ciphertext"):
+            if field in manifest:
+                job[field] = manifest[field]
         if manifest.get("auto_key_ciphertext"):
             job["auto_key_ciphertext"] = manifest["auto_key_ciphertext"]
         if manifest.get("generation_credits") is not None:
@@ -1307,6 +1342,12 @@ def refresh_stale_job(job: dict):
     # Admission waits do not own a worker yet and have a separate two-hour
     # bound. Processing still has the original 35-minute watchdog.
     records, cloud, _ = services()
+    from .google_fallback import is_google_fallback, refund_unsubmitted_fallback
+    if is_google_fallback(job) and job.get("status") == "failed":
+        try:
+            return refund_unsubmitted_fallback(records, job)
+        except Exception:
+            return job  # A later status refresh may settle the exact receipt.
     from .self_hosted_jobs import SelfHostedJobs, is_self_hosted
     if is_self_hosted(job) and job.get("access_mode") == "credits":
         if (job.get("status") == "submitting" and job.get("credit_reservation_reference")
@@ -1329,7 +1370,7 @@ def refresh_stale_job(job: dict):
             job = manager.reconcile_status(job)
     def timed_out(current):
         if current["status"] == "queued" and current.get("account_id") and current.get("admission_token"):
-            return time.time() - current["created_at"] > 7200
+            return time.time() - current.get("preparation_queued_at", current["created_at"]) > 7200
         return (current["status"] in {"queued", "preparing", "matching", "finalizing", "finishing"}
                 and time.time() - current["updated_at"] > 2100)
 
@@ -1346,7 +1387,13 @@ def refresh_stale_job(job: dict):
             current.update(status="submission_unknown", message="Submission outcome is unknown. Check your provider history before creating another generation.")
         return current
     if timed_out(job) or (job["status"] == "submitting" and time.time() - job["updated_at"] > 90):
-        return records.update(f"jobs/{job['id']}.json", mutate)
+        job = records.update(f"jobs/{job['id']}.json", mutate)
+        if is_google_fallback(job) and job.get("status") == "failed":
+            try:
+                return refund_unsubmitted_fallback(records, job)
+            except Exception:
+                pass
+        return job
     return job
 
 
@@ -1836,8 +1883,10 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     if credits_mode:
         debited = False
         try:
-            apply_wallet_change(records, job["account_id"], "generation:" + job_id, -charge, "generation")
+            receipt = apply_wallet_change(records, job["account_id"], "generation:" + job_id, -charge, "generation")
             debited = True
+            if "refund:" + job_id in receipt.get("applied", {}):
+                raise PublicError("This generation reservation was returned. Prepare a new clip before generating.", 409)
             records.update(f"jobs/{job_id}.json", lambda current: {**current, "app_credits_charged": charge})
         except Exception:
             if debited:
@@ -2177,7 +2226,9 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     easy_auto = bool(job.get("setup", {}).get("auto_generate") and job.get("setup", {}).get("easy_mode"))
     capacity_approved = (job.get("capacity_generation_authorized") is True
         and job.get("capacity_approval_revision") == job.get("tracking_applied_revision"))
-    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_submission or capacity_approved):
+    from .google_fallback import is_google_fallback
+    fallback_approved = is_google_fallback(job) and job.get("google_fallback_approved") is True
+    if job.get("access_mode") not in {"credits", "api-key"} or not (easy_auto or reviewed_submission or capacity_approved or fallback_approved):
         return {"ok": True}
     try:
         from .self_hosted_jobs import is_self_hosted
@@ -2238,15 +2289,24 @@ def admit_preparation(task: InternalTask, authorization: str | None = Header(def
     job, _ = records.read(f"jobs/{task.job_id}.json")
     if not job or job.get("status") != "queued" or job.get("admission_token") != task.task_token:
         return {"ok": True}
+    def fail_admission(message):
+        failed = records.update(f"jobs/{task.job_id}.json", lambda current: {**current,
+            "status": "failed", "message": message} if current and current.get("status") == "queued"
+            and current.get("admission_token") == task.task_token else current)
+        from .google_fallback import refund_unsubmitted_fallback
+        try:
+            refund_unsubmitted_fallback(records, failed)
+        except Exception as error:
+            emit("google_fallback_credit_reconciliation_pending", job_id=task.job_id, error_type=type(error).__name__)
     if time.time() - job.get("preparation_queued_at", job.get("created_at", 0)) > 7200:
-        records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "status": "failed", "message": "The preparation queue timed out. No generation was submitted."})
+        fail_admission("The preparation queue timed out. No generation was submitted.")
         return {"ok": True}
     try:
         records.update("control/preparation.json", lambda current: claim_queued_slot(current, task.job_id, time.time(),
             **preparation_limits(records, job)))
     except PublicError as error:
         if error.code != "preparation_busy":
-            records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "status": "failed", "message": error.message})
+            fail_admission(error.message)
             return {"ok": True}
         next_token = uuid.uuid4().hex
         records.update(f"jobs/{task.job_id}.json", lambda current: {**current, "admission_token": next_token,
@@ -2257,7 +2317,7 @@ def admit_preparation(task: InternalTask, authorization: str | None = Header(def
     if ProcessingCapacity(settings, records).enabled():
         cloud.enqueue("prepare", task.job_id, task_token=job.get("tracking_task_token"))
     else:
-        pipeline.prepare(task.job_id)
+        pipeline.prepare(task.job_id, job.get("tracking_task_token"))
     return {"ok": True}
 
 

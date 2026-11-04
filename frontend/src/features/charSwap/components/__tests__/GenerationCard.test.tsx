@@ -27,6 +27,32 @@ const job: AccountJob = {
   ],
 };
 
+it.each([
+  ["starting_worker", "Starting Google GPU", "We’re starting the Google worker and loading its models"],
+  ["waiting_for_capacity", "Waiting for Google GPU", "Your clip is queued while Google GPU capacity is checked"],
+] as const)("shows %s while the saved Google job waits without implying generation is underway", (phase, title, detail) => {
+  render(<GenerationCard job={{...job, status: "queued", generation_destination: "google_h3",
+    self_hosted_progress: {phase, completed_shots: 0, total_shots: 8}}} onOpen={vi.fn()} />);
+  expect(screen.getByText(title)).toBeVisible();
+  expect(screen.getByText(new RegExp(detail))).toBeVisible();
+  expect(screen.queryByText(/Processing scenes/)).not.toBeInTheDocument();
+});
+
+it("shows capacity fallback as fresh normal API preparation, including the normal SAM settings", () => {
+  render(<GenerationCard job={{...job, status: "preparing", generation_destination: "current",
+    generation_fallback: {from: "google_h3", reason: "capacity_unavailable"}}} onOpen={vi.fn()} />);
+  expect(screen.getByText("Preparing with the normal API route")).toBeVisible();
+  expect(screen.getByText(/Google GPU capacity was unavailable/)).toHaveTextContent("including SAM when enabled");
+  expect(screen.queryByText("Starting Google GPU")).not.toBeInTheDocument();
+});
+
+it("keeps a failed Google startup visibly failed rather than masking it as waiting", () => {
+  render(<GenerationCard job={{...job, status: "failed", generation_destination: "google_h3",
+    self_hosted_progress: {phase: "starting_worker", completed_shots: 0, total_shots: 8}}} onOpen={vi.fn()} />);
+  expect(screen.getByText("Failed")).toBeVisible();
+  expect(screen.queryByText("Starting Google GPU")).not.toBeInTheDocument();
+});
+
 it("keeps the grid still and opens details when the thumbnail is clicked", () => {
   const open = vi.fn();
   render(<GenerationCard job={job} onOpen={open} />);

@@ -81,8 +81,9 @@ export interface JobSettingsUsed {
 
 export interface LivePipelineJob {
   generation_destination?: MultiPersonGenerationRoute;
+  generation_fallback?: {from: "google_h3"; reason: "capacity_unavailable"};
   self_hosted_progress?: {
-    phase: "queued" | "submitting" | "encoding" | "rendering" | "assembling" | "complete" | "reconciliation_required" | "credit_reservation_failed";
+    phase: "queued" | "starting_worker" | "waiting_for_capacity" | "submitting" | "encoding" | "rendering" | "assembling" | "complete" | "reconciliation_required" | "credit_reservation_failed";
     completed_shots: number;
     total_shots: number;
   };
@@ -376,11 +377,18 @@ function readJob(value: unknown): LivePipelineJob {
       throw new LivePipelineError("The service returned an unreadable generation destination. Refresh the job before continuing.");
     job.generation_destination = value.generation_destination;
   }
+  if (value.generation_fallback !== undefined) {
+    const fallback = value.generation_fallback;
+    if (job.generation_destination !== "current" || !isRecord(fallback)
+        || fallback.from !== "google_h3" || fallback.reason !== "capacity_unavailable")
+      throw new LivePipelineError("The service returned unreadable generation fallback details. Refresh the job before continuing.");
+    job.generation_fallback = {from: "google_h3", reason: "capacity_unavailable"};
+  }
   if (value.self_hosted_progress !== undefined) {
     const progress = value.self_hosted_progress;
     if ((job.generation_destination !== "google_h3" && job.generation_destination !== "paperspace_h3")
         || !isRecord(progress) || typeof progress.phase !== "string"
-        || !["queued", "submitting", "encoding", "rendering", "assembling", "complete", "reconciliation_required", "credit_reservation_failed"].includes(progress.phase)
+        || !["queued", "starting_worker", "waiting_for_capacity", "submitting", "encoding", "rendering", "assembling", "complete", "reconciliation_required", "credit_reservation_failed"].includes(progress.phase)
         || typeof progress.completed_shots !== "number" || !Number.isInteger(progress.completed_shots)
         || typeof progress.total_shots !== "number" || !Number.isInteger(progress.total_shots)
         || progress.completed_shots < 0 || progress.total_shots < 0 || progress.total_shots > 60

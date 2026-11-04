@@ -75,7 +75,7 @@ def assert_no_tracking_preview(job, cloud, previews):
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
             background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False, preview_available=True,
-            depth_overlay_opacity=None, depth_identity_colors_version=None):
+            depth_overlay_opacity=None, depth_identity_colors_version=None, google_fallback=False):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -195,6 +195,31 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                 return {}
             yield invoke
     records, cloud = Records(), Cloud()
+    if google_fallback:
+        from google.api_core.exceptions import PreconditionFailed
+        token = "e" * 32
+        records.data[path].update(multi_person_generation_route="current",
+            generation_fallback={"from": "google_h3", "reason": "capacity_unavailable"},
+            tracking_task_token=token)
+        old_inputs = ("normalized.mp4", "sam-input.mp4", "working-masks.zip", "selected-people-masks.zip",
+                      "identity-matched-masks.zip", "all-people-masks.zip", "depth.mp4", "masks.zip", "vocals_plus3.wav")
+        cloud.original_h3_objects = {f"gs://workers/inputs/swapmein-{job_id}/{name}": b"retained original input"
+                                     for name in old_inputs}
+        cloud.original_h3_objects.update({f"gs://app/outputs/{job_id}/{name}": b"retained original preview"
+                                         for name in ("guide.mp4", "tracking.mp4")})
+        cloud.original_h3_objects.update({f"gs://app/outputs/{job_id}/{folder}/{frame}.jpg": b"retained original still"
+                                         for folder in ("scenes", "scenes-masked") for frame in range(96)})
+        cloud.objects.update(cloud.original_h3_objects)
+        upload, copy_object = cloud.upload, cloud.copy
+        def immutable_upload(bucket, key, source, content_type):
+            if f"gs://{bucket}/{key}" in cloud.objects:
+                raise PreconditionFailed("Immutable destination already exists")
+            return upload(bucket, key, source, content_type)
+        def immutable_copy(uri, bucket, key):
+            if f"gs://{bucket}/{key}" in cloud.objects:
+                raise PreconditionFailed("Immutable destination already exists")
+            return copy_object(uri, bucket, key)
+        cloud.upload, cloud.copy = immutable_upload, immutable_copy
     cloud.replicate_calls = []
     class HostedPreparation:
         def __init__(self, saved_records, saved_cloud, job):
@@ -209,7 +234,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
             return {"depth_uri": cloud.worker_output({}, "hosted-depth", "depth.mp4") if depth_guidance else None,
                     "masks_uri": cloud.worker_output({}, "hosted-sam", "masks.zip")}
     monkeypatch.setattr("swapmein.pipeline.ReplicatePreparation", HostedPreparation)
-    Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud).prepare(job_id)
+    Pipeline(replace(Settings(), app_bucket="app", worker_bucket="workers"), records, cloud).prepare(
+        job_id, records.data[path].get("tracking_task_token"))
     return records.data[path], cloud, sam_inputs, previews, originals
 
 

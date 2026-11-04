@@ -101,6 +101,7 @@ export interface PipelineSettings {
   multi_person_generation_route?: MultiPersonGenerationRoute;
   self_hosted_workers?: Partial<Record<Exclude<MultiPersonGenerationRoute, "current">, {
     ready: boolean;
+    on_demand_available?: boolean;
     message?: string;
   }>>;
   prompt_variant?: PromptVariant;

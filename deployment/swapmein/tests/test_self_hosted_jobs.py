@@ -643,6 +643,83 @@ def test_stale_queue_recovery_cannot_reassign_an_already_started_worker(workers)
     assert not cloud.enqueued and not cloud.signed_outputs
 
 
+def test_managed_google_boot_admits_only_one_fresh_job_but_keeps_same_job_resume(workers, monkeypatch):
+    client, records, _, manager, headers = workers
+    monkeypatch.setattr("swapmein.google_lifecycle.configuration", lambda _settings: {"zone": "test-zone"})
+    monkeypatch.setattr("swapmein.google_lifecycle.wake_google", lambda *_: {})
+    records.data["control/self-hosted/google_h3.json"] = {"google_accepting_claims": True}
+    route, lease, first = start(workers, prepared(route="google_h3"))
+    control = records.data[f"control/self-hosted/{route}.json"]
+    assert control["google_boot_claimed_job"] == lease["job_id"]
+    url = f"/worker/self-hosted/{route}/claim"
+    assert client.post(url, headers=headers[route], json={"worker_id": "worker-one"}).json()["job"]["lease_token"] == first["lease_token"]
+    second = prepared("b" * 32, route="google_h3")
+    records.create(f"jobs/{second['id']}.json", second)
+    manager.enqueue(second["id"])
+    manager._release(route, lease["job_id"])
+    response = client.post(url, headers=headers[route], json={"worker_id": "worker-one"})
+    assert response.status_code == 200 and response.json() == {"job": None}
+    control = records.data[f"control/self-hosted/{route}.json"]
+    assert control["queue"] == [second["id"]] and control["google_boot_claimed_job"] == lease["job_id"]
+    control["google_boot_claimed_job"] = None  # Only the lifecycle's next boot clears this marker.
+    response = client.post(url, headers=headers[route], json={"worker_id": "worker-one"})
+    assert response.status_code == 200 and response.json()["job"]["id"] == second["id"]
+
+
+@pytest.mark.parametrize("gate,action,error", [(None,None,None),(False,None,None),(True,{"kind":"start"},None),(True,None,"operation_unknown")])
+def test_managed_google_fresh_claim_requires_explicit_open_idle_gate(workers,monkeypatch,gate,action,error):
+    client,records,_,manager,headers=workers
+    monkeypatch.setattr("swapmein.google_lifecycle.configuration",lambda _:{"zone":"test-zone"})
+    monkeypatch.setattr("swapmein.google_lifecycle.wake_google",lambda *_:{})
+    job=prepared(route="google_h3");records.create(f"jobs/{job['id']}.json",job);manager.enqueue(job["id"])
+    base="/worker/self-hosted/google_h3"
+    assert client.post(base+"/heartbeat",headers=headers["google_h3"],json={"worker_id":"worker-one"}).status_code==200
+    state=records.data["control/self-hosted/google_h3.json"]
+    if gate is not None:state["google_accepting_claims"]=gate
+    state.update(google_action=action,google_lifecycle_error=error)
+    response=client.post(base+"/claim",headers=headers["google_h3"],json={"worker_id":"worker-one"})
+    assert response.status_code==200 and response.json()=={"job":None}
+    assert not records.data[f"jobs/{job['id']}.json"].get("worker_started_at")
+    state=records.data["control/self-hosted/google_h3.json"]
+    state.update(google_accepting_claims=True,google_action=None,google_lifecycle_error=None)
+    assert client.post(base+"/claim",headers=headers["google_h3"],json={"worker_id":"worker-one"}).json()["job"]["id"]==job["id"]
+
+
+def test_unmanaged_google_worker_preserves_legacy_missing_gate_claim(workers,monkeypatch):
+    monkeypatch.setattr("swapmein.google_lifecycle.configuration",lambda _:None)
+    route,lease,claim=start(workers,prepared(route="google_h3"))
+    assert route=="google_h3" and claim["id"]==lease["job_id"]
+
+
+@pytest.mark.parametrize("phase,expected", [
+    ("starting_worker", "Starting Google GPU."),
+    ("queued", "Waiting for Google worker startup."),
+    ("waiting_for_capacity", "Waiting for Google GPU capacity."),
+])
+def test_google_on_demand_cold_start_status_does_not_report_offline_or_failed_fallback(workers,monkeypatch,phase,expected):
+    _,records,cloud,manager,_=workers
+    monkeypatch.setattr("swapmein.google_lifecycle.on_demand_available",lambda *_:True)
+    monkeypatch.setattr("swapmein.google_lifecycle.wake_google",lambda *_:{})
+    job=prepared(route="google_h3");records.create(f"jobs/{job['id']}.json",job)
+    current=manager.enqueue(job["id"])
+    current["self_hosted_phase"]=phase;records.data[f"jobs/{job['id']}.json"]=current
+    result=manager.reconcile_status(current)
+    assert result["message"].startswith(expected)
+    assert "offline" not in result["message"] and "fallback" not in result["message"]
+    assert result["status"]=="generating" and result["self_hosted_phase"]==phase
+    assert not result.get("worker_started_at") and not result.get("self_hosted_lease")
+    assert not cloud.enqueued
+
+
+def test_unconfigured_google_queue_still_reports_worker_offline(workers,monkeypatch):
+    _,records,_,manager,_=workers
+    monkeypatch.setattr("swapmein.google_lifecycle.on_demand_available",lambda *_:False)
+    monkeypatch.setattr("swapmein.google_lifecycle.wake_google",lambda *_:{})
+    job=prepared(route="google_h3");records.create(f"jobs/{job['id']}.json",job)
+    current=manager.enqueue(job["id"])
+    assert "worker is offline" in manager.reconcile_status(current)["message"]
+
+
 def test_public_job_view_never_exposes_worker_credentials(workers, api):
     client, records, _, _, _ = workers
     headers, owner = authenticated(api)
