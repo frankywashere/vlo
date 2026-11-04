@@ -1,0 +1,111 @@
+{
+  "date": "2026-11-04",
+  "branch": "multi-person-self-hosted",
+  "implementation_commit": "78360bfe",
+  "admin_copy_commit": "b1994347",
+  "immutable_api_worker_image": "us-east4-docker.pkg.dev/charswap-franky-20261013/proof/recastfx-gateway@sha256:428a6311029a03d4ad7b94bf21bf87f45bf481875de52612fffaf312ec0e434b",
+  "services": {
+    "recastfx-worker": {
+      "previous_ready_revision": "recastfx-worker-00006-mfh",
+      "new_revision": "recastfx-worker-psh3-20261104-1",
+      "runtime_preserved_sha256": "074ba31029c0f2d5ca8b78ca4bf32ded6f5da2bff4ff39ee02387d1373c091b5",
+      "traffic_promoted": true,
+      "total_seconds": 14.13
+    },
+    "recastfx-control-worker": {
+      "previous_ready_revision": "recastfx-control-worker-00004-bdf",
+      "new_revision": "recastfx-control-worker-psh3-20261104-1",
+      "runtime_preserved_sha256": "5c21c8eac9b20ebf86bf8a2fad9c87b6db1d74e34a1852f5e403038925cdf4dd",
+      "traffic_promoted": true,
+      "total_seconds": 14.38
+    },
+    "recastfx-api": {
+      "previous_ready_revision": "recastfx-api-00082-n42",
+      "new_revision": "recastfx-api-psh3-20261104-1",
+      "runtime_preserved_sha256": "35b6ef49d8c5890a3d90fd211805d2c9fc7dacd9d9a7c72f2ba0566f4f584d6d",
+      "traffic_promoted": true,
+      "total_seconds": 14.34
+    }
+  },
+  "frontend": {
+    "bundle": "/assets/charswap-CzqxYZyG.js",
+    "sha256": "a543c9aebfdc19b70b86e07b767a9b4e6a06fefc952dba9a867dc6776146d1db",
+    "public_bundle_matches_build": true
+  },
+  "routing": {
+    "pipeline_revision": 15,
+    "multi_person": "paperspace_h3",
+    "single_person": "current",
+    "google_enabled": false,
+    "existing_jobs_keep_route": true
+  },
+  "worker": {
+    "recipe": "characterswap_v1",
+    "base": "BF16 Ref2VA",
+    "text_encoder": "existing INT8 convrot",
+    "adapters": {
+      "CharacterSwap V1.5": 1,
+      "FL2v Turbo 8-step": 1
+    },
+    "seed": 904239,
+    "steps": 8,
+    "sampler": "er_sde",
+    "scheduler": "normal",
+    "cfg": 1,
+    "video_shift": 12,
+    "audio_shift": 3,
+    "fps": 24,
+    "job_concurrency": 1,
+    "models_transferred": false,
+    "new_vm": false,
+    "owned_comfy_exited_after_job": true,
+    "shared_services_unchanged": true
+  },
+  "smoke": {
+    "job_id": "81e27e4119334b3891f4ebc494ac55a8",
+    "scope": "Two reviewed shot assignments, actual signed-in Library approval through private worker and Library finishing; no new automatic matching quality claim.",
+    "duration_seconds": 4,
+    "width": 852,
+    "height": 480,
+    "frames": 96,
+    "shot_frames": [
+      73,
+      23
+    ],
+    "generation_to_library_seconds": 1485.57,
+    "queue_wait_seconds": 7.06,
+    "site_credit_cost": 52,
+    "single_debit_verified": true,
+    "no_hosted_generation_provider_task": true,
+    "original_audio_correlation": 0.9999886859901858,
+    "before_bytes_identical": true,
+    "comparison": {
+      "layout": "stacked",
+      "width": 852,
+      "height": 960,
+      "frames": 96
+    },
+    "retained_characters": 2,
+    "retained_selection_previews": 2,
+    "visual_review": "Sampled source/output frames show both selected replacements; not broad creative acceptance.",
+    "browser_library_complete": true,
+    "download_controls_visible": true,
+    "comparison_media_verified": true,
+    "native_download_save_confirmation": "Not verified: Chrome automation did not observe a download and native UI was unavailable while macOS was locked."
+  },
+  "validation": {
+    "focused_backend_tests": 539,
+    "final_admin_tests": 44,
+    "frontend_build": true,
+    "extension_surface_check": "No extension contract surface files changed",
+    "runtime_config_preserved": true,
+    "preview_unchanged": true,
+    "google_gpu_unchanged": true
+  },
+  "cost_boundary": {
+    "new_gpu_rentals": false,
+    "model_transfer_bytes": 0,
+    "server_rate": "unverified; no dollar estimate asserted",
+    "cloud_build_seconds": 171.69
+  }
+}

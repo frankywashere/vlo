@@ -15,7 +15,8 @@ Selecting one switch replaces the other; disabling it returns to `current`.
 The route is pinned to the upload ticket and job. Changing Admin settings does
 not move or cancel existing jobs. Enabling a destination requires a configured
 worker token and a recent verified heartbeat. An offline route can always be
-disabled. This branch does not enable the live setting or provision a VM.
+disabled. New installations default to `current`. The Paperspace production
+activation is recorded below; these services do not provision a VM.
 
 ## Processing
 
@@ -90,11 +91,32 @@ route because actual self-hosted cost has not been settled.
 
 ## Release boundary
 
-This implementation is locally testable with fake provider/Comfy interfaces,
-CPU media fixtures and the existing application's tests. GPU execution and
-paid matching are separate release checks. Configure and verify a worker,
-deploy the API and UI, and run a bounded end-to-end test before enabling either
-live switch for users. The default remains `current` until that happens.
+New destinations must pass local configuration checks and a bounded live GPU
+test before activation. Paperspace completed this gate on November 4, 2026;
+Google remains unconfigured and disabled. Production pipeline revision 15 routes
+new jobs with two or more explicitly selected people to `paperspace_h3`.
+Single-person jobs and existing jobs keep their original route.
+
+The controlled test used two reviewed shot assignments, then the real signed-in
+Library approval, credit reservation, pull worker, native GPU graph, assembly,
+private upload and existing Library finishing path. It delivered 96 frames at
+24 fps, 852×480, in 24m46s, with one 52-credit debit. Original-audio correlation
+was 0.9999887, the source-before file was byte-identical, the stacked comparison
+was 852×960, and both replacement photos and selection previews were retained.
+Sampled frames showed both replacements. This is not broad creative acceptance
+or validation of automatic matching on arbitrary footage.
+
+The existing Paperspace server processes one job at a time; extra jobs queue.
+The dedicated Comfy processes exit between jobs while the small pull-worker
+service remains active. The shared GPU services and prior benchmark outputs
+were preserved. Keep the model, launcher and pinned source paths referenced by
+the private runtime profile installed; do not remove those dependencies during
+experiment cleanup. No new VM, model download or inter-region model transfer
+was needed. The existing server's billing rate was not verified, so elapsed GPU
+time is recorded without inventing a dollar charge.
+
+See `docs/charswap-evidence/recastfx-paperspace-route-release-2026-11-04.json`
+from the repository root for immutable images, revisions and verification scope.
 
 No Google VM is automatically started, disk copied or performance increased by
 these switches. The retained Belgium disk was separately reduced to the included
@@ -122,7 +144,9 @@ the experimental notice appears for two selections and disappears for one, and
 neither layout scrolls horizontally. Its API responses were local fixtures; this
 was not a live account, cloud worker or GPU test.
 
-The working implementation is on `multi-person-self-hosted`. No deployment,
-live route activation, VM start, model transfer or paid generation was performed
-as part of this implementation. Actual automatic matching accuracy and the
-private GPU runtime remain release checks.
+The implementation is on `multi-person-self-hosted`. Production API, heavy/control
+CPU workers and the production frontend were released in place, preserving their
+existing configuration and secret bindings. The isolated one-minute preview was
+unchanged. Automatic matching remains experimental and uncertain assignments
+require scene review; the live smoke used reviewed assignments. No Google GPU
+worker or Google start-on-queue/stop-on-idle controller was deployed.
