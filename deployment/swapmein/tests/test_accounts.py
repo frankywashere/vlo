@@ -171,7 +171,7 @@ def test_admission_waits_requeues_then_claims_once(api, monkeypatch):
     dispatched, prepared = [], []
     monkeypatch.setattr(cloud, "enqueue", lambda kind, jid, **options: dispatched.append((kind, jid, options)))
     class Pipeline:
-        def prepare(self, jid):
+        def prepare(self, jid, task_token=None):
             prepared.append(jid)
             records.update(f"jobs/{jid}.json", lambda current: {**current, "status": "preparing"})
     monkeypatch.setattr(gateway, "internal_pipeline", lambda *args: Pipeline())

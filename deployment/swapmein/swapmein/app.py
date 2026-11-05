@@ -2012,9 +2012,11 @@ def submit_self_hosted_generation(job_id, job, active_session, records, cloud):
     charge = job.get("generation_credits", generation_credit_cost(job["duration"], public_catalog(records)["credits_per_generation"]))
     if credits_mode and (type(charge) is not int or not 0 < charge <= 1000000):
         raise PublicError("Credit pricing is not configured yet.", 503)
+    view_task_token = uuid.uuid4().hex
     try:
         records.update(f"jobs/{job_id}.json", lambda current: {
             **claim_job(current, {"ready"}, "submitting"), "self_hosted_shots": shots,
+            "self_hosted_view_task_token": view_task_token,
             "generation_settings": {"model": "MiniMax-H3", "recipe": "characterswap_v1"},
             **({"credit_reservation_credits": charge, "credit_reservation_reference": "generation:" + job_id,
                 "credit_reservation_state": "pending", "credit_reconciliation_required": False} if credits_mode else {}),
@@ -2023,6 +2025,19 @@ def submit_self_hosted_generation(job_id, job, active_session, records, cloud):
         if error.status_code == 409:
             return view(records.read(f"jobs/{job_id}.json")[0])
         raise
+    # Both automatic and reviewed selections reach this same owned transition.
+    # Add source-only pose cues before charging or creating the immutable GPU
+    # task. A moved review anchor cannot reuse a prior crop's description.
+    from .self_hosted_views import enrich_for_submission
+    described, view_cache, hint_status = enrich_for_submission(job, shots, records, cloud)
+    shots = validate_prepared_job({**job, "self_hosted_shots": described}, settings)
+    def save_source_views(current):
+        if (current.get("status") != "submitting"
+                or current.get("self_hosted_view_task_token") != view_task_token):
+            raise PublicError("This generation changed while its source views were checked. No GPU request was submitted.", 409)
+        return {**current, "self_hosted_shots": shots, "self_hosted_view_cache": view_cache,
+                "self_hosted_view_hints_status": hint_status}
+    records.update(f"jobs/{job_id}.json", save_source_views)
     if credits_mode:
         debited = False
         try:

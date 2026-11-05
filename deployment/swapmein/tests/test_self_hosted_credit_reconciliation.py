@@ -26,6 +26,20 @@ def submit(job, records, cloud):
         {"access_mode": "credits"}, records, cloud)
 
 
+def test_job_changed_during_source_view_check_cannot_debit_or_submit(api, monkeypatch):
+    from swapmein import self_hosted_views
+    job, wallet_path, records, cloud = credit_job(api)
+    def change_job(current, shots, *_):
+        records.data[f"jobs/{job['id']}.json"]["status"] = "failed"
+        return shots, {}, "completed"
+    monkeypatch.setattr(self_hosted_views, "enrich_for_submission", change_job)
+    with pytest.raises(PublicError) as caught:
+        submit(job, records, cloud)
+    assert caught.value.status_code == 409
+    assert records.data[wallet_path]["balance"] == 200
+    assert not records.data[wallet_path]["transactions"] and not cloud.enqueued
+
+
 def test_committed_debit_with_lost_ack_is_confirmed_and_refunded_without_queueing(api, monkeypatch):
     job, wallet_path, records, cloud = credit_job(api)
     original = gateway.apply_wallet_change

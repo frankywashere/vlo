@@ -9,20 +9,43 @@ def conditioning_frames(frames):
     return max(56, 5 + 17 * math.ceil((frames - 5) / 17))
 
 
-def shot_prompt(targets):
+def shot_prompt(targets, *, start_frame=0, width=None, height=None):
     instructions = []
     for index, target in enumerate(targets, 1):
-        x = target["anchor"]["x"]
+        anchor = target["anchor"]
+        hint = target.get("view_hint") or {}
+        if not isinstance(hint, dict):
+            hint = {}
+        evidence = hint.get("evidence_frames", [])
+        corroborated = (isinstance(evidence, list) and len(evidence) == 2
+                        and all(type(frame) is int and frame >= 0 for frame in evidence)
+                        and len(set(evidence)) == 2
+                        and abs(evidence[0] - evidence[1]) == 1
+                        and round(anchor["time"] * 24) in evidence)
+        # A hint belongs to one inspected source instant, never an identity or
+        # a replacement photo. Discard it if review moves the selected point.
+        view = (hint.get("view") if hint.get("anchor") == anchor
+                and type(hint.get("confidence")) in (int, float)
+                and math.isfinite(hint["confidence"])
+                and (.8 if corroborated else .9) <= hint["confidence"] <= 1 else None)
+        description = {"back": "seen from behind ", "front": "facing the camera "}.get(view, "")
+        x, y = anchor["x"], anchor["y"]
+        if width is not None and height is not None:
+            # The worker pads RGB to multiples of 32, then crops on export.
+            # Locate the person in the actual conditioning canvas, not export.
+            canvas_width, canvas_height = math.ceil(width / 32) * 32, math.ceil(height / 32) * 32
+            x = (x * width + (canvas_width - width) // 2) / canvas_width
+            y = (y * height + (canvas_height - height) // 2) / canvas_height
         position = "on the left" if x < .4 else "on the right" if x > .6 else "in the center"
-        if len(targets) > 1:
-            # Two selected people may both occupy the broad "center" bucket.
-            # Preserve every reference mapping and identify its actual anchor
-            # rather than giving contradictory replacements for one person.
-            y = target["anchor"]["y"]
-            position += f" (at {x * 100:.2f}% from the left and {y * 100:.2f}% from the top)"
-        instructions.append(f"Replace the person {position} in <Video 1> with the person in <Picture {index}>. "
+        # One selected target can still share a shot with unselected people.
+        # Never reduce its identity to a broad left/center/right description.
+        position += f" (at {x * 100:.2f}% from the left and {y * 100:.2f}% from the top)"
+        local_time = anchor["time"] - start_frame / 24
+        instructions.append(f"Replace the person {description}{position} in <Video 1> with the person in <Picture {index}>. "
+                            f"That position identifies this person at {local_time:.3f} seconds into this shot. "
                             f"Use that reference person's face, hair and clothing. "
-                            "Follow the source person's movements and expressions.")
+                            "Follow that same source person's movements and expressions throughout the shot, "
+                            "including when they turn away or another person's face is more visible.")
     return " ".join(instructions) + (" Leave other people and the setting unchanged. "
         "Keep each reference's clothing consistent throughout. "
         "Show only the filmed scene, without written text, captions, logos or graphics.")
@@ -49,7 +72,8 @@ def reviewed_shots(metadata, targets):
                                 "anchor": scene["anchor"]})
         result.append({"index": index, "start_frame": start, "end_frame": end,
                        "conditioning_frames": conditioning_frames(end - start),
-                       "targets": present, "prompt": shot_prompt(present) if present else ""})
+                       "targets": present, "prompt": shot_prompt(present, start_frame=start,
+                           width=metadata["width"], height=metadata["height"]) if present else ""})
     return result
 
 
@@ -82,7 +106,8 @@ def prepare(pipeline, job, options, source, metadata, targets, root):
         return
     shots = matched["shots"]
     for shot in shots:
-        shot["prompt"] = shot_prompt(shot["targets"]) if shot["targets"] else ""
+        shot["prompt"] = shot_prompt(shot["targets"], start_frame=shot["start_frame"],
+            width=metadata["width"], height=metadata["height"]) if shot["targets"] else ""
     pipeline.update_job(job["id"], **common, status="ready", review_required=False,
         tracking_reviewed=True, self_hosted_shots=shots,
         message="Shot assignments are ready for experimental CharacterSwap.")

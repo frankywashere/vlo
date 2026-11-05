@@ -65,6 +65,41 @@ The Google capacity fallback described below is a separate pre-generation
 infrastructure decision. It does not bypass uncertain character assignments or
 retry a render that may already have started.
 
+### Source targeting and view cues
+
+Retain precise coordinates even when only one selected person appears in a
+shot: unselected people can still be present. Coordinates are converted from
+the normalized source to the worker's padded canvas. Anchor timestamps are
+relative to the beginning of that shot, rather than the complete upload.
+
+The shared submission path for automatic and reviewed selections can add
+bounded, source-only view cues before wallet debit and GPU submission. Clef
+examines crops at the selected anchor and an adjacent original frame, with
+marked full-frame context. It may describe the selected person as seen from
+behind or facing the camera; it never chooses a new person or replacement
+reference. Two adjacent views must agree at scores of at least .8 each, or a
+single view must reach .9. These are experimental decision scores, not
+calibrated probabilities or an identity guarantee.
+
+Caches are keyed by source URI, target ID/reference and exact anchor. Moving a
+review selection invalidates the cue. Fixed phrases prevent arbitrary caption
+text from becoming prompt instructions. Unknown/disagreeing views abstain;
+later API failures preserve earlier confirmed cues. The existing lifetime
+Cloudflare spending ledger covers calls, with at most 40 anchors and a
+45-second decision deadline. Unavailable/partial enrichment retains the
+precise position and is recorded explicitly, without masks or a provider
+reroute. An owned submission token and status check prevent a job changed
+during this step from subsequently charging or submitting a GPU task.
+
+In the isolated November 4–5 targeting control, coordinates alone still
+replaced an unselected background woman. Adding the automatically corroborated
+back-view cue replaced the intended foreground man and preserved the two
+women across all 55 inspected output frames. The generated man nevertheless
+turned toward the camera and changed his mouth performance. This is a
+targeting improvement, not an overall creative-quality pass or authorization
+to replace the user's existing Library video. Deployment status must be
+reported separately from the staged code and isolated test.
+
 ## Private worker configuration
 
 Use a distinct random secret of at least 32 characters for each destination in
