@@ -75,7 +75,8 @@ def assert_no_tracking_preview(job, cloud, previews):
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
             background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False, preview_available=True,
-            depth_overlay_opacity=None, depth_identity_colors_version=None, google_fallback=False, generation_model="minimax-h3"):
+            depth_overlay_opacity=None, depth_identity_colors_version=None, google_fallback=False, generation_model="minimax-h3",
+            generation_resolution="768P"):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -86,6 +87,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                "easy_mode": easy, "enhanced_character_masking": enhanced, "auto_generate": easy}
     if generation_model != "minimax-h3":
         options["generation_model"] = generation_model
+    if generation_resolution != "768P":
+        options["generation_resolution"] = generation_resolution
     if background_tap:
         targets[0]["anchor"].update(x=.03, y=.03)
         options["anchor"].update(x=.03, y=.03)
@@ -101,10 +104,14 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                 "scene_cuts": [2.0], "preparation_version": 1 if legacy else 2,
                 "targets": [] if legacy or selection == "all" else
                     [{**target, "anchor": {**target["anchor"], "frame": 24}} for target in targets]}
-    def normalize(_source, destination, validated):
+    def normalize(_source, destination, validated, *, high_detail=False):
         assert validated.preparation_version == (1 if legacy else 2)
-        shutil.copyfile(media["legacy" if legacy else "working"], destination)
-        return copy.deepcopy(metadata)
+        shutil.copyfile(media["hd" if high_detail else "legacy" if legacy else "working"], destination)
+        result = copy.deepcopy(metadata)
+        if high_detail:
+            assert validated.generation_resolution == "2K"
+            result.update(width=1800, height=1440, resolution_policy="source_detail_2k_no_upscale")
+        return result
     monkeypatch.setattr("swapmein.pipeline.normalize", normalize)
     sam_inputs = []
     def low_copy(source, destination):
@@ -128,7 +135,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
     monkeypatch.setattr("swapmein.pipeline.create_selection_preview", selection_preview)
     originals = []
     def original_guide(source, vocals, output, checked):
-        assert checked["width"] == 960 and vocals.read_bytes() == media["audio"].read_bytes()
+        assert checked["width"] == (1800 if generation_resolution == "2K" else 960)
+        assert vocals.read_bytes() == media["audio"].read_bytes()
         originals.append(True)
         shutil.copyfile(source, output)
     monkeypatch.setattr("swapmein.pipeline.original_guide", original_guide)
@@ -153,7 +161,7 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
             self.calls, self.enqueued, self.copies, self.uploads = [], [], [], []
             self.worker_outputs = []
             self.cap_checks = 0
-            self.objects = {"gs://app/upload.bin": media["working"].read_bytes()}
+            self.objects = {"gs://app/upload.bin": media["hd" if generation_resolution == "2K" else "working"].read_bytes()}
         def check_cap(self):
             self.cap_checks += 1
             if not spending_protected:
@@ -181,7 +189,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                 self.objects[uri] = (media["empty_masks" if no_people else "masks"].read_bytes() if filename == "masks.zip" else
                     media["audio"].read_bytes() if filename == "vocals_plus3.wav" else
                     media["depth"].read_bytes() if filename == "depth.mp4" and not legacy else
-                    media["legacy" if legacy else "working"].read_bytes())
+                    media["hd" if filename == "prepared_guide.mp4" and generation_resolution == "2K"
+                          else "legacy" if legacy else "working"].read_bytes())
             return uri
         @contextmanager
         def worker(self, kind):

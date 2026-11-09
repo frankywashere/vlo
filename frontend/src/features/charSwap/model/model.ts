@@ -1,3 +1,4 @@
+import { referenceIds, submittedReferences, targetReferences, MAX_REFERENCE_IMAGES } from "./referenceGroups";
 import { trimDuration } from "../utils/trimRange";
 import { MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 
@@ -66,8 +67,10 @@ export type GenerationModel = "minimax-h3" | "kling-4-0";
 
 export interface WalkthroughState {
   generationModel?: GenerationModel;
+  generationResolution?: "768P" | "2K" | "720p";
   generationCreditQuote?: number;
   kling4Enabled?: boolean;
+  minimax2kEnabled?: boolean;
   replaceAllPeople?: boolean;
   easyMode?: boolean;
   submitWithoutAudio?: boolean;
@@ -80,6 +83,7 @@ export interface WalkthroughState {
   targets: TargetPerson[];
   references: ReferenceAsset[];
   assignments: Record<string, string>;
+  referenceGroups?: Record<string, string[]>;
   issues: MatchIssue[];
   decisions: Record<string, MatchDecision>;
 }
@@ -107,7 +111,9 @@ export function generationModelLabel(model?: GenerationModel): string {
 export function createInitialState(): WalkthroughState {
   return {
     generationModel: "minimax-h3",
+    generationResolution: "768P",
     kling4Enabled: false,
+    minimax2kEnabled: true,
     replaceAllPeople: false,
     easyMode: true,
     submitWithoutAudio: false,
@@ -118,6 +124,7 @@ export function createInitialState(): WalkthroughState {
     targets: [],
     references: [],
     assignments: {},
+    referenceGroups: {},
     issues: [],
     decisions: {},
   };
@@ -138,6 +145,7 @@ export function setClip(
     targets: [],
     references: [],
     assignments: {},
+    referenceGroups: {},
     issues: [],
     decisions: {},
   };
@@ -165,9 +173,10 @@ export function setTrim(
     ...state,
     replaceAllPeople: false,
     trim: [start, end],
-    ...(trimDuration([start, end]) > 15 ? {generationModel: "kling-4-0" as const, faceMesh: false, enhancedCharacterMasking: true} : {}),
+    ...(trimDuration([start, end]) > 15 ? {generationModel: "kling-4-0" as const, generationResolution: "720p" as const, faceMesh: false, enhancedCharacterMasking: true} : {}),
     targets: [],
     assignments: {},
+    referenceGroups: {},
     issues: [],
     decisions: {},
   };
@@ -183,7 +192,7 @@ export function setReplaceAllPeople(state: WalkthroughState, enabled: boolean): 
     replaceAllPeople: enabled,
     targets: enabled ? [{id: ALL_PEOPLE_TARGET_ID, name: "All people", color: "#75baff",
       anchor: {x: 0.5, y: 0.5, time: state.trim[0]}}] : [],
-    references: [], assignments: {}, issues: [], decisions: {},
+    references: [], assignments: {}, referenceGroups: {}, issues: [], decisions: {},
   };
 }
 
@@ -197,6 +206,8 @@ export function toggleTarget(
       .map((person, index) => ({...person, color: TARGET_COLORS[index]}));
     const assignments = { ...state.assignments };
     delete assignments[target.id];
+    const referenceGroups = {...state.referenceGroups};
+    delete referenceGroups[target.id];
     const issues = state.issues.filter((issue) => issue.targetId !== target.id);
     const decisions = Object.fromEntries(
       issues.flatMap((issue) => {
@@ -204,7 +215,7 @@ export function toggleTarget(
         return decision ? [[issue.id, decision]] : [];
       }),
     );
-    return { ...state, targets, assignments, issues, decisions };
+    return { ...state, targets, assignments, referenceGroups, issues, decisions };
   }
 
   if (!state.clip || state.targets.length >= MAX_TARGET_PEOPLE || !isValidAnchor(target, state.trim)) return state;
@@ -225,17 +236,37 @@ export function setReference(
     ...state,
     references: [...references, reference],
     assignments: { ...state.assignments, [targetId]: reference.id },
+    referenceGroups: {...state.referenceGroups, [targetId]: [reference.id, ...referenceIds(state, targetId).filter(id => id !== reference.id && id !== state.assignments[targetId])]},
   };
 }
 
-export function removeReference(
-  state: WalkthroughState,
-  targetId: string,
-): WalkthroughState {
-  if (!Object.hasOwn(state.assignments, targetId)) return state;
-  const assignments = { ...state.assignments };
-  delete assignments[targetId];
-  return { ...state, assignments };
+export function removeReference(state: WalkthroughState, targetId: string, referenceId = state.assignments[targetId]): WalkthroughState {
+  if (!referenceId || !referenceIds(state, targetId).includes(referenceId)) return state;
+  const group = referenceIds(state, targetId).filter(id => id !== referenceId);
+  const assignments = {...state.assignments};
+  if (group.length) assignments[targetId] = group[0];
+  else delete assignments[targetId];
+  return {...state, assignments, referenceGroups: {...state.referenceGroups, [targetId]: group}};
+}
+
+export function addReferences(state: WalkthroughState, targetId: string, assets: ReferenceAsset[]): WalkthroughState {
+  if (!state.targets.some(target => target.id === targetId) || !assets.length) return state;
+  const references = [...state.references];
+  for (const asset of assets) {
+    if (!asset.id || !asset.url) return state;
+    const index = references.findIndex(reference => reference.id === asset.id);
+    if (index < 0) references.push(asset); else references[index] = asset;
+  }
+  const group = [...new Set([...referenceIds(state, targetId), ...assets.map(asset => asset.id)])];
+  const updated = {...state, references, assignments: {...state.assignments, [targetId]: group[0]},
+    referenceGroups: {...state.referenceGroups, [targetId]: group}};
+  return submittedReferences(updated).length > MAX_REFERENCE_IMAGES ? state : updated;
+}
+
+export function makePrimaryReference(state: WalkthroughState, targetId: string, referenceId: string): WalkthroughState {
+  if (!referenceIds(state, targetId).includes(referenceId) || state.assignments[targetId] === referenceId) return state;
+  return {...state, assignments: {...state.assignments, [targetId]: referenceId},
+    referenceGroups: {...state.referenceGroups, [targetId]: [referenceId, ...referenceIds(state, targetId).filter(id => id !== referenceId)]}};
 }
 
 export function setIssues(
@@ -293,7 +324,7 @@ export function canContinue(state: WalkthroughState, step: Step): boolean {
 }
 
 export function hasAssignedReferenceImages(state: WalkthroughState): boolean {
-  return state.targets.every(target=>state.references.some(reference=>reference.id===state.assignments[target.id]&&Boolean(reference.url)));
+  return state.targets.every(target => referenceIds(state, target.id).length > 0 && referenceIds(state, target.id).every(id => state.references.some(reference => reference.id === id && Boolean(reference.url))));
 }
 
 export function referenceCleanupBlocker(reference: ReferenceAsset): string | null {
@@ -304,9 +335,8 @@ export function referenceCleanupBlocker(reference: ReferenceAsset): string | nul
 }
 
 export function hasPendingReferenceCleanup(state: WalkthroughState): boolean {
-  return state.targets.some(target => state.references.some(reference =>
-    reference.id === state.assignments[target.id] && reference.cleanup?.mode === "clean" &&
-      (reference.cleanup.pending || !reference.cleanup.cleanedUrl)));
+  return state.targets.some(target => targetReferences(state, target.id).some(reference =>
+    reference.cleanup?.mode === "clean" && (reference.cleanup.pending || !reference.cleanup.cleanedUrl)));
 }
 
 export function getStepBlocker(
@@ -347,6 +377,8 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       ) {
         return `Choose a section between 1 and ${maximumClipSeconds(state)} seconds.`;
       }
+      if (state.generationModel !== "kling-4-0" && state.generationResolution === "2K" && state.minimax2kEnabled === false)
+        return "MiniMax 2K is currently unavailable. Choose 768p to continue.";
       if (state.generationModel === "kling-4-0" && !state.kling4Enabled)
         return "Kling 4.0 is currently unavailable. Choose MiniMax and a clip up to 15 seconds.";
       if (trimDuration(state.trim) > 15 && state.generationModel !== "kling-4-0")
@@ -376,9 +408,10 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
       ) {
         return state.replaceAllPeople ? "Add one replacement image for everyone." : "Add a replacement image for each selected person.";
       }
-      for (const target of state.targets) {
-        const reference = state.references.find(item => item.id === state.assignments[target.id]);
-        const blocker = reference && referenceCleanupBlocker(reference);
+      if (!hasAssignedReferenceImages(state)) return "Upload every selected reference image, or remove its missing angle.";
+      if (submittedReferences(state).length > MAX_REFERENCE_IMAGES) return "Use up to six photos total across all characters.";
+      for (const target of state.targets) for (const reference of targetReferences(state, target.id)) {
+        const blocker = referenceCleanupBlocker(reference);
         if (blocker) return blocker;
       }
       return null;

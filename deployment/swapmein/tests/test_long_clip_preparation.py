@@ -149,4 +149,9 @@ def test_cpu_health_advertises_deployable_long_guide_capability(monkeypatch):
     readiness = worker.health()
     assert readiness["compositor_ready"] is True
     assert readiness["max_input_frames"] == 720 and readiness["max_input_seconds"] == 30
-    assert readiness["version"] == "audio-identity-kling-v10"
+    assert readiness["version"] == "audio-identity-hd-v11"
+
+    assert readiness["high_detail_max_short_side"] == 1440
+    assert readiness["high_detail_max_width"] == readiness["high_detail_max_height"] == 2560
+    assert readiness["high_detail_max_pixels"] == 3_686_400
+    assert readiness["scaled_tracking_masks"] is True

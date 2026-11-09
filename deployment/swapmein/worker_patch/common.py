@@ -33,7 +33,7 @@ def upload_tree(directory, run_id):
     return files
 
 
-def probe(path):
+def probe(path, *, high_detail=False):
     result = json.loads(subprocess.check_output([
         "ffprobe", "-v", "error", "-show_entries",
         "format=duration:stream=codec_type,width,height,r_frame_rate,nb_frames", "-of", "json", str(path)
@@ -41,16 +41,20 @@ def probe(path):
     video = next(x for x in result["streams"] if x["codec_type"] == "video")
     width, height = video["width"], video["height"]
     duration = float(result["format"]["duration"])
+    long_side, short_side, pixels, seconds = ((2560, 1440, 3_686_400, 15.1) if high_detail
+                                             else (1920, 768, 1_474_560, 30.1))
     if (type(width) is not int or type(height) is not int or min(width, height) < 2
-            or max(width, height) > 1920 or min(width, height) > 768
-            or width * height > 1_474_560 or not math.isfinite(duration) or not 0 < duration <= 30.1):
-        raise ValueError("Worker accepts up to 30 seconds, a 768px short side and 1920px long side")
+            or max(width, height) > long_side or min(width, height) > short_side
+            or width * height > pixels or not math.isfinite(duration) or not 0 < duration <= seconds):
+        raise ValueError("High-detail worker accepts up to 15 seconds, a 1440px short side and 2560px long side"
+                         if high_detail else "Worker accepts up to 30 seconds, a 768px short side and 1920px long side")
     if video["r_frame_rate"] != "24/1":
         raise ValueError("Input must be normalized to 24 fps")
     if video.get("nb_frames") not in (None, "N/A"):
         frames = int(video["nb_frames"])
-        if not 1 <= frames <= 720:
-            raise ValueError("Worker accepts 1–720 prepared video frames")
+        if not 1 <= frames <= (360 if high_detail else 720):
+            raise ValueError("High-detail worker accepts 1–360 prepared video frames" if high_detail
+                             else "Worker accepts 1–720 prepared video frames")
         # Container audio padding can be slightly longer than the prepared video.
         # Reject an inconsistent timeline instead of silently composing a prefix.
         if abs(frames / 24 - duration) > .1:

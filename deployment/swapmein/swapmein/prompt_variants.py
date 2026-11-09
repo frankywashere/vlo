@@ -5,6 +5,7 @@ the actual saved guide, audio, and reviewed assignments rather than inferring
 those settings from an experiment name.
 """
 from .errors import PublicError
+from .reference_groups import group_indexes, picture_words, angle_guidance
 from .guide_style import SHARED_CYAN_STYLES
 from .multi_tracking import TARGET_COLORS
 
@@ -265,7 +266,12 @@ def _structured_prompt(duration, targets, enhanced_masking, mask_style, audio_pr
         definitions.extend([
             "<Subject 1> means every source person throughout <Video 1>, including people who enter later or first appear after cuts; it is not a fixed list or limited number of performers.",
             "<Subject 2> is the replacement character whose identity, hair and clothing come from <Picture 1>; the picture is not a target frame or pose."])
-        mapping = "Replace every source person in every scene with a separate instance of <Subject 2>, using <Picture 1>."
+        group = group_indexes(targets[0])
+        if len(group) > 1:
+            pictures = picture_words(group)
+            definitions[-1] = definitions[-1].replace("<Picture 1>", pictures)
+            definitions.append(angle_guidance(group, structured=True))
+        mapping = "Replace every source person in every scene with a separate instance of <Subject 2>, using " + picture_words(group) + "."
         retention.extend([
             "<Subject 1>: partially_preserved - preserve each individual person's position, interactions, posture, head angle, gaze, facial movement and speaking turns; change their identity and clothing to <Subject 2>.",
             "<Subject 2>: attribute_transfer - transfer identity, hair and clothing to each source person; do not transfer the photograph's pose, illumination, background or sharpness."])
@@ -276,20 +282,22 @@ def _structured_prompt(duration, targets, enhanced_masking, mask_style, audio_pr
         pairs = []
         for index, target in enumerate(targets, 1):
             replacement = count + index
-            reference = target["reference_index"] + 1
+            pictures = picture_words(group_indexes(target))
             point = target["anchor"]
             if compact:
                 definitions.append(f"<Subject {index}>: source performer at {_point(point)}. "
-                    f"<Subject {replacement}>: identity, hair and clothing from <Picture {reference}> only.")
+                    f"<Subject {replacement}>: identity, hair and clothing from {pictures} only.")
             else:
                 definitions.extend([
                     f"<Subject {index}> is the source performer selected in <Video 1> at {_point(point)}. "
                     "This anchor identifies that performer when they appear again after cuts.",
-                    f"<Subject {replacement}> is the replacement character whose identity, hair and clothing come from <Picture {reference}>. "
+                    f"<Subject {replacement}> is the replacement character whose identity, hair and clothing come from {pictures}. "
                     "The photo defines the character, not a target frame or pose."])
+            if len(group_indexes(target)) > 1:
+                definitions.append(angle_guidance(group_indexes(target), structured=True))
             pairs.append(f"<Subject {index}> becomes <Subject {replacement}>")
             if compact:
-                retention.append(f"<Subject {index}>: preserve source performance; transfer identity, hair and clothing from <Subject {replacement}> (<Picture {reference}>) only.")
+                retention.append(f"<Subject {index}>: preserve source performance; transfer identity, hair and clothing from <Subject {replacement}> ({pictures}) only.")
             else:
                 retention.extend([
                     f"<Subject {index}>: partially_preserved - preserve this performer's screen position, physical interactions, body posture, head angle, gaze, facial movement and speaking turns; replace their identity and clothing with <Subject {replacement}>.",
@@ -302,7 +310,7 @@ def _structured_prompt(duration, targets, enhanced_masking, mask_style, audio_pr
                 marker = ("overlay" if mask_style in IDENTITY_OVERLAY_STYLES else
                     "flat mask" if mask_style == "solid_multi" else "depth marker")
                 color = _target_color_name(target, index)
-                assignments.append(f"<Subject {index}>: {color} {marker}; <Picture {reference}>.")
+                assignments.append(f"<Subject {index}>: {color} {marker}; {pictures}.")
             elif not identity_colors and enhanced_masking and mask_style in {"depth_multi", "solid_multi"} and not target.get("coordinate_fallback"):
                 marker = "depth" if mask_style == "depth_multi" else "flat mask"
                 assignments.append(f"<Subject {index}>'s detected {marker} marker is {TARGET_COLORS[index - 1][1]}.")
@@ -343,9 +351,9 @@ def _structured_prompt(duration, targets, enhanced_masking, mask_style, audio_pr
 
 def structured_prompt(duration, *, enhanced_masking=False, anchor=None, mask_style="cyan_overlay",
                       audio_processing=True, submit_without_audio=False, replace_all_people=False,
-                      targets=None, face_mesh=False):
+                      targets=None, face_mesh=False, reference_indexes=None):
     normalized_targets = ([{**target, "anchor": target.get("anchor", target)} for target in targets]
-        if targets is not None else [{"reference_index": 0,
+        if targets is not None else [{"reference_index": 0, "reference_indexes": reference_indexes,
             "anchor": anchor or {"x": .5, "y": .5, "time": 0}}])
     kwargs = dict(enhanced_masking=enhanced_masking, mask_style=mask_style,
         audio_processing=audio_processing, submit_without_audio=submit_without_audio,
@@ -361,7 +369,7 @@ def structured_prompt(duration, *, enhanced_masking=False, anchor=None, mask_sty
 
 def identity_colors_prompt(duration, *, enhanced_masking=False, anchor=None, mask_style="cyan_overlay",
                            audio_processing=True, submit_without_audio=False, replace_all_people=False,
-                           targets=None, face_mesh=False, tint_tracking=False):
+                           targets=None, face_mesh=False, tint_tracking=False, reference_indexes=None):
     """Color identities for reviewed guides, timed shared selection for Easy Mode.
 
     The guide style is the saved description of what the compositor produced.
@@ -369,7 +377,7 @@ def identity_colors_prompt(duration, *, enhanced_masking=False, anchor=None, mas
     IDs alone never authorize a claim that a color identifies someone across cuts.
     """
     normalized_targets = ([{**target, "anchor": target.get("anchor", target)} for target in targets]
-        if targets is not None else [{"reference_index": 0,
+        if targets is not None else [{"reference_index": 0, "reference_indexes": reference_indexes,
             "anchor": anchor or {"x": .5, "y": .5, "time": 0}}])
     kwargs = dict(enhanced_masking=enhanced_masking, mask_style=mask_style,
         audio_processing=audio_processing, submit_without_audio=submit_without_audio,

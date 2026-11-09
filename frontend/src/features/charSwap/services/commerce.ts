@@ -14,6 +14,9 @@ export interface CreditCatalog {
   packs: CreditPack[];
   credits_per_generation: number;
   credits_per_second?: number;
+  minimax_2k_credits_per_generation?: number;
+  minimax_2k_credits_per_second?: number;
+  minimax_extra_reference_credits?: number;
   kling_credits_per_generation?: number;
   kling_credits_per_second?: number;
   usd_cents_per_credit: number;
@@ -69,6 +72,8 @@ export interface CreditAdmin {
     packs: CreditPack[];
     credits_per_generation: number;
     credits_per_second?: number;
+    minimax_2k_credits_per_generation?: number;
+    minimax_extra_reference_credits?: number;
     kling_credits_per_generation?: number;
     margin_model?: MarginModel | null;
   };
@@ -97,6 +102,7 @@ export type MultiPersonGenerationRoute = "current" | "google_h3" | "paperspace_h
 export type PromptVariant = "current" | "favorite_v2" | "structured_v1" | "identity_colors_v1" | "identity_tint_tracking_v1" | "cloudflare_identity_v1";
 
 export interface PipelineSettings {
+  minimax_2k_enabled?:boolean;
   kling4_enabled?: boolean;
   revision: number;
   audio_processing: boolean;
@@ -120,7 +126,7 @@ export interface PipelineSettings {
   replicate_api_key_configured?: boolean;
 }
 
-export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "kling4_enabled" | "multi_characters" | "multi_person_generation_route" | "prompt_variant" | "matching_no_review" | "hide_audio_toggle" | "audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_enabled" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
+export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "minimax_2k_enabled" | "kling4_enabled" | "multi_characters" | "multi_person_generation_route" | "prompt_variant" | "matching_no_review" | "hide_audio_toggle" | "audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_enabled" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
   return commerceRequest<PipelineSettings>("/api/commerce/admin/pipeline", settings);
 }
 

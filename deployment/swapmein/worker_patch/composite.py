@@ -34,7 +34,7 @@ def depth_blend(depth, opacity, tint=(255,79,216)):
     return np.rint(depth.astype(np.float32)*(1-opacity)+color*opacity).astype(np.uint8)
 
 
-def compose(source, archive, vocals, output, selected_label, fill_mode='gray', depth_source=None, target_styles=None, face_mesh=False, mesh_all_people=False, depth_opacity=1.0, depth_tint_by_target=False):
+def compose(source, archive, vocals, output, selected_label, fill_mode='gray', depth_source=None, target_styles=None, face_mesh=False, mesh_all_people=False, depth_opacity=1.0, depth_tint_by_target=False, high_detail=False):
     if not 0 <= depth_opacity <= 1:raise ValueError('Invalid depth opacity')
     if fill_mode not in ['gray','original','color','depth','solid','translucent']:raise ValueError('Invalid fill mode')
     if depth_tint_by_target and (fill_mode != 'depth' or not target_styles):
@@ -51,15 +51,20 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
             if not rgb.max():raise ValueError('Target color must be visible')
             styles.append((style['label'],rgb))
         if len({label for label,_ in styles})!=len(styles):raise ValueError('Target labels must be unique')
-    meta = probe(source)
+    meta = probe(source, high_detail=True) if high_detail else probe(source)
     video = next(s for s in meta['streams'] if s['codec_type'] == 'video')
     width, height = video['width'], video['height']
+    mask_size = None
+    depth_width, depth_height = width, height
     depth_decoder = None
     if fill_mode == 'depth':
         if depth_source is None:raise ValueError('Depth source required')
         depth_meta=probe(depth_source)
         depth_video=next(s for s in depth_meta['streams'] if s['codec_type']=='video')
-        if (depth_video['width'],depth_video['height'])!=(width,height):raise ValueError('Depth dimensions differ from source')
+        depth_width,depth_height=depth_video['width'],depth_video['height']
+        if (depth_width,depth_height)!=(width,height):
+            if not high_detail or abs((depth_width/depth_height)/(width/height)-1)>.03:
+                raise ValueError('Depth dimensions differ from source')
     masks = output.parent/'labels'; masks.mkdir()
     with zipfile.ZipFile(archive) as z:
         entries = sorted(i for i in z.namelist() if i.startswith('labels/labels_') and i.endswith('.png'))
@@ -70,7 +75,11 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
                 raise ValueError('Invalid or oversized mask frame')
             (masks/f'labels_{i:05d}.png').write_bytes(z.read(name))
             with Image.open(masks/f'labels_{i:05d}.png') as image:
-                if image.size!=(width,height):raise ValueError('Mask dimensions differ from source')
+                if image.size!=(width,height) and (not high_detail or image.width>1920 or image.height>1920
+                        or min(image.size)>768 or abs((image.width/image.height)/(width/height)-1)>.03):
+                    raise ValueError('Mask dimensions differ from source')
+                if mask_size is None:mask_size=image.size
+                if image.size!=mask_size:raise ValueError('Mask dimensions changed during the clip')
                 values=np.array(image)
                 if values.ndim!=2 or not np.issubdtype(values.dtype,np.integer) or np.any(values<0) or np.any(values>65535):
                     raise ValueError('Invalid tracking labels')
@@ -85,17 +94,22 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
     depth_decoder=subprocess.Popen(['ffmpeg','-v','error','-i',str(depth_source),'-map','0:v:0','-f','rawvideo','-pix_fmt','rgb24','pipe:1'],stdout=subprocess.PIPE) if fill_mode=='depth' else None
     decoded = subprocess.Popen(['ffmpeg','-v','error','-i',str(source),'-map','0:v:0','-f','rawvideo','-pix_fmt','rgb24','pipe:1'],stdout=subprocess.PIPE)
     labels = subprocess.Popen(['ffmpeg','-v','error','-framerate','24','-i',str(masks/'labels_%05d.png'),'-f','rawvideo','-pix_fmt','gray16le','pipe:1'],stdout=subprocess.PIPE)
-    encoded = subprocess.Popen(['ffmpeg','-v','error','-y','-f','rawvideo','-pix_fmt','rgb24','-s',f'{width}x{height}','-r','24','-i','pipe:0','-i',str(vocals),'-map','0:v:0','-map','1:a:0','-c:v','libx264','-threads','4','-crf','18','-pix_fmt','yuv420p','-af','apad','-c:a','aac','-b:a','192k','-t',str(duration),'-movflags','+faststart',str(output)],stdin=subprocess.PIPE)
+    encoded = subprocess.Popen(['ffmpeg','-v','error','-y','-f','rawvideo','-pix_fmt','rgb24','-s',f'{width}x{height}','-r','24','-i','pipe:0','-i',str(vocals),'-map','0:v:0','-map','1:a:0','-c:v','libx264','-threads','4','-crf','18',*(['-maxrate','20M','-bufsize','20M'] if high_detail else []),'-pix_fmt','yuv420p','-af','apad','-c:a','aac','-b:a','192k','-t',str(duration),'-movflags','+faststart',str(output)],stdin=subprocess.PIPE)
     coverage=[]; target_coverage={str(label):[] for label,_ in styles}
+    mask_width,mask_height=mask_size
     try:
         for i in range(len(entries)):
             raw = decoded.stdout.read(width*height*3)
-            mask = labels.stdout.read(width*height*2)
-            if len(raw)!=width*height*3 or len(mask)!=width*height*2:
+            mask = labels.stdout.read(mask_width*mask_height*2)
+            if len(raw)!=width*height*3 or len(mask)!=mask_width*mask_height*2:
                 raise ValueError('Source and mask frame dimensions/count do not match')
             frame = np.frombuffer(raw,dtype=np.uint8).reshape(height,width,3).copy()
             original = frame.copy() if painter else None
-            label_frame=np.frombuffer(mask,dtype='<u2').reshape(height,width)
+            label_frame=np.frombuffer(mask,dtype='<u2').reshape(mask_height,mask_width)
+            if mask_size!=(width,height):
+                # Keep the complete archive at tracking resolution. Project
+                # one categorical frame at a time onto the high-detail RGB.
+                label_frame=np.array(Image.fromarray(label_frame).resize((width,height),Image.Resampling.NEAREST))
             target = clean_border_fragments(label_frame==selected_label) if not styles else np.zeros((height,width),dtype=bool)
             styled_masks=[]
             for label,rgb in styles:
@@ -117,9 +131,11 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
             if fill_mode=='gray':frame[target]=128
             elif fill_mode=='color':frame[target]=np.rint(frame[target].astype(np.float32)*.5 + np.array([0,220,255],dtype=np.float32)*.5).astype(np.uint8)
             if fill_mode=='depth':
-                depth_raw=depth_decoder.stdout.read(width*height*3)
-                if len(depth_raw)!=width*height*3:raise ValueError('Depth frame count mismatch')
-                depth_frame=np.frombuffer(depth_raw,dtype=np.uint8).reshape(height,width,3)
+                depth_raw=depth_decoder.stdout.read(depth_width*depth_height*3)
+                if len(depth_raw)!=depth_width*depth_height*3:raise ValueError('Depth frame count mismatch')
+                depth_frame=np.frombuffer(depth_raw,dtype=np.uint8).reshape(depth_height,depth_width,3)
+                if (depth_width,depth_height)!=(width,height):
+                    depth_frame=np.array(Image.fromarray(depth_frame).resize((width,height),Image.Resampling.BILINEAR))
                 if styles:
                     # Keep the depth signal's value/brightness variation while
                     # giving each selected identity a distinct, stable hue.
@@ -143,6 +159,8 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
             if p.poll() is None: p.kill();p.wait()
     result={'frames':len(entries),'fps':24,'duration_seconds':duration,'width':width,'height':height,'selected_label':selected_label,'mask_pixels_per_frame':coverage,'fill_mode':fill_mode,'fill_rgb':[128,128,128] if fill_mode=='gray' else None,'overlay_rgb':[0,220,255] if fill_mode in ['color','translucent'] else None,'overlay_opacity':.2 if fill_mode=='translucent' else .5 if fill_mode=='color' else None,'device':'cpu','depth':fill_mode=='depth','face_mesh':face_mesh}
     if fill_mode=='depth':result.update(depth_opacity=depth_opacity,depth_tint_by_target=depth_tint_by_target)
+    if high_detail:result.update(high_detail=True,tracking_width=mask_width,tracking_height=mask_height,
+        projected_masks=mask_size!=(width,height))
     if painter:result['face_mesh_metrics']=painter.metrics
     if styles:result.update(target_styles=target_styles,target_coverage=target_coverage)
     return result

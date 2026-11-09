@@ -31,6 +31,7 @@ const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
   kling4Enabled?: boolean;
+  minimax2kEnabled?:boolean;
   hideAudioToggle?: boolean;
   multiCharacters?: boolean;
   faceMeshOptions?: LivePipelineConfig["face_mesh_options"];
@@ -259,6 +260,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       if (!enabled) throw new LivePipelineError("Live preparation is unavailable on this page.");
       if (accessMode === "api-key") assertLiveKey(apiKey);
       validateLiveSetup(state);
+      if(state.generationModel!=="kling-4-0"&&state.generationResolution==="2K"&&state.minimax2kEnabled===false)throw new LivePipelineError("MiniMax 2K is currently unavailable. Choose 768p to continue.");
       if (config?.multi_characters === false && (state.targets.length > 1 || state.replaceAllPeople)) {
         throw new LivePipelineError("Multi-characters is currently off. Select one person and one reference image.");
       }
@@ -466,6 +468,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   return {
     enabled,
     kling4Enabled: config?.kling4_enabled === true,
+    minimax2kEnabled:config?.minimax_2k_enabled!==false,
     creditsAvailable: config?.credits_available === true,
     hideAudioToggle: config?.hide_audio_toggle,
     multiCharacters: config?.multi_characters !== false,

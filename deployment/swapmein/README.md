@@ -87,7 +87,7 @@ packets after stripping, nonzero soundtrack trim, and restored audio; they do no
 
 ## Preparation and selection
 
-- Clips are 4–15 seconds with a whole-second **duration**. Start/end positions and
+- MiniMax clips are 4–15 seconds; enabled Kling clips are 4–30 seconds, with a whole-second **duration**. Start/end positions and
   person timestamps may be fractional, for example 1.3–6.3 seconds.
 - New requests default to `preparation_version: 2`. Working video keeps its aspect
   ratio, caps its short side at 768 pixels, and does not upscale smaller picture
@@ -97,12 +97,12 @@ packets after stripping, nonzero soundtrack trim, and restored audio; they do no
 - The shared preparation timeline remains **24 fps**. This release does not
   implement source-FPS passthrough. Audio and picture use the same selected source
   interval; frame conversion is not a playback-speed change.
-- Enhanced masking and Easy mode default on. Face mesh is not connected to this
-  preparation path. Enhanced off skips depth, SAM and mask previews entirely.
-- Selected mode supports 1–5 people and up to five image references. People may
+- Enhanced masking and Easy mode default on. MiniMax face mesh follows the saved
+  job setting; Kling always disables it. Enhanced off skips depth, SAM and mask previews entirely.
+- Selected mode supports 1–5 people and up to six image references in total. People may
   share a reference. The browser deduplicates a shared reference asset/URL and
-  sends explicit per-person reference indexes. Group mode (`replace_all_people`)
-  uses exactly one reference for every detected person and is mutually exclusive
+  sends explicit per-person photo groups, with the primary photo first. Group mode (`replace_all_people`)
+  uses one shared identity/photo group for every detected person and is mutually exclusive
   with individual `targets`.
 
 Enhanced version 2 preparation follows this sequence:
@@ -272,15 +272,18 @@ A selected-mode upload request can be:
 ```
 
 Targets have unique safe IDs (1–40 letters/digits/`_`/`-`), names of 1–40
-characters, and a strict integer `reference_index` from 0 through 4. Every index
+characters, and a strict integer `reference_index` from 0 through 5. Optional
+`reference_indexes` contains unique image indexes with that primary index first. Every index
 must exist in the uploaded references. Taps use normalized displayed-source
 coordinates and absolute source times within `[trim start, trim end)`. Working
 anchors are adjusted for padding and the trim start. Legacy `anchor` and
 `target_name` remain accepted; the first target supplies the anchor if omitted.
 Group mode instead sets `replace_all_people:true`, omits `targets`, and uploads
-one shared reference. Flags are strict booleans and unknown setup fields fail.
+one shared photo group in top-level `reference_indexes`. All uploaded images must
+belong to a submitted group; six is the total across groups, not the number of people.
+Flags are strict booleans and unknown setup fields fail.
 
-`reference_sizes` contains 1–5 positive whole-byte lengths, each at most 5 MiB.
+`reference_sizes` contains 1–6 positive whole-byte lengths, each at most 5 MiB.
 Legacy `reference_bytes` alone becomes a one-reference request; if both are
 present it must match the first size. `references` contains the corresponding
 signed upload descriptors in the same order, and `reference` aliases the first.
@@ -337,10 +340,9 @@ preserves empty scenes. Reference images supply appearance; the guide supplies
 the source scene/motion. No seed, anatomy-strength setting, LoRA or automatic
 provider fallback is added.
 
-The service accepts up to five references within the first-five reference
-allowance used for this provider integration. Shared-image assignments need only
-one uploaded reference. **Customer pricing remains duration-based**, with no
-additional per-person/reference charge here and no output-tier change. Provider
+The service accepts up to six references. Shared-image assignments need only
+one uploaded reference. Customer pricing is duration-based at the selected model
+and resolution rate, with a flat sixth-image surcharge for MiniMax only. Provider
 billing remains authoritative; a larger number of selected people does not prove
 lower/higher generation fidelity or identical provider routing.
 
@@ -848,8 +850,10 @@ encoding duration, canvas dimensions and layout.
 Create offers MiniMax or Kling through fifteen seconds and requires Kling for
 longer trims, up to thirty seconds. The backend independently validates model,
 duration and access at intake; Kling is reAPI-only. Explicit Kling selections
-bypass the optional Google/Paperspace CharacterSwap overrides. MiniMax retains
-those overrides and its existing fifteen-second limit. Disabling Kling blocks
+bypass the optional Google/Paperspace CharacterSwap overrides. MiniMax 2K and
+multi-angle selections also use the hosted API: the private recipes do not support
+those options. Single-photo MiniMax 768P retains those overrides and its existing
+fifteen-second limit. Disabling Kling blocks
 new tickets; already accepted uploads and jobs retain their saved model.
 
 Kling snapshots twenty-percent body masking, no mesh, no depth and no vocal
@@ -865,7 +869,7 @@ limits, duplicate submission protection and refunds use the existing flow.
 Preparation beyond fifteen seconds is pinned to the existing Replicate SAM
 route and requires its configured credential. Deploy the updated CPU overlay
 worker before exposing this feature: its health version is
-`audio-identity-kling-v10`, with `max_input_seconds: 30` and
+`audio-identity-hd-v11`, with `max_input_seconds: 30` and
 `max_input_frames: 720`. This does not extend the legacy private GPU SAM service.
 
 The catalog has an independent editable `kling_credits_per_generation` rate
@@ -887,3 +891,45 @@ preparation/storage and markup. The reviewed fifteen-second masked experiment
 reported $2.678. Those provider dollars are separate from app credit prices.
 No paid thirty-second render has been submitted during this implementation;
 media tests exercise the full 720-frame preparation timeline locally.
+
+### Multiple angles and MiniMax 2K
+
+Create groups supporting photos under each character. Six unique submitted photos
+is the render-wide limit for either model; the five-person limit is unchanged.
+The primary photo supplies appearance/clothes, and supporting angles clarify that
+same identity. Every MiniMax prompt mode and Kling edit prompt retains the group.
+Original/Clean is chosen per character/photo; retries and private Library character
+archives retain the grouping. Older one-photo jobs keep their existing prompt behavior.
+
+MiniMax exposes `generation_resolution: "768P" | "2K"`; Kling remains `720p`.
+2K keeps a separate RGB provider source from the original trim, capped at 1440px
+short side and 2560px long side without upscaling. Tracking, SAM and depth retain
+their bounded working copies. The CPU compositor projects one label/depth frame
+at a time onto the detailed RGB, including reviewed-guide rebuilding and optional
+mesh. Unmasked and silent-input paths use that detailed source too. Export,
+watermark, Library Before and the 2K comparison preserve its dimensions. A small
+original still requests 2K generation but does not acquire detail during prep.
+
+The CPU v11 overlay accepts explicit `high_detail` composition up to 2560×1440
+pixels (either orientation), streams masks at tracking size and uses a 20 Mbit/s
+VBV for high-detail guides to respect the existing 50 MiB provider input limit.
+Full-duration/detail encodes have a 300-second allowance; this is separate from
+provider generation time. Deploy v11 before the new gateway/frontend. Existing
+guide geometry, private GPU configuration and 768P prices are unchanged.
+
+Admin saves independent `minimax_2k_credits_per_generation` and
+`minimax_extra_reference_credits`. Without explicit prices, 2K derives from the
+existing margin assumptions at $0.119/sec instead of $0.074/sec, and the sixth
+image uses the provider's $0.036 flat charge with the same margin assumptions.
+Kling has no added photo fee. The displayed quote uses the same deduplicated
+image list as upload, is validated before uploads, and is pinned for debit/refund.
+Published rates: https://reapi.ai/docs/minimax-h3 and
+https://reapi.ai/models/minimax-h3 (checked November 9, 2026). Provider estimates
+remain conservative; settled provider charges are authoritative. Local FFmpeg and
+route-matrix tests verify the media wiring, not 2K generation quality; this release
+does not submit a paid generation test.
+
+Experimental also exposes `minimax_2k_enabled` (default true). Turning it off hides
+2K from ordinary users and rejects new 2K intake from stale clients before uploads
+or preparation. Staff can still test it. Accepted upload tickets and jobs retain
+their 2K choice and quote after the switch changes. Other Admin edits preserve it.

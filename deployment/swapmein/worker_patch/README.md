@@ -245,3 +245,51 @@ documents input videos up to 2000 frames. The
 [pinned-version API](https://replicate.com/8digit/gener8-sam3/versions/a6f50615da4cfa8b03fe95ec56681bc252a5e60c2ed368938f72bfa4f55dfcd1/api)
 also retains that 576-frame example. No model-version change, paid proof or
 legacy GPU limit increase is implied by the local 720-frame CPU tests.
+
+## MiniMax 2K provider-source projection
+
+CPU overlay `audio-identity-hd-v11` adds an explicit `/compose` `high_detail`
+flag. The default audio/tracking contract remains at a 768-pixel short side,
+1920-pixel long side, 720 frames and 30 seconds. High-detail composition instead
+accepts up to a 1440-pixel short side, 2560-pixel long side, 3,686,400 pixels,
+360 frames and 15 seconds. `/health` advertises those separate bounds and
+`scaled_tracking_masks: true`. Deploy this overlay before the gateway begins
+sending `high_detail` requests.
+
+For MiniMax 2K, the gateway normalizes two versions directly from the upload.
+`normalized_uri` retains the existing lower-resolution tracking source;
+`provider_source_uri` retains the source detail up to the high-detail bounds,
+without enlarging a smaller source. SAM, identity matching and depth still use
+the bounded working copy. The compositor decodes the high-detail RGB, projects
+one categorical label frame with nearest-neighbor sampling and one depth frame
+with bilinear sampling, then discards those projected arrays on the next frame.
+It never expands the full label archive to 2K in memory. Face mesh is detected
+and drawn on the high-detail RGB and projected label geometry. Both depth and
+flat/translucent/original guide styles use that same projection contract.
+
+Initial and manually reviewed guide builds use the saved high-detail source.
+An unmasked guide preserves the high-detail source video while changing only
+the selected audio. High-detail H.264 guide encodes use CRF 18 with a 20 Mbit/s
+VBV ceiling to stay within the provider's 50 MiB video-reference limit. The
+completed main video, optional watermark, original-audio restoration, saved
+Library Before video, and comparison export retain the higher-detail canvas.
+The comparison panels no longer apply their old 1536-pixel cap for these jobs.
+The actual working and provider dimensions are recorded separately as
+`preparation_media` and `provider_preparation_media`; a 2K output request never
+claims to recover detail absent from the upload.
+
+Local FFmpeg coverage exercises real 2560×1440 normalization, frame/audio
+validation, lower-resolution mask/depth projection, mesh geometry, audio-free
+submission remux, watermark and full-resolution comparison. Orchestration tests
+cover both preparation providers, Easy/Manual, single/multiple/all-people,
+masking on/off, mesh and depth, audio on/off, reviewed rebuilds and saved Library
+Before media. These are processing proofs, not paid MiniMax inference results.
+
+The full-detail comparison is a bounded optional derivative: each panel is at
+most 4,194,304 pixels and 4096 pixels on its longest side. The usual
+2560×1440/1440×2560 panels produce 2560×2880/2880×2560 combined video without
+holding a full clip in memory. A provider result outside that panel bound still
+keeps its full main export; the comparison reports failure rather than
+allocating an unbounded combined canvas or silently reducing resolution. Local
+portrait/landscape tests establish frame/audio/dimension behavior, not a measured
+Cloud Run peak-memory guarantee or model-quality acceptance.

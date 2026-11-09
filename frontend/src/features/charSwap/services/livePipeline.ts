@@ -1,6 +1,7 @@
 import { trimDuration } from "../utils/trimRange";
 import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES, MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
+import { referenceIds, targetReferences, selectedReferenceUrl, MAX_REFERENCE_IMAGES } from "../model/referenceGroups";
 import { referenceCleanupBlocker } from "../model/model";
 import type { WalkthroughState } from "../model/model";
 import { DEMO_API_KEY } from "../hooks/useApiKeyPreview";
@@ -21,6 +22,7 @@ export interface FaceMeshOptions {
 
 export interface LivePipelineConfig {
   kling4_enabled?: boolean;
+  minimax_2k_enabled?: boolean;
   max_duration_seconds?: number;
   hide_audio_toggle?: boolean;
   multi_characters?: boolean;
@@ -113,6 +115,7 @@ export interface LivePipelineJob {
   source_preview_url?: string;
   tracking_segments?: TrackingReviewSegment[];
   selection_targets?: SelectionTarget[];
+  selection_reference_indexes?: number[];
   reference_urls?: string[];
   reference_url?: string;
   tracking_revision?: number;
@@ -151,6 +154,7 @@ export interface SelectionTarget {
   name: string;
   anchor: { x: number; y: number; time: number };
   reference_index: number;
+  reference_indexes?: number[];
   color?: string;
   color_name?: string;
 }
@@ -300,7 +304,7 @@ function capacityMessage(value: unknown): string | null {
     ? new Date(Date.now() + seconds * 1000).toLocaleString(undefined, {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short"})
     : null;
   const referenceLabel = value.code.startsWith("reference_") && typeof value.reference_index === "number"
-    && Number.isInteger(value.reference_index) && value.reference_index >= 0 && value.reference_index < MAX_TARGET_PEOPLE
+    && Number.isInteger(value.reference_index) && value.reference_index >= 0 && value.reference_index < MAX_REFERENCE_IMAGES
     ? `Reference image ${value.reference_index + 1}: ` : "";
   return referenceLabel + message + (reset ? value.code === "preparation_busy" ? " Current processing deadline: " + reset + "." : " Resets " + reset + "." : "") + " No generation was submitted.";
 }
@@ -467,12 +471,17 @@ function readJob(value: unknown): LivePipelineJob {
     }
   }
   if (value.reference_urls !== undefined) {
-    if (!Array.isArray(value.reference_urls) || value.reference_urls.length > MAX_TARGET_PEOPLE || value.reference_urls.some((url) => {
+    if (!Array.isArray(value.reference_urls) || value.reference_urls.length > MAX_REFERENCE_IMAGES || value.reference_urls.some((url) => {
       if (typeof url !== "string") return true;
       try { const parsed = new URL(url); return parsed.protocol !== "https:" || Boolean(parsed.username || parsed.password); }
       catch { return true; }
     })) throw new LivePipelineError("The service returned unreadable reference assignments. Refresh the job before continuing.");
     job.reference_urls = [...value.reference_urls];
+  }
+  if (value.selection_reference_indexes !== undefined) {
+    const indexes=value.selection_reference_indexes;
+    if(!Array.isArray(indexes)||!indexes.length||indexes.length>MAX_REFERENCE_IMAGES||new Set(indexes).size!==indexes.length||indexes.some((index:unknown)=>typeof index!=="number"||!Number.isInteger(index)||index<0||index>=MAX_REFERENCE_IMAGES))throw new LivePipelineError("The service returned unreadable reference groups.");
+    job.selection_reference_indexes=[...indexes];
   }
   if (value.selection_targets !== undefined) {
     const targets = value.selection_targets;
@@ -483,10 +492,12 @@ function readJob(value: unknown): LivePipelineJob {
       return typeof target.name !== "string" || !target.name.trim() || target.name.length > 40 || !isRecord(target.anchor)
         || ![target.anchor.x, target.anchor.y, target.anchor.time].every((number) => typeof number === "number" && Number.isFinite(number))
         || Number(target.anchor.x) < 0 || Number(target.anchor.x) > 1 || Number(target.anchor.y) < 0 || Number(target.anchor.y) > 1 || Number(target.anchor.time) < 0
-        || !Number.isInteger(target.reference_index) || Number(target.reference_index) < 0 || Number(target.reference_index) >= MAX_TARGET_PEOPLE;
+        || (target.reference_indexes !== undefined && (!Array.isArray(target.reference_indexes) || !target.reference_indexes.length || target.reference_indexes.length > MAX_REFERENCE_IMAGES || new Set(target.reference_indexes).size !== target.reference_indexes.length || target.reference_indexes[0] !== target.reference_index || target.reference_indexes.some((index:unknown)=>typeof index!=="number"||!Number.isInteger(index)||index<0||index>=MAX_REFERENCE_IMAGES)))
+        || !Number.isInteger(target.reference_index) || Number(target.reference_index) < 0 || Number(target.reference_index) >= MAX_REFERENCE_IMAGES;
     })) throw new LivePipelineError("The service returned unreadable person assignments. Refresh the job before continuing.");
     job.selection_targets = (targets as SelectionTarget[]).map((target, index) => ({
       id: target.id, name: target.name, anchor: {...target.anchor}, reference_index: target.reference_index,
+      ...(target.reference_indexes ? {reference_indexes:[...target.reference_indexes]} : {}),
       color: typeof target.color === "string" && /^#[0-9a-f]{6}$/i.test(target.color) ? target.color : TARGET_COLORS[index],
       ...(typeof target.color_name === "string" ? {color_name: target.color_name.slice(0, 40)} : {}),
       ...(typeof target.thumbnail_url === "string" && isSafeMediaUrl(target.thumbnail_url) ? {thumbnail_url: target.thumbnail_url} : {}),
@@ -604,6 +615,7 @@ export async function getLiveConfig(
   }
   return {
     kling4_enabled: value.kling4_enabled === true,
+    minimax_2k_enabled:value.minimax_2k_enabled!==false,
     max_duration_seconds: value.kling4_enabled === true ? 30 : 15,
     live: value.live === true,
     available: value.available === true,
@@ -690,22 +702,20 @@ export function validateLiveSetup(state: WalkthroughState) {
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(target.id) || !target.name.trim() || target.name.length > 40
         || ![x, y, time].every(Number.isFinite) || x < 0 || x > 1 || y < 0 || y > 1 || time < start || time >= end)
       throw new LivePipelineError("Select the person again inside the chosen section.");
-    const assigned = state.references.find((item) => item.id === state.assignments[target.id]);
-    if (!assigned?.url) throw new LivePipelineError(`Assign a reference image to ${target.name}.`);
-    const cleanupIssue = referenceCleanupBlocker(assigned);
-    if (cleanupIssue) throw new LivePipelineError(`${target.name}: ${cleanupIssue} No generation was submitted.`);
-    // The user's selected mode is authoritative; never fall back to the original
-    // while Clean background is selected or trust a stale display URL.
-    const reference = {...assigned, url: assigned.cleanup?.mode === "clean" ? assigned.cleanup.cleanedUrl!
-      : assigned.cleanup?.originalUrl ?? assigned.url};
-    let referenceIndex = references.findIndex((item) => item.id === reference.id || item.url === reference.url);
-    if (referenceIndex < 0) {
-      referenceIndex = references.length;
-      references.push(reference);
+    const ids=referenceIds(state,target.id);
+    if(!ids.length||ids.some(id=>!state.references.some(item=>item.id===id&&Boolean(item.url))))throw new LivePipelineError(`Assign every reference image to ${target.name}, or remove its missing angle.`);
+    const indexes:number[]=[];
+    for(const assigned of targetReferences(state,target.id)) {
+      const cleanupIssue=referenceCleanupBlocker(assigned);
+      if(cleanupIssue)throw new LivePipelineError(`${target.name}: ${cleanupIssue} No generation was submitted.`);
+      const reference={...assigned,url:selectedReferenceUrl(assigned)};
+      let referenceIndex=references.findIndex(item=>item.id===reference.id||item.url===reference.url);
+      if(referenceIndex<0){referenceIndex=references.length;references.push(reference);}
+      if(!indexes.includes(referenceIndex))indexes.push(referenceIndex);
     }
-    return {id: target.id, name: target.name, anchor: {...target.anchor}, reference_index: referenceIndex};
+    return {id:target.id,name:target.name,anchor:{...target.anchor},reference_index:indexes[0],...(indexes.length>1?{reference_indexes:indexes}:{})};
   });
-  if (references.length > MAX_TARGET_PEOPLE) throw new LivePipelineError("Use up to five different reference images.");
+  if(references.length>MAX_REFERENCE_IMAGES)throw new LivePipelineError("Use up to six photos total across all characters.");
   return { clip: state.clip, reference: references[0], target: state.targets[0], references, targets };
 }
 
@@ -825,9 +835,10 @@ export async function createLiveJob(
         setup: {
           preparation_version: 2,
           ...(state.generationModel === "kling-4-0" ? {generation_model: "kling-4-0", face_mesh: false} : {}),
+          ...(state.generationModel === "kling-4-0" ? {generation_resolution:"720p"} : state.generationResolution === "2K" ? {generation_resolution:"2K"} : {}),
           ...(typeof state.generationCreditQuote === "number" ? {generation_credit_quote: state.generationCreditQuote} : {}),
           trim: state.trim,
-          ...(state.replaceAllPeople ? {replace_all_people: true} : {anchor: target.anchor, targets}),
+          ...(state.replaceAllPeople ? {replace_all_people: true, ...(targets[0].reference_indexes ? {reference_indexes:targets[0].reference_indexes}: {})} : {anchor: target.anchor, targets}),
           target_name: target.name,
           enhanced_character_masking: state.generationModel === "kling-4-0" || (state.enhancedCharacterMasking ?? true),
           easy_mode: state.easyMode ?? true,

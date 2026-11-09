@@ -322,8 +322,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             {!reviewPage && (selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
               {selectedTargets.map((target) => <Stack key={target.id} spacing={0.5} sx={{borderLeft: `3px solid ${target.color}`, pl: 1}}>
                 <Typography fontWeight={600}>{target.name}</Typography>
-                {selectedReferences[target.reference_index] && <Box component="img" src={selectedReferences[target.reference_index]}
-                  alt={`${target.name} replacement reference`} sx={{width: 112, height: 112, objectFit: "contain"}} />}
+                <Stack direction="row" flexWrap="wrap" gap={1}>{(target.reference_indexes ?? [target.reference_index]).map((referenceIndex,angle)=>selectedReferences[referenceIndex]&&<Box key={referenceIndex} component="img" src={selectedReferences[referenceIndex]} alt={`${target.name} ${angle===0?"replacement reference":`additional angle ${angle}`}`} sx={{width:112,height:112,objectFit:"contain"}}/>)}</Stack>
               </Stack>)}
             </Stack> : selected?.reference_url && (
               <Box

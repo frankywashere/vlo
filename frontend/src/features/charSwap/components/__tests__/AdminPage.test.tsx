@@ -669,3 +669,16 @@ it("exposes Kling under Experimental and saves its access separately from existi
   await user.click(screen.getByRole("button", {name: "Save pricing"}));
   expect(api.save).toHaveBeenCalledWith(expect.objectContaining({kling_credits_per_generation: 450, credits_per_generation: 150}));
 });
+
+it("saves independent MiniMax 2K pricing and the flat sixth-photo surcharge",async()=>{
+ const user=userEvent.setup();await renderExpandedAdmin();
+ const quality=screen.getByLabelText("MiniMax 2K credits for 15 seconds"),extra=screen.getByLabelText("MiniMax sixth-photo surcharge (credits)");
+ await user.clear(quality);await user.type(quality,"375");await user.clear(extra);await user.type(extra,"6");
+ await user.click(screen.getByRole("button",{name:"Save pricing"}));
+ expect(api.save).toHaveBeenCalledWith(expect.objectContaining({credits_per_generation:150,minimax_2k_credits_per_generation:375,minimax_extra_reference_credits:6}));
+});
+
+it("can hide MiniMax 2K for users while preserving the other pipeline settings",async()=>{
+ const user=userEvent.setup();api.pipelineSettings={revision:4,audio_processing:false,kling4_enabled:true,minimax_2k_enabled:true};await renderExpandedAdmin();
+ await user.click(screen.getByRole("switch",{name:"Allow MiniMax 2K for users"}));expect(api.pipeline).toHaveBeenCalledWith({revision:4,minimax_2k_enabled:false});expect(api.pipelineSettings?.kling4_enabled).toBe(true);
+});

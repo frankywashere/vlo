@@ -92,3 +92,19 @@ it("submits a 30-second Kling choice and its displayed credit quote while forcin
   expect(setup).toMatchObject({generation_model: "kling-4-0", generation_credit_quote: 724, trim: [1, 31], face_mesh: false, enhanced_character_masking: true});
   expect(() => validateLiveSetup({...state, generationModel: "minimax-h3"})).toThrow(/between 4 and 15/);
 });
+
+it("uploads six shared-group photos once with 2K and keeps two source people distinct",async()=>{
+ const base=draft(),refs=[base.references[0],...[1,2,3,4,5].map(n=>({id:`ref-${n}`,name:`angle-${n}.jpg`,url:`blob:angle-${n}`}))];
+ const state={...base,generationResolution:"2K" as const,generationCreditQuote:247,references:refs,
+   targets:[base.targets[0],{...base.targets[0],id:"two",name:"Person 2"}],assignments:{one:"ref",two:"ref"},referenceGroups:{one:["ref","ref-1","ref-2"],two:["ref","ref-3","ref-4","ref-5"]}};
+ let body:unknown;let uploads=0;
+ request.mockImplementation(async(input,init)=>{
+  const url=String(input);if(url.startsWith("blob:")){const response=new Response(null);vi.spyOn(response,"blob").mockResolvedValue(new Blob([url],{type:url==="blob:source"?"video/mp4":"image/png"}));return response;}
+  if(url==="/api/preparation-capacity")return new Response(JSON.stringify({available:true}));
+  if(url==="/api/uploads"){body=JSON.parse(String(init?.body));return new Response(JSON.stringify({id:"ticket",source:{url:"https://storage.googleapis.com/source",headers:{"Content-Type":"application/octet-stream","x-goog-if-generation-match":"0"}},references:refs.map((_,i)=>({url:`https://storage.googleapis.com/ref-${i}`,headers:{"Content-Type":"application/octet-stream","x-goog-if-generation-match":"0"}}))}));}
+  if(url.startsWith("https://storage.googleapis.com/")){uploads++;return new Response(null,{status:200});}
+  if(url==="/api/uploads/ticket/complete")return new Response(JSON.stringify({id:"ticket",status:"queued"}));throw new Error("Unexpected request");
+ });
+ await createLiveJob(state,"session",new AbortController().signal);
+ expect(uploads).toBe(7);expect(body).toMatchObject({reference_sizes:expect.arrayContaining([expect.any(Number)]),setup:{generation_resolution:"2K",generation_credit_quote:247,targets:[{id:"one",reference_index:0,reference_indexes:[0,1,2]},{id:"two",reference_index:0,reference_indexes:[0,3,4,5]}]}});
+});

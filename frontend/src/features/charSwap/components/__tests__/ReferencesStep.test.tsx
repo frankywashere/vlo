@@ -177,3 +177,15 @@ it("drops onto the intended character including its image tile, and respects pen
   view.rerender(<ReferencesStep demo={null} onImport={onImport} pendingIds={["b"]}/>);
   fireEvent.drop(card,{dataTransfer:drag});expect(onImport).toHaveBeenCalledOnce();
 });
+
+it("adds several angles without replacing the primary and lets the user promote or remove one",async()=>{
+ const user=userEvent.setup(),add=vi.fn();
+ useCharSwapStore.getState().assignReference("a",{id:"front",name:"Front",url:"blob:front"});
+ useCharSwapStore.getState().addReferences("a",[{id:"side",name:"Side",url:"blob:side"}]);
+ render(<ReferencesStep demo={null} onImport={vi.fn()} onImportAdditional={add} pendingIds={[]}/>);
+ const input=screen.getByLabelText("Add reference angles for Person A");expect(input).toHaveAttribute("multiple");
+ const photos=[new File(["a"],"back.png",{type:"image/png"}),new File(["b"],"profile.png",{type:"image/png"})];
+ fireEvent.change(input,{target:{files:photos}});expect(add).toHaveBeenCalledWith("a",photos);
+ await user.click(screen.getByRole("button",{name:"Make primary"}));expect(useCharSwapStore.getState().assignments.a).toBe("side");
+ await user.click(screen.getByRole("button",{name:"Remove angle 2 for Person A"}));expect(useCharSwapStore.getState().referenceGroups?.a).toEqual(["side"]);
+});

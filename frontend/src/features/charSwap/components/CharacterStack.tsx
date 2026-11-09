@@ -11,15 +11,10 @@ export function CharacterStack({ job }: CharacterStackProps) {
     : job.reference_url
       ? [job.reference_url]
       : [];
-  const images = [
-    ...new Set(
-      references.length
-        ? references
-        : (job.selection_targets ?? [])
-            .map((target) => target.thumbnail_url)
-            .filter((url): url is string => Boolean(url)),
-    ),
-  ];
+  const images = job.selection_targets?.length
+    ? job.selection_targets.map(target=>references[target.reference_index] ?? target.thumbnail_url).filter((url):url is string=>Boolean(url))
+    : job.selection_reference_indexes?.length ? [references[job.selection_reference_indexes[0]]].filter((url):url is string=>Boolean(url))
+    : [...new Set(references)];
   if (!images.length) return null;
   const visible = images.slice(0, 5);
   return (
@@ -37,7 +32,7 @@ export function CharacterStack({ job }: CharacterStackProps) {
     >
       {visible.map((url, index) => (
         <Avatar
-          key={url}
+          key={`${index}:${url}`}
           variant="circular"
           src={url}
           alt={`Replacement character ${index + 1}`}

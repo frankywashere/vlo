@@ -60,3 +60,10 @@ it("keeps photos and selections when the browser cannot decode the saved video",
   expect(revoke).toHaveBeenCalledWith("blob:bad-video");
   expect(revoke).not.toHaveBeenCalledWith("blob:photo");
 });
+
+it("restores every angle and 2K without re-submission, preserving explicit missing-angle placeholders",async()=>{
+ vi.spyOn(URL,"createObjectURL").mockReturnValueOnce("blob:front").mockReturnValueOnce("blob:back");const request=vi.fn().mockImplementation(async()=>new Response(new Blob(["photo"])));vi.stubGlobal("fetch",request);
+ const draft=await restoreRetryDraft({...recovery,settings:{model:"minimax-h3",requested_resolution:"2K"},targets:[{...target,reference_index:0,reference_indexes:[0,1,2]}],reference_urls:["https://storage.googleapis.com/front",null,"https://storage.googleapis.com/back"]},new AbortController().signal);
+ expect(draft.generationResolution).toBe("2K");expect(draft.assignments.left).toBe("retry-reference-0");expect(draft.referenceGroups?.left).toEqual(["retry-reference-0","retry-reference-1","retry-reference-2"]);expect(draft.retryNotice).toMatch(/1 saved reference photos are unavailable/);
+ expect(request).toHaveBeenCalledTimes(2);expect(request.mock.calls.every(([,options])=>!options.method)).toBe(true);
+});

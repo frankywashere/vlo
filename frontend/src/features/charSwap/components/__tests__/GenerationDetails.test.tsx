@@ -98,3 +98,9 @@ it("keeps the main video available and offers paired playback if comparison expo
   expect(screen.getByLabelText("Recast comparison player")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Download full video" })).toBeEnabled();
 });
+
+it("shows supplemental photos inside the selected character rather than as additional characters",()=>{
+ render(<GenerationDetails job={{...job,reference_urls:["https://storage.googleapis.com/front.jpg","https://storage.googleapis.com/side.jpg"],selection_targets:[{id:"a",name:"Person A",anchor:{x:.5,y:.5,time:0},reference_index:0,reference_indexes:[0,1]}]}} busy={false} onClose={()=>{}} onReview={()=>{}}>Details</GenerationDetails>);
+ fireEvent.click(screen.getByRole("tab",{name:"Characters"}));
+ expect(screen.getByRole("img",{name:"Person A replacement"})).toHaveAttribute("src","https://storage.googleapis.com/front.jpg");expect(screen.getByRole("img",{name:"Person A additional angle 1"})).toHaveAttribute("src","https://storage.googleapis.com/side.jpg");
+});

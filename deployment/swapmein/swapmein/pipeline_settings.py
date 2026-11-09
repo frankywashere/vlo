@@ -22,6 +22,7 @@ def pipeline_settings(records):
             "hide_audio_toggle": current.get("hide_audio_toggle") is True,
             "multi_characters": current.get("multi_characters", True) is not False,
             "kling4_enabled": current.get("kling4_enabled") is True,
+            "minimax_2k_enabled": current.get("minimax_2k_enabled", True) is not False,
             "multi_person_generation_route": route if isinstance(route, str) and route in MULTI_PERSON_GENERATION_ROUTES else "current",
             "depth_guidance": current.get("depth_guidance", False) is not False,
             "face_mesh_enabled": current.get("face_mesh_enabled", True) is not False,
@@ -37,10 +38,12 @@ def pipeline_settings(records):
 
 def save_pipeline_settings(records, actor, revision, audio_processing=None, preparation_provider=None,
                            retry_missing_masks_with_sam=None, depth_guidance=None,
-                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None, matching_no_review=None, multi_person_generation_route=None, kling4_enabled=None):
+                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None, matching_no_review=None, multi_person_generation_route=None, kling4_enabled=None, minimax_2k_enabled=None):
     require_permission(records, actor, "pipeline_settings")
     if kling4_enabled is not None and type(kling4_enabled) is not bool:
         raise PublicError("Choose whether Kling 4.0 is available.")
+    if minimax_2k_enabled is not None and type(minimax_2k_enabled) is not bool:
+        raise PublicError("Choose whether MiniMax 2K is available to users.")
     if multi_person_generation_route is not None:
         validate_generation_route(multi_person_generation_route)
     if matching_no_review is not None and type(matching_no_review) is not bool:
@@ -78,6 +81,7 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
                 **{key: current.get(key, default) if value is None else value for key, default, value in (
                     ("face_mesh_enabled", True, face_mesh_enabled),
                     ("kling4_enabled", False, kling4_enabled),
+                    ("minimax_2k_enabled", True, minimax_2k_enabled),
                     ("face_mesh_masked_default", True, face_mesh_masked_default),
                     ("face_mesh_unmasked_default", False, face_mesh_unmasked_default),
                     ("face_mesh_user_control", False, face_mesh_user_control),
@@ -89,6 +93,7 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
     emit("admin_audio_processing_changed", actor_id=digest(actor["email"]),
          revision=saved["revision"], depth_guidance=saved["depth_guidance"], audio_processing=saved["audio_processing"], preparation_provider=saved["preparation_provider"],
          kling4_enabled=saved["kling4_enabled"],
+         minimax_2k_enabled=saved["minimax_2k_enabled"],
          retry_missing_masks_with_sam=saved["retry_missing_masks_with_sam"],
          matching_no_review=saved["matching_no_review"],
          face_mesh_enabled=saved["face_mesh_enabled"], face_mesh_masked_default=saved["face_mesh_masked_default"],
@@ -107,6 +112,6 @@ def face_mesh_snapshot(defaults, setup, *, is_admin=False):
 
 
 def enforce_character_limit(setup, reference_count, enabled):
-    if not enabled and (reference_count > 1 or len(setup.targets or []) > 1 or setup.replace_all_people):
-        raise PublicError("Multi-characters is currently off. Select one person and one reference image. No generation was submitted.",
+    if not enabled and (len(setup.targets or []) > 1 or setup.replace_all_people):
+        raise PublicError("Multi-characters is currently off. Select just one person; multiple photos of that character are allowed. No generation was submitted.",
                           409, code="single_character_only")

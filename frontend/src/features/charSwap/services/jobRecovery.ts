@@ -14,6 +14,8 @@ export interface JobRecovery {
   target_name?: string;
   source_url?: string | null;
   reference_urls?: (string | null)[];
+  reference_indexes?: number[];
+  selection_reference_indexes?: number[];
   credits_charged?: number;
   credits_returned?: number;
 }
@@ -64,6 +66,7 @@ export async function restoreRetryDraft(recovery: JobRecovery, signal: AbortSign
     }
     const references: WalkthroughState["references"] = [];
     const assignments: Record<string, string> = {};
+    const referenceGroups: Record<string,string[]> = {};
     const targets = recovery.targets?.length ? recovery.targets.map((target, index) => ({
       id: target.id, name: target.name, anchor: {...target.anchor}, color: target.color ?? TARGET_COLORS[index % TARGET_COLORS.length],
     })) : recovery.settings?.replace_all_people ? [{id: "all-people", name: "All people", anchor: {x: 0.5, y: 0.5, time: recovery.trim?.[0] ?? 0}, color: TARGET_COLORS[0]}] : recovery.anchor ? [{id: "selected", name: recovery.target_name ?? "Selected person", anchor: recovery.anchor, color: TARGET_COLORS[0]}] : [];
@@ -78,13 +81,22 @@ export async function restoreRetryDraft(recovery: JobRecovery, signal: AbortSign
         if (targetIndex === index) assignments[target.id] = id;
       }
     }
+    const missingPhotoIds=new Set<string>();
+    for(const target of targets){
+      const plan=recovery.targets?.find(item=>item.id===target.id);
+      const indexes=plan?.reference_indexes ?? recovery.reference_indexes ?? recovery.selection_reference_indexes ?? [plan?.reference_index ?? 0];
+      referenceGroups[target.id]=indexes.map(index=>`retry-reference-${index}`);
+      for(const id of referenceGroups[target.id])if(!references.some(reference=>reference.id===id))missingPhotoIds.add(id);
+    }
     signal.throwIfAborted();
+    const missingPhotos=missingPhotoIds.size;
     const settings = recovery.settings ?? {};
-    return {clip, trim: recovery.trim ?? [0, clip ? Math.min(15, Math.floor(clip.duration)) : 0], targets, references, assignments,
+    return {clip, trim: recovery.trim ?? [0, clip ? Math.min(15, Math.floor(clip.duration)) : 0], targets, references, assignments, referenceGroups,
+      generationResolution: settings.model === "kling-4-0" ? "720p" : settings.requested_resolution === "2K" ? "2K" : "768P",
       generationModel: settings.model === "kling-4-0" ? "kling-4-0" : "minimax-h3",
       issues: [], decisions: {}, easyMode: settings.easy_mode ?? true, faceMesh: settings.face_mesh, submitWithoutAudio: settings.submit_without_audio ?? false, addWatermark: settings.add_watermark ?? false, enhancedCharacterMasking: settings.enhanced_masking ?? true,
       replaceAllPeople: settings.replace_all_people ?? false, retryNeedsSource: !clip,
-      retryNotice: unreadableSource ? "This browser could not open the saved video. Upload the original clip; your trim, character selections, and available photos are restored."
+      retryNotice: missingPhotos ? `${missingPhotos} saved reference photos are unavailable. Upload them again or remove the missing angles before retrying.` : unreadableSource ? "This browser could not open the saved video. Upload the original clip; your trim, character selections, and available photos are restored."
         : !clip ? "Upload the original clip to retry. Saved settings and available references are restored; review them before submitting."
         : "Your clip and available references are restored. Review the trim, people, references, and current credit cost before submitting again."};
   } catch (error) {

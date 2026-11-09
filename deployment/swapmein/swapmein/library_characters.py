@@ -70,10 +70,21 @@ def character_view(record, cloud):
         result["reference_urls"] = [cloud.signed_url(uri) for uri in record["library_reference_uris"]]
         result["reference_url"] = result["reference_urls"][0]
     targets = record.get("normalized_targets") or record.get("selection_targets") or record.get("setup", {}).get("targets")
+    if not targets and record.get("setup", {}).get("reference_indexes"):
+        result["selection_reference_indexes"] = record["setup"]["reference_indexes"]
     if targets:
         result["selection_targets"] = []
+        original_targets = record.get("setup", {}).get("targets") or []
         for target in targets:
-            item = {key: target[key] for key in ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
+            item = {key: target[key] for key in ("id", "name", "anchor", "reference_index", "reference_indexes", "color", "color_name") if key in target}
+            if not item.get("reference_indexes"):
+                original = next((candidate for candidate in original_targets
+                    if candidate.get("id") == target.get("id") and candidate.get("reference_index") == target.get("reference_index")), {})
+                group = original.get("reference_indexes")
+                if not group and len(targets) == 1 and not original_targets and target.get("reference_index") == 0:
+                    group = record.get("setup", {}).get("reference_indexes")
+                if group:
+                    item["reference_indexes"] = group
             anchor = target.get("anchor", {})
             frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
             uri = record.get("library_selection_thumbnail_uris", {}).get(str(frame))

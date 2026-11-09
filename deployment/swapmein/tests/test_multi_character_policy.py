@@ -40,8 +40,9 @@ def test_disabled_policy_blocks_all_new_direct_upload_modes_before_storage_or_wo
         body['reference_sizes']=[1024];body['setup'].pop('targets');body['setup']['replace_all_people']=True
     if kind=='extra_reference':body['setup']['targets']=body['setup']['targets'][1:]
     response=client.post('/api/uploads',headers=headers,json=body)
-    assert response.status_code==409,response.text
-    assert response.json()['code']=='single_character_only'
+    assert response.status_code==(422 if kind=='extra_reference' else 409),response.text
+    if kind!='extra_reference':
+        assert response.json()['code']=='single_character_only'
     assert not cloud.upload_sizes and not cloud.enqueued and not provider.submissions
 
 

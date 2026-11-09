@@ -14,7 +14,7 @@ import zipfile
 
 import numpy as np
 from PIL import Image, ImageOps, ImageDraw, ImageFont
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from .errors import PublicError
 from .diagnostics import emit, timed
@@ -59,11 +59,22 @@ class Target(BaseModel):
     id: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
     name: str = Field(min_length=1, max_length=40)
     anchor: Anchor
-    reference_index: int = Field(ge=0, le=4, strict=True)
+    reference_index: int = Field(ge=0, le=5, strict=True)
+    reference_indexes: list[StrictInt] | None = Field(default=None, min_length=1, max_length=6)
+
+    @model_validator(mode="after")
+    def validate_reference_group(self):
+        if self.reference_indexes is not None and (self.reference_indexes[0] != self.reference_index
+                or len(set(self.reference_indexes)) != len(self.reference_indexes)
+                or any(type(i) is not int or not 0 <= i < 6 for i in self.reference_indexes)):
+            raise ValueError("Use a unique photo group with the primary photo first.")
+        return self
 
 
 class Setup(BaseModel):
     generation_model: Literal["minimax-h3", "kling-4-0"] = "minimax-h3"
+    generation_resolution: Literal["768P", "2K", "720p"] = "768P"
+    reference_indexes: list[StrictInt] | None = Field(default=None, min_length=1, max_length=6)
     generation_credit_quote: int | None = Field(default=None, ge=1, le=1000000, strict=True)
     face_mesh: bool | None = Field(default=None, strict=True)
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -85,9 +96,20 @@ class Setup(BaseModel):
         start, end = self.trim
         maximum = 30 if self.generation_model == "kling-4-0" else 15
         if self.generation_model == "kling-4-0":
+            if self.generation_resolution == "2K":
+                raise ValueError("Kling uses the supported 720p tier.")
+            self.generation_resolution = "720p"
             # The tested Kling recipe uses body tints and never facial mesh.
             self.face_mesh = False
             self.enhanced_character_masking = True
+        elif self.generation_resolution == "720p":
+            raise ValueError("Choose MiniMax 768P or 2K.")
+        if self.generation_resolution == "2K":
+            self.preparation_version = 2
+        if self.reference_indexes is not None and (self.targets
+                or len(set(self.reference_indexes)) != len(self.reference_indexes)
+                or any(type(i) is not int or not 0 <= i < 6 for i in self.reference_indexes)):
+            raise ValueError("Use a valid photo group for the selected character.")
         # Timestamp subtraction can put an exact trim slightly above its limit.
         duration = round(end - start, 6)
         if (start < 0 or not 4 <= duration <= maximum
@@ -135,12 +157,14 @@ def _source_bounds(width: int, height: int):
         raise PublicError("Use a video with supported source dimensions up to 4096px per side.")
 
 
-def _fit_dimensions(width, height, preparation_version):
+def _fit_dimensions(width, height, preparation_version, *, high_detail=False):
     if not .4 <= width / height <= 2.5:
         raise PublicError("Use a video with an aspect ratio between 0.4 and 2.5.")
     if preparation_version not in (1, 2):
         raise PublicError("Unsupported clip preparation version.")
-    factor = min(854 / width, 480 / height) if preparation_version == 1 else min(1, Fraction(768) / min(width, height))
+    factor = (min(1, Fraction(1440) / min(width, height), Fraction(2560) / max(width, height))
+              if high_detail else min(854 / width, 480 / height) if preparation_version == 1
+              else min(1, Fraction(768) / min(width, height)))
     scaled_w = max(2, math.floor(width * factor / 2) * 2)
     scaled_h = max(2, math.floor(height * factor / 2) * 2)
     # Narrow portrait clips need small letterboxes to satisfy H3's 256px minimum.
@@ -184,7 +208,9 @@ def decoded_audio_samples(path: Path, start: float = 0, duration: float | None =
 
 
 @timed("normalize")
-def normalize(source: Path, output: Path, setup: Setup):
+def normalize(source: Path, output: Path, setup: Setup, *, high_detail=False):
+    if high_detail and (setup.generation_model != "minimax-h3" or setup.generation_resolution != "2K"):
+        raise PublicError("High-detail preparation requires MiniMax 2K.")
     metadata = probe(source)
     streams = metadata.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
@@ -200,7 +226,7 @@ def normalize(source: Path, output: Path, setup: Setup):
     source_w, source_h = video["width"], video["height"]
     if setup.preparation_version >= 2:
         source_w, source_h = _display_dimensions(source_w, source_h, video.get("sample_aspect_ratio"), rotation)
-        sw, sh, width, height = _fit_dimensions(source_w, source_h, setup.preparation_version)
+        sw, sh, width, height = _fit_dimensions(source_w, source_h, setup.preparation_version, high_detail=high_detail)
     else:
         # Preserve the pixel geometry saved by pre-V2 jobs, including their taps.
         if abs(round(rotation)) % 180 == 90:
@@ -212,9 +238,12 @@ def normalize(source: Path, output: Path, setup: Setup):
          # the selection ends at the file boundary. Repeat only its last frame;
          # larger deficits still fail the frame-count check below.
          "-vf", f"fps=24,tpad=stop_mode=clone:stop=1,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,scale={sw}:{sh},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
-         "-c:v", "libx264", "-threads", "2", "-crf", "18", "-pix_fmt", "yuv420p",
+         "-c:v", "libx264", "-threads", "2", "-crf", "18",
+         # Keep a 15-second high-detail guide below the provider's 50 MiB
+         # reference limit without reducing its canvas or frame rate.
+         *(["-maxrate", "20M", "-bufsize", "20M"] if high_detail else []), "-pix_fmt", "yuv420p",
          "-af", "apad", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-         "-movflags", "+faststart", str(output)], timeout=180 if setup.generation_model == "kling-4-0" else 90)
+         "-movflags", "+faststart", str(output)], timeout=300 if high_detail else 180 if setup.generation_model == "kling-4-0" else 90)
     normalized = probe(output)
     normalized_video = next(s for s in normalized["streams"] if s["codec_type"] == "video")
     if int(normalized_video.get("nb_frames", 0)) != duration * 24:
@@ -252,11 +281,13 @@ def normalize(source: Path, output: Path, setup: Setup):
                  else setup.anchor or setup.targets[0].anchor)
     anchor = mapped_anchor(selection)
     targets = [{"id": target.id, "name": target.name, "anchor": mapped_anchor(target.anchor),
-                "reference_index": target.reference_index} for target in setup.targets or []]
+                "reference_index": target.reference_index,
+                **({"reference_indexes": target.reference_indexes} if target.reference_indexes is not None else {})}
+               for target in setup.targets or []]
     return {"duration": duration, "width": width, "height": height,
             "frames": duration * 24, "anchor": anchor, "scene_cuts": scene_cuts,
             "preparation_version": setup.preparation_version,
-            "resolution_policy": "legacy_480p" if setup.preparation_version == 1 else "short_side_768_no_upscale",
+            "resolution_policy": "source_detail_2k_no_upscale" if high_detail else "legacy_480p" if setup.preparation_version == 1 else "short_side_768_no_upscale",
             "targets": targets}
 
 
@@ -529,7 +560,7 @@ def finish(raw: Path, original: Path, output: Path, duration: int,
          "-map", video_map, "-map", "1:a:0" if restore_audio else "0:a:0", *filter_options,
          "-t", str(duration), "-c:v", "libx264", "-threads", "2",
          "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags",
-         "+faststart", str(output)])
+         "+faststart", str(output)], timeout=300 if width * height > 1_474_560 else 90)
     checked = probe(output)
     final_video = next(s for s in checked["streams"] if s["codec_type"] == "video")
     if ((final_video["width"], final_video["height"]) != (width, height)

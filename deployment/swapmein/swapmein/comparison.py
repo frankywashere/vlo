@@ -8,13 +8,18 @@ from .media import probe, run, require_audio_duration
 
 
 @timed("comparison_export")
-def create_comparison(original: Path, recast: Path, output: Path, duration: int):
+def create_comparison(original: Path, recast: Path, output: Path, duration: int, *, preserve_resolution=False):
     before = next(s for s in probe(original)["streams"] if s.get("codec_type") == "video")
     after = next(s for s in probe(recast)["streams"] if s.get("codec_type") == "video")
     portrait = before["height"] > before["width"]
-    # Bound the combined canvas without enlarging the finished render. Preserve
-    # each video's own aspect ratio when the provider returns a different canvas.
-    factor = min(1, 1536 / max(after["width"], after["height"]))
+    # Two full-detail panels share the same CPU memory budget as finishing.
+    # An unexpectedly large provider canvas may skip this optional derivative;
+    # it must never downscale or fail the separately saved main render.
+    if preserve_resolution and (after["width"] * after["height"] > 4_194_304
+                                or max(after["width"], after["height"]) > 4096):
+        raise PublicError("The full-resolution comparison exceeds its processing bounds.")
+    # Preserve each video's aspect when the provider returns a different canvas.
+    factor = 1 if preserve_resolution else min(1, 1536 / max(after["width"], after["height"]))
     width = max(2, math.floor(after["width"] * factor / 2) * 2)
     height = max(2, math.floor(after["height"] * factor / 2) * 2)
     panel = (f"fps=24,trim=duration={duration},setpts=PTS-STARTPTS,"
@@ -25,7 +30,7 @@ def create_comparison(original: Path, recast: Path, output: Path, duration: int)
          "-i", str(original), "-i", str(recast), "-filter_complex_threads", "2",
          "-filter_complex", f"[0:v]{panel}[before];[1:v]{panel}[after];[before][after]{layout}=inputs=2[v]",
          "-map", "[v]", "-map", "1:a:0", "-t", str(duration), "-c:v", "libx264", "-threads", "2",
-         "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)], timeout=120)
+         "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)], timeout=300 if preserve_resolution else 120)
     result = probe(output)
     video = next(s for s in result["streams"] if s.get("codec_type") == "video")
     expected = (width * 2, height) if portrait else (width, height * 2)

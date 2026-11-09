@@ -128,28 +128,64 @@ def kling_credit_rate(catalog):
                 * Decimal("0.1784") / Decimal("0.074")).to_integral_value(rounding=ROUND_CEILING))
 
 
-def model_credit_rate(catalog, model="minimax-h3"):
+def minimax_2k_credit_rate(catalog):
+    explicit = catalog.get("minimax_2k_credits_per_generation")
+    if type(explicit) is int and 1 <= explicit <= 100000:
+        return explicit
+    if catalog.get("margin_model"):
+        return margin_credit_rate({**catalog["margin_model"], "provider_usd_per_second": .119}) * 15
+    return int((Decimal(str(catalog.get("credits_per_generation", 150)))
+                * Decimal(".119") / Decimal(".074")).to_integral_value(rounding=ROUND_CEILING))
+
+
+def minimax_extra_reference_rate(catalog):
+    explicit = catalog.get("minimax_extra_reference_credits")
+    if type(explicit) is int and 0 <= explicit <= 100000:
+        return explicit
+    model = catalog.get("margin_model")
+    if model:
+        available = 1 - (Decimal(str(model["target_margin_percent"])) + Decimal(str(model["payment_fee_percent"]))) / 100
+        if available <= 0:
+            raise PublicError("Margin and payment fees must total less than 100%.")
+        amount = Decimal("3.6") / available
+    else:
+        amount = Decimal("3.6") * Decimal(str(catalog.get("credits_per_generation", 150))) / Decimal("111")
+    return int(amount.to_integral_value(rounding=ROUND_CEILING))
+
+
+def model_credit_rate(catalog, model="minimax-h3", resolution="768P"):
     from .generation_models import KLING, max_duration
     max_duration(model)
-    return kling_credit_rate(catalog) if model == KLING else catalog["credits_per_generation"]
+    return kling_credit_rate(catalog) if model == KLING else minimax_2k_credit_rate(catalog) if resolution == "2K" else catalog["credits_per_generation"]
 
 
-def generation_quote(records, setup):
-    from .generation_models import generation_model
+def generation_quote(records, setup, *, reference_count=None):
+    from .generation_models import generation_model, generation_resolution
+    from .reference_groups import reference_count as photo_count, has_multiple_angles
     catalog, _ = records.read(CATALOG_PATH)
     catalog = catalog or default_catalog()
     model = generation_model(setup)
-    rate = model_credit_rate(catalog, model)
-    credits = generation_credit_cost(setup.trim[1] - setup.trim[0], rate, generation_model=model)
+    resolution = generation_resolution(setup)
+    count = photo_count(setup) if reference_count is None else reference_count
+    if type(count) is not int or not 1 <= count <= 6:
+        raise PublicError("Choose one to six reference photos in total.")
+    rate = model_credit_rate(catalog, model, resolution)
+    base = generation_credit_cost(setup.trim[1] - setup.trim[0], rate, generation_model=model)
+    extra = minimax_extra_reference_rate(catalog) * max(0, count - 5) if model == "minimax-h3" else 0
+    credits = base + extra
     offered = getattr(setup, "generation_credit_quote", None)
-    if model == "kling-4-0" and offered is None:
-        raise PublicError("Confirm the displayed Kling credit price before submitting.", 409,
+    if (model == "kling-4-0" or resolution == "2K" or has_multiple_angles(setup) or count > 5) and offered is None:
+        raise PublicError("Confirm the displayed generation credit price before submitting.", 409,
                           code="generation_quote_required")
     if offered is not None and offered != credits:
         raise PublicError("Generation pricing changed. Refresh the price before submitting.", 409,
                           code="generation_price_changed")
-    return {"model": model, "credits": credits, "credits_for_15_seconds": rate,
-            "catalog_revision": catalog.get("revision", 0)}
+    quote = {"model": model, "credits": credits, "credits_for_15_seconds": rate,
+             "catalog_revision": catalog.get("revision", 0)}
+    if resolution == "2K" or has_multiple_angles(setup) or count > 5:
+        quote.update(resolution=resolution, reference_count=count, base_credits=base,
+                     extra_reference_credits=extra)
+    return quote
 
 
 def default_catalog() -> dict:
@@ -222,6 +258,9 @@ def public_catalog(records) -> dict:
         "credits_per_second": current.get("credits_per_generation", 150) / 15,
         "kling_credits_per_generation": kling_credit_rate(current),
         "kling_credits_per_second": kling_credit_rate(current) / 15,
+        "minimax_2k_credits_per_generation": minimax_2k_credit_rate(current),
+        "minimax_2k_credits_per_second": minimax_2k_credit_rate(current) / 15,
+        "minimax_extra_reference_credits": minimax_extra_reference_rate(current),
         "usd_cents_per_credit": USD_CENTS_PER_CREDIT,
         "minimum_pack_cents": MIN_PACK_CENTS,
         "stripe_mode": "live" if stripe_livemode() else "test",
@@ -252,7 +291,7 @@ def margin_credit_rate(model: dict) -> int:
     return rate
 
 
-def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int, margin_model: dict | None = None, kling_credits_per_generation: int | None = None) -> dict:
+def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int, margin_model: dict | None = None, kling_credits_per_generation: int | None = None, minimax_2k_credits_per_generation: int | None = None, minimax_extra_reference_credits: int | None = None) -> dict:
     require_permission(records, actor, "pricing")
     if margin_model is not None:
         credits_per_generation = margin_credit_rate(margin_model) * 15
@@ -260,6 +299,9 @@ def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits
         raise PublicError("Set a valid credit rate and one to eight packs.")
     if kling_credits_per_generation is not None and (type(kling_credits_per_generation) is not int or not 1 <= kling_credits_per_generation <= 100000):
         raise PublicError("Set a valid Kling credit rate.")
+    for value, low in ((minimax_2k_credits_per_generation, 1), (minimax_extra_reference_credits, 0)):
+        if value is not None and (type(value) is not int or not low <= value <= 100000):
+            raise PublicError("Set valid MiniMax resolution and reference-photo prices.")
     seen = set()
     for pack in packs:
         if (not PACK_PATTERN.fullmatch(pack["id"]) or pack["id"] in seen
@@ -279,12 +321,17 @@ def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits
         kling_rate = (kling_credits_per_generation if kling_credits_per_generation is not None else
                       kling_credit_rate({**current, "credits_per_generation": credits_per_generation,
                                          "margin_model": margin_model}))
+        assumptions = {**current, "credits_per_generation": credits_per_generation, "margin_model": margin_model}
+        extra_rates = {"minimax_2k_credits_per_generation": minimax_2k_credits_per_generation
+            if minimax_2k_credits_per_generation is not None else minimax_2k_credit_rate(assumptions),
+            "minimax_extra_reference_credits": minimax_extra_reference_credits
+            if minimax_extra_reference_credits is not None else minimax_extra_reference_rate(assumptions)}
         history.append({"revision": revision + 1, "actor": actor["email"], "at": time.time(),
                         "packs": packs, "credits_per_generation": credits_per_generation, "margin_model": margin_model,
-                        "kling_credits_per_generation": kling_rate})
+                        "kling_credits_per_generation": kling_rate, **extra_rates})
         return {"revision": revision + 1, "packs": packs,
                 "credits_per_generation": credits_per_generation, "margin_model": margin_model, "history": history,
-                "kling_credits_per_generation": kling_rate}
+                "kling_credits_per_generation": kling_rate, **extra_rates}
 
     saved = records.update(CATALOG_PATH, mutate)
     emit("admin_pricing_changed", actor_id=digest(actor["email"]), revision=saved["revision"], credits_for_15_seconds=credits_per_generation, pack_count=len(packs), target_margin_percent=margin_model.get("target_margin_percent") if margin_model else None)

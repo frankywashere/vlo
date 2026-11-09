@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Alert, Avatar, Box, Button, Stack, Typography, RadioGroup, Radio, FormControlLabel } from "@mui/material";
+import { targetReferences } from "../model/referenceGroups";
 import { generationModelLabel, referenceCleanupBlocker } from "../model/model";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { FaceMeshOptions, LivePipelineJob } from "../services/livePipeline";
@@ -43,10 +44,12 @@ export function ReviewStep({
   onGenerate,
   onCredits,
 }: ReviewStepProps) {
-  const { clip, trim, targets, references, assignments, easyMode, enhancedCharacterMasking, generationModel, visit } =
+  const { clip, trim, targets, references, assignments, easyMode, enhancedCharacterMasking, generationModel, generationResolution, referenceGroups, visit } =
     useCharSwapStore(
       useShallow((state) => ({
         generationModel: state.generationModel,
+        generationResolution: state.generationResolution,
+        referenceGroups: state.referenceGroups,
         clip: state.clip,
         trim: state.trim,
         targets: state.targets,
@@ -68,7 +71,7 @@ export function ReviewStep({
     accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits;
   const needsPreparation = !job || ["failed", "completed"].includes(job.status);
   const manualPreparationComplete = live && !easyMode && !!job && (job.status === "ready" || trackingReady);
-  const cleanupIssue = targets.map(target => references.find(reference => reference.id === assignments[target.id]))
+  const cleanupIssue = targets.flatMap(target => targetReferences({targets,references,assignments,referenceGroups},target.id))
     .map(reference => reference && referenceCleanupBlocker(reference)).find(Boolean);
   const canSubmit = !cleanupIssue && enoughCredits && !busy && creditsAvailable && (
     live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && playableGuide === guideIdentity)
@@ -171,7 +174,7 @@ export function ReviewStep({
         )}
       </Stack>
       <Stack spacing={2.5} sx={{ minWidth: 0 }}>
-        <Typography fontWeight={700}>Generation model: {generationModelLabel(generationModel)}</Typography>
+        <Typography fontWeight={700}>Generation model: {generationModelLabel(generationModel)} · {generationModel === "kling-4-0" ? "720p" : generationResolution ?? "768P"}</Typography>
         {targets.length > 1 && <Alert severity="warning">Replacing multiple people is experimental and may not produce the intended result.</Alert>}
         {cleanupIssue && <Alert severity="info">{cleanupIssue}</Alert>}
         {manualPreparationComplete ? (
@@ -284,6 +287,7 @@ export function ReviewStep({
                         >
                           {reference?.name ?? "Your character"}
                         </Typography>
+                        {targetReferences({targets,references,assignments,referenceGroups},person.id).length>1&&<Typography variant="caption">{targetReferences({targets,references,assignments,referenceGroups},person.id).length} reference photos</Typography>}
                       </Box>
                     </Stack>
                   </Box>

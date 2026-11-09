@@ -17,6 +17,8 @@ export function AdminPage() {
   const [packs, setPacks] = useState<CreditPack[]>([]);
   const [rate, setRate] = useState("");
   const [klingCredits, setKlingCredits] = useState("");
+  const [minimax2kCredits,setMinimax2kCredits]=useState("");
+  const [extraReferenceCredits,setExtraReferenceCredits]=useState("5");
   const [watermarkVisible, setWatermarkVisible] = useState(true);
   const [watermarkBonus, setWatermarkBonus] = useState("25");
   const [margin, setMargin] = useState<MarginModel>(DEFAULT_MARGIN_MODEL);
@@ -47,6 +49,8 @@ export function AdminPage() {
       setMargin(result.catalog.margin_model ?? DEFAULT_MARGIN_MODEL);
       setUseMargin(Boolean(result.catalog.margin_model));
       setRate((result.catalog.credits_per_generation / 1500).toFixed(2));
+      setMinimax2kCredits(String(result.catalog.minimax_2k_credits_per_generation ?? Math.ceil(result.catalog.credits_per_generation*.119/.074)));
+      setExtraReferenceCredits(String(result.catalog.minimax_extra_reference_credits ?? 5));
       setKlingCredits(String(result.catalog.kling_credits_per_generation ?? Math.ceil(result.catalog.credits_per_generation * 0.1784 / 0.074)));
     }).catch((cause: unknown) => {
       if (active) setError(cause instanceof Error ? cause.message : "Admin settings are unavailable.");
@@ -120,6 +124,13 @@ export function AdminPage() {
         <AdminSection title="Experimental"><Stack spacing={2}>
           <VideoDownloaderSettings canEdit={can("service_controls")} />
           <Box>
+            <FormControlLabel control={<Switch checked={admin.pipeline?.minimax_2k_enabled!==false} disabled={busy||!can("pipeline_settings")} onChange={(_,enabled)=>void run(async()=>{
+              const pipeline=await savePipelineSettings({revision:admin.pipeline?.revision??0,minimax_2k_enabled:enabled});
+              setAdmin(current=>current?{...current,pipeline}:current);setMessage(`MiniMax 2K ${enabled?"enabled":"hidden"} for users. Admins can still test it.`);
+            })}/>} label="Allow MiniMax 2K for users"/>
+            <Typography variant="body2" color="text.secondary">When off, users see 768p only. Admins can still test 2K. Existing jobs keep their saved quality and price.</Typography>
+          </Box>
+          <Box>
             <FormControlLabel control={<Switch checked={admin.pipeline?.kling4_enabled === true} disabled={busy || !can("pipeline_settings")} onChange={(_, enabled) => void run(async () => {
               const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, kling4_enabled: enabled});
               setAdmin(current => current ? {...current, pipeline} : current);
@@ -130,7 +141,7 @@ export function AdminPage() {
           <Box component="section" aria-label="Multi-person generation destination">
             <Typography fontWeight={600}>Multi-person generation destination</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
-              Applies only to jobs with two or more individually selected people. One-person jobs and Replace all people keep the normal route. Explicit Kling selections use Kling regardless of these destinations. Only one destination can be on; with both off, the normal route is used. Changes apply to new jobs only.
+              Applies only to jobs with two or more individually selected people. One-person jobs and Replace all people keep the normal route. Explicit Kling, MiniMax 2K, and multi-angle selections use the chosen hosted API regardless of these optional private GPU destinations. Only one destination can be on; with both off, the normal route is used. Changes apply to new jobs only.
             </Typography>
             <Stack spacing={1}>
               {([
@@ -286,6 +297,8 @@ export function AdminPage() {
             {estimate ? <Alert severity="info">Calculated rate: {estimate.credits} credits per second. Estimated margin: {estimate.estimatedMargin.toFixed(1)}% at {margin.reference_seconds} seconds. A 5-second clip costs {estimate.credits * 5} credits; 15 seconds costs {estimate.credits * 15} credits. Save pricing to apply.</Alert> : <Alert severity="error">Check the cost assumptions. Margin plus payment fees must be below 100%.</Alert>}
           </Stack>}
           <TextField label="Price per video second (USD)" type="number" disabled={useMargin} value={useMargin && estimate ? (estimate.credits / 100).toFixed(2) : rate} onChange={(event) => setRate(event.target.value)} inputProps={{min: 0.01, step: 0.01}} helperText={`${(useMargin ? estimate?.credits : Math.round(Number(rate) * 100)) || 0} credits per second`} />
+          <TextField label="MiniMax 2K credits for 15 seconds" type="number" value={minimax2kCredits} onChange={event=>setMinimax2kCredits(event.target.value)} inputProps={{min:1,max:100000,step:1}} helperText="Separate 2K price. Standard 768p keeps the MiniMax price above."/>
+          <TextField label="MiniMax sixth-photo surcharge (credits)" type="number" value={extraReferenceCredits} onChange={event=>setExtraReferenceCredits(event.target.value)} inputProps={{min:0,max:100000,step:1}} helperText="Flat addition once per render with six unique reference photos. No extra-photo charge for Kling."/>
           <TextField label="Kling 4.0 credits for 15 seconds" type="number" value={klingCredits} onChange={event => setKlingCredits(event.target.value)} inputProps={{min: 1, max: 100000, step: 1}} helperText={`Separate from MiniMax and its margin calculator. ${Number(klingCredits) > 0 ? `${(Number(klingCredits) / 15).toFixed(2)} credits per second; ${Number(klingCredits) * 2} credits for 30 seconds.` : "Set a positive whole-credit price."}`} />
           {packs.map((pack, index) => <Stack key={index} spacing={1} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
             <TextField label="Pack ID" value={pack.id} onChange={(event) => updatePack(index, { id: event.target.value })} />
@@ -295,7 +308,7 @@ export function AdminPage() {
             <Button color="error" onClick={() => setPacks((current) => current.filter((_, i) => i !== index))}>Remove pack</Button>
           </Stack>)}
           <Stack direction="row" spacing={1}><Button disabled={busy || packs.length >= 8} onClick={() => setPacks((current) => [...current, { id: "", name: "", credits: 2000, price_cents: 2000, active: false }])}>Add pack</Button>
-            <Button variant="contained" disabled={busy || (useMargin ? !estimate : !rate) || packs.length === 0 || !/^\d+$/.test(klingCredits) || Number(klingCredits) < 1 || Number(klingCredits) > 100000} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, kling_credits_per_generation: Number(klingCredits), credits_per_generation: (useMargin ? estimate!.credits : Math.round(Number(rate) * 100)) * 15, margin_model: useMargin ? margin : null }); setAdmin({ ...admin, catalog }); setRate((catalog.credits_per_generation / 1500).toFixed(2)); setKlingCredits(String(catalog.kling_credits_per_generation ?? Number(klingCredits))); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
+            <Button variant="contained" disabled={busy || (useMargin ? !estimate : !rate) || packs.length === 0 || !/^\d+$/.test(klingCredits) || Number(klingCredits) < 1 || Number(klingCredits) > 100000 || !/^\d+$/.test(minimax2kCredits) || Number(minimax2kCredits)<1 || Number(minimax2kCredits)>100000 || !/^\d+$/.test(extraReferenceCredits) || Number(extraReferenceCredits)>100000} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, minimax_2k_credits_per_generation:Number(minimax2kCredits), minimax_extra_reference_credits:Number(extraReferenceCredits), kling_credits_per_generation: Number(klingCredits), credits_per_generation: (useMargin ? estimate!.credits : Math.round(Number(rate) * 100)) * 15, margin_model: useMargin ? margin : null }); setAdmin({ ...admin, catalog }); setRate((catalog.credits_per_generation / 1500).toFixed(2)); setKlingCredits(String(catalog.kling_credits_per_generation ?? Number(klingCredits))); setMinimax2kCredits(String(catalog.minimax_2k_credits_per_generation ?? Number(minimax2kCredits))); setExtraReferenceCredits(String(catalog.minimax_extra_reference_credits ?? Number(extraReferenceCredits))); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
         </Stack></Box></AdminSection>
         <AdminSection title="Watermark rewards"><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <FormControlLabel control={<Switch checked={!watermarkVisible} onChange={(_, hidden) => setWatermarkVisible(!hidden)} />} label="Hide watermark offer for everyone" />

@@ -17,7 +17,9 @@ def effective_generation_route(setup, configured_route):
     """A shared reference still represents two people when two targets are selected."""
     route = validate_generation_route(configured_route)
     data = setup if isinstance(setup, dict) else setup.model_dump()
-    if data.get("generation_model") == "kling-4-0":
+    from .reference_groups import has_multiple_angles
+    if (data.get("generation_model") == "kling-4-0"
+            or data.get("generation_resolution") == "2K" or has_multiple_angles(data)):
         # Explicit model and its quoted price take precedence over an Admin
         # override intended only for MiniMax CharacterSwap.
         return "current"

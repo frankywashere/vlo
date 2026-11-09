@@ -398,6 +398,7 @@ export function GenerationDetails({
                           {[
                             ["Original person", target.thumbnail_url],
                             ["Replacement", references[target.reference_index]],
+                            ...(target.reference_indexes ?? []).filter(index=>index!==target.reference_index).map((index,angle)=>[`Additional angle ${angle+1}`,references[index]]),
                           ].map(([label, url]) => (
                             <Box key={label}>
                               <Typography
@@ -447,7 +448,7 @@ export function GenerationDetails({
                           <Box
                             component="img"
                             src={url}
-                            alt={`Replacement character ${index + 1}`}
+                            alt={job.selection_reference_indexes?.length ? `Replacement character ${index===0?"primary photo":`angle ${index}`}` : `Replacement character ${index + 1}`}
                             sx={{
                               width: "100%",
                               height: 180,
@@ -457,7 +458,7 @@ export function GenerationDetails({
                             }}
                           />
                           <Typography variant="caption">
-                            Character {index + 1}
+                            {job.selection_reference_indexes?.length ? index===0?"Primary photo":"Additional angle "+index : "Character "+(index+1)}
                           </Typography>
                         </Box>
                       ))}

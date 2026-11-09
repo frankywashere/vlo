@@ -104,3 +104,13 @@ it("adding the next character photo immediately does not cancel the first cleanu
  expect(assigned("b").cleanup?.pending).toBeFalsy();
  expect(firstSignal.aborted).toBe(false);
 });
+
+it("cleans supplemental angles and keeps the group blocked until every selected angle is ready",async()=>{
+ const finishes:Array<(image:Blob)=>void>=[];vi.mocked(cleanReferenceBackground).mockImplementation(()=>new Promise(resolve=>finishes.push(resolve)));
+ useCharSwapStore.getState().addReferences("a",[{id:"side",name:"Side",url:"blob:side"}]);
+ render(<Harness/>);expect(cleanReferenceBackground).toHaveBeenCalledTimes(2);
+ await userEvent.setup().click(screen.getByRole("button",{name:"Original"}));
+ expect(getStepBlocker(useCharSwapStore.getState(),"references")).toMatch(/Wait for background cleanup/);
+ await act(async()=>finishes[1](new Blob(["side"],{type:"image/png"})));
+ expect(getStepBlocker(useCharSwapStore.getState(),"references")).toBeNull();expect(useCharSwapStore.getState().referenceGroups?.a).toEqual(["photo","side"]);
+});

@@ -27,9 +27,13 @@ def health():
     # otherwise look healthy and fail only after expensive GPU preparation.
     from composite import compose
     from PIL import __version__ as pillow_version
-    return {"status": "ready", "device": "cpu", "version": "audio-identity-kling-v10",
+    return {"status": "ready", "device": "cpu", "version": "audio-identity-hd-v11",
             "operations": ["audio", "compose"], "compositor_ready": callable(compose),
             "max_input_frames": 720, "max_input_seconds": 30,
+            "high_detail_max_width": 2560, "high_detail_max_height": 2560,
+            "high_detail_max_short_side": 1440,
+            "high_detail_max_pixels": 3686400, "high_detail_max_seconds": 15,
+            "scaled_tracking_masks": True,
             "pillow_version": pillow_version}
 
 
@@ -53,6 +57,7 @@ class ComposeRequest(BaseModel):
     run_id: str
     face_mesh: bool = False
     mesh_all_people: bool = False
+    high_detail: bool = False
 
     @model_validator(mode='after')
     def validate_styles(self):
@@ -87,7 +92,7 @@ def composite(request: ComposeRequest):
             metrics=compose(source,masks,vocals,output/'prepared_guide.mp4',request.selected_label,request.fill_mode,depth_source,
                 [style.model_dump() for style in request.target_styles] if request.target_styles is not None else None,
                 face_mesh=request.face_mesh, mesh_all_people=request.mesh_all_people, depth_opacity=request.depth_opacity,
-                depth_tint_by_target=request.depth_tint_by_target)
+                depth_tint_by_target=request.depth_tint_by_target, high_detail=request.high_detail)
             metrics['request_processing_seconds']=time.monotonic()-started
             (output/'metrics.json').write_text(json.dumps(metrics,indent=2))
             return {'metrics':metrics,'files':upload_tree(output,request.run_id)}

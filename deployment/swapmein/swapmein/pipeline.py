@@ -145,6 +145,18 @@ class Pipeline:
                 prefix = preparation_prefix(job, "worker")
                 app_prefix = preparation_prefix(job, "app")
                 source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "normalized.mp4", normalized, "video/mp4")
+                guide_source, guide_metadata, guide_source_uri = normalized, metadata, source_uri
+                high_detail = options.generation_model == "minimax-h3" and options.generation_resolution == "2K"
+                if high_detail:
+                    guide_source = root / "provider-source.mp4"
+                    guide_metadata = normalize(source, guide_source, options, high_detail=True)
+                    guide_source_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "provider-source.mp4", guide_source, "video/mp4")
+                    self.update_job(job_id, provider_source_uri=guide_source_uri, provider_source_metadata=guide_metadata,
+                        provider_preparation_media={"width": guide_metadata["width"], "height": guide_metadata["height"],
+                            "fps": 24, "resolution_policy": guide_metadata["resolution_policy"]})
+                    emit("provider_source_prepared", job_id=job_id, width=guide_metadata["width"],
+                         height=guide_metadata["height"], frames=guide_metadata["frames"], fps=24,
+                         resolution_policy=guide_metadata["resolution_policy"], source_upscaled=False)
                 self.update_job(job_id, duration=metadata["duration"], width=metadata["width"], height=metadata["height"],
                                 normalized_uri=source_uri, normalized_targets=targets, preparation_version=options.preparation_version,
                                 preparation_media={"width": metadata["width"], "height": metadata["height"], "fps": 24},
@@ -362,10 +374,12 @@ class Pipeline:
                             vocals_input = (self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
                                             if audio_processing else source_uri)
                             if not plan or not plan["review_required"]:
-                                compose_payload = {"input_uri": source_uri, "masks_uri": masks_input,
+                                compose_payload = {"input_uri": guide_source_uri, "masks_uri": masks_input,
                                     "guide_audio_uri": vocals_input, "selected_label": label, "depth_uri": depth_input,
                                     "fill_mode": fill_mode, "run_id": guide_run,
                                     "face_mesh": job.get("face_mesh", False), "mesh_all_people": options.replace_all_people}
+                                if high_detail:
+                                    compose_payload["high_detail"] = True
                                 if multi:
                                     compose_payload["target_styles"] = compose_styles(fill_mode, targets, mask_style)
                                 if fill_mode == "depth" and "depth_overlay_opacity" in job:
@@ -411,7 +425,7 @@ class Pipeline:
                     if options.preparation_version >= 2 or options.generation_model == "kling-4-0":
                         checked_guide = root / "checked-guide.mp4"
                         self.cloud.download(prepared, checked_guide, 50 * 1024 * 1024)
-                        verified = validate_guide_media(checked_guide, metadata)
+                        verified = validate_guide_media(checked_guide, guide_metadata)
                         emit("guide_media_verified", job_id=job_id, **verified)
                     if options.generation_model == "kling-4-0":
                         provider_guide = root / "kling-guide.mp4"
@@ -425,11 +439,11 @@ class Pipeline:
                     vocals, guide = root / "vocals_plus3.wav", root / "guide.mp4"
                     if audio_processing:
                         self.cloud.download(vocals_uri, vocals, 10 * 1024 * 1024)
-                        original_guide(normalized, vocals, guide, metadata)
+                        original_guide(guide_source, vocals, guide, guide_metadata)
                     else:
-                        guide.write_bytes(normalized.read_bytes())
+                        guide.write_bytes(guide_source.read_bytes())
                     if options.preparation_version >= 2:
-                        verified = validate_guide_media(guide, metadata)
+                        verified = validate_guide_media(guide, guide_metadata)
                         emit("guide_media_verified", job_id=job_id, **verified)
                     guide_uri = self.cloud.upload(self.settings.app_bucket, app_prefix + "guide.mp4", guide, "video/mp4")
                 if options.enhanced_character_masking:
@@ -605,11 +619,13 @@ class Pipeline:
         self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")
         fill_mode, mask_style = guide_style(job, job.get("setup", {}).get("enhanced_character_masking", True), bool(job.get("target_styles")), reviewed=True)
         with self.cloud.worker("audio") as invoke:
-            payload = {"input_uri": job["normalized_uri"],
+            payload = {"input_uri": job.get("provider_source_uri") or job["normalized_uri"],
                 "masks_uri": job["reviewed_masks_uri"], "guide_audio_uri": job["tracking_vocals_uri"],
                 "depth_uri": job.get("tracking_depth_uri"), "selected_label": 1,
                 "fill_mode": fill_mode, "run_id": run_id,
                 "face_mesh": job.get("face_mesh", False), "mesh_all_people": job.get("replace_all_people", False)}
+            if job.get("provider_source_uri"):
+                payload["high_detail"] = True
             if job.get("target_styles"):
                 payload["target_styles"] = compose_styles(fill_mode, job["target_styles"], mask_style)
             if fill_mode == "depth" and "depth_overlay_opacity" in job:
@@ -626,7 +642,7 @@ class Pipeline:
             with tempfile.TemporaryDirectory() as temporary:
                 checked = Path(temporary) / "guide.mp4"
                 self.cloud.download(prepared, checked, 50 * 1024 * 1024)
-                verified = validate_guide_media(checked, job["tracking_metadata"])
+                verified = validate_guide_media(checked, job.get("provider_source_metadata") or job["tracking_metadata"])
                 emit("guide_media_verified", job_id=job_id, **verified)
                 if kling:
                     provider_guide = Path(temporary) / "kling-guide.mp4"
@@ -694,7 +710,7 @@ class Pipeline:
                     self.cloud.download(job["private_provider_output_uri"], raw, 500 * 1024 * 1024)
                 else:
                     self.cloud.download_provider(job["provider_output"], raw)
-                self.cloud.download(job["normalized_uri"], original)
+                self.cloud.download(job.get("provider_source_uri") or job["normalized_uri"], original)
                 audio_processing = job.get("audio_processing", True)
                 restore_audio = job.get("restore_original_audio") is True or audio_processing or job.get("setup", {}).get("submit_without_audio", False)
                 if restore_audio:
@@ -711,7 +727,8 @@ class Pipeline:
                 if job.get("account_id"):
                     try:
                         comparison = root / "comparison.mp4"
-                        comparison_dimensions = create_comparison(original, output, comparison, job["duration"])
+                        comparison_dimensions = create_comparison(original, output, comparison, job["duration"],
+                            **({"preserve_resolution": True} if job.get("provider_source_uri") else {}))
                         comparison_uri = self.cloud.upload(self.settings.app_bucket,
                             prefix + f"comparison-{uuid.uuid4().hex}.mp4", comparison, "video/mp4")
                         comparison_fields = {"comparison_uri": comparison_uri, "comparison_status": "ready",
@@ -789,7 +806,7 @@ class Pipeline:
         # job record is updated. Keep the original RGB and unchanged soundtrack.
         key = f"library/{job['account_id']}/{job['id']}/before.mp4"
         try:
-            self.cloud.copy(job["normalized_uri"], self.settings.app_bucket, key)
+            self.cloud.copy(job.get("provider_source_uri") or job["normalized_uri"], self.settings.app_bucket, key)
         except PreconditionFailed:
             pass
         blob = self.cloud.blob(self.settings.app_bucket, key)

@@ -33,8 +33,9 @@ from .task_delivery import worker_audience
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .provider_failure import provider_failure, failure_message, failure_category
 from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot, enforce_character_limit
-from .generation_models import KLING, generation_model, generation_snapshot, require_model_access
-from .commerce import generation_quote, model_credit_rate, kling_credit_rate
+from .generation_models import KLING, generation_model, generation_resolution, generation_snapshot, require_model_access
+from .reference_groups import group_indexes, setup_groups, reference_count, has_multiple_angles
+from .commerce import generation_quote, model_credit_rate, kling_credit_rate, minimax_2k_credit_rate, minimax_extra_reference_rate
 from .self_hosted_route import generation_route_snapshot, SELF_HOSTED_GENERATION_ROUTES
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
@@ -108,7 +109,7 @@ async def protect_requests(request: Request, call_next):
 @app.exception_handler(PublicError)
 async def public_error(_request, error):
     reference_index = getattr(error, "reference_index", None)
-    reference_fields = {"reference_index": reference_index} if type(reference_index) is int and 0 <= reference_index < 5 else {}
+    reference_fields = {"reference_index": reference_index} if type(reference_index) is int and 0 <= reference_index < 6 else {}
     emit("api_request_rejected", error=error, route=_request.scope.get("route").path if _request.scope.get("route") else "unmatched", http_status=error.status_code, public_code=error.code, **reference_fields)
     content = {"message": error.message}
     content.update(reference_fields)
@@ -184,6 +185,9 @@ def job_estimate(job):
     # ToAPIs estimate scales the verified US$0.80 five-second reference test.
     if generation_model(job) == KLING:
         return estimate(job["duration"], generation_model=KLING)
+    if generation_resolution(job) == "2K" or len(job.get("reference_uris", [])) > 5:
+        return estimate(job["duration"], generation_resolution=generation_resolution(job),
+                        reference_count=len(job.get("reference_uris") or [job.get("reference_uri")]))
     return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
 
 
@@ -208,6 +212,8 @@ def pinned_generation_credits(job, records):
     if saved is not None:
         return saved
     model = generation_model(job)
+    if generation_resolution(job) == "2K" or has_multiple_angles(job.get("setup", {})):
+        raise PublicError("This job's resolution and reference price must be confirmed before generation.", 409)
     return generation_credit_cost(job["duration"], model_credit_rate(public_catalog(records), model),
                                   generation_model=model)
 
@@ -293,15 +299,22 @@ def view(job: dict, *, review_thumbnails: bool = True):
                     "anchor": job["tracking_metadata"]["anchor"], "reference_index": 0}]
     if targets:
         result["selection_targets"] = []
+        original_targets = {item["id"]: item for item in job.get("setup", {}).get("targets", []) or []}
         for target in targets:
             public_target = {key: target[key] for key in
-                ("id", "name", "anchor", "reference_index", "color", "color_name") if key in target}
+                ("id", "name", "anchor", "reference_index", "reference_indexes", "color", "color_name") if key in target}
+            original = original_targets.get(target.get("id"), {})
+            group = original.get("reference_indexes") or (job.get("setup", {}).get("reference_indexes") if len(targets) == 1 else None)
+            if group is not None:
+                public_target["reference_indexes"] = group
             anchor = target.get("anchor", {})
             frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
             thumbnail = job.get("scene_thumbnail_uris", {}).get(str(frame))
             if thumbnail and review_thumbnails:
                 public_target["thumbnail_url"] = cloud.signed_url(thumbnail)
             result["selection_targets"].append(public_target)
+    if job.get("setup", {}).get("reference_indexes") is not None:
+        result["selection_reference_indexes"] = job["setup"]["reference_indexes"]
     reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
     temporary_media_available = not job.get("temporary_media_cleanup_started_at")
     if reference_uris and temporary_media_available:
@@ -395,7 +408,9 @@ def config():
             "hide_audio_toggle": mesh.get("hide_audio_toggle", False),
             "multi_characters": mesh.get("multi_characters", True),
             "kling4_enabled": mesh.get("kling4_enabled", False),
+            "minimax_2k_enabled": mesh.get("minimax_2k_enabled", True),
             "max_duration_seconds": 30 if mesh.get("kling4_enabled", False) else 15,
+            "max_reference_images": 6,
             "face_mesh_options": {key: mesh.get(key, default) for key, default in (
                 ("face_mesh_enabled", True), ("face_mesh_masked_default", True), ("face_mesh_unmasked_default", False), ("face_mesh_user_control", False))},
             "reference_cleanup_available": bool(settings.reference_cleanup_url),
@@ -545,6 +560,8 @@ class CatalogUpdate(BaseModel):
     credits_per_generation: int
     margin_model: MarginModel | None = None
     kling_credits_per_generation: int | None = Field(default=None, ge=1, le=100000)
+    minimax_2k_credits_per_generation: int | None = Field(default=None, ge=1, le=100000)
+    minimax_extra_reference_credits: int | None = Field(default=None, ge=0, le=100000)
 
 
 class FeatureUpdate(BaseModel):
@@ -775,7 +792,9 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     from .self_hosted_jobs import worker_views
     pipeline = {**pipeline_settings(records), "self_hosted_workers": worker_views(settings, records)}
     catalog = catalog or default_catalog()
-    catalog = {**catalog, "kling_credits_per_generation": kling_credit_rate(catalog)}
+    catalog = {**catalog, "kling_credits_per_generation": kling_credit_rate(catalog),
+               "minimax_2k_credits_per_generation": minimax_2k_credit_rate(catalog),
+               "minimax_extra_reference_credits": minimax_extra_reference_rate(catalog)}
     return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog, "features": feature_view(records), "pipeline": pipeline, "watermark": watermark_settings(records), "cloudflare_key": cloudflare_credential_view()}
 
 
@@ -831,6 +850,7 @@ class PipelineSettingsUpdate(BaseModel):
     multi_person_generation_route: Literal["current", "google_h3", "paperspace_h3"] | None = None
     face_mesh_enabled: bool | None = None
     kling4_enabled: bool | None = None
+    minimax_2k_enabled: bool | None = None
     prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"] | None = None
 
 
@@ -846,7 +866,7 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
     saved = save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
                                   body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant, body.matching_no_review,
-                                  body.multi_person_generation_route, body.kling4_enabled)
+                                  body.multi_person_generation_route, body.kling4_enabled, body.minimax_2k_enabled)
     return {**saved, "self_hosted_workers": worker_views(settings, records)}
 
 
@@ -862,7 +882,8 @@ def update_commerce_catalog(body: CatalogUpdate, x_firebase_token: str | None = 
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
     return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_generation, body.margin_model.model_dump() if body.margin_model else None,
-                        body.kling_credits_per_generation)
+                        body.kling_credits_per_generation, body.minimax_2k_credits_per_generation,
+                        body.minimax_extra_reference_credits)
 
 
 @app.post("/api/commerce/admin/replicate-key")
@@ -1044,7 +1065,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     validate_reference_mapping(options, 1)
     defaults = pipeline_settings(records)
     enforce_character_limit(options, 1, defaults["multi_characters"])
-    require_model_access(options, defaults, active_session.get("provider", "reAPI"))
+    require_model_access(options, defaults, active_session.get("provider", "reAPI"),
+                         is_admin=bool(staff_role(records, active_session)))
     hosted_snapshot = generation_snapshot(options)
     route_snapshot = generation_route_snapshot(options, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
@@ -1080,7 +1102,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
             reference_uri = await run_in_threadpool(cloud.upload, settings.app_bucket, f"uploads/{job_id}/reference.{extension}", image, content_type)
         enforce_character_limit(options, 1, defaults["multi_characters"])
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
-               "message": "Your clip is queued for preparation.", "setup": options.model_dump(), "provider": active_session.get("provider", "reAPI"),
+               "message": "Your clip is queued for preparation.", "setup": setup_payload(options), "provider": active_session.get("provider", "reAPI"),
                "source_uri": source_uri, "reference_uri": reference_uri, "reference_uris": [reference_uri],
                "access_mode": active_session.get("access_mode", "api-key"),
                "audio_processing": defaults["audio_processing"], "multi_characters": defaults["multi_characters"],
@@ -1125,22 +1147,30 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
 
 
 def validate_reference_mapping(setup: Setup, count: int):
-    if not 1 <= count <= 5:
-        raise PublicError("Choose between one and five reference images.")
-    if setup.replace_all_people and count != 1:
-        raise PublicError("Replace all people uses one shared reference image.")
-    targets = getattr(setup, "targets", None)
-    if targets and any(target.reference_index >= count for target in targets):
-        raise PublicError("Assign an uploaded reference image to every selected person.")
-    if not targets and count != 1:
-        raise PublicError("Assign each reference to a selected person before uploading.")
+    if not 1 <= count <= 6:
+        raise PublicError("Choose one to six reference photos in total.")
+    groups = setup_groups(setup)
+    used = {index for group in groups for index in group}
+    if used != set(range(count)):
+        raise PublicError("Assign every uploaded photo to a character, using no more than six photos in total.")
+
+
+def setup_payload(setup):
+    """Keep legacy target records free of unused optional group fields."""
+    data = setup.model_dump()
+    if data.get("reference_indexes") is None:
+        data.pop("reference_indexes", None)
+    for target in data.get("targets") or []:
+        if target.get("reference_indexes") is None:
+            target.pop("reference_indexes", None)
+    return data
 
 
 class UploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_bytes: int = Field(strict=True, gt=0, le=MAX_SOURCE_BYTES)
     reference_bytes: int | None = Field(default=None, strict=True, gt=0, le=MAX_REFERENCE_BYTES)
-    reference_sizes: list[StrictInt] | None = Field(default=None, min_length=1, max_length=5)
+    reference_sizes: list[StrictInt] | None = Field(default=None, min_length=1, max_length=6)
     setup: Setup
     title: str = Field(default="Your clip", max_length=120)
 
@@ -1198,7 +1228,8 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     records, cloud, _ = services()
     defaults = pipeline_settings(records)
     enforce_character_limit(options.setup, len(options.reference_sizes), defaults["multi_characters"])
-    require_model_access(options.setup, defaults, active_session.get("provider", "reAPI"))
+    require_model_access(options.setup, defaults, active_session.get("provider", "reAPI"),
+                         is_admin=bool(staff_role(records, active_session)))
     hosted_snapshot = generation_snapshot(options.setup)
     route_snapshot = generation_route_snapshot(options.setup, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
@@ -1229,7 +1260,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "expires_at": time.time() + UPLOAD_SECONDS, "source_uri": source_uri,
         "raw_reference_uri": reference_uris[0], "raw_reference_uris": reference_uris,
         "source_bytes": options.source_bytes, "reference_bytes": options.reference_bytes,
-        "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
+        "reference_sizes": options.reference_sizes, "setup": setup_payload(options.setup),
         "prompt_variant": defaults["prompt_variant"],
         "matching_no_review": defaults["matching_no_review"],
         **route_snapshot, **hosted_snapshot,
@@ -1717,6 +1748,8 @@ def account_job_recovery(job_id: str, x_firebase_token: str | None = Header(defa
               "trim": setup.get("trim") or saved.get("trim"),
               "targets": setup.get("targets") or ([] if setup.get("anchor") or setup.get("replace_all_people") else item.get("selection_targets") or []),
               "anchor": setup.get("anchor"), "target_name": setup.get("target_name", "Selected person"),
+              "reference_indexes": setup.get("reference_indexes"),
+              "generation_resolution": generation_resolution(job or {"setup":setup}),
               "source_url": cloud.signed_url(source) if source else None,
               "reference_urls": [cloud.signed_url(uri) if uri else None for uri in references],
               "credits_charged": charged, "credits_returned": refunded,
@@ -1870,11 +1903,25 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
             target.get("id") != expected.id or target.get("reference_index") != expected.reference_index
             for target, expected in zip(targets, options.targets))):
         raise PublicError("This clip's person assignments have changed. Prepare it again before generating.", 409)
+    if options.targets:
+        rebound = []
+        for target, expected in zip(targets, options.targets):
+            group = group_indexes(expected.model_dump(), len(reference_uris))
+            if target.get("reference_indexes") is not None and group_indexes(target, len(reference_uris)) != group:
+                raise PublicError("This clip's photo groups changed. Prepare it again before generating.", 409)
+            rebound.append({**target, **({"reference_indexes":group} if expected.reference_indexes is not None else {})})
+        targets = rebound
+    elif options.reference_indexes is not None and targets:
+        if len(targets) != 1 or targets[0].get("reference_index", 0) != 0:
+            raise PublicError("This clip's photo group does not match its selected character.", 409)
+        targets = [{**targets[0], "reference_indexes":options.reference_indexes}]
     payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
         job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
         replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio, face_mesh=job.get("face_mesh", False),
         prompt_variant=job.get("prompt_variant") or "current", easy_mode=options.easy_mode,
-        **({"generation_model": KLING} if generation_model(job) == KLING else {}))
+        **({"generation_model": KLING} if generation_model(job) == KLING else {}),
+        **({"generation_resolution":"2K"} if generation_resolution(job) == "2K" else {}),
+        **({"reference_indexes":options.reference_indexes} if options.reference_indexes is not None else {}))
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         charge = pinned_generation_credits(job, records)

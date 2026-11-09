@@ -7,6 +7,7 @@ import httpx
 from .errors import PublicError
 from .diagnostics import emit, submission_event
 from .multi_tracking import TARGET_COLORS
+from .reference_groups import group_indexes, reference_words, kling_words, angle_guidance
 from .guide_style import SHARED_CYAN_STYLES
 from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1, CLOUDFLARE_IDENTITY_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, identity_colors_prompt, normalize_prompt_variant, structured_prompt
 
@@ -14,11 +15,18 @@ BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 
-def estimate(duration: int, rate: float = .074, *, generation_model: str = "minimax-h3"):
+def estimate(duration: int, rate: float = .074, *, generation_model: str = "minimax-h3", generation_resolution: str = "768P", reference_count: int = 1):
+    # Published MiniMax output rates are $0.074/s at 768P and $0.119/s
+    # at 2K, with five included photos and $0.036 per additional photo.
+    # Retain the existing conservative input+output duration allowance;
+    # published input-video billing and observed settlements differ.
     if generation_model == "kling-4-0":
         # reAPI bills an edit's output + max(output,input) at its video rate.
         rate = .0892
-    return math.ceil(duration * 2 * rate * 1000) / 1000
+    elif generation_resolution == "2K":
+        rate = .119
+    surcharge = .036 * max(0, reference_count - 5) if generation_model == "minimax-h3" else 0
+    return math.ceil((duration * 2 * rate + surcharge) * 1000) / 1000
 
 
 def replacement_prompt(duration: int, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, replace_all_people: bool = False):
@@ -92,18 +100,20 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
     has_coordinate_fallback = any(target.get("coordinate_fallback") or any(scene.get("coordinate_fallback") for scene in target.get("scenes", [])) for target in targets)
     for index, target in enumerate(targets):
         anchor = target.get("anchor", target)
-        reference = target["reference_index"] + 1
+        reference_text = reference_words(group_indexes(target))
         location = (f"selected at approximately {anchor['x'] * 100:.0f}% of the frame width and "
                     f"{anchor['y'] * 100:.0f}% of its height, measured from the top left, "
                     f"at {anchor['time']:.2f} seconds")
         marker = (f" covered by {TARGET_COLORS[index][1]}-tinted depth imagery" if mask_style in {"depth_multi", "solid_multi"}
                   else " covered by colored depth imagery") if enhanced_masking and not shared_cyan and not target.get("coordinate_fallback") else ""
         if target.get("scenes"):
-            instructions.append(f"Person {index + 1} uses the character from reference image {reference}. "
+            instructions.append(f"Person {index + 1} uses the character from {reference_text}. "
                                 "Use the following scene-specific positions and absences as the authoritative assignments.")
         else:
             instructions.append(f"Person {index + 1}{marker}, {location}, must be replaced with the character "
-                                f"from reference image {reference}.")
+                                f"from {reference_text}.")
+        if len(group_indexes(target)) > 1:
+            instructions.append(angle_guidance(group_indexes(target)))
         if target.get("coordinate_fallback"):
             instructions.append(f"Person {index + 1} has no detected selection mask. Use that person's stated position and timestamp to identify them in the original visible footage; do not substitute a different masked person.")
         for scene in target.get("scenes", []):
@@ -114,7 +124,7 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
                 point = scene["anchor"]
                 instructions.append(f"In the scene {interval}, identify Person {index + 1} at "
                     f"{point['time']:.2f} seconds, {point['x'] * 100:.0f}% across and {point['y'] * 100:.0f}% down "
-                    f"from the top left; replace that person with reference image {reference} throughout this scene.")
+                    f"from the top left; replace that person with {reference_text} throughout this scene.")
                 if scene.get("coordinate_fallback"):
                     instructions.append("This assignment has no detected mask in this interval. The selected person remains in original RGB footage; "
                         "use the stated position and timestamp, not a depth color, to identify them. Do not substitute a different masked person.")
@@ -144,7 +154,9 @@ def compact_multi_scene_prompt(duration: int, targets: list[dict], enhanced_mask
         "Absent intervals mean do not replace anyone for that assignment."]
     for index, target in enumerate(targets):
         marker = f" ({TARGET_COLORS[index][1]} depth)" if enhanced_masking and not target.get("coordinate_fallback") and mask_style in {"depth_multi", "solid_multi"} else ""
-        lines.append(f"Person {index + 1}{marker} -> reference image {target['reference_index'] + 1}.")
+        lines.append(f"Person {index + 1}{marker} -> {reference_words(group_indexes(target))}.")
+        if len(group_indexes(target)) > 1:
+            lines.append(angle_guidance(group_indexes(target)))
         scenes = target.get("scenes", [])
         if target.get("coordinate_fallback"):
             lines.append("No selection mask: identify from the stated position/time in original pixels, not another masked person.")
@@ -225,25 +237,29 @@ def shared_cyan_guidance(mask_style, face_mesh, replace_all_people):
                else "Remove all overlay colors from the finished video."))
 
 
-def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False, generation_model: str = "minimax-h3"):
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False, generation_model: str = "minimax-h3", generation_resolution: str = "768P", reference_indexes: list[int] | None = None):
     if generation_model not in {"minimax-h3", "kling-4-0"}:
         raise PublicError("Choose a supported generation model.")
     if generation_model == "kling-4-0":
         return kling_generation_payload(duration, image_url, video_url, anchor=anchor,
             mask_style=mask_style, replace_all_people=replace_all_people, targets=targets,
-            face_mesh=face_mesh)
+            face_mesh=face_mesh, reference_indexes=reference_indexes)
+    if generation_resolution not in {"768P", "2K"}:
+        raise PublicError("Choose MiniMax 768P or 2K.")
     prompt_variant = normalize_prompt_variant(prompt_variant)
     images = [image_url] if isinstance(image_url, str) else image_url
-    if (not isinstance(images, list) or not 1 <= len(images) <= 5
+    if (not isinstance(images, list) or not 1 <= len(images) <= 6
             or any(not isinstance(url, str) or not url for url in images)):
-        raise PublicError("Choose between one and five valid reference images.")
-    if replace_all_people and (targets or len(images) != 1):
-        raise PublicError("Replace all people uses one shared reference image.")
+        raise PublicError("Choose between one and six valid reference images.")
+    top_group = group_indexes({"reference_index": 0, "reference_indexes": reference_indexes}, len(images))
+    if replace_all_people and (targets or set(top_group) != set(range(len(images)))):
+        raise PublicError("Assign all shared reference photos to the replacement character.")
     if targets is not None:
         if not isinstance(targets, list) or not 1 <= len(targets) <= 5:
             raise PublicError("Choose between one and five people.")
         for target in targets:
             reference = target.get("reference_index") if isinstance(target, dict) else None
+            group_indexes(target, len(images)) if isinstance(target, dict) else None
             point = target.get("anchor", target) if isinstance(target, dict) else {}
             if (type(reference) is not int or not 0 <= reference < len(images) or not isinstance(point, dict)
                     or any(type(point.get(axis)) not in (int, float) or not math.isfinite(point[axis])
@@ -253,13 +269,16 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         prompt = multi_replacement_prompt(duration, targets, enhanced_masking, mask_style)
     else:
         prompt = replacement_prompt(duration, enhanced_masking, anchor, mask_style, replace_all_people=replace_all_people)
+        if len(top_group) > 1:
+            prompt = re.sub(r"reference image 1\b", reference_words(top_group), prompt, flags=re.I)
+            prompt += " " + angle_guidance(top_group)
     if prompt_variant in {STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1, CLOUDFLARE_IDENTITY_V1}:
         builder = structured_prompt if prompt_variant == STRUCTURED_V1 else identity_colors_prompt
         tracking_options = ({"tint_tracking": easy_mode} if prompt_variant == IDENTITY_TINT_TRACKING_V1
             or prompt_variant == CLOUDFLARE_IDENTITY_V1 and replace_all_people else {})
         prompt = builder(duration, enhanced_masking=enhanced_masking, anchor=anchor, mask_style=mask_style,
             audio_processing=audio_processing, submit_without_audio=submit_without_audio, replace_all_people=replace_all_people,
-            targets=targets, face_mesh=face_mesh, **tracking_options)
+            targets=targets, face_mesh=face_mesh, reference_indexes=reference_indexes, **tracking_options)
     else:
         mesh_note = (" Facial mesh lines in the reference video mark detected facial motion only. Use them as expression and mouth-motion guidance; remove every mesh line from all faces in the final video. Keep speaker assignments and dialogue timing tied to the original people, including across cuts." if face_mesh else "")
         prompt = audio_prompt(mask_prompt(prompt, mask_style), audio_processing, submit_without_audio) + mesh_note + shared_cyan_guidance(mask_style, face_mesh, replace_all_people) + " " + PERFORMANCE_GUIDANCE
@@ -278,12 +297,12 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
         raise PublicError("This clip has too many scene assignments for the provider prompt limit. Use a shorter clip or fewer replacements. No generation was submitted.",
             400, code="provider_prompt_too_long")
     return {"model": "minimax-h3", "prompt": prompt, "duration": duration,
-            "resolution": "768P", "aspect_ratio": "adaptive", "content_filter": False,
+            "resolution": generation_resolution, "aspect_ratio": "adaptive", "content_filter": False,
             "reference_image_urls": images, "reference_video_urls": [video_url]}
 
 
 def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mask_style="none",
-                             replace_all_people=False, targets=None, face_mesh=False):
+                             replace_all_people=False, targets=None, face_mesh=False, reference_indexes=None):
     """The reviewed body-tint edit recipe, with dynamic person assignments.
 
     Colors mark the person slot, not the reference's array index. An identity
@@ -296,21 +315,24 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
     if face_mesh:
         raise PublicError("Face mesh must be off for Kling. Prepare its body-mask guide first.", 409)
     images = [image_url] if isinstance(image_url, str) else image_url
-    if (not isinstance(images, list) or not 1 <= len(images) <= 5
+    if (not isinstance(images, list) or not 1 <= len(images) <= 6
             or any(not isinstance(url, str) or not url for url in images)):
-        raise PublicError("Choose between one and five valid reference images.")
-    if replace_all_people and (targets or len(images) != 1):
-        raise PublicError("Replace all people uses one shared reference image.")
+        raise PublicError("Choose between one and six valid reference images.")
+    top_group = group_indexes({"reference_index": 0, "reference_indexes": reference_indexes}, len(images))
+    if replace_all_people and (targets or set(top_group) != set(range(len(images)))):
+        raise PublicError("Assign all shared reference photos to the replacement character.")
     if mask_style not in {"identity_overlay_20", "identity_overlay_multi_20",
                           "cyan_overlay_20", "cyan_overlay_multi_20"}:
         raise PublicError("Kling requires its prepared twenty-percent body-mask guide.", 409)
     shared = mask_style in SHARED_CYAN_STYLES
     lines = ["Edit @Video1."]
     if replace_all_people:
-        lines.append("Replace every person with the character in @Image1, using their face, hair and clothing. "
+        lines.append("Replace every person with the character in " + kling_words(top_group) + ", using their face, hair and clothing. "
                      "Keep each replacement separate and in its source person's position.")
+        if len(top_group) > 1:
+            lines.append(angle_guidance(top_group, kling=True))
     else:
-        selections = targets or [{"anchor": anchor or {"x": .5, "y": .5, "time": 0}, "reference_index": 0}]
+        selections = targets or [{"anchor": anchor or {"x": .5, "y": .5, "time": 0}, "reference_index": 0, "reference_indexes": reference_indexes}]
         if not isinstance(selections, list) or not 1 <= len(selections) <= 5:
             raise PublicError("Choose between one and five people.")
         if len(selections) > 1 and shared:
@@ -325,19 +347,23 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
                     or not 0 <= point["x"] <= 1 or not 0 <= point["y"] <= 1
                     or not 0 <= point["time"] < duration):
                 raise PublicError("Each selected person needs a valid reference and clip timestamp.")
+            group = group_indexes(target, len(images))
+            references = kling_words(group)
             color = TARGET_COLORS[index][1]
             position = (f"at {point['time']:.2f} seconds, x={point['x'] * 100:.0f}%, "
                         f"y={point['y'] * 100:.0f}% measured from the top left")
             identifier = f"the person {position}" if shared else f"the {color}-tinted person ({position})"
-            lines.append(f"Replace {identifier} with the character in @Image{reference + 1}, "
+            lines.append(f"Replace {identifier} with the character in {references}, "
                          "using their face, hair and clothing.")
             if not shared:
-                lines.append(f"The {color} tint marks the source person assigned to @Image{reference + 1}.")
+                lines.append(f"The {color} tint marks the source person assigned to {references}.")
+            if len(group) > 1:
+                lines.append(angle_guidance(group, kling=True))
             for scene in target.get("scenes", []):
                 start, end = scene["start"], scene["end"]
                 if scene["absent"]:
                     lines.append(f"From {start:.2f} to {end:.2f} seconds that person is absent; "
-                                 f"do not replace anyone with @Image{reference + 1} in that interval.")
+                                 f"do not replace anyone with {references} in that interval.")
                 else:
                     at = scene["anchor"]
                     lines.append(f"From {start:.2f} to {end:.2f} seconds identify that person "
@@ -451,7 +477,7 @@ class ToAPIsProvider(Provider):
             raise PublicError("Kling generation requires reAPI. No generation was submitted.", 409)
         import uuid
         translated = {"model": "MiniMax-H3", "prompt": payload["prompt"], "duration": payload["duration"],
-            "resolution": "768p", "aspect_ratio": "adaptive", "client_business_id": "swapmein-" + uuid.uuid4().hex,
+            "resolution": "2K" if payload.get("resolution") == "2K" else "768p", "aspect_ratio": "adaptive", "client_business_id": "swapmein-" + uuid.uuid4().hex,
             "image_with_roles": [{"url": url, "role": "reference_image"} for url in payload["reference_image_urls"]],
             "video_with_roles": [{"url": url, "role": "reference_video"} for url in payload["reference_video_urls"]]}
         fingerprint = submission_event(translated, provider="ToAPIs", endpoint="/v1/videos/generations", job_id=job_id)

@@ -220,3 +220,12 @@ describe("local asset upload lifecycle", () => {
     expect(revokeUrl).toHaveBeenCalledWith("blob:asset-4");
   });
 });
+
+it("retains concurrent angle batches for one character and keeps pending until every batch finishes",async()=>{
+ preparePerson();const first=deferred<void>(),second=deferred<void>();validateImage.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+ const {result}=renderHook(()=>useLocalAssets());let a!:Promise<void>,b!:Promise<void>;
+ act(()=>{a=result.current.importAdditionalReferences(PERSON.id,[referenceFile("front.png")]);b=result.current.importAdditionalReferences(PERSON.id,[referenceFile("side.png")]);});
+ await act(async()=>{second.resolve(undefined);await b;});expect(result.current.pendingReferences).toEqual([PERSON.id]);
+ await act(async()=>{first.resolve(undefined);await a;});expect(result.current.pendingReferences).toEqual([]);
+ const state=useCharSwapStore.getState();expect(state.references.map(reference=>reference.name).sort()).toEqual(["front.png","side.png"]);expect(state.referenceGroups?.[PERSON.id]).toHaveLength(2);
+});

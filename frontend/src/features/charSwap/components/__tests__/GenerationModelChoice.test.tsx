@@ -49,3 +49,18 @@ it("allows either model for short clips and locks Kling mesh off with masking on
   await user.click(screen.getByRole("radio", {name: /MiniMax/}));
   expect(screen.getByRole("switch", {name: "Face mesh"})).toBeEnabled();
 });
+
+it("offers MiniMax 2K independently of Kling access and freezes Kling quality at 720p",async()=>{
+ const user=userEvent.setup();render(<GenerationModelChoice/>);
+ await user.click(screen.getByRole("combobox",{name:"MiniMax quality"}));await user.click(screen.getByRole("option",{name:"2K · Higher detail"}));
+ expect(useCharSwapStore.getState().generationResolution).toBe("2K");
+ useCharSwapStore.getState().setKling4Enabled(true);useCharSwapStore.getState().setGenerationModel("kling-4-0");
+ expect(useCharSwapStore.getState().generationResolution).toBe("720p");useCharSwapStore.getState().setGenerationResolution("2K");expect(useCharSwapStore.getState().generationResolution).toBe("720p");
+});
+
+it("hides 2K for users when access is off and blocks a stale 2K draft until 768p is chosen",async()=>{
+ const user=userEvent.setup();useCharSwapStore.getState().setMinimax2kEnabled(false);render(<GenerationModelChoice/>);
+ await user.click(screen.getByRole("combobox",{name:"MiniMax quality"}));expect(screen.queryByRole("option",{name:/2K/})).not.toBeInTheDocument();await user.click(screen.getByRole("option",{name:"768p · Standard"}));
+ useCharSwapStore.setState({generationResolution:"2K"});expect(getStepBlocker(useCharSwapStore.getState(),"trim")).toMatch(/2K is currently unavailable/);
+ await user.click(screen.getByRole("combobox",{name:"MiniMax quality"}));await user.click(screen.getByRole("option",{name:"768p · Standard"}));expect(useCharSwapStore.getState().generationResolution).toBe("768P");useCharSwapStore.getState().setMinimax2kEnabled(true);
+});

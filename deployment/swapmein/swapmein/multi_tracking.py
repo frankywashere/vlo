@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 
 from .errors import PublicError
+from .reference_groups import group_indexes
 from .tracking import FPS, _maps, _metadata, _pixel_label, analyze_tracking, resolve_tracking
 
 TARGET_COLORS = [("#00dcff", "cyan"), ("#ff4fd8", "magenta"), ("#ffd166", "gold"),
@@ -24,8 +25,9 @@ def style_targets(targets: list[dict]):
         if (not isinstance(target, dict) or not isinstance(target.get("id"), str)
                 or not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", target["id"])
                 or target["id"] in ids or type(target.get("reference_index")) is not int
-                or not 0 <= target["reference_index"] < 5):
+                or not 0 <= target["reference_index"] < 6):
             raise PublicError("The person-to-reference mapping is invalid.", code="target_selection_invalid")
+        group_indexes(target)
         ids.add(target["id"])
         color, name = TARGET_COLORS[index]
         result.append({**target, "label": index + 1, "color": color, "color_name": name})

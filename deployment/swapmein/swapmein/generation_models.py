@@ -6,6 +6,16 @@ KLING = "kling-4-0"
 GENERATION_MODELS = frozenset({MINIMAX, KLING})
 
 
+def generation_resolution(data):
+    data = data if isinstance(data, dict) else data.model_dump()
+    model = generation_model(data)
+    value = data.get("generation_resolution", (data.get("setup") or {}).get("generation_resolution"))
+    value = value or ("720p" if model == KLING else "768P")
+    if value not in ({"720p"} if model == KLING else {"768P", "2K"}):
+        raise PublicError("Choose a supported output resolution for this model.")
+    return value
+
+
 def generation_model(data):
     data = data if isinstance(data, dict) else data.model_dump()
     model = data.get("generation_model", (data.get("setup") or {}).get("generation_model", MINIMAX))
@@ -20,7 +30,11 @@ def max_duration(model):
     return 30 if model == KLING else 15
 
 
-def require_model_access(setup, defaults, provider):
+def require_model_access(setup, defaults, provider, *, is_admin=False):
+    if (generation_model(setup) == MINIMAX and generation_resolution(setup) == "2K"
+            and defaults.get("minimax_2k_enabled", True) is False and not is_admin):
+        raise PublicError("MiniMax 2K is currently unavailable. Choose 768p to continue.",
+                          409, code="minimax_2k_disabled")
     if generation_model(setup) == KLING:
         if not defaults.get("kling4_enabled", False):
             raise PublicError("Kling 4.0 is currently unavailable. Choose MiniMax for a clip up to 15 seconds.",
@@ -36,7 +50,7 @@ def require_model_access(setup, defaults, provider):
 
 def generation_snapshot(setup):
     model = generation_model(setup)
-    snapshot = {"generation_model": model}
+    snapshot = {"generation_model": model, "generation_resolution": generation_resolution(setup)}
     if model == KLING:
         # Reproduce the reviewed body-tint recipe, regardless of user overrides
         # or subsequent Admin changes. Restoring source audio is deterministic.

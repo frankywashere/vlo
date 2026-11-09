@@ -1,3 +1,4 @@
+import { submittedReferences, targetReferences, selectedReferenceUrl } from "./model/referenceGroups";
 import { UploadSavedNotice } from "./components/UploadSavedNotice";
 import { processingStageCopy } from "./utils/processingStage";
 import { trimDuration } from "./utils/trimRange";
@@ -123,8 +124,12 @@ export function CharSwapWalkthrough({
     submitWithoutAudio,
     faceMesh,
     generationModel,
+    generationResolution,
+    referenceGroups,
     kling4Enabled,
     setKling4Enabled,
+    minimax2kEnabled,
+    setMinimax2kEnabled,
     addWatermark,
     enhancedCharacterMasking,
     selectionVersion,
@@ -152,8 +157,12 @@ export function CharSwapWalkthrough({
       submitWithoutAudio: state.submitWithoutAudio ?? false,
       faceMesh: state.faceMesh,
       generationModel: state.generationModel ?? "minimax-h3",
+      generationResolution: state.generationResolution ?? "768P",
+      referenceGroups: state.referenceGroups,
       kling4Enabled: state.kling4Enabled,
       setKling4Enabled: state.setKling4Enabled,
+      minimax2kEnabled:state.minimax2kEnabled,
+      setMinimax2kEnabled:state.setMinimax2kEnabled,
       addWatermark: state.addWatermark ?? false,
       enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
       selectionVersion: state.selectionVersion,
@@ -198,6 +207,7 @@ export function CharSwapWalkthrough({
   }, [apiKeyAllowed, accessMode, clearKey]);
   const pipeline = useLivePipeline(apiKey, provider, accessMode);
   useEffect(() => { setKling4Enabled(pipeline.kling4Enabled === true); }, [pipeline.kling4Enabled, setKling4Enabled]);
+  useEffect(()=>{setMinimax2kEnabled(pipeline.minimax2kEnabled!==false||isAdmin);},[pipeline.minimax2kEnabled,isAdmin,setMinimax2kEnabled]);
   const ownCredits = useLiveCredits(!credits, pipeline.job?.status);
   const creditAccount = credits ?? ownCredits;
   const secureSite = isSecureLiveOrigin();
@@ -209,6 +219,8 @@ export function CharSwapWalkthrough({
     trim[1] - trim[0],
     creditAccount.catalog,
     generationModel,
+    generationResolution,
+    submittedReferences({targets, references, assignments, referenceGroups}).length,
   );
   const generationCredits = pipeline.job && !["failed", "completed"].includes(pipeline.job.status)
     ? pipeline.job.generation_credits ?? trimCredits : trimCredits;
@@ -242,6 +254,9 @@ export function CharSwapWalkthrough({
     submitWithoutAudio,
     faceMesh,
     generationModel,
+    generationResolution,
+    minimax2kEnabled,
+    referenceGroups,
     kling4Enabled,
     generationCreditQuote: accessMode === "credits" ? trimCredits : undefined,
     addWatermark: Boolean(addWatermark && creditAccount.catalog?.watermark_enabled && accessMode === "credits"),
@@ -292,19 +307,14 @@ export function CharSwapWalkthrough({
     (step === "matches" && !trackingReady) ||
     !fullyFunded;
   const cleanupPending=hasPendingReferenceCleanup(state);
-  const cleanupFailed=targets.some(target=>references.find(reference=>reference.id===assignments[target.id])?.cleanup?.error);
+  const cleanupFailed=targets.some(target=>targetReferences({targets,references,assignments,referenceGroups},target.id).some(reference=>reference.cleanup?.error));
   useEffect(()=>{
     if (step!=="references" || !clip) {setWaitingForCleanup(false);return;}
     if (waitingForCleanup && !cleanupPending && !cleanupFailed && !continueDisabled) {
       setWaitingForCleanup(false);visit("review");
     }
   },[step,clip,waitingForCleanup,cleanupPending,cleanupFailed,continueDisabled,visit]);
-  const referenceVersion = JSON.stringify(
-    Object.entries(assignments).map(([target, id]) => [
-      target,
-      references.find((reference) => reference.id === id)?.url,
-    ]),
-  );
+  const referenceVersion = JSON.stringify(targets.map(target=>[target.id, targetReferences({targets,references,assignments,referenceGroups},target.id).map(reference=>[reference.id,selectedReferenceUrl(reference),reference.cleanup?.mode])]));
   const { reset: resetPipeline } = pipeline;
   const cancelPending = assets.cancelPending;
   const startNewSwap = useCallback(() => {
@@ -609,13 +619,17 @@ export function CharSwapWalkthrough({
                 maxPeople={live && pipeline.multiCharacters === false ? 1 : 5}
               />
             )}
-            {step === "references" && waitingForCleanup && <ReferenceCleanupWait targets={targets} references={references} assignments={assignments} onBack={()=>setWaitingForCleanup(false)}/> }
+            {step === "references" && waitingForCleanup && <ReferenceCleanupWait targets={targets} references={references} assignments={assignments} referenceGroups={referenceGroups} onBack={()=>setWaitingForCleanup(false)}/> }
             {step === "references" && !waitingForCleanup && (
               <ReferencesStep
                 demo={demo}
                 cleanupEnabled={live && pipeline.referenceCleanupAvailable}
                 cleanupEndpoint={pipeline.referenceCleanupEndpoint}
                 pendingIds={assets.pendingReferences}
+                onImportAdditional={(id,files)=>{
+                  if(files.some(file=>file.size>5*1024*1024)){setError("Choose character images smaller than 5 MiB each.");return;}
+                  void assets.importAdditionalReferences(id,files);
+                }}
                 onImport={(id, file) => {
                   if (file.size > 5 * 1024 * 1024) {
                     setError("Choose a character image smaller than 5 MiB.");

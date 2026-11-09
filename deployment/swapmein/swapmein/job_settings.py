@@ -1,6 +1,8 @@
 """Public, durable settings summaries without credentials, URLs or prompts."""
 import math
 
+from .generation_models import generation_resolution
+from .reference_groups import group_indexes, reference_count
 from .self_hosted_route import MULTI_PERSON_GENERATION_ROUTES, SELF_HOSTED_GENERATION_ROUTES
 
 MASK_STYLES = {"none", "depth", "depth_multi", "cyan_overlay", "cyan_overlay_20", "cyan_overlay_multi_20",
@@ -50,11 +52,15 @@ def settings_used(job):
     targets = job.get("normalized_targets") or setup.get("targets")
     if targets:
         result["people_count"] = len(targets)
-        result["reference_count"] = len({target["reference_index"] for target in targets if "reference_index" in target})
+        result["reference_count"] = len({index for target in targets if "reference_index" in target for index in group_indexes(target)})
     elif setup.get("anchor"):
         result["people_count"] = 1
+    if setup.get("targets") or setup.get("reference_indexes"):
+        result["reference_count"] = reference_count(setup)
     if job.get("reference_uris"):
         result["reference_count"] = len(job["reference_uris"])
+    elif job.get("library_reference_uris"):
+        result["reference_count"] = len(job["library_reference_uris"])
     elif job.get("reference_uri"):
         result["reference_count"] = 1
     for key in ("duration", "width", "height"):
@@ -64,18 +70,23 @@ def settings_used(job):
     for key in ("width", "height", "fps"):
         if isinstance(media.get(key), (int, float)):
             result["prep_" + key] = media[key]
+    provider_media = job.get("provider_preparation_media") or {}
+    for key in ("width", "height", "fps"):
+        if isinstance(provider_media.get(key), (int, float)):
+            result["provider_prep_" + key] = provider_media[key]
     generation = job.get("generation_settings") or {}
+    requested = generation.get("resolution")
+    if requested not in {"2K", "720p", "768P", "768p"} and (job.get("generation_resolution") or setup.get("generation_resolution")):
+        requested = generation_resolution(job)
+    if requested in {"2K", "720p", "768P", "768p"}:
+        result["requested_resolution"] = "768p" if requested in {"768P", "768p"} else requested
     if generation.get("model") in {"minimax-h3", "MiniMax-H3"}:
         result["model"] = "MiniMax H3"
     if generation.get("model") == "kling-4-0" or job.get("generation_model") == "kling-4-0":
         result["model"] = "Kling 4.0"
-    if generation.get("resolution") == "720p":
-        result["requested_resolution"] = "720p"
-    if generation.get("resolution") in {"768P", "768p"}:
-        result["requested_resolution"] = "768p"
     if isinstance(route, str) and route in SELF_HOSTED_GENERATION_ROUTES:
         # Self-hosted workers preserve the normalized source geometry; the
         # hosted provider's requested 768P setting and prompt selector do not run.
         result.pop("requested_resolution", None)
-    allowed = {"prompt_variant", "face_mesh", "depth_guidance", "add_watermark", "watermark_bonus_credits", "submit_without_audio", "easy_mode", "replace_all_people", "audio_processing", "restore_original_audio", "multi_person_generation_route", "generation_recipe", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution"}
+    allowed = {"prompt_variant", "face_mesh", "depth_guidance", "add_watermark", "watermark_bonus_credits", "submit_without_audio", "easy_mode", "replace_all_people", "audio_processing", "restore_original_audio", "multi_person_generation_route", "generation_recipe", "enhanced_masking", "mask_style", "trim", "people_count", "reference_count", "duration", "width", "height", "prep_width", "prep_height", "prep_fps", "model", "requested_resolution", "provider_prep_width", "provider_prep_height", "provider_prep_fps"}
     return {key: value for key, value in result.items() if key in allowed or key == "depth_overlay_opacity"}
