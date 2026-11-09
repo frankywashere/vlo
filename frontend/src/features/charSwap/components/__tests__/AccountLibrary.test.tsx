@@ -459,3 +459,36 @@ it("opens and saves Option 6 fallback scene review while keeping Easy Mode and t
   expect(onCreate).not.toHaveBeenCalled();
   expect(generateLiveJob).not.toHaveBeenCalled();
 });
+
+it("refreshes terminal failure immediately when returning to the Library and displays its safety badge", async () => {
+  const generating={...job,status:"generating" as const,access_mode:"credits" as const};
+  const failed={...generating,status:"failed" as const,failure_category:"content_rejected" as const,
+    failed_at:1000032,generation_started_at:1000000,message:"Content-safety review rejected this request. Your credits were returned."};
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([generating]).mockResolvedValue([failed]);
+  vi.mocked(loadJobRecovery).mockResolvedValue({action:"support",message:"Your saved inputs are retained."});
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await screen.findByText("Generating");
+  act(()=>window.dispatchEvent(new Event("focus")));
+  expect(await screen.findByText("Content safety")).toBeVisible();
+  expect(screen.getByText(/Your credits were returned/)).toBeVisible();
+  await userEvent.click(screen.getByRole("button",{name:"View details"}));
+  expect(screen.getAllByRole("alert").some(alert => alert.textContent?.includes("Your credits were returned"))).toBe(true);
+  expect(screen.getByText(/Provider processing stopped after 32s/)).toBeVisible();
+  expect(pollLiveProvider).not.toHaveBeenCalled();expect(generateLiveJob).not.toHaveBeenCalled();
+});
+
+it("does not let an older in-flight refresh overwrite a newly observed failure", async () => {
+  const generating={...job,status:"generating" as const,access_mode:"credits" as const};
+  const failed={...generating,status:"failed" as const,failure_category:"content_rejected" as const};
+  let resolveOld!: (jobs: Awaited<ReturnType<typeof loadAccountJobs>>) => void;
+  const older = new Promise<Awaited<ReturnType<typeof loadAccountJobs>>>(resolve => {resolveOld=resolve;});
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([generating]).mockReturnValueOnce(older).mockResolvedValue([failed]);
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await screen.findByText("Generating");
+  act(()=>window.dispatchEvent(new Event("focus")));
+  act(()=>document.dispatchEvent(new Event("visibilitychange")));
+  await screen.findByText("Content safety");
+  await act(async()=>resolveOld([generating]));
+  expect(screen.getByText("Content safety")).toBeVisible();
+  expect(screen.queryByText("Generating")).not.toBeInTheDocument();
+});

@@ -19,6 +19,7 @@ import type { PreparationProgressState } from "../model/preparation";
 import { useVideoDownload } from "../hooks/useVideoDownload";
 import { VideoPreview } from "./VideoPreview";
 import { JobElapsedTime } from "./JobElapsedTime";
+import { JobFailureNotice } from "./JobFailureNotice";
 
 interface GenerationPageProps {
   canCreateAnother?: boolean;
@@ -120,6 +121,9 @@ export function GenerationPage({
               created_at: job.created_at,
               completed_at: job.completed_at,
               updated_at: job.updated_at,
+              failed_at: job.failed_at,
+              review_wait_seconds: job.review_wait_seconds,
+              review_paused_at: job.review_paused_at,
             }}
           />
         )}
@@ -243,7 +247,7 @@ export function GenerationPage({
               {preparation.message}
             </Typography>
           )}
-          {error && (
+          {failed && job ? <JobFailureNotice job={job} /> : error && (
             <Alert severity={unknown ? "warning" : "error"}>{error}</Alert>
           )}
           {unknown && (

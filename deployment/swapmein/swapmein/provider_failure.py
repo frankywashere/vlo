@@ -1,6 +1,13 @@
 """Allowlisted provider failure reasons; never expose or log raw provider text."""
 import re
 
+FAILURE_CATEGORIES = frozenset({"face_rejected", "content_rejected", "generation_failed"})
+
+
+def failure_category(failure):
+    category = failure.get("category") if isinstance(failure, dict) else None
+    return category if isinstance(category, str) and category in FAILURE_CATEGORIES else None
+
 
 def provider_failure(body):
     error = body.get("error")
@@ -19,6 +26,6 @@ def provider_failure(body):
 def failure_message(failure, credits):
     category = failure.get("category") if isinstance(failure, dict) else None
     prefix = {"face_rejected": "Face rejected by the generation provider.",
-              "content_rejected": "Content rejected by the generation provider. A safety check flagged the prompt, references, or generated video."}.get(category, "The generation failed.")
+              "content_rejected": "Content rejected by the generation provider's safety review. The provider did not identify which prompt, image or video content triggered the rejection."}.get(category, "The generation failed.")
     return prefix + (" Your recastfx credits were returned." if credits else
                      " Check its task details and refund in your provider dashboard.")

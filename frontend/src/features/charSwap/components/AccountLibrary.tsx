@@ -25,6 +25,7 @@ import {
   resolveLiveTracking,
 } from "../services/livePipeline";
 import { JobElapsedTime } from "./JobElapsedTime";
+import { JobFailureNotice } from "./JobFailureNotice";
 import { JobSettings } from "./JobSettings";
 import { SceneTrackingReview } from "./SceneTrackingReview";
 import { loadAccountAccess } from "../services/commerce";
@@ -50,6 +51,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const refreshCount = useRef(0);
+  const latestRefresh = useRef(0);
   const savedReviewVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
@@ -87,11 +89,12 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const controller = useRef<AbortController | null>(null);
   const refresh = useCallback(async () => {
     const reviewVersion = savedReviewVersion.current;
+    const refreshVersion = ++latestRefresh.current;
     refreshCount.current += 1;
     setRefreshing(true);
     try {
       const received = await loadAccountJobs();
-      if (mounted.current && reviewVersion === savedReviewVersion.current) {
+      if (mounted.current && reviewVersion === savedReviewVersion.current && refreshVersion === latestRefresh.current) {
         // Renew links well before their one-hour expiry without restarting a
         // playing video on every status refresh.
         const result = received.filter((job) => !hiddenJobs.current.has(job.id)).map((job) => {
@@ -141,7 +144,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
         setError(null);
       }
     } catch (cause) {
-      if (mounted.current)
+      if (mounted.current && refreshVersion === latestRefresh.current)
         setError(
           cause instanceof Error
             ? cause.message
@@ -158,9 +161,14 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     const timer = globalThis.setInterval(() => {
       if (!document.hidden) void refresh();
     }, 15000);
+    const refreshWhenVisible = () => { if (!document.hidden) void refresh(); };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       mounted.current = false;
       globalThis.clearInterval(timer);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
       controller.current?.abort();
     };
   }, [refresh]);
@@ -287,7 +295,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const details = (<>
         <Box sx={{px: reviewPage ? 0 : 3, pb: reviewPage ? 0 : 2}}>
           <Stack spacing={2}>
-            {(!reviewPage || selected?.status !== "tracking_review") && <Typography>{selected?.message}</Typography>}
+            {selected?.status === "failed" ? <JobFailureNotice job={selected} />
+              : (!reviewPage || selected?.status !== "tracking_review") && <Typography>{selected?.message}</Typography>}
             {checkingRecovery && <LinearProgress aria-label="Checking saved files" />}
             {recovery && <Alert severity={recovery.action === "support" ? "warning" : "info"}>
               {recovery.message}

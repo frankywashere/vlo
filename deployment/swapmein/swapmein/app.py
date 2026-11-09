@@ -31,7 +31,7 @@ from .pipeline import Pipeline
 from .processing_capacity import ProcessingCapacity, HEAVY_CEILING, REAPI_CEILING
 from .task_delivery import worker_audience
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
-from .provider_failure import provider_failure, failure_message
+from .provider_failure import provider_failure, failure_message, failure_category
 from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot, enforce_character_limit
 from .generation_models import KLING, generation_model, generation_snapshot, require_model_access
 from .commerce import generation_quote, model_credit_rate, kling_credit_rate
@@ -269,6 +269,15 @@ def view(job: dict, *, review_thumbnails: bool = True):
               "settings_used": settings_used(job),
               "generation_model": generation_model(job),
               "replace_all_people": bool(job.get("setup", {}).get("replace_all_people", False))}
+    if status == "failed":
+        category = failure_category(job.get("provider_failure"))
+        if category:
+            result["failure_category"] = category
+        for field in ("failed_at", "stage_started_at", "updated_at"):
+            value = job.get(field)
+            if type(value) in (int, float) and math.isfinite(value) and value > 0:
+                result["failed_at"] = value
+                break
     if job.get("status") == "ready" and job.get("review_generation_queued"):
         result["processing_stage"] = "generation_queue"
     elif status in {"queued", "preparing"} and job.get("preparation_kind") == "tracking_rebuild":
@@ -2190,6 +2199,7 @@ def provider_status(job_id: str, job: dict, key: str):
              failure_category=failure["category"], provider_error_code=failure["code"], **billing)
         updated = records.update(f"jobs/{job_id}.json", lambda current: {**current, "status": "failed",
             "auto_key_ciphertext": None,
+            "failed_at": time.time(), "updated_at": time.time(), "provider_checked_at": time.time(),
             "provider_state": "failed", "provider_failure": failure,
             "message": failure_message(failure, job.get("access_mode") == "credits")
         } if current["status"] == "generating" and current.get("provider_task") == job["provider_task"] else current)

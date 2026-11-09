@@ -14,6 +14,7 @@ import { generationStatus } from "../utils/generationStatus";
 import { processingStageCopy } from "../utils/processingStage";
 import { CharacterStack } from "./CharacterStack";
 import { JobElapsedTime } from "./JobElapsedTime";
+import { generationFailureMessage } from "../utils/generationFailure";
 
 interface GenerationCardProps {
   job: AccountJob;
@@ -286,6 +287,9 @@ export function GenerationCard({ job, onOpen, onReview }: GenerationCardProps) {
               {stage.detail}
             </Typography>
           )}
+          {job.status === "failed" && <Typography variant="body2" color="text.secondary" sx={{mt: 1}}>
+            {generationFailureMessage(job)}
+          </Typography>}
           {running && (
             <Box
               sx={{

@@ -6,6 +6,20 @@ from swapmein.storage import Records
 from test_api import api
 
 
+def test_failure_time_is_pinned_before_later_refund_progress_updates():
+    from swapmein.storage import account_failure_time
+    active={'status':'generating','updated_at':10.}
+    failed=account_failure_time(active,{**active,'status':'failed'},42.)
+    assert failed['failed_at']==42.
+    later=account_failure_time(failed,{**failed,'updated_at':640.,'failed_at':640.},640.)
+    assert later['failed_at']==42.
+    old={'status':'failed','stage_started_at':42.,'updated_at':640.}
+    assert account_failure_time(old,old,1000.)['failed_at']==42.
+    # An explicit recovery and subsequent failure starts a new stopped clock.
+    resumed={**failed,'status':'finalizing'}
+    assert account_failure_time(resumed,{**resumed,'status':'failed'},1000.)['failed_at']==1000.
+
+
 def test_phase_timing_is_saved_once_after_write_race_and_kept_across_progress_updates(monkeypatch, capsys):
     import swapmein.storage as module
     monkeypatch.setattr(module.time, "time", lambda: 20.)

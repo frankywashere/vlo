@@ -126,3 +126,11 @@ it("updates elapsed generation time and removes it when the card completes", () 
   );
   expect(screen.queryByText(/^Elapsed:/)).not.toBeInTheDocument();
 });
+
+it("shows content-safety classification and explanation directly on a failed card", () => {
+  render(<GenerationCard job={{...job, status: "failed", failure_category: "content_rejected",
+    message: "The provider rejected this request in content-safety review. Your credits were returned."}} onOpen={vi.fn()} />);
+  expect(screen.getByText("Content safety")).toBeVisible();
+  expect(screen.getByText(/Your credits were returned/)).toBeVisible();
+  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+});

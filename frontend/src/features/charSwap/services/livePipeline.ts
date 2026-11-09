@@ -97,6 +97,8 @@ export interface LivePipelineJob {
   audio_processing?: boolean;
   created_at?: number;
   completed_at?: number;
+  failed_at?: number;
+  failure_category?: "content_rejected" | "face_rejected" | "generation_failed";
   updated_at?: number;
   provider?: GenerationProvider;
   access_mode?: GenerationAccessMode;
@@ -373,6 +375,8 @@ function readJob(value: unknown): LivePipelineJob {
     id: value.id,
     status: value.status as LiveJobStatus,
   };
+  if (value.failure_category === "content_rejected" || value.failure_category === "face_rejected"
+      || value.failure_category === "generation_failed") job.failure_category = value.failure_category;
   if (value.generation_destination !== undefined) {
     if (value.generation_destination !== "current" && value.generation_destination !== "google_h3"
         && value.generation_destination !== "paperspace_h3")
@@ -490,6 +494,7 @@ function readJob(value: unknown): LivePipelineJob {
   }
   for (const field of [
     "duration",
+    "failed_at",
     "width",
     "height",
     "selected_label",

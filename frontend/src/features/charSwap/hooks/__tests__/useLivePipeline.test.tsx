@@ -654,3 +654,23 @@ it("submits face mesh off when the global master is off, despite a saved on over
   const body=JSON.parse(String(calls("/api/uploads")[0][1]?.body));
   expect(body.setup.face_mesh).toBe(false);
 });
+
+it("checks a returning active job immediately even after the normal polling window, without another generation", async () => {
+  vi.useFakeTimers();
+  jobStatus="ready";
+  let rejected=false;
+  requests.mockImplementation(input => input === "/api/jobs/job-1/provider" && rejected
+    ? Promise.resolve(json({id:"job-1",status:"failed",failure_category:"content_rejected",failed_at:1232,
+        message:"Content-safety review rejected this request. Credits returned."})) : defaultRequest(input));
+  const {result}=await renderLive();
+  await act(async()=>{await result.current.prepare(setup());});
+  await act(async()=>{await result.current.generate();});
+  expect(result.current.job?.status).toBe("generating");
+  rejected=true;
+  vi.setSystemTime(Date.now()+21*60*1000);
+  await act(async()=>{document.dispatchEvent(new Event("visibilitychange"));});
+  expect(result.current.job?.status).toBe("failed");
+  expect(result.current.job?.failure_category).toBe("content_rejected");
+  expect(calls("/api/jobs/job-1/generate")).toHaveLength(1);
+  expect(calls("/api/jobs/job-1/provider")).toHaveLength(1);
+});

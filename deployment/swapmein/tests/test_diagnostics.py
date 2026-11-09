@@ -52,6 +52,15 @@ def test_submission_log_preserves_actual_settings_but_removes_signed_urls(capsys
     assert payload['image_with_roles'][0]['url'].startswith('https://private')
 
 
+def test_singular_kling_media_urls_are_not_recorded(capsys):
+    from swapmein.diagnostics import submission_event
+    submission_event({'model':'kling-4-0','video_url':'https://storage.googleapis.com/private?signature=secret',
+                      'image_with_roles':[{'url':'https://storage.googleapis.com/photo?signature=secret','role':'reference_image'}]},
+                     provider='reAPI',endpoint='/api/v1/videos/generations')
+    output=capsys.readouterr().out
+    assert 'signature=secret' not in output and 'https://storage.googleapis.com' not in output
+
+
 def test_nested_timers_keep_job_correlation_and_redact_exception_details(capsys, monkeypatch):
     import swapmein.diagnostics as module
     import pytest

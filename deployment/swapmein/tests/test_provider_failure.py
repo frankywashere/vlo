@@ -38,3 +38,15 @@ def test_poll_preserves_public_reason_for_library_without_leaking_provider_text(
     logs=capsys.readouterr().out
     assert private not in json.dumps(saved)+json.dumps(result)+json.dumps(credit_view)+logs
     assert 'provider_error_code' in logs
+    assert result['failure_category'] == provider_failure({'error': {'code':code, 'message':message}})['category']
+    assert result['failed_at'] == saved['failed_at']
+    # Later bookkeeping cannot move the failure clock presented to the user.
+    later=gateway.view({**saved,'updated_at':saved['failed_at']+600})
+    assert later['failed_at']==saved['failed_at']
+
+
+def test_failure_category_is_allowlisted_and_legacy_failure_time_uses_stage(api):
+    result=gateway.view({'id':'a'*32,'status':'failed','access_mode':'credits',
+        'provider_failure':{'category':'private arbitrary reason'},'stage_started_at':100.,'updated_at':700.})
+    assert 'failure_category' not in result
+    assert result['failed_at']==100.

@@ -51,6 +51,18 @@ def phase(job):
             "completed": "completed", "failed": "failed", "submission_unknown": "submission_unknown"}.get(status)
 
 
+def account_failure_time(current, updated, now):
+    """A failure's clock stops once; later status/refund writes cannot extend it."""
+    if updated.get("status") != "failed":
+        return updated
+    current = current or {}
+    stopped = current.get("failed_at") if current.get("status") == "failed" else None
+    if type(stopped) not in (int, float) or not math.isfinite(stopped) or stopped <= 0:
+        # Older failed records already have the durable failure stage timestamp.
+        stopped = current.get("stage_started_at", current.get("updated_at", now)) if current.get("status") == "failed" else now
+    return {**updated, "failed_at": stopped}
+
+
 class Records:
     def __init__(self, bucket_name: str, client=None):
         self.client = client or storage.Client()
@@ -89,6 +101,7 @@ class Records:
                 updated = mutation(current)
                 if path.startswith("jobs/") and isinstance(updated, dict):
                     updated = account_review_wait(current, updated, time.time())
+                    updated = account_failure_time(current, updated, time.time())
                 next_phase = phase(updated)
                 now = time.time()
                 changed = path.startswith("jobs/") and next_phase is not None and previous_phase != next_phase

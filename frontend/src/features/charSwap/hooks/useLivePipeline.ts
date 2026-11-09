@@ -449,6 +449,20 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     }
   }, [enabled, apiKey, accessMode, ensureSession, publishJob]);
 
+  useEffect(() => {
+    if (!enabled || !jobId || !jobStatus || !POLL_STATUSES.has(jobStatus)) return;
+    const refreshVisibleJob = () => {
+      const active = currentJob.current;
+      if (!document.hidden && active?.id === jobId && POLL_STATUSES.has(active.status)) void refresh();
+    };
+    window.addEventListener("focus", refreshVisibleJob);
+    document.addEventListener("visibilitychange", refreshVisibleJob);
+    return () => {
+      window.removeEventListener("focus", refreshVisibleJob);
+      document.removeEventListener("visibilitychange", refreshVisibleJob);
+    };
+  }, [enabled, jobId, jobStatus, refresh]);
+
   return {
     enabled,
     kling4Enabled: config?.kling4_enabled === true,

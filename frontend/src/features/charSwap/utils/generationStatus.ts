@@ -1,5 +1,6 @@
 import type { AccountJob } from "../services/accounts";
 import { processingStageCopy } from "./processingStage";
+import { generationFailureLabel } from "./generationFailure";
 
 const STATUS_LABELS: Record<AccountJob["status"], string> = {
   queued: "In queue",
@@ -31,9 +32,9 @@ export function generationStatus(job: AccountJob) {
           : "info";
   return {
     label:
-      job.status === "ready"
+      generationFailureLabel(job) ?? (job.status === "ready"
         ? STATUS_LABELS.ready
-        : (processingStageCopy(job)?.title ?? STATUS_LABELS[job.status]),
+        : (processingStageCopy(job)?.title ?? STATUS_LABELS[job.status])),
     color,
   } as const;
 }

@@ -57,3 +57,15 @@ it("supports older exports and does not invent a duration when timestamps are mi
   expect(formatElapsed(3661)).toBe("1h 1m 1s");
   expect(formatElapsed(-10)).toBe("0s");
 });
+
+it("freezes failure at its terminal timestamp even after later refund metadata updates", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(2_000_000);
+  const job = {status: "failed" as const, created_at: 900, failed_at: 1032,
+    updated_at: 1800, review_wait_seconds: 100};
+  const view = render(<JobElapsedTime job={job} />);
+  expect(screen.getByText("Stopped after: 32s")).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(600000));
+  view.rerender(<JobElapsedTime job={{...job, updated_at: 2600}} />);
+  expect(screen.getByText("Stopped after: 32s")).toBeInTheDocument();
+});

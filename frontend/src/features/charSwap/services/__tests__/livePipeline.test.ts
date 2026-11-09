@@ -357,3 +357,11 @@ it.each([undefined, null, "unknown", {}, []])("omits an unknown or unsaved promp
   const settings = (await getLiveJob("job-1", "session", new AbortController().signal)).settings_used;
   expect(settings).toEqual({easy_mode: true});
 });
+
+it("retains allowlisted terminal failure metadata and discards unknown category text", async () => {
+  requests.mockResolvedValueOnce(new Response(JSON.stringify({id:"job-1",status:"failed",failure_category:"content_rejected",failed_at:1000})));
+  expect(await getLiveJob("job-1","session",new AbortController().signal)).toMatchObject({failure_category:"content_rejected",failed_at:1000});
+  requests.mockResolvedValueOnce(new Response(JSON.stringify({id:"job-1",status:"failed",failure_category:"private provider text",failed_at:-1})));
+  const job=await getLiveJob("job-1","session",new AbortController().signal);
+  expect(job.failure_category).toBeUndefined();expect(job.failed_at).toBeUndefined();
+});

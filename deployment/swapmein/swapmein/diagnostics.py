@@ -39,7 +39,7 @@ def emit(event, *, error=None, **fields):
 def submission_event(payload, *, provider, endpoint, job_id=None):
     """Record the actual vendor payload immediately before its single paid POST."""
     def redact(value, key=""):
-        if key == "url":
+        if key == "url" or key.endswith("_url"):
             return "[redacted signed media URL]"
         if key.endswith("_urls"):
             return ["[redacted signed media URL]" for _ in value]

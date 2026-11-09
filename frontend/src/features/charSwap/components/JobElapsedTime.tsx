@@ -3,7 +3,7 @@ import { Typography } from "@mui/material";
 import type { AccountJob } from "../services/accounts";
 
 interface JobElapsedTimeProps {
-  job: Pick<AccountJob, "status" | "created_at" | "completed_at" | "updated_at" | "review_wait_seconds" | "review_paused_at">;
+  job: Pick<AccountJob, "status" | "created_at" | "completed_at" | "failed_at" | "updated_at" | "review_wait_seconds" | "review_paused_at">;
 }
 
 export function formatElapsed(seconds: number): string {
@@ -25,7 +25,8 @@ export function JobElapsedTime({ job }: JobElapsedTimeProps) {
     return () => globalThis.clearInterval(timer);
   }, [job.created_at, terminal, paused]);
   // Older completed jobs predate completed_at; their last persisted update was export.
-  const end = terminal ? job.completed_at ?? (job.status !== "expired" ? job.updated_at : undefined)
+  const end = job.status === "failed" ? job.failed_at ?? job.updated_at ?? job.completed_at
+    : terminal ? job.completed_at ?? (job.status !== "expired" ? job.updated_at : undefined)
     : paused ? job.review_paused_at ?? job.updated_at : now;
   if (!Number.isFinite(job.created_at) || job.created_at <= 0 || !Number.isFinite(end)) return null;
   const label = job.status === "completed" ? "Finished in" : terminal ? "Stopped after" : paused ? "Elapsed (paused)" : "Elapsed";
