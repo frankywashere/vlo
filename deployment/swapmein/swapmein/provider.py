@@ -14,7 +14,10 @@ BASE = "https://reapi.ai"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 
-def estimate(duration: int, rate: float = .074):
+def estimate(duration: int, rate: float = .074, *, generation_model: str = "minimax-h3"):
+    if generation_model == "kling-4-0":
+        # reAPI bills an edit's output + max(output,input) at its video rate.
+        rate = .0892
     return math.ceil(duration * 2 * rate * 1000) / 1000
 
 
@@ -222,7 +225,13 @@ def shared_cyan_guidance(mask_style, face_mesh, replace_all_people):
                else "Remove all overlay colors from the finished video."))
 
 
-def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False):
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False, generation_model: str = "minimax-h3"):
+    if generation_model not in {"minimax-h3", "kling-4-0"}:
+        raise PublicError("Choose a supported generation model.")
+    if generation_model == "kling-4-0":
+        return kling_generation_payload(duration, image_url, video_url, anchor=anchor,
+            mask_style=mask_style, replace_all_people=replace_all_people, targets=targets,
+            face_mesh=face_mesh)
     prompt_variant = normalize_prompt_variant(prompt_variant)
     images = [image_url] if isinstance(image_url, str) else image_url
     if (not isinstance(images, list) or not 1 <= len(images) <= 5
@@ -273,6 +282,86 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
             "reference_image_urls": images, "reference_video_urls": [video_url]}
 
 
+def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mask_style="none",
+                             replace_all_people=False, targets=None, face_mesh=False):
+    """The reviewed body-tint edit recipe, with dynamic person assignments.
+
+    Colors mark the person slot, not the reference's array index. An identity
+    matched/reviewed guide therefore retains the exact saved color-to-photo
+    mapping even when the user reorders or reuses reference photos.
+    """
+    if (type(duration) not in (int, float) or not math.isfinite(duration)
+            or not 4 <= duration <= 30 or not math.isclose(duration, round(duration), abs_tol=.01)):
+        raise PublicError("Kling supports a whole-second clip from 4 to 30 seconds.")
+    if face_mesh:
+        raise PublicError("Face mesh must be off for Kling. Prepare its body-mask guide first.", 409)
+    images = [image_url] if isinstance(image_url, str) else image_url
+    if (not isinstance(images, list) or not 1 <= len(images) <= 5
+            or any(not isinstance(url, str) or not url for url in images)):
+        raise PublicError("Choose between one and five valid reference images.")
+    if replace_all_people and (targets or len(images) != 1):
+        raise PublicError("Replace all people uses one shared reference image.")
+    if mask_style not in {"identity_overlay_20", "identity_overlay_multi_20",
+                          "cyan_overlay_20", "cyan_overlay_multi_20"}:
+        raise PublicError("Kling requires its prepared twenty-percent body-mask guide.", 409)
+    shared = mask_style in SHARED_CYAN_STYLES
+    lines = ["Edit @Video1."]
+    if replace_all_people:
+        lines.append("Replace every person with the character in @Image1, using their face, hair and clothing. "
+                     "Keep each replacement separate and in its source person's position.")
+    else:
+        selections = targets or [{"anchor": anchor or {"x": .5, "y": .5, "time": 0}, "reference_index": 0}]
+        if not isinstance(selections, list) or not 1 <= len(selections) <= 5:
+            raise PublicError("Choose between one and five people.")
+        if len(selections) > 1 and shared:
+            raise PublicError("Review each character's scene assignments to build Kling's distinct-color guide. "
+                              "No generation was submitted.", 409, code="kling_identity_guide_required")
+        for index, target in enumerate(selections):
+            point = target.get("anchor", target) if isinstance(target, dict) else {}
+            reference = target.get("reference_index") if isinstance(target, dict) else None
+            if (type(reference) is not int or not 0 <= reference < len(images)
+                    or any(type(point.get(axis)) not in (int, float) or not math.isfinite(point[axis])
+                           for axis in ("x", "y", "time"))
+                    or not 0 <= point["x"] <= 1 or not 0 <= point["y"] <= 1
+                    or not 0 <= point["time"] < duration):
+                raise PublicError("Each selected person needs a valid reference and clip timestamp.")
+            color = TARGET_COLORS[index][1]
+            position = (f"at {point['time']:.2f} seconds, x={point['x'] * 100:.0f}%, "
+                        f"y={point['y'] * 100:.0f}% measured from the top left")
+            identifier = f"the person {position}" if shared else f"the {color}-tinted person ({position})"
+            lines.append(f"Replace {identifier} with the character in @Image{reference + 1}, "
+                         "using their face, hair and clothing.")
+            if not shared:
+                lines.append(f"The {color} tint marks the source person assigned to @Image{reference + 1}.")
+            for scene in target.get("scenes", []):
+                start, end = scene["start"], scene["end"]
+                if scene["absent"]:
+                    lines.append(f"From {start:.2f} to {end:.2f} seconds that person is absent; "
+                                 f"do not replace anyone with @Image{reference + 1} in that interval.")
+                else:
+                    at = scene["anchor"]
+                    lines.append(f"From {start:.2f} to {end:.2f} seconds identify that person "
+                                 f"at {at['time']:.2f} seconds, x={at['x'] * 100:.0f}%, "
+                                 f"y={at['y'] * 100:.0f}%.")
+        if shared:
+            lines.append("All selected people share cyan selection tint; it is not an identity color. "
+                         "Use the stated positions and times to keep each reference assignment separate across cuts.")
+    lines.append("Apply these same replacements throughout every shot where those people appear. "
+                 "Keep their original actions, expressions, speaking turns and mouth movements, "
+                 "and keep the other people, scene and camera shots unchanged. "
+                 "These translucent colors identify the selected people only; "
+                 "remove all guide tints completely from the finished video.")
+    prompt = " ".join(lines)
+    if len(prompt) > 7000:
+        raise PublicError("This clip has too many scene assignments for the generation prompt. "
+                          "Use a shorter clip or fewer replacements. No generation was submitted.",
+                          400, code="provider_prompt_too_long")
+    return {"model": "kling-4-0", "resolution": "720p", "omni_reference_task_type": "edit",
+            "prompt": prompt, "video_url": video_url,
+            "image_with_roles": [{"url": url, "role": "reference_image"} for url in images],
+            "audio_setting": "origin"}
+
+
 class Provider:
     def __init__(self, client=None):
         self.client = client or httpx.Client(timeout=httpx.Timeout(30, connect=15), follow_redirects=False, trust_env=False)
@@ -317,7 +406,7 @@ class Provider:
         except Exception:
             raise PublicError("The provider submission outcome is unknown. Check your reAPI task history before trying again.", 502) from None
 
-    def status(self, key: str, task_id: str):
+    def status(self, key: str, task_id: str, *, generation_model: str = "minimax-h3"):
         if not TASK_ID.fullmatch(task_id):
             raise PublicError("Invalid provider task.", 500)
         try:
@@ -327,7 +416,8 @@ class Provider:
                 raise PublicError("reAPI rejected your key. Check that it is still active.", 401)
             response.raise_for_status()
             body = response.json()
-            if body.get("id") != task_id or body.get("model") != "minimax-h3":
+            if (generation_model not in {"minimax-h3", "kling-4-0"}
+                    or body.get("id") != task_id or body.get("model") != generation_model):
                 raise ValueError
             return body
         except PublicError:
@@ -357,6 +447,8 @@ class ToAPIsProvider(Provider):
             raise PublicError("ToAPIs could not validate this key and its allowance. Check your token settings.", 401) from None
 
     def submit(self, key: str, payload: dict, *, job_id: str | None = None):
+        if payload.get("model") != "minimax-h3":
+            raise PublicError("Kling generation requires reAPI. No generation was submitted.", 409)
         import uuid
         translated = {"model": "MiniMax-H3", "prompt": payload["prompt"], "duration": payload["duration"],
             "resolution": "768p", "aspect_ratio": "adaptive", "client_business_id": "swapmein-" + uuid.uuid4().hex,
@@ -381,7 +473,9 @@ class ToAPIsProvider(Provider):
         except Exception:
             raise PublicError("The ToAPIs submission outcome is unknown. Check its task history before trying again.", 502) from None
 
-    def status(self, key: str, task_id: str):
+    def status(self, key: str, task_id: str, *, generation_model: str = "minimax-h3"):
+        if generation_model != "minimax-h3":
+            raise PublicError("Kling generation requires reAPI.", 409)
         if not TASK_ID.fullmatch(task_id):
             raise PublicError("Invalid provider task.", 500)
         try:

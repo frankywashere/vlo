@@ -653,3 +653,19 @@ it("keeps the saved destination when switching workers fails", async () => {
   expect(screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"})).not.toBeChecked();
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, multi_person_generation_route: "paperspace_h3"});
 });
+
+it("exposes Kling under Experimental and saves its access separately from existing pipeline settings", async () => {
+  const user = userEvent.setup();
+  api.pipelineSettings = {revision: 3, audio_processing: false, kling4_enabled: false, multi_person_generation_route: "paperspace_h3"};
+  await renderExpandedAdmin();
+  const toggle = screen.getByRole("switch", {name: "Allow users to choose Kling 4.0"});
+  expect(toggle).not.toBeChecked();
+  await user.click(toggle);
+  expect(api.pipeline).toHaveBeenCalledWith({revision: 3, kling4_enabled: true});
+  expect(api.pipelineSettings?.multi_person_generation_route).toBe("paperspace_h3");
+  const rate = screen.getByLabelText("Kling 4.0 credits for 15 seconds");
+  await user.clear(rate);
+  await user.type(rate, "450");
+  await user.click(screen.getByRole("button", {name: "Save pricing"}));
+  expect(api.save).toHaveBeenCalledWith(expect.objectContaining({kling_credits_per_generation: 450, credits_per_generation: 150}));
+});

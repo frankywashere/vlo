@@ -81,6 +81,7 @@ export async function restoreRetryDraft(recovery: JobRecovery, signal: AbortSign
     signal.throwIfAborted();
     const settings = recovery.settings ?? {};
     return {clip, trim: recovery.trim ?? [0, clip ? Math.min(15, Math.floor(clip.duration)) : 0], targets, references, assignments,
+      generationModel: settings.model === "kling-4-0" ? "kling-4-0" : "minimax-h3",
       issues: [], decisions: {}, easyMode: settings.easy_mode ?? true, faceMesh: settings.face_mesh, submitWithoutAudio: settings.submit_without_audio ?? false, addWatermark: settings.add_watermark ?? false, enhancedCharacterMasking: settings.enhanced_masking ?? true,
       replaceAllPeople: settings.replace_all_people ?? false, retryNeedsSource: !clip,
       retryNotice: unreadableSource ? "This browser could not open the saved video. Upload the original clip; your trim, character selections, and available photos are restored."

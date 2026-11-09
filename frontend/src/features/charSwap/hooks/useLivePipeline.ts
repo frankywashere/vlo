@@ -30,6 +30,7 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "generating", "finalizin
 const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
+  kling4Enabled?: boolean;
   hideAudioToggle?: boolean;
   multiCharacters?: boolean;
   faceMeshOptions?: LivePipelineConfig["face_mesh_options"];
@@ -278,7 +279,8 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     setPreparationProgress({phase: "checking_access", message: accessMode === "credits" ? "Checking your credits…" : "Checking your API key…"});
     try {
       const access = await ensureSession(controller.signal);
-      const submittedState = config?.face_mesh_options?.face_mesh_enabled === false ? {...state, faceMesh: false} : state;
+      if (state.generationModel === "kling-4-0" && config?.kling4_enabled !== true) throw new LivePipelineError("Kling 4.0 is currently unavailable. Choose MiniMax and a clip up to 15 seconds.");
+      const submittedState = state.generationModel === "kling-4-0" || config?.face_mesh_options?.face_mesh_enabled === false ? {...state, faceMesh: false} : state;
       const prepared = await createLiveJob(submittedState, access.token, controller.signal, (progress) => {
         if (!controller.signal.aborted && epoch.current === version) setPreparationProgress(progress);
       }, autoGenerate, accessMode === "api-key" ? apiKey : "");
@@ -299,7 +301,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [config?.face_mesh_options?.face_mesh_enabled, config?.multi_characters, enabled, apiKey, accessMode, reset, ensureSession, publishJob]);
+  }, [config?.kling4_enabled, config?.face_mesh_options?.face_mesh_enabled, config?.multi_characters, enabled, apiKey, accessMode, reset, ensureSession, publishJob]);
 
   const resolveTracking = useCallback(async (choices: TrackingReviewChoice[]) => {
     const active = currentJob.current;
@@ -449,6 +451,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
 
   return {
     enabled,
+    kling4Enabled: config?.kling4_enabled === true,
     creditsAvailable: config?.credits_available === true,
     hideAudioToggle: config?.hide_audio_toggle,
     multiCharacters: config?.multi_characters !== false,

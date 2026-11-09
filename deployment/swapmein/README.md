@@ -841,3 +841,49 @@ comparison failure logs `comparison_export_failed` and preserves the successful
 main render; the Library falls back to an on-screen paired preview if the original
 is available. `comparison_export` timings and `comparison_export_saved` record
 encoding duration, canvas dimensions and layout.
+
+### Hosted model selection: MiniMax H3 and Kling 4.0
+
+`control/pipeline-settings.json.kling4_enabled` is off by default. When enabled,
+Create offers MiniMax or Kling through fifteen seconds and requires Kling for
+longer trims, up to thirty seconds. The backend independently validates model,
+duration and access at intake; Kling is reAPI-only. Explicit Kling selections
+bypass the optional Google/Paperspace CharacterSwap overrides. MiniMax retains
+those overrides and its existing fifteen-second limit. Disabling Kling blocks
+new tickets; already accepted uploads and jobs retain their saved model.
+
+Kling snapshots twenty-percent body masking, no mesh, no depth and no vocal
+pitch processing. Identity matching or scene review establishes distinct
+person-to-reference colors; uncertain multi-person guides cannot silently
+submit shared-cyan identity guidance. The final guide is separately resized
+with square pixels and exact display aspect to satisfy Kling's minimum input
+height, without changing working masks or tap coordinates. It uses edit mode,
+720p and original-audio mode, and export restores the source soundtrack.
+Watermarks, comparisons, character retention, Library progress, provider-slot
+limits, duplicate submission protection and refunds use the existing flow.
+
+Preparation beyond fifteen seconds is pinned to the existing Replicate SAM
+route and requires its configured credential. Deploy the updated CPU overlay
+worker before exposing this feature: its health version is
+`audio-identity-kling-v10`, with `max_input_seconds: 30` and
+`max_input_frames: 720`. This does not extend the legacy private GPU SAM service.
+
+The catalog has an independent editable `kling_credits_per_generation` rate
+per fifteen seconds. Legacy catalogs without it derive a price from their
+existing margin assumptions using a provider cost of $0.1784 per finished
+second, or scale the MiniMax rate by $0.1784/$0.074 when no margin model exists.
+Admin can save an explicit Kling price without changing MiniMax. Credits are
+rounded up once for the complete selected duration. Credit-funded Kling must
+include the displayed `generation_credit_quote`; stale quotes fail before
+uploads or preparation. The accepted quote, model, rate and catalog revision
+are retained with the ticket and job. Completion, debit and refund use that
+saved quote even if Admin subsequently changes pricing.
+
+Published provider pricing checked November 8, 2026:
+https://reapi.ai/models/kling-4-0 and https://reapi.ai/docs/kling-4-0.
+720p edits bill $0.0892 times output plus max(output,input), approximately
+$2.676 for fifteen seconds in/out and $5.352 for thirty seconds in/out, before
+preparation/storage and markup. The reviewed fifteen-second masked experiment
+reported $2.678. Those provider dollars are separate from app credit prices.
+No paid thirty-second render has been submitted during this implementation;
+media tests exercise the full 720-frame preparation timeline locally.

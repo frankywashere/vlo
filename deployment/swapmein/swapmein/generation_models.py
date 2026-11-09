@@ -1,0 +1,52 @@
+"""Hosted model policy, pinned at intake rather than read from mutable Admin settings."""
+from .errors import PublicError
+
+MINIMAX = "minimax-h3"
+KLING = "kling-4-0"
+GENERATION_MODELS = frozenset({MINIMAX, KLING})
+
+
+def generation_model(data):
+    data = data if isinstance(data, dict) else data.model_dump()
+    model = data.get("generation_model", (data.get("setup") or {}).get("generation_model", MINIMAX))
+    if model not in GENERATION_MODELS:
+        raise PublicError("Choose MiniMax H3 or Kling 4.0.")
+    return model
+
+
+def max_duration(model):
+    if model not in GENERATION_MODELS:
+        raise PublicError("Choose a supported generation model.")
+    return 30 if model == KLING else 15
+
+
+def require_model_access(setup, defaults, provider):
+    if generation_model(setup) == KLING:
+        if not defaults.get("kling4_enabled", False):
+            raise PublicError("Kling 4.0 is currently unavailable. Choose MiniMax for a clip up to 15 seconds.",
+                              409, code="kling_disabled")
+        if provider != "reAPI":
+            raise PublicError("Kling 4.0 requires reAPI access.", 409, code="kling_provider_unavailable")
+        if round(setup.trim[1] - setup.trim[0], 6) > 15:
+            from .preparation_credentials import replicate_key_ready
+            if not replicate_key_ready():
+                raise PublicError("Longer Kling clips need Replicate preparation configured by an administrator.",
+                                  409, code="kling_preparation_unavailable")
+
+
+def generation_snapshot(setup):
+    model = generation_model(setup)
+    snapshot = {"generation_model": model}
+    if model == KLING:
+        # Reproduce the reviewed body-tint recipe, regardless of user overrides
+        # or subsequent Admin changes. Restoring source audio is deterministic.
+        snapshot.update(face_mesh=False, depth_guidance=False, audio_processing=False,
+                        restore_original_audio=True, guide_style_version=2,
+                        depth_overlay_opacity=.2, depth_identity_colors_version=1)
+        from .cloudflare_credentials import cloudflare_key_ready
+        snapshot.update(prompt_variant="cloudflare_identity_v1" if cloudflare_key_ready() else "identity_colors_v1",
+                        matching_no_review=False)
+        if round(setup.trim[1] - setup.trim[0], 6) > 15:
+            from .replicate_preparation import preparation_snapshot
+            snapshot.update(preparation_snapshot("replicate", enhanced_masking=True))
+    return snapshot

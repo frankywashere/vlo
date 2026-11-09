@@ -5,6 +5,7 @@ import { useCharSwapStore } from "../useCharSwapStore";
 
 export function GenerationOptions({ hideAudioToggle = false, disabled = false, onChange, watermarkOffer, faceMeshOptions, isAdmin = false }: { hideAudioToggle?: boolean; disabled?: boolean; onChange?: () => void; watermarkOffer?: {bonusCredits: number}; faceMeshOptions?: FaceMeshOptions; isAdmin?: boolean }) {
   const defaults = useCharSwapStore(useShallow(state => ({
+    generationModel: state.generationModel,
     faceMesh: state.faceMesh, setFaceMesh: state.setFaceMesh,
     easyMode: state.easyMode ?? true, enhanced: state.enhancedCharacterMasking ?? true,
     watermark: state.addWatermark ?? false, setWatermark: state.setAddWatermark,
@@ -12,17 +13,18 @@ export function GenerationOptions({ hideAudioToggle = false, disabled = false, o
     setEasyMode: state.setEasyMode, setEnhanced: state.setEnhancedCharacterMasking,
   })));
   const { easyMode, enhanced } = defaults;
+  const kling = defaults.generationModel === "kling-4-0";
   return (
     <Stack component="section" aria-label="Generation options" spacing={2.5}
       sx={{ p: 2.5, border: "1px solid", borderColor: "divider", borderRadius: "5px", bgcolor: "background.paper" }}>
       <Typography component="h2" variant="subtitle1" fontWeight={700}>Generation options</Typography>
-      {(isAdmin || faceMeshOptions?.face_mesh_user_control) && <Box>
+      {(kling || isAdmin || faceMeshOptions?.face_mesh_user_control) && <Box>
         <FormControlLabel sx={{m: 0, width: "100%", justifyContent: "space-between"}} labelPlacement="start"
-          control={<Switch checked={faceMeshOptions?.face_mesh_enabled !== false && (defaults.faceMesh ?? (enhanced ? faceMeshOptions?.face_mesh_masked_default ?? true : faceMeshOptions?.face_mesh_unmasked_default ?? false))}
-            disabled={disabled || faceMeshOptions?.face_mesh_enabled === false} onChange={(_, value) => {onChange?.(); defaults.setFaceMesh(value);}}
+          control={<Switch checked={!kling && faceMeshOptions?.face_mesh_enabled !== false && (defaults.faceMesh ?? (enhanced ? faceMeshOptions?.face_mesh_masked_default ?? true : faceMeshOptions?.face_mesh_unmasked_default ?? false))}
+            disabled={disabled || kling || faceMeshOptions?.face_mesh_enabled === false} onChange={(_, value) => {onChange?.(); defaults.setFaceMesh(value);}}
             slotProps={{input: {role: "switch", "aria-describedby": "face-mesh-help"}}} />}
           label={<Typography variant="body2" fontWeight={650}>Face mesh</Typography>} />
-        <Typography id="face-mesh-help" variant="body2" color="text.secondary" sx={{mt: .5}}>{faceMeshOptions?.face_mesh_enabled === false ? "Face mesh is disabled globally." : "Adds facial-motion guidance for selected people. May take extra time."}</Typography>
+        <Typography id="face-mesh-help" variant="body2" color="text.secondary" sx={{mt: .5}}>{kling ? "Face mesh is always off for Kling 4.0." : faceMeshOptions?.face_mesh_enabled === false ? "Face mesh is disabled globally." : "Adds facial-motion guidance for selected people. May take extra time."}</Typography>
       </Box>}
       <Box>
         <FormControlLabel sx={{ m: 0, width: "100%", justifyContent: "space-between" }} labelPlacement="start"
@@ -35,7 +37,7 @@ export function GenerationOptions({ hideAudioToggle = false, disabled = false, o
       </Box>
       <Box>
         <FormControlLabel sx={{ m: 0, width: "100%", justifyContent: "space-between" }} labelPlacement="start"
-          control={<Switch checked={enhanced} disabled={disabled} onChange={(_, value) => { onChange?.(); defaults.setEnhanced(value); }}
+          control={<Switch checked={kling || enhanced} disabled={disabled || kling} onChange={(_, value) => { onChange?.(); defaults.setEnhanced(value); }}
             slotProps={{ input: { role: "switch", "aria-describedby": "enhanced-mask-help" } }} />}
           label={<Typography variant="body2" fontWeight={650}>Enhanced person masking</Typography>} />
         <Typography id="enhanced-mask-help" variant="body2" color="text.secondary" sx={{ mt: .5 }}>
@@ -48,7 +50,7 @@ export function GenerationOptions({ hideAudioToggle = false, disabled = false, o
             slotProps={{ input: { role: "switch", "aria-describedby": "silent-submit-help" } }} />}
           label={<Typography variant="body2" fontWeight={650}>Submit without audio</Typography>} />
         <Typography id="silent-submit-help" variant="body2" color="text.secondary" sx={{ mt: .5 }}>
-          Try this if characters have trouble saying their lines. Sends MiniMax a silent clip and restores your original soundtrack after generation.
+          Try this if characters have trouble saying their lines. Sends the model a silent clip and restores your original soundtrack after generation.
         </Typography>
       </Box>}
       {watermarkOffer && <Box>

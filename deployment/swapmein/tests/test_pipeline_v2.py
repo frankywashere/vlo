@@ -75,7 +75,7 @@ def assert_no_tracking_preview(job, cloud, previews):
 
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
             background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False, preview_available=True,
-            depth_overlay_opacity=None, depth_identity_colors_version=None, google_fallback=False):
+            depth_overlay_opacity=None, depth_identity_colors_version=None, google_fallback=False, generation_model="minimax-h3"):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -84,6 +84,8 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                         "anchor": {"x": .75, "y": .5, "time": 1}})
     options = {"trim": [0, 4], "anchor": {"x": .25, "y": .5, "time": 1},
                "easy_mode": easy, "enhanced_character_masking": enhanced, "auto_generate": easy}
+    if generation_model != "minimax-h3":
+        options["generation_model"] = generation_model
     if background_tap:
         targets[0]["anchor"].update(x=.03, y=.03)
         options["anchor"].update(x=.03, y=.03)
@@ -648,3 +650,42 @@ def test_matched_easy_option_six_keeps_identity_depth_tints_without_manual_rebui
     if provider == "replicate":
         assert len(cloud.replicate_calls) == 1
         assert not any(kind == "gpu" for kind, _, _ in cloud.calls)
+
+
+@pytest.mark.parametrize("provider", ["workers", "replicate"])
+def test_kling_keeps_distinct_body_tints_and_publishes_provider_compatible_guide(monkeypatch, media, provider):
+    from swapmein.multi_tracking import build_selected_masks, selected_tracks
+    from swapmein.media import Setup
+    def match(self, job, video, masks, metadata, targets, root, remaining):
+        stable = root / "matched.zip"
+        coverage = build_selected_masks(masks, metadata, selected_tracks(masks, metadata, targets), stable)
+        matched = [{**target, "scenes": [{"start": 0, "end": 4, "absent": False,
+            "anchor": target["anchor"]}]} for target in targets]
+        return {"masks_path": stable, "coverage": coverage, "targets": matched,
+                "assignments": [], "diagnostics": {"calls": 1}}
+    monkeypatch.setattr(Pipeline, "match_cloudflare_identities", match)
+    job, cloud, _, previews, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+        selection="multi", audio_processing=False, preparation_provider=provider,
+        prompt_variant="cloudflare_identity_v1", guide_style_version=2,
+        depth_guidance=False, face_mesh=False, generation_model="kling-4-0")
+    assert job["status"] == "ready", job.get("message")
+    assert job["mask_style"] == "identity_overlay_multi_20"
+    assert job["provider_guide_media"]["sample_aspect_ratio"] == "1:1"
+    assert job["provider_guide_media"]["height"] >= 700
+    assert job["provider_guide_media"]["frames"] == 96
+    payload = next(payload for _, endpoint, payload in cloud.calls if endpoint == "/compose")
+    assert payload["fill_mode"] == "translucent" and payload["face_mesh"] is False
+    assert [style["color"] for style in payload["target_styles"]] == ["#00dcff", "#ff4fd8"]
+    assert not [payload for _, endpoint, payload in cloud.calls if endpoint == "/benchmark" and "operation" not in payload]
+    assert cloud.objects[job["guide_uri"]]
+
+
+def test_kling_without_automatic_matching_requires_scene_review_instead_of_shared_identity(monkeypatch, media):
+    job, cloud, _, _, _ = harness(monkeypatch, media, easy=True, enhanced=True,
+        selection="multi", audio_processing=False, preparation_provider="replicate",
+        prompt_variant="identity_colors_v1", guide_style_version=2,
+        depth_guidance=False, face_mesh=False, generation_model="kling-4-0")
+    assert job["status"] == "tracking_review", job.get("message")
+    assert job["easy_mode"] is False and job["auto_generate"] is False
+    assert not cloud.enqueued
+    assert not any(endpoint == "/compose" for _, endpoint, _ in cloud.calls)

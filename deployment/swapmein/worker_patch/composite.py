@@ -63,8 +63,8 @@ def compose(source, archive, vocals, output, selected_label, fill_mode='gray', d
     masks = output.parent/'labels'; masks.mkdir()
     with zipfile.ZipFile(archive) as z:
         entries = sorted(i for i in z.namelist() if i.startswith('labels/labels_') and i.endswith('.png'))
-        if not 1 <= len(entries) <= 360:
-            raise ValueError('Expected 1–360 mask frames')
+        if not 1 <= len(entries) <= 720:
+            raise ValueError('Expected 1–720 mask frames')
         for i, name in enumerate(entries):
             if name != f'labels/labels_{i:05d}.png' or z.getinfo(name).file_size > 8_000_000:
                 raise ValueError('Invalid or oversized mask frame')

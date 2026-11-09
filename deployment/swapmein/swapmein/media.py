@@ -34,7 +34,7 @@ def detect_scene_cuts(source: Path) -> list[float]:
 def scene_thumbnails(source: Path, directory: Path, frames: list[int]) -> dict[int, Path]:
     """Decode bounded review thumbnails in one pass, including for mobile Safari."""
     frames = sorted(set(frames))
-    if not frames or len(frames) > 300 or any(type(frame) is not int or not 0 <= frame < 360 for frame in frames):
+    if not frames or len(frames) > 300 or any(type(frame) is not int or not 0 <= frame < 720 for frame in frames):
         raise PublicError("The scene preview frames are invalid.")
     directory.mkdir(exist_ok=True)
     selection = "+".join(f"eq(n\\,{frame})" for frame in frames)
@@ -63,6 +63,8 @@ class Target(BaseModel):
 
 
 class Setup(BaseModel):
+    generation_model: Literal["minimax-h3", "kling-4-0"] = "minimax-h3"
+    generation_credit_quote: int | None = Field(default=None, ge=1, le=1000000, strict=True)
     face_mesh: bool | None = Field(default=None, strict=True)
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     enhanced_character_masking: bool = Field(default=True, strict=True)
@@ -81,11 +83,16 @@ class Setup(BaseModel):
     @model_validator(mode="after")
     def validate_range(self):
         start, end = self.trim
-        # Timestamp subtraction can put an exact 15-second trim above 15.
+        maximum = 30 if self.generation_model == "kling-4-0" else 15
+        if self.generation_model == "kling-4-0":
+            # The tested Kling recipe uses body tints and never facial mesh.
+            self.face_mesh = False
+            self.enhanced_character_masking = True
+        # Timestamp subtraction can put an exact trim slightly above its limit.
         duration = round(end - start, 6)
-        if (start < 0 or not 4 <= duration <= 15
+        if (start < 0 or not 4 <= duration <= maximum
                 or not math.isclose(duration, round(duration), abs_tol=0.01)):
-            raise ValueError("Select 4–15 seconds, with a whole-second length.")
+            raise ValueError(f"Select 4–{maximum} seconds, with a whole-second length.")
         if self.targets and self.replace_all_people:
             raise ValueError("Choose individual people or replace everyone, not both.")
         if self.targets and (len({target.id for target in self.targets}) != len(self.targets)
@@ -207,7 +214,7 @@ def normalize(source: Path, output: Path, setup: Setup):
          "-vf", f"fps=24,tpad=stop_mode=clone:stop=1,trim=end_frame={duration * 24},setpts=PTS-STARTPTS,scale={sw}:{sh},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
          "-c:v", "libx264", "-threads", "2", "-crf", "18", "-pix_fmt", "yuv420p",
          "-af", "apad", "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-         "-movflags", "+faststart", str(output)])
+         "-movflags", "+faststart", str(output)], timeout=180 if setup.generation_model == "kling-4-0" else 90)
     normalized = probe(output)
     normalized_video = next(s for s in normalized["streams"] if s["codec_type"] == "video")
     if int(normalized_video.get("nb_frames", 0)) != duration * 24:
@@ -261,7 +268,7 @@ def sam_input_video(source: Path, output: Path):
     if not video or video["r_frame_rate"] != "24/1":
         raise PublicError("SAM input must use the prepared 24 fps timeline.")
     frames = int(video.get("nb_frames", 0))
-    if not 1 <= frames <= 360:
+    if not 1 <= frames <= 720:
         raise PublicError("SAM input exceeds the supported clip length.")
     factor = min(1, 854 / video["width"], 480 / video["height"])
     width = max(2, math.floor(video["width"] * factor / 2) * 2)
@@ -291,6 +298,35 @@ def validate_guide_media(path: Path, metadata: dict):
     require_audio_duration(checked, metadata["duration"])
     return {"bytes": size, "width": video["width"], "height": video["height"],
             "frames": int(video["nb_frames"]), "fps": 24, "duration": duration}
+
+
+@timed("kling_guide_media")
+def kling_guide_media(source: Path, output: Path, metadata: dict):
+    """Adapt only the final tinted guide, retaining the working-mask geometry.
+
+    Kling rejects input below 700 pixels high and non-square sample pixels.
+    An integer enlargement preserves the exact prepared display ratio, unlike
+    rounding both dimensions independently or changing the camera framing.
+    Audio is stream-copied; this adds no model inference or new mask pixels.
+    """
+    validate_guide_media(source, metadata)
+    width, height = metadata["width"], metadata["height"]
+    factor = max(1, math.ceil(700 / height))
+    converted = {**metadata, "width": width * factor, "height": height * factor}
+    video = next(stream for stream in probe(source)["streams"] if stream["codec_type"] == "video")
+    if factor == 1 and video.get("sample_aspect_ratio") == "1:1":
+        shutil.copyfile(source, output)
+    else:
+        run(["ffmpeg", "-v", "error", "-y", "-i", str(source),
+             "-map", "0:v:0", "-map", "0:a:0", "-vf",
+             f"scale={converted['width']}:{converted['height']},setsar=1",
+             "-c:v", "libx264", "-threads", "2", "-crf", "18", "-pix_fmt", "yuv420p",
+             "-c:a", "copy", "-movflags", "+faststart", str(output)], timeout=180)
+    verified = validate_guide_media(output, converted)
+    actual = next(stream for stream in probe(output)["streams"] if stream["codec_type"] == "video")
+    if actual.get("sample_aspect_ratio") != "1:1":
+        raise PublicError("The Kling guide must use square pixels.", code="guide_media_invalid")
+    return {**verified, "sample_aspect_ratio": "1:1", "integer_scale": factor}
 
 
 @timed("normalize_reference")

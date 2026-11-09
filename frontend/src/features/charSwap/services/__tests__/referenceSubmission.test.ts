@@ -65,3 +65,30 @@ it("uses Original immediately while cleanup continues and ignores unused pending
   const selected=validateLiveSetup(state);
   expect(selected.references).toHaveLength(1);expect(selected.reference.url).toBe("blob:original");
 });
+
+it("submits a 30-second Kling choice and its displayed credit quote while forcing mesh off and masks on", async () => {
+  const base = draft();
+  const state = {...base, generationModel: "kling-4-0" as const, kling4Enabled: true,
+    clip: {...base.clip, duration: 40}, trim: [1, 31] as [number, number],
+    faceMesh: true, enhancedCharacterMasking: false, generationCreditQuote: 724};
+  let setup: unknown;
+  request.mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.startsWith("blob:")) {
+      const response = new Response(null);
+      vi.spyOn(response, "blob").mockResolvedValue(new Blob(["media"], {type: url === "blob:source" ? "video/mp4" : "image/png"}));
+      return response;
+    }
+    if (url === "/api/preparation-capacity") return new Response(JSON.stringify({available: true}));
+    if (url === "/api/uploads") {
+      setup = JSON.parse(String(init?.body)).setup;
+      return new Response(JSON.stringify({id: "ticket", source: {url: "https://storage.googleapis.com/source", headers: {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}}, references: [{url: "https://storage.googleapis.com/reference", headers: {"Content-Type": "application/octet-stream", "x-goog-if-generation-match": "0"}}]}));
+    }
+    if (url.startsWith("https://storage.googleapis.com/")) return new Response(null, {status: 200});
+    if (url === "/api/uploads/ticket/complete") return new Response(JSON.stringify({id: "ticket", status: "queued"}));
+    throw new Error("Unexpected request");
+  });
+  await createLiveJob(state, "session", new AbortController().signal);
+  expect(setup).toMatchObject({generation_model: "kling-4-0", generation_credit_quote: 724, trim: [1, 31], face_mesh: false, enhanced_character_masking: true});
+  expect(() => validateLiveSetup({...state, generationModel: "minimax-h3"})).toThrow(/between 4 and 15/);
+});

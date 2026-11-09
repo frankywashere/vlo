@@ -226,3 +226,22 @@ The build checks `fill_mode: "translucent"`, shared color across two labels,
 integrity. No model download, GPU change or user media enters the build context.
 `fill_mode: "color"` retains its legacy 50% overlay; gray and solid guides remain
 available for older saved jobs.
+
+
+## Kling thirty-second guide support
+
+The CPU compositor overlay now accepts at most 720 prepared frames at 24 fps
+and 30.1 container seconds, with the same 768-pixel short side, 1920-pixel long
+side and 1,474,560-pixel area bounds. Its health reports version
+`audio-identity-kling-v10`, `max_input_frames: 720` and `max_input_seconds: 30`.
+This source change does not update a deployed image by itself. Deploy and verify
+this CPU overlay before enabling thirty-second jobs.
+
+The private legacy GPU SAM worker and point-recovery endpoint retain their
+fifteen-second bounds. Long Kling preparation is pinned to Replicate instead.
+The pinned `8digit/gener8-sam3:a6f50615…` public example processed 576 frames
+(approximately 24 seconds), and the [wrapper README](https://replicate.com/8digit/gener8-sam3/readme)
+documents input videos up to 2000 frames. The
+[pinned-version API](https://replicate.com/8digit/gener8-sam3/versions/a6f50615da4cfa8b03fe95ec56681bc252a5e60c2ed368938f72bfa4f55dfcd1/api)
+also retains that 576-frame example. No model-version change, paid proof or
+legacy GPU limit increase is implied by the local 720-frame CPU tests.

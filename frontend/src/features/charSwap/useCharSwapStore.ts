@@ -20,6 +20,7 @@ import type {
   Step,
   TargetPerson,
   WalkthroughState,
+  GenerationModel,
 } from "./model/model";
 
 export const STEPS: Step[] = [
@@ -43,6 +44,8 @@ interface CharSwapStore extends WalkthroughState {
   setEasyMode: (enabled: boolean) => void;
   setSubmitWithoutAudio: (enabled: boolean) => void;
   setFaceMesh: (enabled: boolean) => void;
+  setKling4Enabled: (enabled: boolean) => void;
+  setGenerationModel: (model: GenerationModel) => void;
   setAddWatermark: (enabled: boolean) => void;
   setEnhancedCharacterMasking: (enabled: boolean) => void;
   loadClip: (clip: ClipAsset) => void;
@@ -77,7 +80,15 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     trackingReady: false, issues: [], decisions: {},
     step: ["matches", "generation"].includes(state.step) ? "review" : state.step,
   }),
-  setFaceMesh: (enabled) => set((state) => enabled === state.faceMesh ? state : {
+  setKling4Enabled: (enabled) => set({kling4Enabled: enabled}),
+  setGenerationModel: (model) => set((state) => {
+    if (model === "kling-4-0" && !state.kling4Enabled || model === "minimax-h3" && state.trim[1] - state.trim[0] > 15) return state;
+    if (model === (state.generationModel ?? "minimax-h3")) return state;
+    return {generationModel: model, ...(model === "kling-4-0" ? {faceMesh: false, enhancedCharacterMasking: true} : {}),
+      selectionVersion: state.selectionVersion + 1, trackingReady: false, issues: [], decisions: {},
+      step: ["matches", "generation"].includes(state.step) ? "review" as const : state.step};
+  }),
+  setFaceMesh: (enabled) => set((state) => state.generationModel === "kling-4-0" || enabled === state.faceMesh ? state : {
     faceMesh: enabled, selectionVersion: state.selectionVersion + 1,
     trackingReady: false, issues: [], decisions: {},
     step: ["matches", "generation"].includes(state.step) ? "review" : state.step,
@@ -104,7 +115,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     ),
   setEnhancedCharacterMasking: (enabled) =>
     set((state) =>
-      enabled === state.enhancedCharacterMasking
+      state.generationModel === "kling-4-0" || enabled === state.enhancedCharacterMasking
         ? state
         : {
             enhancedCharacterMasking: enabled,
@@ -118,7 +129,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
           },
     ),
   restoreRetry: (draft) => set((state) => ({...createInitialState(),
-    faceMesh: undefined, ...draft, step: "clip",
+    faceMesh: undefined, ...draft, kling4Enabled: state.kling4Enabled, step: "clip",
     selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null})),
   loadClip: (clip) =>
     set((state) => ({
@@ -236,6 +247,7 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
   reset: () =>
     set({
       ...createInitialState(),
+      kling4Enabled: get().kling4Enabled,
       faceMesh: undefined,
       retryNotice: undefined, retryNeedsSource: false,
       selectionVersion: get().selectionVersion + 1,

@@ -17,6 +17,10 @@ def effective_generation_route(setup, configured_route):
     """A shared reference still represents two people when two targets are selected."""
     route = validate_generation_route(configured_route)
     data = setup if isinstance(setup, dict) else setup.model_dump()
+    if data.get("generation_model") == "kling-4-0":
+        # Explicit model and its quoted price take precedence over an Admin
+        # override intended only for MiniMax CharacterSwap.
+        return "current"
     targets = data.get("targets") or []
     if data.get("replace_all_people") or len(targets) < 2:
         return "current"

@@ -52,7 +52,7 @@ export function JobSettings({ settings, creditsUsed, creditsReturned, accessMode
     };
     if (settings.mask_style && styles[settings.mask_style]) rows.push(["Mask method", styles[settings.mask_style]]);
     if (settings.prep_width && settings.prep_height) rows.push(["Prepared video", `${settings.prep_width} × ${settings.prep_height}${settings.prep_fps ? ` · ${settings.prep_fps} fps` : ""}`]);
-    if (settings.model) rows.push(["Model", settings.model]);
+    if (settings.model) rows.push(["Model", settings.model === "kling-4-0" ? "Kling 4.0" : settings.model === "minimax-h3" ? "MiniMax H3" : settings.model]);
     if (!selfHosted && settings.requested_resolution) rows.push(["Render quality", settings.requested_resolution]);
     if (settings.width && settings.height) rows.push(["Video dimensions", `${settings.width} × ${settings.height}`]);
   }

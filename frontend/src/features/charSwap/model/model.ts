@@ -62,7 +62,12 @@ export interface MatchDecision {
   candidateId: string | null;
 }
 
+export type GenerationModel = "minimax-h3" | "kling-4-0";
+
 export interface WalkthroughState {
+  generationModel?: GenerationModel;
+  generationCreditQuote?: number;
+  kling4Enabled?: boolean;
   replaceAllPeople?: boolean;
   easyMode?: boolean;
   submitWithoutAudio?: boolean;
@@ -91,8 +96,18 @@ const STEPS: Step[] = [
 const MIN_CLIP_SECONDS = 1;
 const MAX_CLIP_SECONDS = 15;
 
+export function maximumClipSeconds(state: Pick<WalkthroughState, "kling4Enabled">): number {
+  return state.kling4Enabled ? 30 : MAX_CLIP_SECONDS;
+}
+
+export function generationModelLabel(model?: GenerationModel): string {
+  return model === "kling-4-0" ? "Kling 4.0" : "MiniMax H3";
+}
+
 export function createInitialState(): WalkthroughState {
   return {
+    generationModel: "minimax-h3",
+    kling4Enabled: false,
     replaceAllPeople: false,
     easyMode: true,
     submitWithoutAudio: false,
@@ -141,7 +156,7 @@ export function setTrim(
   const start = Math.max(0, Math.min(earlier, duration - minimum));
   const end = Math.min(
     duration,
-    start + MAX_CLIP_SECONDS,
+    start + maximumClipSeconds(state),
     Math.max(start + minimum, later),
   );
   if (state.trim[0] === start && state.trim[1] === end) return state;
@@ -150,6 +165,7 @@ export function setTrim(
     ...state,
     replaceAllPeople: false,
     trim: [start, end],
+    ...(trimDuration([start, end]) > 15 ? {generationModel: "kling-4-0" as const, faceMesh: false, enhancedCharacterMasking: true} : {}),
     targets: [],
     assignments: {},
     issues: [],
@@ -327,10 +343,14 @@ function getOwnStepBlocker(state: WalkthroughState, step: Step): string | null {
         start < 0 ||
         end > state.clip.duration + 1e-6 ||
         trimDuration(state.trim) < MIN_CLIP_SECONDS ||
-        trimDuration(state.trim) > MAX_CLIP_SECONDS
+        trimDuration(state.trim) > maximumClipSeconds(state)
       ) {
-        return "Choose a section between 1 and 15 seconds.";
+        return `Choose a section between 1 and ${maximumClipSeconds(state)} seconds.`;
       }
+      if (state.generationModel === "kling-4-0" && !state.kling4Enabled)
+        return "Kling 4.0 is currently unavailable. Choose MiniMax and a clip up to 15 seconds.";
+      if (trimDuration(state.trim) > 15 && state.generationModel !== "kling-4-0")
+        return "Clips longer than 15 seconds require Kling 4.0.";
       return null;
     }
     case "people":

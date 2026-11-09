@@ -26,7 +26,7 @@ import {
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
 import { useCharSwapStore, STEPS } from "./useCharSwapStore";
-import { canContinue, canVisitStep, getStepBlocker, hasPendingReferenceCleanup, hasAssignedReferenceImages } from "./model/model";
+import { canContinue, canVisitStep, getStepBlocker, hasPendingReferenceCleanup, hasAssignedReferenceImages, maximumClipSeconds } from "./model/model";
 import type { Step } from "./model/model";
 import { loadDemo, sampleReviewIssues } from "./services/demo";
 import type { DemoManifest } from "./services/demo";
@@ -122,6 +122,9 @@ export function CharSwapWalkthrough({
     easyMode,
     submitWithoutAudio,
     faceMesh,
+    generationModel,
+    kling4Enabled,
+    setKling4Enabled,
     addWatermark,
     enhancedCharacterMasking,
     selectionVersion,
@@ -148,6 +151,9 @@ export function CharSwapWalkthrough({
       easyMode: state.easyMode ?? true,
       submitWithoutAudio: state.submitWithoutAudio ?? false,
       faceMesh: state.faceMesh,
+      generationModel: state.generationModel ?? "minimax-h3",
+      kling4Enabled: state.kling4Enabled,
+      setKling4Enabled: state.setKling4Enabled,
       addWatermark: state.addWatermark ?? false,
       enhancedCharacterMasking: state.enhancedCharacterMasking ?? true,
       selectionVersion: state.selectionVersion,
@@ -191,6 +197,7 @@ export function CharSwapWalkthrough({
     if (!apiKeyAllowed && accessMode === "api-key") { setAccessMode("credits"); clearKey(); }
   }, [apiKeyAllowed, accessMode, clearKey]);
   const pipeline = useLivePipeline(apiKey, provider, accessMode);
+  useEffect(() => { setKling4Enabled(pipeline.kling4Enabled === true); }, [pipeline.kling4Enabled, setKling4Enabled]);
   const ownCredits = useLiveCredits(!credits, pipeline.job?.status);
   const creditAccount = credits ?? ownCredits;
   const secureSite = isSecureLiveOrigin();
@@ -201,6 +208,7 @@ export function CharSwapWalkthrough({
   const trimCredits = creditsForDuration(
     trim[1] - trim[0],
     creditAccount.catalog,
+    generationModel,
   );
   const generationCredits = pipeline.job && !["failed", "completed"].includes(pipeline.job.status)
     ? pipeline.job.generation_credits ?? trimCredits : trimCredits;
@@ -233,6 +241,9 @@ export function CharSwapWalkthrough({
     easyMode,
     submitWithoutAudio,
     faceMesh,
+    generationModel,
+    kling4Enabled,
+    generationCreditQuote: accessMode === "credits" ? trimCredits : undefined,
     addWatermark: Boolean(addWatermark && creditAccount.catalog?.watermark_enabled && accessMode === "credits"),
     enhancedCharacterMasking,
     clip,
@@ -268,7 +279,9 @@ export function CharSwapWalkthrough({
   const selectedDuration = trimDuration(trim);
   const validLiveTrim =
     selectedDuration >= 4 &&
-    selectedDuration <= 15 &&
+    selectedDuration <= maximumClipSeconds({kling4Enabled}) &&
+    (selectedDuration <= 15 || generationModel === "kling-4-0") &&
+    (generationModel !== "kling-4-0" || provider === "reAPI") &&
     Math.abs(selectedDuration - Math.round(selectedDuration)) < 1e-6;
   const singleCharacterBlocked = live && (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) && pipeline.multiCharacters === false && (targets.length > 1 || replaceAllPeople);
   const continueDisabled =
@@ -576,6 +589,7 @@ export function CharSwapWalkthrough({
                 demo={demo}
                 estimatedCredits={trimCredits}
                 creditBalance={balance}
+                klingProviderAvailable={provider === "reAPI"}
                 sampleAvailable={!secureSite}
                 busy={Boolean(busy || !entryFunded)}
                 onImport={(file) => {

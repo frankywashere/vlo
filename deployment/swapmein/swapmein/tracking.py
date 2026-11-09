@@ -20,7 +20,7 @@ from .diagnostics import emit, timed
 
 
 FPS = 24
-MAX_FRAMES = 360
+MAX_FRAMES = 720  # 30-second Kling guide; intake keeps MiniMax at 15 seconds.
 MAX_SEGMENTS = 60
 MAX_FRAME_BYTES = 8_000_000
 

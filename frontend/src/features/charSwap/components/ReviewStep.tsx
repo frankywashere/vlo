@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Alert, Avatar, Box, Button, Stack, Typography, RadioGroup, Radio, FormControlLabel } from "@mui/material";
-import { referenceCleanupBlocker } from "../model/model";
+import { generationModelLabel, referenceCleanupBlocker } from "../model/model";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { FaceMeshOptions, LivePipelineJob } from "../services/livePipeline";
 import { VideoPreview } from "./VideoPreview";
@@ -43,9 +43,10 @@ export function ReviewStep({
   onGenerate,
   onCredits,
 }: ReviewStepProps) {
-  const { clip, trim, targets, references, assignments, easyMode, enhancedCharacterMasking, visit } =
+  const { clip, trim, targets, references, assignments, easyMode, enhancedCharacterMasking, generationModel, visit } =
     useCharSwapStore(
       useShallow((state) => ({
+        generationModel: state.generationModel,
         clip: state.clip,
         trim: state.trim,
         targets: state.targets,
@@ -170,6 +171,7 @@ export function ReviewStep({
         )}
       </Stack>
       <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+        <Typography fontWeight={700}>Generation model: {generationModelLabel(generationModel)}</Typography>
         {targets.length > 1 && <Alert severity="warning">Replacing multiple people is experimental and may not produce the intended result.</Alert>}
         {cleanupIssue && <Alert severity="info">{cleanupIssue}</Alert>}
         {manualPreparationComplete ? (

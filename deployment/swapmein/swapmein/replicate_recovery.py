@@ -45,7 +45,7 @@ def _validated_groups(requests, metadata):
         groups[start, end].append(item)
     if len({item["segment_id"] for item in requests}) != len(requests):
         raise PublicError("The saved mask-recovery selections are invalid.", 409)
-    if work > 1800 or len(groups) > 60:
+    if work > 5 * metadata["frames"] or len(groups) > 60:
         raise PublicError("Mask recovery exceeds the supported clip budget.", 409)
     return groups
 

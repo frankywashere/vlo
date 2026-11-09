@@ -20,6 +20,8 @@ export interface FaceMeshOptions {
 }
 
 export interface LivePipelineConfig {
+  kling4_enabled?: boolean;
+  max_duration_seconds?: number;
   hide_audio_toggle?: boolean;
   multi_characters?: boolean;
   face_mesh_options?: FaceMeshOptions;
@@ -279,7 +281,7 @@ function capacityMessage(value: unknown): string | null {
   let message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
   const details = isRecord(value.tracking_details) ? value.tracking_details : null;
   const frame = details?.frame;
-  const validFrame = typeof frame === "number" && Number.isInteger(frame) && frame >= 0 && frame < 360;
+  const validFrame = typeof frame === "number" && Number.isInteger(frame) && frame >= 0 && frame < 720;
   if (validFrame && value.code === "tracking_background") {
     message = `No person mask was detected at the selected point at ${(frame / 24).toFixed(2)}s. Try inside the detected body, or use Show another frame.`;
   }
@@ -529,7 +531,7 @@ function readJob(value: unknown): LivePipelineJob {
         (segment.selected_label !== undefined && segment.selected_label !== null && (typeof segment.selected_label !== "number" || !Number.isSafeInteger(segment.selected_label) || segment.selected_label < 1))
         || (segment.target_id !== undefined && (typeof segment.target_id !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(segment.target_id)))
         || (segment.target_name !== undefined && (typeof segment.target_name !== "string" || segment.target_name.length > 40))
-        || (segment.scene_index !== undefined && (typeof segment.scene_index !== "number" || !Number.isSafeInteger(segment.scene_index) || segment.scene_index < 0 || segment.scene_index >= 360));
+        || (segment.scene_index !== undefined && (typeof segment.scene_index !== "number" || !Number.isSafeInteger(segment.scene_index) || segment.scene_index < 0 || segment.scene_index >= 720));
     })) throw new LivePipelineError("The service returned an unreadable scene review. Refresh the job before continuing.");
     job.tracking_segments = (segments as TrackingReviewSegment[]).map((segment) => ({
       id: segment.id, start_frame: segment.start_frame, end_frame: segment.end_frame,
@@ -596,6 +598,8 @@ export async function getLiveConfig(
     );
   }
   return {
+    kling4_enabled: value.kling4_enabled === true,
+    max_duration_seconds: value.kling4_enabled === true ? 30 : 15,
     live: value.live === true,
     available: value.available === true,
     provider: "reAPI",
@@ -668,11 +672,11 @@ export function validateLiveSetup(state: WalkthroughState) {
     start < 0 ||
     end > state.clip.duration + 1e-6 ||
     duration < 4 ||
-    duration > 15 ||
+    duration > (state.generationModel === "kling-4-0" ? 30 : 15) ||
     Math.abs(duration - Math.round(duration)) > 1e-6
   ) {
     throw new LivePipelineError(
-      "Choose a whole-number duration between 4 and 15 seconds for the live beta.",
+      `Choose a whole-number duration between 4 and ${state.generationModel === "kling-4-0" ? 30 : 15} seconds for the selected model.`,
     );
   }
   const references: WalkthroughState["references"] = [];
@@ -815,13 +819,15 @@ export async function createLiveJob(
         reference_sizes: referenceFiles.map((file) => file.size),
         setup: {
           preparation_version: 2,
+          ...(state.generationModel === "kling-4-0" ? {generation_model: "kling-4-0", face_mesh: false} : {}),
+          ...(typeof state.generationCreditQuote === "number" ? {generation_credit_quote: state.generationCreditQuote} : {}),
           trim: state.trim,
           ...(state.replaceAllPeople ? {replace_all_people: true} : {anchor: target.anchor, targets}),
           target_name: target.name,
-          enhanced_character_masking: state.enhancedCharacterMasking ?? true,
+          enhanced_character_masking: state.generationModel === "kling-4-0" || (state.enhancedCharacterMasking ?? true),
           easy_mode: state.easyMode ?? true,
           submit_without_audio: state.submitWithoutAudio ?? false,
-          ...(typeof state.faceMesh === "boolean" ? {face_mesh: state.faceMesh} : {}),
+          ...(typeof state.faceMesh === "boolean" && state.generationModel !== "kling-4-0" ? {face_mesh: state.faceMesh} : {}),
           ...(state.addWatermark ? {add_watermark: true, watermark_bonus_quote: state.watermarkBonusQuote} : {}),
           auto_generate: autoGenerate,
         },

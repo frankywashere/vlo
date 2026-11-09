@@ -27,8 +27,9 @@ def health():
     # otherwise look healthy and fail only after expensive GPU preparation.
     from composite import compose
     from PIL import __version__ as pillow_version
-    return {"status": "ready", "device": "cpu", "version": "audio-identity-depth-v9",
+    return {"status": "ready", "device": "cpu", "version": "audio-identity-kling-v10",
             "operations": ["audio", "compose"], "compositor_ready": callable(compose),
+            "max_input_frames": 720, "max_input_seconds": 30,
             "pillow_version": pillow_version}
 
 

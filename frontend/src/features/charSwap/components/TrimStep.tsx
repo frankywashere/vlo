@@ -5,28 +5,36 @@ import { useCharSwapStore } from "../useCharSwapStore";
 import type { DemoManifest } from "../services/demo";
 import { VideoPreview } from "./VideoPreview";
 import { TrimRangeSlider } from "./TrimRangeSlider";
+import { maximumClipSeconds } from "../model/model";
+import { GenerationModelChoice } from "./GenerationModelChoice";
 import { resizeTrim } from "../utils/trimRange";
 
 interface TrimStepProps {
   demo: DemoManifest | null;
   estimatedCredits?: number;
   creditBalance?: number;
+  disabled?: boolean;
+  klingProviderAvailable?: boolean;
 }
 
 export function TrimStep({
   demo,
   estimatedCredits,
   creditBalance,
+  disabled = false,
+  klingProviderAvailable = true,
 }: TrimStepProps) {
-  const { clip, trim, targets, changeTrim } = useCharSwapStore(
+  const { clip, trim, targets, changeTrim, kling4Enabled } = useCharSwapStore(
     useShallow((state) => ({
       clip: state.clip,
       trim: state.trim,
       targets: state.targets,
       changeTrim: state.changeTrim,
+      kling4Enabled: state.kling4Enabled,
     })),
   );
   if (!clip) return null;
+  const maxSeconds = maximumClipSeconds({kling4Enabled});
   const minimumLength = Math.min(4, clip.duration);
   return (
     <Box
@@ -48,6 +56,7 @@ export function TrimStep({
           <TrimRangeSlider
             value={trim}
             duration={clip.duration}
+            maxSeconds={maxSeconds}
             onChange={changeTrim}
           />
         </Box>
@@ -88,11 +97,11 @@ export function TrimStep({
             onCommit={(value) => {
               if (value.trim() && Number.isFinite(Number(value)))
                 changeTrim(
-                  resizeTrim(trim, "start", Number(value), clip.duration),
+                  resizeTrim(trim, "start", Number(value), clip.duration, maxSeconds),
                 );
             }}
             inputProps={{
-              min: Math.max(0, trim[1] - 15),
+              min: Math.max(0, trim[1] - maxSeconds),
               max: trim[1] - minimumLength,
               step: 1,
             }}
@@ -104,7 +113,7 @@ export function TrimStep({
             onCommit={(value) => {
               if (value.trim() && Number.isFinite(Number(value)))
                 changeTrim(
-                  resizeTrim(trim, "end", Number(value), clip.duration),
+                  resizeTrim(trim, "end", Number(value), clip.duration, maxSeconds),
                 );
             }}
             inputProps={{
@@ -147,8 +156,9 @@ export function TrimStep({
               )}
           </Box>
         )}
+        <GenerationModelChoice disabled={disabled} klingProviderAvailable={klingProviderAvailable} />
         <Typography variant="body2" color="text.secondary">
-          4–15 seconds. Length snaps to whole seconds.
+          4–{maxSeconds} seconds. Length snaps to whole seconds.
         </Typography>
         {!!targets.length && (
           <Typography variant="caption" color="text.secondary">

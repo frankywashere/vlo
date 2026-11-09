@@ -33,6 +33,8 @@ from .task_delivery import worker_audience
 from .watermark import watermark_settings, save_watermark_settings, watermark_snapshot
 from .provider_failure import provider_failure, failure_message
 from .pipeline_settings import pipeline_settings, save_pipeline_settings, face_mesh_snapshot, enforce_character_limit
+from .generation_models import KLING, generation_model, generation_snapshot, require_model_access
+from .commerce import generation_quote, model_credit_rate, kling_credit_rate
 from .self_hosted_route import generation_route_snapshot, SELF_HOSTED_GENERATION_ROUTES
 from .provider import Provider, ToAPIsProvider, estimate, generation_payload
 from .security import (ID_PATTERN, bearer_token, check_key_binding, check_owner, check_session,
@@ -121,7 +123,7 @@ async def public_error(_request, error):
     if error.code in {"tracking_background", "tracking_target_conflict"} and isinstance(details, dict):
         # Keep public error context numeric and bounded; never echo vendor text.
         public_details = {}
-        for key, maximum in (("frame", 359), ("target_index", 4), ("conflicting_target_index", 4)):
+        for key, maximum in (("frame", 719), ("target_index", 4), ("conflicting_target_index", 4)):
             value = details.get(key)
             if type(value) is int and 0 <= value <= maximum:
                 public_details[key] = value
@@ -180,10 +182,12 @@ def key_for_session(active_session: dict, supplied_key: str | None) -> str:
 
 def job_estimate(job):
     # ToAPIs estimate scales the verified US$0.80 five-second reference test.
+    if generation_model(job) == KLING:
+        return estimate(job["duration"], generation_model=KLING)
     return job["duration"] * .16 if job.get("provider") == "ToAPIs" else estimate(job["duration"], settings.h3_price_per_second_usd)
 
 
-def check_generation_funding(records, setup: Setup, active_session: dict, *, generation_route="current"):
+def check_generation_funding(records, setup: Setup, active_session: dict, *, generation_route="current", pinned_quote=None):
     if setup.auto_generate and not setup.easy_mode:
         raise PublicError("Automatic generation requires Easy mode.", 409)
     if active_session.get("access_mode") != "credits":
@@ -192,10 +196,20 @@ def check_generation_funding(records, setup: Setup, active_session: dict, *, gen
         return
     if not feature_view(records, generation_route=generation_route)["credit_generation"]:
         raise PublicError("Credit-funded generation is not available yet.", 503)
-    catalog = public_catalog(records)
-    expected_charge = generation_credit_cost(setup.trim[1] - setup.trim[0], catalog["credits_per_generation"])
+    quote = pinned_quote if pinned_quote is not None else generation_quote(records, setup)
+    expected_charge = quote["credits"]
     if expected_charge <= 0 or wallet_view(records, active_session["account_id"])["balance"] < expected_charge:
         raise PublicError("Add enough recastfx credits before submitting this swap.", 402)
+    return quote
+
+
+def pinned_generation_credits(job, records):
+    saved = job.get("generation_credits")
+    if saved is not None:
+        return saved
+    model = generation_model(job)
+    return generation_credit_cost(job["duration"], model_credit_rate(public_catalog(records), model),
+                                  generation_model=model)
 
 
 def normal_generation_snapshot(defaults, options, active_session):
@@ -253,6 +267,7 @@ def view(job: dict, *, review_thumbnails: bool = True):
                           else job.get("message", "")),
               "access_mode": "credits" if credits_mode else "api-key",
               "settings_used": settings_used(job),
+              "generation_model": generation_model(job),
               "replace_all_people": bool(job.get("setup", {}).get("replace_all_people", False))}
     if job.get("status") == "ready" and job.get("review_generation_queued"):
         result["processing_stage"] = "generation_queue"
@@ -292,6 +307,9 @@ def view(job: dict, *, review_thumbnails: bool = True):
             result["estimate_note"] = "Provider estimate only, using rounded published 768P rate; Google preparation costs are separate."
             result["estimate_source"] = "https://reapi.ai/models/minimax-h3"
             result["estimate_verified_at"] = "2026-10-14"
+            if generation_model(job) == KLING:
+                result.update(estimate_note="Kling 720p edit estimate includes input and output; preparation is separate.",
+                              estimate_source="https://reapi.ai/models/kling-4-0", estimate_verified_at="2026-11-08")
     if not credits_mode and job.get("provider") == "ToAPIs":
         result["estimate_note"] = "Estimate scaled from the US$0.80 five-second H3 test; not a quote. Google preparation is separate."
         result["estimate_source"] = "https://docs.toapis.com/docs/en/api-reference/videos/minimax-h3/generation"
@@ -367,6 +385,8 @@ def config():
             "accounts_required": settings.require_account, "credits_available": credit_ready,
             "hide_audio_toggle": mesh.get("hide_audio_toggle", False),
             "multi_characters": mesh.get("multi_characters", True),
+            "kling4_enabled": mesh.get("kling4_enabled", False),
+            "max_duration_seconds": 30 if mesh.get("kling4_enabled", False) else 15,
             "face_mesh_options": {key: mesh.get(key, default) for key, default in (
                 ("face_mesh_enabled", True), ("face_mesh_masked_default", True), ("face_mesh_unmasked_default", False), ("face_mesh_user_control", False))},
             "reference_cleanup_available": bool(settings.reference_cleanup_url),
@@ -515,6 +535,7 @@ class CatalogUpdate(BaseModel):
     packs: list[CreditPack]
     credits_per_generation: int
     margin_model: MarginModel | None = None
+    kling_credits_per_generation: int | None = Field(default=None, ge=1, le=100000)
 
 
 class FeatureUpdate(BaseModel):
@@ -744,7 +765,9 @@ def commerce_admin(x_firebase_token: str | None = Header(default=None)):
     catalog, _ = records.read(CATALOG_PATH)
     from .self_hosted_jobs import worker_views
     pipeline = {**pipeline_settings(records), "self_hosted_workers": worker_views(settings, records)}
-    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog or default_catalog(), "features": feature_view(records), "pipeline": pipeline, "watermark": watermark_settings(records), "cloudflare_key": cloudflare_credential_view()}
+    catalog = catalog or default_catalog()
+    catalog = {**catalog, "kling_credits_per_generation": kling_credit_rate(catalog)}
+    return {"role": role, "permissions": staff_permissions(records, account), "catalog": catalog, "features": feature_view(records), "pipeline": pipeline, "watermark": watermark_settings(records), "cloudflare_key": cloudflare_credential_view()}
 
 
 class CapacityUpdate(BaseModel):
@@ -798,6 +821,7 @@ class PipelineSettingsUpdate(BaseModel):
     multi_characters: bool | None = None
     multi_person_generation_route: Literal["current", "google_h3", "paperspace_h3"] | None = None
     face_mesh_enabled: bool | None = None
+    kling4_enabled: bool | None = None
     prompt_variant: Literal["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"] | None = None
 
 
@@ -813,7 +837,7 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
     saved = save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
                                   body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant, body.matching_no_review,
-                                  body.multi_person_generation_route)
+                                  body.multi_person_generation_route, body.kling4_enabled)
     return {**saved, "self_hosted_workers": worker_views(settings, records)}
 
 
@@ -828,7 +852,8 @@ def update_commerce_features(body: FeatureUpdate, x_firebase_token: str | None =
 def update_commerce_catalog(body: CatalogUpdate, x_firebase_token: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
-    return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_generation, body.margin_model.model_dump() if body.margin_model else None)
+    return save_catalog(records, account, body.revision, [pack.model_dump() for pack in body.packs], body.credits_per_generation, body.margin_model.model_dump() if body.margin_model else None,
+                        body.kling_credits_per_generation)
 
 
 @app.post("/api/commerce/admin/replicate-key")
@@ -1006,13 +1031,15 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     try:
         options = Setup.model_validate_json(setup)
     except ValidationError:
-        raise PublicError("Choose one person in a continuous 4–15-second section with a whole-second length.") from None
+        raise PublicError("Choose a whole-second section from 4–15 seconds for MiniMax or 4–30 seconds for Kling.") from None
     validate_reference_mapping(options, 1)
     defaults = pipeline_settings(records)
     enforce_character_limit(options, 1, defaults["multi_characters"])
+    require_model_access(options, defaults, active_session.get("provider", "reAPI"))
+    hosted_snapshot = generation_snapshot(options)
     route_snapshot = generation_route_snapshot(options, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
-    check_generation_funding(records, options, active_session,
+    quote = check_generation_funding(records, options, active_session,
                              generation_route=route_snapshot["multi_person_generation_route"])
     watermark_offer = watermark_snapshot(records, options, active_session)
     job_id = uuid.uuid4().hex
@@ -1056,7 +1083,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **watermark_offer,
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
-               **route_snapshot}
+               **route_snapshot, **hosted_snapshot}
         if fallback_snapshot:
             job["normal_generation_snapshot"] = fallback_snapshot
         if fallback_key:
@@ -1064,7 +1091,8 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
         if auto_key:
             job["auto_key_ciphertext"] = auto_key
         if job["access_mode"] == "credits":
-            job["generation_credits"] = generation_credit_cost(options.trim[1] - options.trim[0], public_catalog(records)["credits_per_generation"])
+            job["generation_quote"] = quote
+            job["generation_credits"] = quote["credits"]
             emit("generation_quote_created", job_id=job_id, duration=options.trim[1] - options.trim[0], credits=job["generation_credits"])
         job = await run_in_threadpool(bind_job, records, job, active_session)
         await run_in_threadpool(records.create, f"jobs/{job_id}.json", job)
@@ -1161,6 +1189,8 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     records, cloud, _ = services()
     defaults = pipeline_settings(records)
     enforce_character_limit(options.setup, len(options.reference_sizes), defaults["multi_characters"])
+    require_model_access(options.setup, defaults, active_session.get("provider", "reAPI"))
+    hosted_snapshot = generation_snapshot(options.setup)
     route_snapshot = generation_route_snapshot(options.setup, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
     check_available_preparation(records, time.time())
@@ -1169,7 +1199,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
                          if route_snapshot["multi_person_generation_route"] == "google_h3" else None)
     fallback_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
                     if fallback_snapshot and x_reapi_key and active_session.get("access_mode") == "api-key" else None)
-    check_generation_funding(records, options.setup, active_session,
+    quote = check_generation_funding(records, options.setup, active_session,
                              generation_route=route_snapshot["multi_person_generation_route"])
     watermark_offer = watermark_snapshot(records, options.setup, active_session)
     auto_key = (protect_key(job_id, key_for_session(active_session, x_reapi_key))
@@ -1193,7 +1223,8 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
         "reference_sizes": options.reference_sizes, "setup": options.setup.model_dump(),
         "prompt_variant": defaults["prompt_variant"],
         "matching_no_review": defaults["matching_no_review"],
-        **route_snapshot,
+        **route_snapshot, **hosted_snapshot,
+        "generation_snapshot": hosted_snapshot,
         **watermark_offer,
         "provider": active_session.get("provider", "reAPI"),
         "access_mode": active_session.get("access_mode", "api-key"),
@@ -1206,7 +1237,8 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     if auto_key:
         manifest["auto_key_ciphertext"] = auto_key
     if manifest["access_mode"] == "credits":
-        manifest["generation_credits"] = generation_credit_cost(options.setup.trim[1] - options.setup.trim[0], public_catalog(records)["credits_per_generation"])
+        manifest["generation_quote"] = quote
+        manifest["generation_credits"] = quote["credits"]
         emit("generation_quote_created", job_id=job_id, duration=options.setup.trim[1] - options.setup.trim[0], credits=manifest["generation_credits"])
     records.create(prefix + "manifest.json", manifest)
     return {"id": job_id, "source": source, "reference": references[0], "references": references}
@@ -1238,7 +1270,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
     validate_reference_mapping(options, len(raw_reference_uris))
     enforce_character_limit(options, len(raw_reference_uris), pipeline_settings(records)["multi_characters"])
     check_generation_funding(records, options, active_session,
-                             generation_route=route_snapshot["multi_person_generation_route"])
+                             generation_route=route_snapshot["multi_person_generation_route"],
+                             pinned_quote=manifest.get("generation_quote"))
     if (not self_hosted and manifest["setup"].get("auto_generate") and manifest.get("access_mode") == "api-key"
             and not manifest.get("auto_key_ciphertext")):
         raise PublicError("Re-enter your API key before submitting this job.", 409)
@@ -1298,8 +1331,8 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
                **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (prompt_variant == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
-               **route_snapshot}
-        for field in ("normal_generation_snapshot", "google_fallback_key_ciphertext"):
+               **route_snapshot, **manifest.get("generation_snapshot", {"generation_model": generation_model(options)})}
+        for field in ("normal_generation_snapshot", "google_fallback_key_ciphertext", "generation_quote"):
             if field in manifest:
                 job[field] = manifest[field]
         if manifest.get("auto_key_ciphertext"):
@@ -1831,11 +1864,11 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     payload = generation_payload(job["duration"], image_urls, video_url, options.enhanced_character_masking, anchor,
         job.get("mask_style", "gray"), audio_processing=job.get("audio_processing", True),
         replace_all_people=options.replace_all_people, targets=targets, submit_without_audio=options.submit_without_audio, face_mesh=job.get("face_mesh", False),
-        prompt_variant=job.get("prompt_variant") or "current", easy_mode=options.easy_mode)
+        prompt_variant=job.get("prompt_variant") or "current", easy_mode=options.easy_mode,
+        **({"generation_model": KLING} if generation_model(job) == KLING else {}))
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
-        catalog = public_catalog(records)
-        charge = job.get("generation_credits", generation_credit_cost(job["duration"], catalog["credits_per_generation"]))
+        charge = pinned_generation_credits(job, records)
         if not 0 < charge <= 1000000:
             raise PublicError("Credit pricing is not configured yet.", 503)
     else:
@@ -2009,7 +2042,7 @@ def submit_self_hosted_generation(job_id, job, active_session, records, cloud):
     # The normal wallet debit key is shared with hosted generation. Repeated
     # approvals cannot charge twice or turn a saved self-hosted job into reAPI.
     credits_mode = active_session.get("access_mode") == "credits"
-    charge = job.get("generation_credits", generation_credit_cost(job["duration"], public_catalog(records)["credits_per_generation"]))
+    charge = pinned_generation_credits(job, records)
     if credits_mode and (type(charge) is not int or not 0 < charge <= 1000000):
         raise PublicError("Credit pricing is not configured yet.", 503)
     view_task_token = uuid.uuid4().hex
@@ -2121,7 +2154,8 @@ def provider_status(job_id: str, job: dict, key: str):
         return view(job)
     records, cloud, provider = services()
     provider = selected_provider(job.get("provider", "reAPI"))
-    body = provider.status(key, job["provider_task"])
+    body = provider.status(key, job["provider_task"],
+        **({"generation_model": KLING} if generation_model(job) == KLING else {}))
     billing = provider_billing(body, job.get("provider", "reAPI"))
     if body.get("status") in ("completed", "failed"):
         # A provider terminal response proves this slot is no longer billable

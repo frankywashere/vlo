@@ -16,6 +16,7 @@ export function AdminPage() {
   const [admin, setAdmin] = useState<CreditAdmin | null>(null);
   const [packs, setPacks] = useState<CreditPack[]>([]);
   const [rate, setRate] = useState("");
+  const [klingCredits, setKlingCredits] = useState("");
   const [watermarkVisible, setWatermarkVisible] = useState(true);
   const [watermarkBonus, setWatermarkBonus] = useState("25");
   const [margin, setMargin] = useState<MarginModel>(DEFAULT_MARGIN_MODEL);
@@ -46,6 +47,7 @@ export function AdminPage() {
       setMargin(result.catalog.margin_model ?? DEFAULT_MARGIN_MODEL);
       setUseMargin(Boolean(result.catalog.margin_model));
       setRate((result.catalog.credits_per_generation / 1500).toFixed(2));
+      setKlingCredits(String(result.catalog.kling_credits_per_generation ?? Math.ceil(result.catalog.credits_per_generation * 0.1784 / 0.074)));
     }).catch((cause: unknown) => {
       if (active) setError(cause instanceof Error ? cause.message : "Admin settings are unavailable.");
     });
@@ -117,10 +119,18 @@ export function AdminPage() {
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
           <VideoDownloaderSettings canEdit={can("service_controls")} />
+          <Box>
+            <FormControlLabel control={<Switch checked={admin.pipeline?.kling4_enabled === true} disabled={busy || !can("pipeline_settings")} onChange={(_, enabled) => void run(async () => {
+              const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, kling4_enabled: enabled});
+              setAdmin(current => current ? {...current, pipeline} : current);
+              setMessage(`Kling 4.0 ${enabled ? "enabled" : "disabled"} for new submissions.`);
+            })} />} label="Allow users to choose Kling 4.0" />
+            <Typography variant="body2" color="text.secondary">Shows the model choice and allows clips up to 30 seconds. Clips longer than 15 seconds require Kling. Kling always uses colored person masks with face mesh and depth off. Existing jobs keep their saved model and price.</Typography>
+          </Box>
           <Box component="section" aria-label="Multi-person generation destination">
             <Typography fontWeight={600}>Multi-person generation destination</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
-              Applies only to jobs with two or more individually selected people. One-person jobs and Replace all people keep the normal route. Only one destination can be on; with both off, the normal route is used. Changes apply to new jobs only.
+              Applies only to jobs with two or more individually selected people. One-person jobs and Replace all people keep the normal route. Explicit Kling selections use Kling regardless of these destinations. Only one destination can be on; with both off, the normal route is used. Changes apply to new jobs only.
             </Typography>
             <Stack spacing={1}>
               {([
@@ -262,6 +272,7 @@ export function AdminPage() {
         </Stack></AdminSection>
         <AdminSection title="Credit pricing"><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <Typography color="text.secondary">All prices are in USD. One credit equals US$0.01. Generation pricing scales with clip length. Credit packs start at US$20.00.</Typography>
+          <Typography fontWeight={650}>MiniMax H3 pricing</Typography>
           <FormControlLabel control={<Switch checked={useMargin} onChange={(event) => setUseMargin(event.target.checked)} />} label="Calculate pricing from target margin" />
           {useMargin && <Stack spacing={2}>
             <TextField label="Target margin (%)" type="number" value={margin.target_margin_percent} onChange={(event) => setMargin({ ...margin, target_margin_percent: Number(event.target.value) })} inputProps={{ min: 0, max: 95, step: 1 }} />
@@ -275,6 +286,7 @@ export function AdminPage() {
             {estimate ? <Alert severity="info">Calculated rate: {estimate.credits} credits per second. Estimated margin: {estimate.estimatedMargin.toFixed(1)}% at {margin.reference_seconds} seconds. A 5-second clip costs {estimate.credits * 5} credits; 15 seconds costs {estimate.credits * 15} credits. Save pricing to apply.</Alert> : <Alert severity="error">Check the cost assumptions. Margin plus payment fees must be below 100%.</Alert>}
           </Stack>}
           <TextField label="Price per video second (USD)" type="number" disabled={useMargin} value={useMargin && estimate ? (estimate.credits / 100).toFixed(2) : rate} onChange={(event) => setRate(event.target.value)} inputProps={{min: 0.01, step: 0.01}} helperText={`${(useMargin ? estimate?.credits : Math.round(Number(rate) * 100)) || 0} credits per second`} />
+          <TextField label="Kling 4.0 credits for 15 seconds" type="number" value={klingCredits} onChange={event => setKlingCredits(event.target.value)} inputProps={{min: 1, max: 100000, step: 1}} helperText={`Separate from MiniMax and its margin calculator. ${Number(klingCredits) > 0 ? `${(Number(klingCredits) / 15).toFixed(2)} credits per second; ${Number(klingCredits) * 2} credits for 30 seconds.` : "Set a positive whole-credit price."}`} />
           {packs.map((pack, index) => <Stack key={index} spacing={1} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
             <TextField label="Pack ID" value={pack.id} onChange={(event) => updatePack(index, { id: event.target.value })} />
             <TextField label="Pack name" value={pack.name} onChange={(event) => updatePack(index, { name: event.target.value })} />
@@ -283,7 +295,7 @@ export function AdminPage() {
             <Button color="error" onClick={() => setPacks((current) => current.filter((_, i) => i !== index))}>Remove pack</Button>
           </Stack>)}
           <Stack direction="row" spacing={1}><Button disabled={busy || packs.length >= 8} onClick={() => setPacks((current) => [...current, { id: "", name: "", credits: 2000, price_cents: 2000, active: false }])}>Add pack</Button>
-            <Button variant="contained" disabled={busy || (useMargin ? !estimate : !rate) || packs.length === 0} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, credits_per_generation: (useMargin ? estimate!.credits : Math.round(Number(rate) * 100)) * 15, margin_model: useMargin ? margin : null }); setAdmin({ ...admin, catalog }); setRate((catalog.credits_per_generation / 1500).toFixed(2)); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
+            <Button variant="contained" disabled={busy || (useMargin ? !estimate : !rate) || packs.length === 0 || !/^\d+$/.test(klingCredits) || Number(klingCredits) < 1 || Number(klingCredits) > 100000} onClick={() => void run(async () => { const catalog = await saveCreditCatalog({ revision: admin.catalog.revision, packs, kling_credits_per_generation: Number(klingCredits), credits_per_generation: (useMargin ? estimate!.credits : Math.round(Number(rate) * 100)) * 15, margin_model: useMargin ? margin : null }); setAdmin({ ...admin, catalog }); setRate((catalog.credits_per_generation / 1500).toFixed(2)); setKlingCredits(String(catalog.kling_credits_per_generation ?? Number(klingCredits))); setMessage("Pricing saved."); })}>Save pricing</Button></Stack>
         </Stack></Box></AdminSection>
         <AdminSection title="Watermark rewards"><Box component="fieldset" disabled={busy || !can("pricing")} sx={{border: 0, p: 0, m: 0, minWidth: 0}}><Stack spacing={2}>
           <FormControlLabel control={<Switch checked={!watermarkVisible} onChange={(_, hidden) => setWatermarkVisible(!hidden)} />} label="Hide watermark offer for everyone" />

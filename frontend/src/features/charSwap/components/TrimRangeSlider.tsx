@@ -8,12 +8,14 @@ import type { TrimRange } from "../utils/trimRange";
 interface TrimRangeSliderProps {
   value: TrimRange;
   duration: number;
+  maxSeconds?: number;
   onChange: (value: TrimRange) => void;
 }
 
 export function TrimRangeSlider({
   value,
   duration,
+  maxSeconds = 15,
   onChange,
 }: TrimRangeSliderProps) {
   const rail = useRef<HTMLDivElement>(null);
@@ -104,6 +106,7 @@ export function TrimRangeSlider({
                 thumb === 0 ? "start" : "end",
                 next[thumb],
                 duration,
+                maxSeconds,
               ),
             );
         }}

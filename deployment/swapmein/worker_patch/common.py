@@ -43,12 +43,18 @@ def probe(path):
     duration = float(result["format"]["duration"])
     if (type(width) is not int or type(height) is not int or min(width, height) < 2
             or max(width, height) > 1920 or min(width, height) > 768
-            or width * height > 1_474_560 or not math.isfinite(duration) or not 0 < duration <= 15.1):
-        raise ValueError("Worker accepts up to 15 seconds, a 768px short side and 1920px long side")
+            or width * height > 1_474_560 or not math.isfinite(duration) or not 0 < duration <= 30.1):
+        raise ValueError("Worker accepts up to 30 seconds, a 768px short side and 1920px long side")
     if video["r_frame_rate"] != "24/1":
         raise ValueError("Input must be normalized to 24 fps")
-    if video.get("nb_frames") not in (None, "N/A") and not 1 <= int(video["nb_frames"]) <= 360:
-        raise ValueError("Worker accepts 1–360 prepared video frames")
+    if video.get("nb_frames") not in (None, "N/A"):
+        frames = int(video["nb_frames"])
+        if not 1 <= frames <= 720:
+            raise ValueError("Worker accepts 1–720 prepared video frames")
+        # Container audio padding can be slightly longer than the prepared video.
+        # Reject an inconsistent timeline instead of silently composing a prefix.
+        if abs(frames / 24 - duration) > .1:
+            raise ValueError("Prepared video frames and duration do not match")
     return result
 
 

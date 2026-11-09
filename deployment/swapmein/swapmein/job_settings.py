@@ -67,6 +67,10 @@ def settings_used(job):
     generation = job.get("generation_settings") or {}
     if generation.get("model") in {"minimax-h3", "MiniMax-H3"}:
         result["model"] = "MiniMax H3"
+    if generation.get("model") == "kling-4-0" or job.get("generation_model") == "kling-4-0":
+        result["model"] = "Kling 4.0"
+    if generation.get("resolution") == "720p":
+        result["requested_resolution"] = "720p"
     if generation.get("resolution") in {"768P", "768p"}:
         result["requested_resolution"] = "768p"
     if isinstance(route, str) and route in SELF_HOSTED_GENERATION_ROUTES:

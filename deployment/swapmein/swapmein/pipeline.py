@@ -13,7 +13,7 @@ from .guide_style import IDENTITY_DEPTH_STYLES, guide_style, compose_styles
 from .errors import PublicError
 from .diagnostics import emit, timed, wait_timing
 from .limits import MAX_SOURCE_BYTES
-from .media import Setup, create_poster, finish, normalize, original_guide, sam_input_video, select_label, validate_guide_media
+from .media import Setup, create_poster, finish, kling_guide_media, normalize, original_guide, sam_input_video, select_label, validate_guide_media
 from .mask_geometry import resize_label_archive
 from .multi_tracking import build_selected_masks, selected_tracks, style_targets
 from .storage import Records, claim_job, release_preparation, preparation_leases, set_preparation_lease
@@ -112,7 +112,13 @@ class Pipeline:
                 # Jobs created before the Easy mode option retain their scene-review policy.
                 options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True,
                                                "easy_mode": False, **job["setup"]})
-                self.update_job(job_id, easy_mode=options.easy_mode, auto_generate=options.auto_generate)
+                if (options.generation_model == "kling-4-0" and not options.replace_all_people
+                        and job.get("prompt_variant") != "cloudflare_identity_v1"):
+                    # Without automatic identity matching, take the established
+                    # scene-review path rather than weaken the proven guide to
+                    # shared cyan or reuse a SAM ID as identity across cuts.
+                    options = options.model_copy(update={"easy_mode": False, "auto_generate": False})
+                job = self.update_job(job_id, easy_mode=options.easy_mode, auto_generate=options.auto_generate)
                 emit("preparation_mode", job_id=job_id, easy_mode=options.easy_mode,
                      enhanced_character_masking=options.enhanced_character_masking, face_mesh=job.get("face_mesh", False),
                      replace_all_people=options.replace_all_people)
@@ -402,12 +408,19 @@ class Pipeline:
                         return
                 if tracking_needed:
                     prepared = self.cloud.worker_output(composed, guide_run, "prepared_guide.mp4")
-                    if options.preparation_version >= 2:
+                    if options.preparation_version >= 2 or options.generation_model == "kling-4-0":
                         checked_guide = root / "checked-guide.mp4"
                         self.cloud.download(prepared, checked_guide, 50 * 1024 * 1024)
                         verified = validate_guide_media(checked_guide, metadata)
                         emit("guide_media_verified", job_id=job_id, **verified)
-                    guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, app_prefix + "guide.mp4")
+                    if options.generation_model == "kling-4-0":
+                        provider_guide = root / "kling-guide.mp4"
+                        provider_media = kling_guide_media(checked_guide, provider_guide, metadata)
+                        guide_uri = self.cloud.upload(self.settings.app_bucket, app_prefix + "guide.mp4", provider_guide, "video/mp4")
+                        self.update_job(job_id, provider_guide_media=provider_media)
+                        emit("kling_guide_verified", job_id=job_id, **provider_media)
+                    else:
+                        guide_uri = self.cloud.copy(prepared, self.settings.app_bucket, app_prefix + "guide.mp4")
                 else:
                     vocals, guide = root / "vocals_plus3.wav", root / "guide.mp4"
                     if audio_processing:
@@ -608,14 +621,23 @@ class Pipeline:
                 self.update_job(job_id, face_mesh_metrics=composed["metrics"]["face_mesh_metrics"])
                 emit("face_mesh_composed", job_id=job_id, **composed["metrics"]["face_mesh_metrics"])
         prepared = self.cloud.worker_output(composed, run_id, "prepared_guide.mp4")
-        if job.get("preparation_version", 1) >= 2:
+        kling = job.get("generation_model", job.get("setup", {}).get("generation_model")) == "kling-4-0"
+        if job.get("preparation_version", 1) >= 2 or kling:
             with tempfile.TemporaryDirectory() as temporary:
                 checked = Path(temporary) / "guide.mp4"
                 self.cloud.download(prepared, checked, 50 * 1024 * 1024)
                 verified = validate_guide_media(checked, job["tracking_metadata"])
                 emit("guide_media_verified", job_id=job_id, **verified)
-        guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
-            preparation_prefix(job, "app") + f"guide-reviewed-{uuid.uuid4().hex}.mp4")
+                if kling:
+                    provider_guide = Path(temporary) / "kling-guide.mp4"
+                    provider_media = kling_guide_media(checked, provider_guide, job["tracking_metadata"])
+                    guide_uri = self.cloud.upload(self.settings.app_bucket,
+                        preparation_prefix(job, "app") + f"guide-reviewed-{uuid.uuid4().hex}.mp4", provider_guide, "video/mp4")
+                    self.update_job(job_id, provider_guide_media=provider_media)
+                    emit("kling_guide_verified", job_id=job_id, **provider_media)
+        if not kling:
+            guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
+                preparation_prefix(job, "app") + f"guide-reviewed-{uuid.uuid4().hex}.mp4")
         auto_submit = bool(not job.get("mask_recovery_conflicts")
             and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
             and job.get("generation_after_review_revision") is not None

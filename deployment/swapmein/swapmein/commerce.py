@@ -100,15 +100,56 @@ def save_features(records, actor: dict, revision: int, checkout: bool, credit_ge
     return feature_view(records)
 
 
-def generation_credit_cost(duration: float, credits_for_15_seconds: int = 150) -> int:
+def generation_credit_cost(duration: float, credits_for_15_seconds: int = 150, *, generation_model="minimax-h3") -> int:
     """Round the duration quote up to a whole credit, without float noise."""
     from decimal import Decimal, ROUND_CEILING
     import math
     if math.isfinite(duration):
         duration = round(duration, 6)
-    if not math.isfinite(duration) or not 0 < duration <= 15 or not math.isfinite(credits_for_15_seconds) or credits_for_15_seconds <= 0:
+    from .generation_models import max_duration
+    if not math.isfinite(duration) or not 0 < duration <= max_duration(generation_model) or not math.isfinite(credits_for_15_seconds) or credits_for_15_seconds <= 0:
         raise PublicError("Set a valid clip duration and credit rate.")
     return int((Decimal(str(round(duration, 6))) * Decimal(str(credits_for_15_seconds)) / Decimal(15)).to_integral_value(rounding=ROUND_CEILING))
+
+
+def kling_credit_rate(catalog):
+    """Separate editable rate; migrate legacy catalogs without underpricing Kling.
+
+    At 720p an equal-length edit bills input plus output at $0.0892/second.
+    When no Kling price is saved, preserve the existing margin assumptions or
+    scale the MiniMax price by the hosted provider-cost ratio ($0.1784/$0.074).
+    """
+    explicit = catalog.get("kling_credits_per_generation")
+    if type(explicit) is int and 1 <= explicit <= 100000:
+        return explicit
+    if catalog.get("margin_model"):
+        return margin_credit_rate({**catalog["margin_model"], "provider_usd_per_second": .1784}) * 15
+    return int((Decimal(str(catalog.get("credits_per_generation", 150)))
+                * Decimal("0.1784") / Decimal("0.074")).to_integral_value(rounding=ROUND_CEILING))
+
+
+def model_credit_rate(catalog, model="minimax-h3"):
+    from .generation_models import KLING, max_duration
+    max_duration(model)
+    return kling_credit_rate(catalog) if model == KLING else catalog["credits_per_generation"]
+
+
+def generation_quote(records, setup):
+    from .generation_models import generation_model
+    catalog, _ = records.read(CATALOG_PATH)
+    catalog = catalog or default_catalog()
+    model = generation_model(setup)
+    rate = model_credit_rate(catalog, model)
+    credits = generation_credit_cost(setup.trim[1] - setup.trim[0], rate, generation_model=model)
+    offered = getattr(setup, "generation_credit_quote", None)
+    if model == "kling-4-0" and offered is None:
+        raise PublicError("Confirm the displayed Kling credit price before submitting.", 409,
+                          code="generation_quote_required")
+    if offered is not None and offered != credits:
+        raise PublicError("Generation pricing changed. Refresh the price before submitting.", 409,
+                          code="generation_price_changed")
+    return {"model": model, "credits": credits, "credits_for_15_seconds": rate,
+            "catalog_revision": catalog.get("revision", 0)}
 
 
 def default_catalog() -> dict:
@@ -116,7 +157,7 @@ def default_catalog() -> dict:
     return {"revision": 0, "packs": [
         {"id": "starter", "name": "Starter", "credits": 2000, "price_cents": 2000, "active": True},
         {"id": "value", "name": "Value", "credits": 5000, "price_cents": 5000, "active": True},
-    ], "credits_per_generation": 150, "history": []}
+    ], "credits_per_generation": 150, "kling_credits_per_generation": 362, "history": []}
 
 
 def api_key_permission(records, account: dict) -> bool:
@@ -179,6 +220,8 @@ def public_catalog(records) -> dict:
                   for pack in current.get("packs", []) if pack.get("active")],
         "credits_per_generation": current.get("credits_per_generation", 150),
         "credits_per_second": current.get("credits_per_generation", 150) / 15,
+        "kling_credits_per_generation": kling_credit_rate(current),
+        "kling_credits_per_second": kling_credit_rate(current) / 15,
         "usd_cents_per_credit": USD_CENTS_PER_CREDIT,
         "minimum_pack_cents": MIN_PACK_CENTS,
         "stripe_mode": "live" if stripe_livemode() else "test",
@@ -209,12 +252,14 @@ def margin_credit_rate(model: dict) -> int:
     return rate
 
 
-def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int, margin_model: dict | None = None) -> dict:
+def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits_per_generation: int, margin_model: dict | None = None, kling_credits_per_generation: int | None = None) -> dict:
     require_permission(records, actor, "pricing")
     if margin_model is not None:
         credits_per_generation = margin_credit_rate(margin_model) * 15
     if not 1 <= credits_per_generation <= 100000 or not 1 <= len(packs) <= 8:
         raise PublicError("Set a valid credit rate and one to eight packs.")
+    if kling_credits_per_generation is not None and (type(kling_credits_per_generation) is not int or not 1 <= kling_credits_per_generation <= 100000):
+        raise PublicError("Set a valid Kling credit rate.")
     seen = set()
     for pack in packs:
         if (not PACK_PATTERN.fullmatch(pack["id"]) or pack["id"] in seen
@@ -231,10 +276,15 @@ def save_catalog(records, actor: dict, revision: int, packs: list[dict], credits
         if current.get("revision", 0) != revision:
             raise PublicError("Prices changed in another session. Reload before saving.", 409)
         history = current.get("history", [])[-49:]
+        kling_rate = (kling_credits_per_generation if kling_credits_per_generation is not None else
+                      kling_credit_rate({**current, "credits_per_generation": credits_per_generation,
+                                         "margin_model": margin_model}))
         history.append({"revision": revision + 1, "actor": actor["email"], "at": time.time(),
-                        "packs": packs, "credits_per_generation": credits_per_generation, "margin_model": margin_model})
+                        "packs": packs, "credits_per_generation": credits_per_generation, "margin_model": margin_model,
+                        "kling_credits_per_generation": kling_rate})
         return {"revision": revision + 1, "packs": packs,
-                "credits_per_generation": credits_per_generation, "margin_model": margin_model, "history": history}
+                "credits_per_generation": credits_per_generation, "margin_model": margin_model, "history": history,
+                "kling_credits_per_generation": kling_rate}
 
     saved = records.update(CATALOG_PATH, mutate)
     emit("admin_pricing_changed", actor_id=digest(actor["email"]), revision=saved["revision"], credits_for_15_seconds=credits_per_generation, pack_count=len(packs), target_margin_percent=margin_model.get("target_margin_percent") if margin_model else None)

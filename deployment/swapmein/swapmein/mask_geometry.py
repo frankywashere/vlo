@@ -9,13 +9,14 @@ from PIL import Image
 
 from .diagnostics import timed
 from .errors import PublicError
+from .tracking import MAX_FRAMES
 
 
 @timed("mask_resize")
 def resize_label_archive(archive: Path, output: Path, metadata: dict):
     width, height, frames = (metadata.get(key) for key in ("width", "height", "frames"))
     if (any(type(value) is not int for value in (width, height, frames))
-            or not 1 <= frames <= 360 or not 2 <= min(width, height) <= 768
+            or not 1 <= frames <= MAX_FRAMES or not 2 <= min(width, height) <= 768
             or max(width, height) > 1920 or width * height > 1_474_560):
         raise PublicError("Invalid prepared mask dimensions or frame count.")
     if archive.resolve() == output.resolve():

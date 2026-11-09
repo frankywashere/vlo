@@ -18,6 +18,7 @@ interface ClipStepProps {
   sampleAvailable?: boolean;
   estimatedCredits?: number;
   creditBalance?: number;
+  klingProviderAvailable?: boolean;
   busy: boolean;
   onImport: (file: File) => void;
   onDemo: () => void;
@@ -30,6 +31,7 @@ export function ClipStep({
   onDemo,
   estimatedCredits,
   creditBalance,
+  klingProviderAvailable,
   sampleAvailable = true,
 }: ClipStepProps) {
   const clip = useCharSwapStore((state) => state.clip);
@@ -87,6 +89,8 @@ export function ClipStep({
           demo={demo}
           estimatedCredits={estimatedCredits}
           creditBalance={creditBalance}
+          disabled={busy}
+          klingProviderAvailable={klingProviderAvailable}
         />
       ) : (
         <Box
