@@ -37,6 +37,19 @@ def test_kling_scene_absence_is_not_a_different_reference_assignment():
     assert "at 26.00 seconds, x=70%, y=40%" in prompt
 
 
+@pytest.mark.parametrize("processed,silent", [(False,False),(True,False),(False,True),(True,True)])
+def test_kling_audio_guidance_matches_the_submitted_track(processed,silent):
+    payload=generation_payload(15,"photo","actual-submitted-guide",True,
+        mask_style="identity_overlay_20",generation_model="kling-4-0",
+        audio_processing=processed,submit_without_audio=silent)
+    prompt=payload['prompt']
+    assert payload['video_url']=='actual-submitted-guide' and payload['audio_setting']=='origin'
+    assert ('isolated vocals pitched up three semitones' in prompt) is (processed and not silent)
+    assert ('silent visual guidance' in prompt) is silent
+    assert ('soundtrack will be restored' in prompt) is (processed or silent)
+    assert not {'audio_urls','duration','negative_prompt'} & payload.keys()
+
+
 @pytest.mark.parametrize("updates", [{"face_mesh": True}, {"duration": 31}, {"mask_style": "depth_multi"},
     {"targets": [selection(2, .3)]}, {"targets": [selection(0, .3), selection(0, .6)], "mask_style": "cyan_overlay_multi_20"}])
 def test_kling_unsafe_or_invalid_recipe_is_rejected_before_provider_request(updates):

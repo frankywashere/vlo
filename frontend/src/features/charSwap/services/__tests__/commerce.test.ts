@@ -91,3 +91,7 @@ it("refuses processing capacity updates while signed out", async () => {
   await expect(saveProcessingCapacity({revision: 0, heavy_jobs: 2, reapi_jobs: 2})).rejects.toThrow("Sign in");
   expect(requests).not.toHaveBeenCalled();
 });
+
+it("sends only the independently changed Kling audio flag with its pipeline revision",async()=>{
+ await savePipelineSettings({revision:7,kling_audio_processing:true});expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision:7,kling_audio_processing:true});
+});

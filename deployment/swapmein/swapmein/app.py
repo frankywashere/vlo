@@ -838,6 +838,7 @@ class PipelineSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     revision: int = Field(ge=0)
     audio_processing: bool | None = None
+    kling_audio_processing: bool | None = None
     preparation_provider: Literal["workers", "replicate"] | None = None
     retry_missing_masks_with_sam: bool | None = None
     matching_no_review: bool | None = None
@@ -866,7 +867,8 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
     saved = save_pipeline_settings(records, actor, body.revision, body.audio_processing, body.preparation_provider,
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
                                   body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant, body.matching_no_review,
-                                  body.multi_person_generation_route, body.kling4_enabled, body.minimax_2k_enabled)
+                                  body.multi_person_generation_route, body.kling4_enabled, body.minimax_2k_enabled,
+                                  body.kling_audio_processing)
     return {**saved, "self_hosted_workers": worker_views(settings, records)}
 
 
@@ -1067,7 +1069,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     enforce_character_limit(options, 1, defaults["multi_characters"])
     require_model_access(options, defaults, active_session.get("provider", "reAPI"),
                          is_admin=bool(staff_role(records, active_session)))
-    hosted_snapshot = generation_snapshot(options)
+    hosted_snapshot = generation_snapshot(options, kling_audio_processing=defaults["kling_audio_processing"])
     route_snapshot = generation_route_snapshot(options, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
     quote = check_generation_funding(records, options, active_session,
@@ -1230,7 +1232,7 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     enforce_character_limit(options.setup, len(options.reference_sizes), defaults["multi_characters"])
     require_model_access(options.setup, defaults, active_session.get("provider", "reAPI"),
                          is_admin=bool(staff_role(records, active_session)))
-    hosted_snapshot = generation_snapshot(options.setup)
+    hosted_snapshot = generation_snapshot(options.setup, kling_audio_processing=defaults["kling_audio_processing"])
     route_snapshot = generation_route_snapshot(options.setup, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
     check_available_preparation(records, time.time())

@@ -103,22 +103,22 @@ it("saves the margin assumptions with the calculated quote", async () => {
 it("defaults audio processing off and confirms saved changes without touching payment controls", async () => {
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  const toggle = await screen.findByRole("switch", { name: "Enable audio processing" });
+  const toggle = await screen.findByRole("switch", { name: "Enable MiniMax audio processing" });
   expect(toggle).not.toBeChecked();
   await user.click(toggle);
   expect(api.pipeline).toHaveBeenLastCalledWith({ revision: 0, audio_processing: true });
-  await screen.findByText(/Audio processing enabled for new jobs/);
+  await screen.findByText(/MiniMax audio processing enabled for new jobs/);
   expect(toggle).toBeChecked();
   await user.click(toggle);
   expect(api.pipeline).toHaveBeenLastCalledWith({ revision: 1, audio_processing: false });
-  await screen.findByText(/Audio processing disabled for new jobs/);
+  await screen.findByText(/MiniMax audio processing disabled for new jobs/);
   expect(toggle).not.toBeChecked();
 });
 
 it("does not let pricing staff change audio behavior", async () => {
   api.role = "pricing_admin";
   await renderExpandedAdmin();
-  expect(await screen.findByRole("switch", { name: "Enable audio processing" })).toBeDisabled();
+  expect(await screen.findByRole("switch", { name: "Enable MiniMax audio processing" })).toBeDisabled();
 });
 
 it("puts the Replicate switch in Experimental and securely saves its key under System API key", async () => {
@@ -152,10 +152,10 @@ it("switches the new-job preparation provider without resetting audio or submitt
   await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
   await screen.findByText(/Replicate selected for preparation of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
-  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
-  await user.click(screen.getByRole("switch", {name: "Enable audio processing"}));
-  await screen.findByText(/Audio processing disabled for new jobs/);
+  await user.click(screen.getByRole("switch", {name: "Enable MiniMax audio processing"}));
+  await screen.findByText(/MiniMax audio processing disabled for new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, audio_processing: false});
   expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
   await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
@@ -222,7 +222,7 @@ it.each([true, false])("switches preparation provider independently with depth=%
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, preparation_provider: "workers"});
   expect(toggle).not.toBeChecked();
   expect(depthToggle).toHaveProperty("checked", !depth_guidance);
-  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
 });
 
 it("allows disabling Replicate if its saved key becomes unavailable", async () => {
@@ -247,7 +247,7 @@ it("lets read-only staff see every section with all mutations disabled", async (
   expect(screen.getByLabelText("System API key")).toHaveValue("");
   expect(screen.getByLabelText("Replicate API key")).toHaveValue("");
   expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
-  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
   const user = userEvent.setup();
   await user.click(screen.getByText("Registered accounts", {exact:true}));
@@ -310,7 +310,7 @@ it("saves the experimental missing-mask mode and preserves unrelated pipeline se
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 7, retry_missing_masks_with_sam: true});
   await screen.findByText(/SAM mask retries selected for new jobs/);
   expect(toggle).toBeChecked();
-  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
   await user.click(toggle);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, retry_missing_masks_with_sam: false});
   await screen.findByText(/Coordinate fallback selected for new jobs/);
@@ -462,7 +462,7 @@ it("saves the Cloudflare prompt option with a revision while preserving manual-m
   await userEvent.click(screen.getByRole("radio", {name: "Cloudflare character matching"}));
   await waitFor(() => expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 11, prompt_variant: "cloudflare_identity_v1"});
-  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Add depth to person masks"})).not.toBeChecked();
   expect(screen.getByRole("switch", {name: "Enable face mesh"})).toBeChecked();
 });
@@ -522,7 +522,7 @@ it("defaults matching failure review on and toggles no-review without changing O
   await waitFor(() => expect(toggle).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, matching_no_review: true});
   expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
-  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
   await userEvent.click(toggle);
   await waitFor(() => expect(toggle).not.toBeChecked());
@@ -605,7 +605,7 @@ it("saves one multi-person destination at a time and returns to normal when the 
   await waitFor(() => expect(paperspace).toBeChecked());
   expect(google).not.toBeChecked();
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, multi_person_generation_route: "paperspace_h3"});
-  expect(screen.getByRole("switch", {name: "Enable audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
   await userEvent.click(paperspace);
   await waitFor(() => expect(paperspace).not.toBeChecked());
@@ -681,4 +681,22 @@ it("saves independent MiniMax 2K pricing and the flat sixth-photo surcharge",asy
 it("can hide MiniMax 2K for users while preserving the other pipeline settings",async()=>{
  const user=userEvent.setup();api.pipelineSettings={revision:4,audio_processing:false,kling4_enabled:true,minimax_2k_enabled:true};await renderExpandedAdmin();
  await user.click(screen.getByRole("switch",{name:"Allow MiniMax 2K for users"}));expect(api.pipeline).toHaveBeenCalledWith({revision:4,minimax_2k_enabled:false});expect(api.pipelineSettings?.kling4_enabled).toBe(true);
+});
+
+it("saves independent MiniMax and Kling audio switches without resetting the other model",async()=>{
+ const user=userEvent.setup();api.pipelineSettings={revision:4,audio_processing:true,kling_audio_processing:false};await renderExpandedAdmin();
+ const mini=screen.getByRole("switch",{name:"Enable MiniMax audio processing"}),kling=screen.getByRole("switch",{name:"Enable Kling 4 audio processing"});
+ expect(mini).toBeChecked();expect(kling).not.toBeChecked();
+ await user.click(kling);expect(api.pipeline).toHaveBeenLastCalledWith({revision:4,kling_audio_processing:true});expect(mini).toBeChecked();expect(kling).toBeChecked();
+ await user.click(mini);expect(api.pipeline).toHaveBeenLastCalledWith({revision:5,audio_processing:false});expect(mini).not.toBeChecked();expect(kling).toBeChecked();
+ await user.click(kling);expect(api.pipeline).toHaveBeenLastCalledWith({revision:6,kling_audio_processing:false});expect(mini).not.toBeChecked();expect(kling).not.toBeChecked();
+});
+
+it("keeps both audio controls read-only without pipeline-settings permission",async()=>{
+ api.role="pricing_admin";await renderExpandedAdmin();expect(screen.getByRole("switch",{name:"Enable MiniMax audio processing"})).toBeDisabled();expect(screen.getByRole("switch",{name:"Enable Kling 4 audio processing"})).toBeDisabled();
+});
+
+it("leaves Kling audio off when saving is rejected and preserves enabled MiniMax audio",async()=>{
+ api.pipelineSettings={revision:3,audio_processing:true,kling_audio_processing:false};api.pipeline.mockRejectedValueOnce(new Error("Pipeline settings changed. Reload before saving."));await renderExpandedAdmin();
+ await userEvent.click(screen.getByRole("switch",{name:"Enable Kling 4 audio processing"}));await screen.findByText("Pipeline settings changed. Reload before saving.");expect(screen.getByRole("switch",{name:"Enable Kling 4 audio processing"})).not.toBeChecked();expect(screen.getByRole("switch",{name:"Enable MiniMax audio processing"})).toBeChecked();
 });

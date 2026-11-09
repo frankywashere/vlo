@@ -243,7 +243,8 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
     if generation_model == "kling-4-0":
         return kling_generation_payload(duration, image_url, video_url, anchor=anchor,
             mask_style=mask_style, replace_all_people=replace_all_people, targets=targets,
-            face_mesh=face_mesh, reference_indexes=reference_indexes)
+            face_mesh=face_mesh, reference_indexes=reference_indexes,
+            audio_processing=audio_processing, submit_without_audio=submit_without_audio)
     if generation_resolution not in {"768P", "2K"}:
         raise PublicError("Choose MiniMax 768P or 2K.")
     prompt_variant = normalize_prompt_variant(prompt_variant)
@@ -302,7 +303,8 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
 
 
 def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mask_style="none",
-                             replace_all_people=False, targets=None, face_mesh=False, reference_indexes=None):
+                             replace_all_people=False, targets=None, face_mesh=False, reference_indexes=None,
+                             audio_processing=False, submit_without_audio=False):
     """The reviewed body-tint edit recipe, with dynamic person assignments.
 
     Colors mark the person slot, not the reference's array index. An identity
@@ -377,6 +379,15 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
                  "and keep the other people, scene and camera shots unchanged. "
                  "These translucent colors identify the selected people only; "
                  "remove all guide tints completely from the finished video.")
+    if submit_without_audio:
+        lines.append("@Video1 is silent visual guidance. Preserve its exact timing, mouth movements, "
+                     "expressions and speaking turns without inventing dialogue. "
+                     "The original full soundtrack will be restored after generation.")
+    elif audio_processing:
+        lines.append("The embedded audio in @Video1 contains isolated vocals pitched up three semitones "
+                     "without changing their timing. Use them as timing guidance for the original visible "
+                     "speakers' mouth movements and speaking turns; do not add or reassign dialogue. "
+                     "The original unshifted full soundtrack will be restored after generation.")
     prompt = " ".join(lines)
     if len(prompt) > 7000:
         raise PublicError("This clip has too many scene assignments for the generation prompt. "

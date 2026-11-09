@@ -108,18 +108,28 @@ export function AdminPage() {
         </Stack></AdminSection>
         <ProcessingCapacityPanel canEdit={can("service_controls")} />
         <AdminSection title="Audio processing"><Stack spacing={2}>
-          <FormControlLabel control={<Switch checked={admin.pipeline?.audio_processing ?? false}
-            disabled={busy || !can("pipeline_settings")}
-            onChange={(event) => {
-              const enabled = event.target.checked;
-              void run(async () => {
+          <Box>
+            <FormControlLabel control={<Switch checked={admin.pipeline?.audio_processing ?? false}
+              disabled={busy || !can("pipeline_settings")}
+              onChange={(_, enabled) => void run(async () => {
                 const pipeline = await savePipelineSettings({ revision: admin.pipeline?.revision ?? 0, audio_processing: enabled });
-                setAdmin({ ...admin, pipeline });
-                setMessage(`Audio processing ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved audio mode.`);
-              });
-            }} />} label="Enable audio processing" />
-          <Typography color="text.secondary">Off by default. When off, the source soundtrack is sent with the clip and the provider’s returned audio is kept. When on, vocals are separated and pitch-shifted before generation, then the original soundtrack is restored on export.</Typography>
-          <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their existing audio mode.</Typography>
+                setAdmin(current => current ? {...current, pipeline} : current);
+                setMessage(`MiniMax audio processing ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved audio mode.`);
+              })} />} label="Enable MiniMax audio processing" />
+            <Typography color="text.secondary">Controls MiniMax only. Off by default: the source soundtrack is sent unchanged and MiniMax’s returned audio is kept. When on, vocals are isolated and raised three semitones before generation, then the original soundtrack is restored on export.</Typography>
+          </Box>
+          <Box>
+            <FormControlLabel control={<Switch checked={admin.pipeline?.kling_audio_processing ?? false}
+              disabled={busy || !can("pipeline_settings")}
+              onChange={(_, enabled) => void run(async () => {
+                const pipeline = await savePipelineSettings({ revision: admin.pipeline?.revision ?? 0, kling_audio_processing: enabled });
+                setAdmin(current => current ? {...current, pipeline} : current);
+                setMessage(`Kling 4 audio processing ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved audio mode.`);
+              })} />} label="Enable Kling 4 audio processing" />
+            <Typography color="text.secondary">Controls Kling 4 only. Off by default: the source soundtrack is sent unchanged. When on, vocals are isolated and raised three semitones before generation. The original soundtrack is restored on export in either case.</Typography>
+          </Box>
+          <Typography variant="body2" color="text.secondary">Submit without audio overrides either model’s processing setting: a silent guide is sent, then the original soundtrack is restored on export.</Typography>
+          <Typography variant="body2" color="text.secondary">Changes apply to new jobs, including jobs using an approved personal key. Queued and running jobs keep their saved audio mode.</Typography>
         </Stack></AdminSection>
         <AdminSection title="Experimental"><Stack spacing={2}>
           <VideoDownloaderSettings canEdit={can("service_controls")} />

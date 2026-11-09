@@ -48,13 +48,14 @@ def require_model_access(setup, defaults, provider, *, is_admin=False):
                                   409, code="kling_preparation_unavailable")
 
 
-def generation_snapshot(setup):
+def generation_snapshot(setup, *, kling_audio_processing=False):
     model = generation_model(setup)
     snapshot = {"generation_model": model, "generation_resolution": generation_resolution(setup)}
     if model == KLING:
-        # Reproduce the reviewed body-tint recipe, regardless of user overrides
-        # or subsequent Admin changes. Restoring source audio is deterministic.
-        snapshot.update(face_mesh=False, depth_guidance=False, audio_processing=False,
+        # Keep the reviewed body-tint recipe and pin Admin audio processing at
+        # intake. Export always restores the original, unshifted soundtrack.
+        snapshot.update(face_mesh=False, depth_guidance=False,
+                        audio_processing=kling_audio_processing is True and not setup.submit_without_audio,
                         restore_original_audio=True, guide_style_version=2,
                         depth_overlay_opacity=.2, depth_identity_colors_version=1)
         from .cloudflare_credentials import cloudflare_key_ready

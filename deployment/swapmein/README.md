@@ -857,13 +857,22 @@ those options. Single-photo MiniMax 768P retains those overrides and its existin
 fifteen-second limit. Disabling Kling blocks
 new tickets; already accepted uploads and jobs retain their saved model.
 
-Kling snapshots twenty-percent body masking, no mesh, no depth and no vocal
-pitch processing. Identity matching or scene review establishes distinct
+Kling snapshots twenty-percent body masking, no mesh and no depth. Admin → Audio
+processing has independent MiniMax (`audio_processing`) and Kling
+(`kling_audio_processing`) switches; both default off. Each enables vocal
+isolation and a three-semitone pitch increase without changing timing, embedding
+those vocals in that model's submitted guide. Switching one does not affect the other.
+Kling pins this choice when the upload ticket is accepted; already accepted jobs
+retain their saved audio mode. Send without audio takes priority and skips vocal
+processing. Identity matching or scene review establishes distinct
 person-to-reference colors; uncertain multi-person guides cannot silently
 submit shared-cyan identity guidance. The final guide is separately resized
 with square pixels and exact display aspect to satisfy Kling's minimum input
 height, without changing working masks or tap coordinates. It uses edit mode,
-720p and original-audio mode, and export restores the source soundtrack.
+720p and `audio_setting: "origin"`, which keeps the submitted guide's audio rather
+than asking Kling to regenerate it. Export always restores the full original
+soundtrack from the selected upload interval, including when the guide used
+pitched vocals or no audio. The prompt explicitly describes these two guide modes.
 Watermarks, comparisons, character retention, Library progress, provider-slot
 limits, duplicate submission protection and refunds use the existing flow.
 

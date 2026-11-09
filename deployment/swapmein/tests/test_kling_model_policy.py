@@ -1,4 +1,7 @@
 """Model access, pricing and immutable uploads; never submits paid inference."""
+from io import BytesIO
+import json
+from PIL import Image
 import pytest
 import swapmein.app as gateway
 from swapmein.commerce import (generation_credit_cost, generation_quote, default_catalog,
@@ -76,6 +79,82 @@ def test_long_kling_pins_replicate_and_survives_flag_change(api, monkeypatch):
     assert job['generation_model'] == KLING and job['preparation_provider'] == 'replicate'
     assert job['face_mesh'] is False and job['depth_guidance'] is False
     assert not provider.submissions
+
+
+@pytest.mark.parametrize('enabled,silent',[(True,False),(False,False),(True,True)])
+def test_kling_audio_choice_is_pinned_at_ticket_acceptance(api,monkeypatch,enabled,silent):
+    client,records,cloud,provider=api;headers,_=authenticated(api)
+    monkeypatch.setenv('REPLICATE_API_TOKEN','replicate-test-token')
+    records.data[PATH]={'kling4_enabled':True,'audio_processing':not enabled,'kling_audio_processing':enabled}
+    body=options(30);body['setup']['submit_without_audio']=silent
+    response=client.post('/api/uploads',headers=headers,json=body)
+    assert response.status_code==201,response.text
+    jobid=response.json()['id'];manifest=records.data[f'uploads/{jobid}/manifest.json']
+    expected=enabled and not silent
+    assert manifest['generation_snapshot']['audio_processing'] is expected
+    records.data[PATH]['kling_audio_processing']=not enabled
+    assert client.post(f'/api/uploads/{jobid}/complete',headers=headers).status_code==202
+    job=records.data[f'jobs/{jobid}.json']
+    assert job['audio_processing'] is expected and job['restore_original_audio'] is True
+    assert job['face_mesh'] is False and job['depth_guidance'] is False
+    assert not provider.submissions
+
+
+def test_legacy_accepted_kling_ticket_keeps_saved_audio_off(api):
+    client,records,cloud,provider=api;headers,_=authenticated(api)
+    records.data[PATH]={'kling4_enabled':True,'kling_audio_processing':False}
+    response=client.post('/api/uploads',headers=headers,json=options())
+    assert response.status_code==201,response.text
+    jobid=response.json()['id']
+    records.data[PATH]['kling_audio_processing']=True
+    assert client.post(f'/api/uploads/{jobid}/complete',headers=headers).status_code==202
+    assert records.data[f'jobs/{jobid}.json']['audio_processing'] is False
+    assert not provider.submissions
+
+
+def test_multipart_kling_keeps_audio_processing_with_original_audio_restore(api):
+    client,records,cloud,provider=api;headers,_=authenticated(api)
+    records.data[PATH]={'kling4_enabled':True,'audio_processing':False,'kling_audio_processing':True}
+    image=BytesIO();Image.new('RGB',(256,256),'blue').save(image,format='PNG')
+    response=client.post('/api/jobs',headers=headers,data={'setup':json.dumps(options()['setup'])},
+        files={'clip':('video.mp4',b'video'),'reference':('photo.png',image.getvalue(),'image/png')})
+    assert response.status_code==202,response.text
+    job=records.data[f"jobs/{response.json()['id']}.json"]
+    assert job['audio_processing'] is True and job['restore_original_audio'] is True
+    assert not provider.submissions
+
+
+@pytest.mark.parametrize('model',[KLING,MINIMAX])
+@pytest.mark.parametrize('minimax_audio,kling_audio',[(False,False),(True,False),(False,True),(True,True)])
+def test_audio_defaults_are_independent_between_models(api,model,minimax_audio,kling_audio):
+    client,records,cloud,provider=api;headers,_=authenticated(api)
+    records.data[PATH]={'kling4_enabled':True,'audio_processing':minimax_audio,
+                        'kling_audio_processing':kling_audio}
+    body=options();body['setup']['generation_model']=model
+    response=client.post('/api/uploads',headers=headers,json=body)
+    assert response.status_code==201,response.text
+    jobid=response.json()['id']
+    assert client.post(f'/api/uploads/{jobid}/complete',headers=headers).status_code==202
+    assert records.data[f'jobs/{jobid}.json']['audio_processing'] is (kling_audio if model==KLING else minimax_audio)
+    assert not provider.submissions
+
+
+def test_admin_can_save_kling_audio_without_changing_minimax_and_checks_access(api,monkeypatch):
+    client,records,cloud,provider=api
+    monkeypatch.setenv('COMMERCE_OWNER_EMAILS','owner@example.com')
+    monkeypatch.setattr(gateway,'verify_account',lambda token,_:{'email':
+        'owner@example.com' if token=='owner' else 'user@example.com'})
+    url='/api/commerce/admin/pipeline';headers={'X-Firebase-Token':'owner'}
+    response=client.post(url,headers=headers,json={'revision':0,'kling_audio_processing':True})
+    assert response.status_code==200,response.text
+    assert response.json()['kling_audio_processing'] is True and response.json()['audio_processing'] is False
+    response=client.post(url,headers=headers,json={'revision':1,'audio_processing':True})
+    assert response.json()['audio_processing'] is True and response.json()['kling_audio_processing'] is True
+    response=client.post(url,headers=headers,json={'revision':2,'kling_audio_processing':False})
+    assert response.json()['audio_processing'] is True and response.json()['kling_audio_processing'] is False
+    assert client.post(url,headers=headers,json={'revision':3,'kling_audio_processing':1}).status_code==422
+    assert client.post(url,headers={'X-Firebase-Token':'user'},json={'revision':3,'kling_audio_processing':True}).status_code==403
+    assert client.post(url,headers=headers,json={'revision':0,'kling_audio_processing':True}).status_code==409
 
 
 def test_quote_is_model_specific_and_pinned_after_catalog_change(api, monkeypatch):

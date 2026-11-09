@@ -15,14 +15,14 @@ def test_audio_toggle_defaults_off_is_owner_only_and_rejects_stale_saves(api, mo
     monkeypatch.setenv("COMMERCE_OWNER_EMAILS", "frank@whipsnapfilms.com")
     monkeypatch.setattr(gateway, "verify_account", lambda token, project: {
         "account_id": digest(token), "email": "frank@whipsnapfilms.com" if token == "owner" else "user@example.com"})
-    assert pipeline_settings(records) == {"revision": 0, "audio_processing": False, "hide_audio_toggle": False, "multi_characters": True, "kling4_enabled": False, "multi_person_generation_route": "current", "prompt_variant": "cloudflare_identity_v1",
+    assert pipeline_settings(records) == {"revision": 0, "audio_processing": False, "kling_audio_processing": False, "hide_audio_toggle": False, "multi_characters": True, "kling4_enabled": False, "minimax_2k_enabled": True, "multi_person_generation_route": "current", "prompt_variant": "cloudflare_identity_v1",
         "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "matching_no_review": False, "depth_guidance": False, "face_mesh_enabled": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False}
     url = "/api/commerce/admin/pipeline"
     body = {"revision": 0, "audio_processing": True}
     assert client.post(url, headers={"X-Firebase-Token": "user"}, json=body).status_code == 403
     assert client.post(url, headers={"X-Firebase-Token": "owner"}, json={**body, "audio_processing": 1}).status_code == 422
     response = client.post(url, headers={"X-Firebase-Token": "owner"}, json=body)
-    assert response.json() == {"revision": 1, "audio_processing": True, "hide_audio_toggle": False, "multi_characters": True, "kling4_enabled": False, "multi_person_generation_route": "current", "prompt_variant": "cloudflare_identity_v1",
+    assert response.json() == {"revision": 1, "audio_processing": True, "kling_audio_processing": False, "hide_audio_toggle": False, "multi_characters": True, "kling4_enabled": False, "minimax_2k_enabled": True, "multi_person_generation_route": "current", "prompt_variant": "cloudflare_identity_v1",
         "preparation_provider": "workers", "replicate_api_key_configured": False, "retry_missing_masks_with_sam": False, "matching_no_review": False, "depth_guidance": False, "face_mesh_enabled": True, "face_mesh_masked_default": True, "face_mesh_unmasked_default": False, "face_mesh_user_control": False,
         "self_hosted_workers": {route: {"ready": False,
             "message": "Connect and verify the private CharacterSwap worker before enabling this route.",
