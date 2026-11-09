@@ -305,7 +305,7 @@ describe("live BYOK pipeline", () => {
     expect(() => validateLiveSetup({...state, targets: state.targets.map((target, index) => index === 4
       ? {...target, anchor: {...target.anchor, time: 6}} : target)})).toThrow(/inside the chosen section/);
     expect(() => validateLiveSetup({...state, targets: [state.targets[0], state.targets[0]]})).toThrow(/up to five/);
-    expect(() => validateLiveSetup({...state, replaceAllPeople: true})).toThrow(/one reference/);
+    expect(() => validateLiveSetup({...state, replaceAllPeople: true})).toThrow(/one replacement character/);
     expect(requests).not.toHaveBeenCalled();
   });
 

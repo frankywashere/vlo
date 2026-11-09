@@ -262,7 +262,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       validateLiveSetup(state);
       if(state.generationModel!=="kling-4-0"&&state.generationResolution==="2K"&&state.minimax2kEnabled===false)throw new LivePipelineError("MiniMax 2K is currently unavailable. Choose 768p to continue.");
       if (config?.multi_characters === false && (state.targets.length > 1 || state.replaceAllPeople)) {
-        throw new LivePipelineError("Multi-characters is currently off. Select one person and one reference image.");
+        throw new LivePipelineError("Multi-characters is currently off. Select one person. You can still add reference angles for that character.");
       }
       if (currentJob.current && !["failed", "completed"].includes(currentJob.current.status)) {
         throw new LivePipelineError("Your current job is retained. Review it before preparing another swap.");

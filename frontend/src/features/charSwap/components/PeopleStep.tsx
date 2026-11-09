@@ -119,11 +119,11 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
           Replace all people
         </Button>
         <Typography variant="body2" color="text.secondary" sx={{mt: 1}}>
-          Use one reference image for everyone in every scene. Each person becomes a separate version of that character.
+          Use one replacement character, with optional reference angles, for everyone in every scene. Each person becomes a separate version of that character.
           {replaceAllPeople ? " Tap a person below to switch back to individual selections." : " Or tap up to five people below and give each their own replacement."}
         </Typography>
       </Box>}
-      {maxPeople === 1 && <Alert severity="info">Select one person and one reference image. Multi-characters is currently off.</Alert>}
+      {maxPeople === 1 && <Alert severity="info">Select one person. You can still add reference angles for that character. Multi-characters is currently off.</Alert>}
       {maxPeople === 1 && (targets.length > 1 || replaceAllPeople) && <Alert severity="warning">Remove extra selections before continuing. Your existing selections have been kept.</Alert>}
       {targets.length > 1 && <Alert severity="warning">Replacing multiple people is experimental and may not produce the intended result.</Alert>}
       <VideoPreview
@@ -309,7 +309,7 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
         </Alert>
       )}
       <Typography variant="body2" color="text.secondary">
-        {replaceAllPeople ? "You’ll choose one replacement image for everyone next." : "You’ll choose a replacement image for each person next."}
+        {replaceAllPeople ? "You’ll choose one replacement character and their reference photos next." : "You’ll add reference photos for each replacement character next."}
       </Typography>
     </Stack>
   );

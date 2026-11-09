@@ -573,7 +573,7 @@ export function CharSwapWalkthrough({
                     " credits. Your choices are saved while you top up."}
               </Alert>
             )}
-          {singleCharacterBlocked && <Alert severity="warning" sx={{mb: 2}}>Multi-characters is currently off. Keep one person and one reference image before submitting.</Alert>}
+          {singleCharacterBlocked && <Alert severity="warning" sx={{mb: 2}}>Multi-characters is currently off. Keep one selected person before submitting. You can still add reference angles for that character.</Alert>}
           {retryNotice && <Alert severity="info" sx={{mb: 2}}>{retryNotice}</Alert>}
           {(step !== "generation" || isUploadUnconfirmed(displayedPreparation)) && displayedPreparation && (
             <Box sx={{ mb: 2 }}>

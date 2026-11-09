@@ -231,7 +231,7 @@ export function AdminPage() {
                 setMessage(`Multi-characters ${enabled ? "enabled" : "disabled"} for new submissions. Existing jobs keep their saved setting.`);
               });
             }} />} label="Multi-characters" />
-          <Typography color="text.secondary">On by default. Turn off to allow only one selected person and one reference image. Applies to all users and new retries; existing jobs continue with their saved setting.</Typography>
+          <Typography color="text.secondary">On by default. Turn off to allow only one selected person. Multiple reference angles for that character are still allowed. Applies to all users and new retries; existing jobs continue with their saved setting.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.hide_audio_toggle ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

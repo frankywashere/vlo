@@ -270,7 +270,7 @@ function requestMessage(status: number): string {
 function capacityMessage(value: unknown): string | null {
   if (!isRecord(value) || typeof value.code !== "string") return null;
   const messages: Record<string, string> = {
-    single_character_only: "Multi-characters is currently off. Select one person and one reference image.",
+    single_character_only: "Multi-characters is currently off. Select one person. You can still add reference angles for that character.",
     reference_dimensions: "The reference image is too narrow, too wide, or outside the supported size. Use an image with both sides between 256 and 5760 pixels and a width-to-height ratio between 0.4 and 2.5. Crop it or choose a different image.",
     reference_format: "Use one still JPG, PNG, or WebP reference image.",
     reference_unreadable: "The reference image could not be opened. Choose another JPG, PNG, or WebP image.",
@@ -679,7 +679,7 @@ export function validateLiveSetup(state: WalkthroughState) {
   if (!state.targets.length || state.targets.length > MAX_TARGET_PEOPLE
       || new Set(state.targets.map((target) => target.id)).size !== state.targets.length
       || (state.replaceAllPeople && state.targets.length !== 1))
-    throw new LivePipelineError("Choose up to five people, or Replace all people with one reference.");
+    throw new LivePipelineError("Choose up to five people, or use one replacement character for Replace all people.");
   const [start, end] = state.trim;
   const duration = trimDuration(state.trim);
   if (

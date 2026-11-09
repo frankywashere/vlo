@@ -771,8 +771,9 @@ stop submission rather than changing someone else's assignment. Initial and
 reviewed recovery share the same worker request/report validation.
 
 Admin → Experimental → “Multi-characters” defaults on. Turning it off limits new
-submissions to one selected person and one reference, including shared-reference
-multi-target and Replace all requests. Both multipart and direct-upload admission
+submissions to one selected person, with up to six photos of that character.
+Shared-reference multi-target and Replace all requests remain multi-character.
+Both multipart and direct-upload admission
 check the policy; direct-upload completion checks again to reject stale tickets.
 New jobs snapshot the policy, and generation uses that snapshot so existing
 prepared, queued, and running jobs are not retroactively blocked. Library retries
