@@ -323,6 +323,7 @@ describe("live BYOK pipeline", () => {
     expect(ticket.reference_sizes).toEqual([9]);
     expect(ticket.setup).toEqual({
       preparation_version: 2,
+      browser_source_duration: 10,
       trim: [1, 6], anchor: { x: 0.5, y: 0.4, time: 2 }, target_name: "Person 1", enhanced_character_masking: true, easy_mode: true, submit_without_audio: false, auto_generate: false,
       targets: [{id: "person", name: "Person 1", anchor: {x: .5, y: .4, time: 2}, reference_index: 0}],
     });
@@ -481,6 +482,48 @@ describe("live BYOK pipeline", () => {
     expect(result.current.job?.status).toBe("submission_unknown");
     expect(result.current.error).toContain("Do not generate again");
     expect(JSON.stringify(result.current)).not.toContain(USER_KEY);
+    await act(async () => { await result.current.generate(); });
+    expect(calls("/api/jobs/job-1/generate")).toHaveLength(1);
+  });
+
+  it.each(["mask_quality_identity_unresolved", "mask_quality_review_required", "tracking_review_invalid", "reopened_review"])(
+    "recovers the explicit %s preflight refusal and permits exactly one later submission",
+    async (code) => {
+      jobStatus = "ready";
+      let attempted = 0;
+      const review = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480,
+        tracking_revision: 2, source_preview_url: "https://storage.googleapis.com/source.mp4",
+        tracking_segments: [{id: "s0", start: 0, end: 5, start_frame: 0, end_frame: 120,
+          seek_time: 1, needs_review: true, reason: "scene_selection"}]};
+      requests.mockImplementation((input) => {
+        if (input === "/api/jobs/job-1/generate") {
+          attempted += 1;
+          return Promise.resolve(attempted === 1 ? code === "reopened_review" ? json(review) : json({code}, 409) : json({id: "job-1", status: "generating"}));
+        }
+        if (input === "/api/jobs/job-1") return Promise.resolve(json(review));
+        if (input === "/api/jobs/job-1/tracking-review") return Promise.resolve(json({id: "job-1", status: "ready"}));
+        return defaultRequest(input);
+      });
+      const {result} = await renderLive();
+      await act(async () => { await result.current.prepare(setup()); await result.current.generate(); });
+      expect(result.current.job?.status).toBe("tracking_review");
+      if (code !== "reopened_review") expect(result.current.error).toContain("No generation was submitted");
+      expect(calls("/api/jobs/job-1/generate")).toHaveLength(1);
+      await act(async () => { await result.current.resolveTracking([{segment_id: "s0", absent: false, anchor: {x: .4, y: .5, time: 1}}]); });
+      expect(result.current.job?.status).toBe("ready");
+      await act(async () => { await result.current.generate(); await result.current.generate(); });
+      expect(result.current.job?.status).toBe("generating");
+      expect(calls("/api/jobs/job-1/generate")).toHaveLength(2);
+    },
+  );
+
+  it("keeps a generic 409 submission conflict locked", async () => {
+    jobStatus = "ready";
+    requests.mockImplementation((input) => input === "/api/jobs/job-1/generate"
+      ? Promise.resolve(json({code: "submission_unknown"}, 409)) : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => { await result.current.prepare(setup()); await result.current.generate(); });
+    expect(result.current.job?.status).toBe("submission_unknown");
     await act(async () => { await result.current.generate(); });
     expect(calls("/api/jobs/job-1/generate")).toHaveLength(1);
   });

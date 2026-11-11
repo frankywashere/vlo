@@ -35,6 +35,7 @@ RECHECK_SAME_SCORE = .20
 MAX_REQUESTS = 120
 MAX_CANDIDATES = 24
 MAX_CONCURRENCY = 4
+MINIMUM_DIFFERENT_SCORE = .80
 INPUT_USD_PER_MILLION = .15
 
 
@@ -241,7 +242,8 @@ def _score_jobs(jobs, credentials, deadline, budget):
         pending = {}
         for _ in range(min(MAX_CONCURRENCY, len(jobs))):
             job = next(iterator)
-            pending[pool.submit(_call, job["payload"], credentials, deadline, budget)] = job
+            pending[pool.submit(_call, job["payload"], credentials, deadline, budget,
+                                **({"detailed": True} if job.get("focused") else {}))] = job
         try:
             while pending:
                 done, _ = wait(pending, return_when=FIRST_COMPLETED)
@@ -252,7 +254,8 @@ def _score_jobs(jobs, credentials, deadline, budget):
                 for _ in completed:
                     job = next(iterator, None)
                     if job is not None:
-                        pending[pool.submit(_call, job["payload"], credentials, deadline, budget)] = job
+                        pending[pool.submit(_call, job["payload"], credentials, deadline, budget,
+                                            **({"detailed": True} if job.get("focused") else {}))] = job
         except Exception:
             for future in pending:
                 future.cancel()
@@ -266,6 +269,8 @@ def _view_choices(shot, view):
 
 def _apply_results(results):
     for job, (answers, _, _) in results:
+        if job.get("focused"):
+            continue
         for local_person, person in enumerate(job["people"]):
             for candidate, column in enumerate(job["columns"]):
                 job["view"]["scores"][person][column] = answers[f"p{local_person}c{candidate}"]
@@ -284,6 +289,45 @@ def _view_jobs(shot, view, images, references):
     return jobs
 
 
+def _resolve_focused_results(results, job_id):
+    """Only affirmative different-person evidence can dismiss a brief SAM ID.
+
+    A same/uncertain result cannot establish absence or authorize one scene-wide
+    identity assignment for several fragmented IDs. Keep the existing review
+    path for those cases; stable matches retain their original acceptance rule.
+    """
+    for job, (answers, _, _) in results:
+        if not job.get("focused"):
+            continue
+        for probabilities in answers.values():
+            if (probabilities["same"] >= MINIMUM_SAME_SCORE
+                    or probabilities["different"] < MINIMUM_DIFFERENT_SCORE
+                    or probabilities["different"] <= probabilities["uncertain"]):
+                emit("cloudflare_matching_evidence", job_id=job_id, scene=job["scene"],
+                     outcome="unresolved_fragment", candidate_label=job["label"],
+                     sample_frame=job["view"]["frame"], probabilities=probabilities)
+                raise _unavailable("A brief person track needs scene review after identity rechecking.",
+                                   reason="fragment_identity_unresolved")
+        job["shot"]["excluded_labels"].add(job["label"])
+        emit("cloudflare_matching_evidence", job_id=job_id, scene=job["scene"],
+             outcome="fragment_different_person", candidate_label=job["label"],
+             sample_frame=job["view"]["frame"])
+
+
+def _candidate_view(frame, labels, candidate_labels, targets):
+    candidates = []
+    for label in candidate_labels:
+        region = dominant_region(labels, label)
+        if region is None:
+            candidates.append({"label": label, "box": None, "anchor": None, "discarded_pixels": 0})
+        else:
+            candidates.append({"label": label, "box": region["box"], "pixels": region["pixels"],
+                               "anchor": _anchor(labels, label, frame, box=region["box"]),
+                               "discarded_pixels": region["discarded_pixels"]})
+    return {"frame": frame, "candidates": candidates,
+            "scores": [[0.0] * len(candidates) for _ in targets]}
+
+
 def _needs_recheck(shot):
     if not shot["people"] or not shot["candidates"]:
         return False
@@ -296,6 +340,12 @@ def _needs_recheck(shot):
 
 def _resolve_views(shot, job_id):
     views = shot["used_views"]
+    if any(view["scores"][person][column] >= MINIMUM_SAME_SCORE
+           for column, candidate in enumerate(shot["candidates"])
+           if candidate["label"] in shot.get("excluded_labels", set())
+           for view in views for person in shot["people"]):
+        raise _unavailable("Person matches disagree with the focused track recheck. Check the scene matches.",
+                           reason="frame_identity_conflict")
     shot["scores"] = [[median(view["scores"][person][candidate] for view in views)
                        for candidate in range(len(shot["candidates"]))]
                       for person in range(len(views[0]["scores"]))]
@@ -303,7 +353,8 @@ def _resolve_views(shot, job_id):
     observations = [_view_choices(shot, view) for view in views]
     if (any(choice is None for choice in choices)
             and any(sum(view["candidates"][column]["box"] is not None for view in views) < min(2, len(views))
-                    for column in range(len(shot["candidates"])))):
+                    for column in range(len(shot["candidates"]))
+                    if shot["candidates"][column]["label"] not in shot.get("excluded_labels", set()))):
         # A brief entrant or fragmented track is not evidence that an unmatched
         # selected person is absent. Let the established review policy decide.
         emit("cloudflare_matching_evidence", job_id=job_id, scene=shot["scene"],
@@ -375,8 +426,11 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                 raise _unavailable("Automatic scene matching exceeded its time limit. Review the scenes to continue.", reason="deadline_exceeded")
             observed = set()
             samples = []
+            pixel_counts = {}
             for frame in range(start, end):
-                labels = {int(label) for label in np.unique(read(frame)) if label}
+                ids, counts = np.unique(read(frame), return_counts=True)
+                pixel_counts[frame] = {int(label): int(count) for label, count in zip(ids, counts) if label}
+                labels = set(pixel_counts[frame])
                 observed.update(labels)
                 samples.append((frame, labels))
             if len(observed) > MAX_CANDIDATES:
@@ -394,35 +448,29 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                  end_frame=end, sample_frame=sample, observed_labels=sorted(observed),
                  visible_labels=sorted(visible), locked_labels=sorted(set(locked.values())),
                  unseen_labels=sorted(unseen))
-            if unseen:
-                emit("cloudflare_matching_rejected", job_id=job_id, reason="within_scene_track_change",
-                     scene=scene, unseen_labels=sorted(unseen), requests_submitted=0)
-                raise _unavailable("A person track changes inside a scene. Review the scene selections to keep identities correct.", reason="within_scene_track_change")
             people = [index for index in range(len(targets)) if index not in locked]
             chosen_frames = sample_frames(samples, start, end)
             if not people:
                 chosen_frames = chosen_frames[:1]
-            views = []
             candidate_labels = sorted(observed - set(locked.values()))
-            for frame in chosen_frames:
-                labels = read(frame)
-                candidates = []
-                for label in candidate_labels:
-                    region = dominant_region(labels, label)
-                    if region is None:
-                        candidates.append({"label": label, "box": None, "anchor": None, "discarded_pixels": 0})
-                        continue
-                    candidates.append({"label": label, "box": region["box"], "pixels": region["pixels"],
-                        "anchor": _anchor(labels, label, frame, box=region["box"]),
-                        "discarded_pixels": region["discarded_pixels"]})
-                views.append({"frame": frame, "candidates": candidates,
-                              "scores": [[0.0] * len(candidates) for _ in targets]})
+            views = [_candidate_view(frame, read(frame), candidate_labels, targets) for frame in chosen_frames]
             candidates = [max((view["candidates"][column] for view in views), key=lambda item: item.get("pixels", 0))
                           for column in range(len(candidate_labels))]
+            focused_labels = unseen | {label for column, label in enumerate(candidate_labels)
+                if sum(view["candidates"][column]["box"] is not None for view in views) < min(2, len(views))}
+            focused_views = []
+            for label in sorted(focused_labels):
+                available = [frame for frame, labels in samples if label in labels]
+                # Inspect the actual sightings, never borrow a crop across a cut.
+                best = sorted(available, key=lambda frame: (-pixel_counts[frame][label], abs(frame - midpoint), frame))[:2]
+                focused_views.extend((label, _candidate_view(frame, read(frame), [label], targets)) for frame in best)
             shots.append({"scene": scene, "start": start, "end": end, "frame": sample,
                           "locked": locked, "candidates": candidates, "people": people,
-                          "views": views, "used_views": views[:2]})
-        decode_frames = [view["frame"] for shot in shots for view in shot["views"]] + [item[0] for item in anchor_labels.values()]
+                          "views": views, "used_views": views[:2], "focused_views": focused_views,
+                          "excluded_labels": set()})
+        decode_frames = ([view["frame"] for shot in shots for view in shot["views"]]
+                         + [view["frame"] for shot in shots for _, view in shot["focused_views"]]
+                         + [item[0] for item in anchor_labels.values()])
         with tempfile.TemporaryDirectory(prefix="identity-rgb-", dir=workdir) as temporary:
             images = _decode_frames(video_path, Path(temporary), decode_frames, width, height)
             references = [_image_url(images[anchor_labels[index][0]], anchor_labels[index][2]) for index in range(len(targets))]
@@ -430,12 +478,17 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
             for shot in shots:
                 for view in shot["used_views"]:
                     jobs.extend(_view_jobs(shot, view, images, references))
+            for shot in shots:
+                for label, view in shot["focused_views"]:
+                    for job in _view_jobs({"people": list(range(len(targets)))}, view, images, references):
+                        jobs.append({**job, "focused": True, "scene": shot["scene"], "label": label, "shot": shot})
             if len(jobs) > MAX_REQUESTS:
                 raise _unavailable("Automatic matching exceeds this clip's request limit. Review the scenes to continue.", reason="request_limit")
             emit("cloudflare_matching_requests_planned", job_id=job_id, requests=len(jobs),
                  locked_assignments=sum(len(shot["locked"]) for shot in shots))
             results = _score_jobs(jobs, credentials, deadline, budget)
             _apply_results(results)
+            _resolve_focused_results(results, job_id)
             rechecks = []
             for shot in shots:
                 if _needs_recheck(shot) and len(shot["views"]) > len(shot["used_views"]):
@@ -499,10 +552,12 @@ def match_tracks(video_path, masks_path, metadata, targets, *, credentials, work
                    "scene_count": len(shots), "requests": len(jobs), "input_tokens": usage_tokens,
                    "estimated_cost_usd": usage_tokens * INPUT_USD_PER_MILLION / 1_000_000,
                    "actual_billed_usd": None, "elapsed_seconds": round(time.monotonic() - started, 6),
-                   "matching_version": 2, "crop_method": "largest_connected_component",
+                   "matching_version": 3, "focused_different_score": MINIMUM_DIFFERENT_SCORE, "crop_method": "largest_connected_component",
                    "recheck_same_score": RECHECK_SAME_SCORE,
                    "scene_evidence": [{"scene": shot["scene"], "frames": [view["frame"] for view in shot["used_views"]],
                         "labels": [item["label"] for item in shot["candidates"]],
+                        "focused_checks": [{"label": label, "frame": view["frame"]} for label, view in shot["focused_views"]],
+                        "excluded_labels": sorted(shot["excluded_labels"]),
                         "scores": [view["scores"] for view in shot["used_views"]],
                         "crop_boxes": [[item["box"] for item in view["candidates"]] for view in shot["used_views"]],
                         "discarded_crop_pixels": [[item["discarded_pixels"] for item in view["candidates"]]

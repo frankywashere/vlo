@@ -13,7 +13,7 @@ from .guide_style import IDENTITY_DEPTH_STYLES, guide_style, compose_styles
 from .errors import PublicError
 from .diagnostics import emit, timed, wait_timing
 from .limits import MAX_SOURCE_BYTES
-from .media import Setup, create_poster, finish, kling_guide_media, normalize, original_guide, sam_input_video, select_label, validate_guide_media
+from .media import Setup, create_poster, finish, kling_guide_media, normalize, original_guide, probe, sam_input_video, select_label, validate_guide_media
 from .mask_geometry import resize_label_archive
 from .multi_tracking import build_selected_masks, selected_tracks, style_targets
 from .storage import Records, claim_job, release_preparation, preparation_leases, set_preparation_lease
@@ -125,6 +125,12 @@ class Pipeline:
                 self.update_job(job_id, replace_all_people=options.replace_all_people)
                 normalization_started = time.monotonic()
                 metadata = normalize(source, normalized, options)
+                duration_audit = {"browser_source_seconds": options.browser_source_duration,
+                    "server_source_seconds": metadata.get("source_duration"), "submitted_trim_start": options.trim[0],
+                    "submitted_trim_end": options.trim[1], "submitted_trim_seconds": round(options.trim[1] - options.trim[0], 6),
+                    "prepared_seconds": metadata["duration"], "prepared_frames": metadata["frames"]}
+                self.update_job(job_id, duration_audit=duration_audit)
+                emit("duration_prepared", job_id=job_id, **duration_audit)
                 metadata["anchor"].setdefault("time", metadata["anchor"].get("frame", 0) / 24)
                 if not options.easy_mode:
                     metadata["review_all_scenes"] = True
@@ -606,6 +612,63 @@ class Pipeline:
             recover_missing_masks=recover, generation_approved=saved.get("generation_after_review_revision") is not None)
         return saved
 
+    @timed("reviewed_mask_quality", job_arg="job")
+    def check_reviewed_mask_quality(self, job):
+        """Conservatively withhold suspect guide regions without changing identities."""
+        from .mask_quality import POLICY_VERSION, sanitize_reviewed_masks
+        from .scene_selection import mask_quality_targets
+        report = job.get("reviewed_mask_quality") or {}
+        revision = job.get("tracking_applied_revision", 0)
+        unsafe_ids = {target["id"] for target in job.get("normalized_targets", [])
+                      if target.get("guide_anchor_untrusted")}
+        withheld_ids = set(report.get("identity_recovery_target_ids") or [])
+        if (report.get("policy_version") == POLICY_VERSION
+                and report.get("review_revision") == revision
+                and report.get("output_uri") == job.get("reviewed_masks_uri")
+                and unsafe_ids <= withheld_ids):
+            return job
+        # Old records lacking saved choices cannot be geometrically validated.
+        # Every newly resolved review records these inputs before this stage.
+        if not job.get("tracking_choices") or not job.get("tracking_assignments"):
+            return job
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original, checked = root / "reviewed.zip", root / "checked.zip"
+            self.cloud.download(job["reviewed_masks_uri"], original, 80 * 1024 * 1024)
+            report = sanitize_reviewed_masks(original, job["tracking_metadata"], job["tracking_plan"],
+                job["tracking_choices"], job["tracking_assignments"], checked, review_revision=revision)
+            # A bad mask must not leave identity tint behind while the user
+            # confirms that person on original pixels in the recovery review.
+            targets = mask_quality_targets(job.get("normalized_targets", []), report)
+            if any(target.get("guide_anchor_untrusted") for target in targets):
+                from .mask_quality_recovery import withhold_untrusted_masks
+                withheld = root / "identity-withheld.zip"
+                report = withhold_untrusted_masks(checked, withheld,
+                    {**job, "reviewed_mask_quality": report, "normalized_targets": targets})
+                checked = withheld
+            uri = job["reviewed_masks_uri"]
+            if report["sha256"] != report["input_sha256"] and report.get("removed_pixels", 0):
+                uri = self.cloud.upload(self.settings.worker_bucket,
+                    preparation_prefix(job, "worker") + f"quality-masks-{uuid.uuid4().hex}.zip", checked, "application/zip")
+            if uri == job["reviewed_masks_uri"]:
+                report["sha256"] = report["input_sha256"]
+            report["output_uri"] = uri
+        targets = mask_quality_targets(job.get("normalized_targets", []), report)
+        saved = self.update_job(job["id"],
+            pre_quality_masks_uri=job.get("pre_quality_masks_uri") or job["reviewed_masks_uri"],
+            reviewed_masks_uri=uri, reviewed_coverage=report["coverage"],
+            reviewed_mask_quality=report, normalized_targets=targets,
+            **({"review_generation_queued": False, "capacity_generation_authorized": False,
+                "capacity_approval_revision": None, "generation_capacity_token": None,
+                "mask_quality_approved_sha256": None, "mask_quality_approved_revision": None}
+               if report.get("review_required") else {}),
+            generation_after_review_revision=None if report.get("review_required")
+                else job.get("generation_after_review_revision"))
+        emit("reviewed_mask_quality_checked", job_id=job["id"], policy_version=POLICY_VERSION,
+             removed_pixels=report.get("removed_pixels", 0), suppressed_ranges=report.get("suppressed_ranges", []),
+             review_required=report.get("review_required", False))
+        return saved
+
     @timed("reviewed_guide_rebuild", job_arg="job")
     def rebuild_reviewed_guide(self, job, remaining):
         """Reuse saved assets; optionally recover missing masks before approved generation."""
@@ -614,6 +677,7 @@ class Pipeline:
         if job.get("recover_missing_masks") and not job.get("mask_recovery_completed"):
             from .mask_recovery import recover_reviewed_masks
             job = recover_reviewed_masks(self, job, remaining)
+        job = self.check_reviewed_mask_quality(job)
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
         self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")
@@ -658,17 +722,28 @@ class Pipeline:
             and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
             and job.get("generation_after_review_revision") is not None
             and job.get("generation_after_review_revision") == job.get("tracking_applied_revision"))
-        self.update_job(job_id, status="ready", guide_uri=guide_uri,
+        from .mask_quality_recovery import identity_recovery_fields
+        recovery = identity_recovery_fields(job)
+        ready_fields = dict(status="ready", guide_uri=guide_uri,
             review_generation_queued=auto_submit,
             message=("Your scene matches are applied. Generation is queued." if auto_submit else "Your guide is ready. "
                 + (f"{job['coordinate_fallback_sections']} selections use position and time because SAM found no mask. " if job.get("coordinate_fallback_sections") else "")
+                + ("Some uncertain selection masks were withheld; review the original person positions and preview. "
+                   if job.get("reviewed_mask_quality", {}).get("review_required") else "")
                 + "Review the masked preview, then approve it to start rendering."),
             tracking_reviewed=True, review_required=True, mask_style=mask_style,
             mask_frames=job["tracking_metadata"]["frames"],
             mask_coverage_min=min(job["reviewed_coverage"]),
             preparation_kind="initial", tracking_revision=job["tracking_applied_revision"] + 1)
+        if recovery:
+            ready_fields.update(recovery)
+        self.update_job(job_id, **ready_fields)
         emit("tracking_guide_rebuilt", job_id=job_id,
             section_count=len(job["tracking_plan"]["segments"]))
+        if recovery:
+            emit("mask_identity_review_reopened", job_id=job_id,
+                 target_ids=recovery["identity_recovery_target_ids"], revision=recovery["tracking_revision"])
+            return
         if job.get("mask_recovery_conflicts"):
             self.update_job(job_id, message="Your selections are saved, but recovered masks overlap another assigned person. Review the guide before generating. No generation was submitted.")
         elif auto_submit:
@@ -721,6 +796,16 @@ class Pipeline:
                 else:
                     output_dimensions = finish(raw, original, output, job["duration"], restore_audio=False,
                         **({"watermark": True} if job.get("setup", {}).get("add_watermark") else {}))
+                try:
+                    exported_media = probe(output)
+                    exported_video = next(stream for stream in exported_media.get("streams", []) if stream.get("codec_type") == "video")
+                    output_audit = {"output_seconds": float(exported_media.get("format", {}).get("duration", 0)),
+                                    "video_seconds": float(exported_video.get("duration", 0)),
+                                    "video_frames": exported_video.get("nb_frames")}
+                    self.update_job(job_id, duration_output_audit=output_audit)
+                    emit("duration_exported", job_id=job_id, requested_seconds=job["duration"], **output_audit)
+                except Exception as error:
+                    emit("duration_export_audit_failed", job_id=job_id, error=error)
                 prefix = f"library/{job['account_id']}/{job_id}/" if job.get("account_id") else f"outputs/{job_id}/"
                 output_uri = self.cloud.upload(self.settings.app_bucket, prefix + f"recastfx-{uuid.uuid4().hex}.mp4", output, "video/mp4")
                 comparison_fields = {}

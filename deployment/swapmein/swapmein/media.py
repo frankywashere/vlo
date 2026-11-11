@@ -87,6 +87,7 @@ class Setup(BaseModel):
     replace_all_people: bool = Field(default=False, strict=True)
     preparation_version: Literal[1, 2] = 2
     trim: tuple[float, float]
+    browser_source_duration: float | None = Field(default=None, gt=0, le=86400)
     anchor: Anchor | None = None
     targets: list[Target] | None = Field(default=None, min_length=1, max_length=5)
     target_name: str = Field(default="Selected person", min_length=1, max_length=40)
@@ -218,7 +219,8 @@ def normalize(source: Path, output: Path, setup: Setup, *, high_detail=False):
         raise PublicError("Use a video with a soundtrack for the vocal guide.")
     start, end = setup.trim
     duration = round(end - start)
-    if end > float(metadata.get("format", {}).get("duration", 0)) + .05:
+    source_duration = float(metadata.get("format", {}).get("duration", 0))
+    if end > source_duration + .05:
         raise PublicError("The trimmed section goes past the end of the video.")
     rotation = float(video.get("tags", {}).get("rotate", 0))
     for data in video.get("side_data_list", []):
@@ -284,7 +286,7 @@ def normalize(source: Path, output: Path, setup: Setup, *, high_detail=False):
                 "reference_index": target.reference_index,
                 **({"reference_indexes": target.reference_indexes} if target.reference_indexes is not None else {})}
                for target in setup.targets or []]
-    return {"duration": duration, "width": width, "height": height,
+    return {"duration": duration, "source_duration": source_duration, "width": width, "height": height,
             "frames": duration * 24, "anchor": anchor, "scene_cuts": scene_cuts,
             "preparation_version": setup.preparation_version,
             "resolution_policy": "source_detail_2k_no_upscale" if high_detail else "legacy_480p" if setup.preparation_version == 1 else "short_side_768_no_upscale",

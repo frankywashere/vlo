@@ -120,6 +120,9 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
             interval = f"from {scene['start']:.2f} to {scene['end']:.2f} seconds"
             if scene["absent"]:
                 instructions.append(f"Person {index + 1} is absent {interval}; do not replace anyone for this assignment.")
+            elif scene.get("guide_anchor_untrusted"):
+                instructions.append(f"Person {index + 1} {interval}: local selection uncertain; use this same original "
+                    f"source performer from confirmed appearances and {reference_text}, not a foreground object as the anchor.")
             else:
                 point = scene["anchor"]
                 instructions.append(f"In the scene {interval}, identify Person {index + 1} at "
@@ -128,6 +131,10 @@ def multi_replacement_prompt(duration: int, targets: list[dict], enhanced_maskin
                 if scene.get("coordinate_fallback"):
                     instructions.append("This assignment has no detected mask in this interval. The selected person remains in original RGB footage; "
                         "use the stated position and timestamp, not a depth color, to identify them. Do not substitute a different masked person.")
+            for withheld in scene.get("guide_mask_suppressed_ranges", []):
+                instructions.append(f"Person {index + 1} from {withheld['start']:.2f} to {withheld['end']:.2f} seconds: "
+                    "selection tint withheld because its mask is uncertain, not because the performer is absent. "
+                    "Use confirmed source identity and reliable positions, never another person's mask.")
     return (
         "Use reference video 1 as the source scene and precise motion guide. "
         + " ".join(instructions) + " "
@@ -167,10 +174,16 @@ def compact_multi_scene_prompt(duration: int, targets: list[dict], enhanced_mask
             interval = f"{scene['start']:.2f}-{scene['end']:.2f}s"
             if scene["absent"]:
                 lines.append(f"{interval}: absent.")
+            elif scene.get("guide_anchor_untrusted"):
+                lines.append(f"{interval}: local selection uncertain; use the same original source performer "
+                             "from confirmed appearances, not a foreground object as the identity anchor.")
             else:
                 point = scene["anchor"]
                 lines.append(f"{interval}: at {point['time']:.2f}s x={point['x'] * 100:.0f}% y={point['y'] * 100:.0f}%"
                     + ("; no mask, identify from original pixels, not another masked person." if scene.get("coordinate_fallback") else "."))
+            for withheld in scene.get("guide_mask_suppressed_ranges", []):
+                lines.append(f"{withheld['start']:.2f}-{withheld['end']:.2f}s: selection tint withheld because its mask "
+                             "is uncertain, not because the performer is absent; use confirmed source identity.")
     lines.append("Replace each selected person's entire head, hands, body and feet. Keep assignments separate through overlaps and cuts. "
         "Follow original motion, pose, interactions, expressions and speaking timing. Keep all other people unchanged; "
         "do not merge people, add characters, or leave human body parts. Reference images supply appearance only; "
@@ -247,6 +260,9 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
             audio_processing=audio_processing, submit_without_audio=submit_without_audio)
     if generation_resolution not in {"768P", "2K"}:
         raise PublicError("Choose MiniMax 768P or 2K.")
+    if isinstance(targets, list) and any(isinstance(target, dict) and target.get("guide_anchor_untrusted") for target in targets):
+        raise PublicError("Select a reliable source-person position before generating this guide.",
+                          409, code="mask_quality_identity_unresolved")
     prompt_variant = normalize_prompt_variant(prompt_variant)
     images = [image_url] if isinstance(image_url, str) else image_url
     if (not isinstance(images, list) or not 1 <= len(images) <= 6
@@ -326,6 +342,9 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
     if mask_style not in {"identity_overlay_20", "identity_overlay_multi_20",
                           "cyan_overlay_20", "cyan_overlay_multi_20"}:
         raise PublicError("Kling requires its prepared twenty-percent body-mask guide.", 409)
+    if isinstance(targets, list) and any(isinstance(target, dict) and target.get("guide_anchor_untrusted") for target in targets):
+        raise PublicError("Select a reliable source-person position before generating this guide.",
+                          409, code="mask_quality_identity_unresolved")
     shared = mask_style in SHARED_CYAN_STYLES
     lines = ["Edit @Video1."]
     if replace_all_people:
@@ -366,11 +385,20 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
                 if scene["absent"]:
                     lines.append(f"From {start:.2f} to {end:.2f} seconds that person is absent; "
                                  f"do not replace anyone with {references} in that interval.")
+                elif scene.get("guide_anchor_untrusted"):
+                    lines.append(f"From {start:.2f} to {end:.2f} seconds the local selection is uncertain. "
+                                 f"Identify the same original source performer assigned to {references} "
+                                 "from their confirmed appearances; do not use a foreground object as an identity anchor.")
                 else:
                     at = scene["anchor"]
                     lines.append(f"From {start:.2f} to {end:.2f} seconds identify that person "
                                  f"at {at['time']:.2f} seconds, x={at['x'] * 100:.0f}%, "
                                  f"y={at['y'] * 100:.0f}%.")
+                for withheld in scene.get("guide_mask_suppressed_ranges", []):
+                    lines.append(f"From {withheld['start']:.2f} to {withheld['end']:.2f} seconds "
+                                 f"the {color} selection tint for {references} is withheld because its mask is uncertain. "
+                                 "This does not mean that performer is absent; use confirmed source identity "
+                                 "and reliable positions, never another person's tint.")
         if shared:
             lines.append("All selected people share cyan selection tint; it is not an identity color. "
                          "Use the stated positions and times to keep each reference assignment separate across cuts.")

@@ -1,10 +1,13 @@
 """Owned scene choices save before media work; background resolution gates generation."""
 import copy
 import json
+from io import BytesIO
 import re
 import time
 from zipfile import ZipFile
 
+import numpy as np
+from PIL import Image
 import pytest
 
 import swapmein.app as gateway
@@ -40,10 +43,21 @@ def tracking_review(api, monkeypatch):
     )
     calls = {"resolved": [], "downloads": [], "uploads": [], "task_tokens": []}
 
+    def selected_masks(path, absent=False):
+        # Match the real resolver's categorical mask archive so the following
+        # quality stage is exercised rather than receiving a placeholder ZIP.
+        pixels = np.zeros((4, 4), np.uint16)
+        if not absent:
+            pixels[2, 2] = 1
+        image = BytesIO()
+        Image.fromarray(pixels).save(image, "PNG")
+        with ZipFile(path, "w") as archive:
+            for frame in range(120):
+                archive.writestr(f"labels/labels_{frame:05d}.png", image.getvalue())
+
     def download(uri, path, maximum):
         calls["downloads"].append((uri, maximum))
-        with ZipFile(path, "w") as archive:
-            archive.writestr("placeholder", b"The resolver is stubbed in API tests.")
+        selected_masks(path)
 
     def upload(bucket, key, path, content_type):
         assert path.is_file()
@@ -54,11 +68,10 @@ def tracking_review(api, monkeypatch):
         assert archive.is_file()
         calls["resolved"].append(copy.deepcopy(choices))
         absent = choices[0]["absent"]
-        with ZipFile(output, "w") as selected:
-            selected.writestr("selected-mask", b"test")
+        selected_masks(output, absent)
         return {"coverage": [0 if absent else 1] * 120,
-                "assignments": [{"segment_id": "segment-000", "absent": absent,
-                                 "label": None if absent else 1}]}
+                "assignments": [{"segment_id": "segment-000", "start_frame": 0, "end_frame": 120,
+                                 "absent": absent, "selected_label": None if absent else 1}]}
 
     def enqueue(kind, queued_id, *, task_token=None):
         calls["task_tokens"].append(task_token)

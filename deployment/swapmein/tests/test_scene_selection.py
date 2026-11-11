@@ -207,3 +207,20 @@ def test_scene_wording_is_preserved_with_performance_guidance_when_prompt_fits(s
         assert payload["prompt"] == standard
         tested_near_limit |= len(standard) > 6800
     assert tested_near_limit
+
+
+def test_mask_quality_guidance_keeps_identity_and_absence_but_rejects_bad_local_anchor():
+    from swapmein.scene_selection import mask_quality_targets
+    original = [{"id": "person-1", "anchor": {"x": .2, "y": .3, "time": 0}, "scenes": [
+        {"start": 0, "end": 1, "absent": False, "anchor": {"x": .2, "y": .3, "time": .5}},
+        {"start": 1, "end": 2, "absent": False, "anchor": {"x": .9, "y": .2, "time": 1.5}},
+        {"start": 2, "end": 3, "absent": True, "anchor": None}]}]
+    report = {"suppressed_ranges": [{"target_id": "person-1", "start_frame": 24,
+               "end_frame": 48, "reason": "ambiguous_seed"}]}
+    result = mask_quality_targets(original, report)
+    assert result[0]["anchor"] == original[0]["anchor"]
+    assert result[0]["scenes"][0] == original[0]["scenes"][0]
+    assert result[0]["scenes"][1]["guide_anchor_untrusted"] is True
+    assert not result[0]["scenes"][1]["absent"]
+    assert result[0]["scenes"][2] == original[0]["scenes"][2]
+    assert "guide_anchor_untrusted" not in original[0]["scenes"][1]

@@ -158,3 +158,20 @@ def test_delayed_preparation_recovers_only_an_unstarted_owned_reservation(enable
         assert identifier not in leases and saved["status"] == "queued"
         assert saved["tracking_task_token"] != token
         assert cloud.enqueued == [("admit", identifier)]
+
+
+def test_withheld_masks_block_stale_auto_tasks_until_explicit_guide_approval(enabled):
+    client, records, cloud, provider = enabled
+    headers, owner = authenticated(enabled)
+    identifier = ready_job(records, owner)
+    job = records.data['jobs/' + identifier + '.json']
+    job.update(access_mode='api-key', tracking_applied_revision=1,
+        reviewed_mask_quality={'review_required':True,'sha256':'new-guide'},
+        capacity_generation_authorized=True,capacity_approval_revision=1)
+    job['setup'].update(auto_generate=True,easy_mode=True)
+    assert client.post('/internal/generate',json={'job_id':identifier}).status_code == 200
+    assert not provider.submissions
+    approved = client.post('/api/jobs/' + identifier + '/generate',headers=headers,json={'approved':True})
+    assert approved.status_code == 200 and approved.json()['status']=='generating'
+    assert len(provider.submissions)==1
+    assert records.data['jobs/' + identifier + '.json']['mask_quality_approved_sha256']=='new-guide'

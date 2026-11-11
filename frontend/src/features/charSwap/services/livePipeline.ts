@@ -209,12 +209,14 @@ const JOB_STATUSES: ReadonlySet<string> = new Set([
 export class LivePipelineError extends Error {
   readonly status: number | null;
   readonly segmentId: string | null;
+  readonly code: string | null;
 
-  constructor(message: string, status: number | null = null, segmentId: string | null = null) {
+  constructor(message: string, status: number | null = null, segmentId: string | null = null, code: string | null = null) {
     super(message);
     this.name = "LivePipelineError";
     this.status = status;
     this.segmentId = segmentId;
+    this.code = code;
   }
 }
 
@@ -283,6 +285,8 @@ function capacityMessage(value: unknown): string | null {
     tracking_background: "That tap did not land on a detected person. Choose a clearer frame and tap inside the person's body, then apply your matches again.",
     tracking_target_conflict: "Two replacements are assigned to the same person in this scene. Choose the correct person for each replacement, or mark one not in this scene.",
     tracking_review_invalid: "This scene review has changed. Refresh the review before applying your matches again.",
+    mask_quality_identity_unresolved: "Choose a clearer frame and select the original person again in the highlighted scene review.",
+    mask_quality_review_required: "Some uncertain selection tint was withheld. Review the updated guide before approving generation.",
   };
   let message = Object.hasOwn(messages, value.code) ? messages[value.code] : undefined;
   const details = isRecord(value.tracking_details) ? value.tracking_details : null;
@@ -334,7 +338,8 @@ async function requestJson(
       let detail: unknown;
       try { detail = await response.json(); } catch { /* Never echo raw error bodies. */ }
       const segmentId = isRecord(detail) && ["tracking_background", "tracking_target_conflict"].includes(String(detail.code)) && typeof detail.segment_id === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(detail.segment_id) ? detail.segment_id : null;
-      throw new LivePipelineError(capacityMessage(detail) ?? requestMessage(response.status), response.status, segmentId);
+      const code = isRecord(detail) && typeof detail.code === "string" && /^[a-z_]{1,64}$/.test(detail.code) ? detail.code : null;
+      throw new LivePipelineError(capacityMessage(detail) ?? requestMessage(response.status), response.status, segmentId, code);
     }
     return await response.json();
   } catch (error) {
@@ -838,6 +843,7 @@ export async function createLiveJob(
           ...(state.generationModel === "kling-4-0" ? {generation_resolution:"720p"} : state.generationResolution === "2K" ? {generation_resolution:"2K"} : {}),
           ...(typeof state.generationCreditQuote === "number" ? {generation_credit_quote: state.generationCreditQuote} : {}),
           trim: state.trim,
+          browser_source_duration: clip.duration,
           ...(state.replaceAllPeople ? {replace_all_people: true, ...(targets[0].reference_indexes ? {reference_indexes:targets[0].reference_indexes}: {})} : {anchor: target.anchor, targets}),
           target_name: target.name,
           enhanced_character_masking: state.generationModel === "kling-4-0" || (state.enhancedCharacterMasking ?? true),

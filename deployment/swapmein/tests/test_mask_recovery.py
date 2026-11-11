@@ -36,10 +36,16 @@ def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconfl
     anchor = {"x": .75, "y": .5, "time": 2.5}
     targets = [{"id": "left", "anchor": {"x": .25, "y": .5, "time": 1}, "reference_index": 0},
                {"id": "right", "anchor": anchor, "reference_index": 1}]
-    sections = [{"id": "left-scene", "target_id": "left", "start": 0, "end": 5},
-                {"id": "right-scene-six", "target_id": "right", "start": 2, "end": 4}]
+    sections = [
+        {"id": "left-scene", "target_id": "left", "start": 0, "end": 5, "start_frame": 0, "end_frame": 120, "needs_review": True},
+        {"id": "right-before", "target_id": "right", "start": 0, "end": 2, "start_frame": 0, "end_frame": 48, "needs_review": True},
+        {"id": "right-scene-six", "target_id": "right", "start": 2, "end": 4, "start_frame": 48, "end_frame": 96, "needs_review": True},
+        {"id": "right-after", "target_id": "right", "start": 4, "end": 5, "start_frame": 96, "end_frame": 120, "needs_review": True},
+    ]
     selections = [{"segment_id": "left-scene", "absent": False, "anchor": targets[0]["anchor"]},
-                  {"segment_id": "right-scene-six", "absent": False, "anchor": anchor}]
+                  {"segment_id": "right-scene-six", "absent": False, "anchor": anchor},
+                  {"segment_id": "right-before", "absent": True, "anchor": None},
+                  {"segment_id": "right-after", "absent": True, "anchor": None}]
     job = {"id": "a"*32, "status": "preparing", "normalized_uri": "gs://worker/rgb.mp4",
         "setup": {"enhanced_character_masking":enhanced}, "face_mesh":mesh, "depth_guidance":depth,
         "reviewed_masks_uri": "gs://worker/selected.zip", "tracking_depth_uri": "gs://worker/depth.mp4" if depth else None,
@@ -47,9 +53,11 @@ def test_recovery_rebuilds_from_saved_choices_then_queues_only_approved_nonconfl
         "generation_after_review_revision": 2, "tracking_applied_revision": 2, "tracking_task_token": "b"*32,
         "tracking_plan": {"targets": targets, "segments": sections}, "tracking_choices": selections,
         "tracking_metadata": {"width": 4, "height": 4, "frames": 120, "duration": 5, "anchor": {"frame": 24}},
-        "tracking_assignments": [{"segment_id": "left-scene", "target_id": "left", "start_frame": 0, "end_frame": 120},
+        "tracking_assignments": [{"segment_id": "left-scene", "target_id": "left", "start_frame": 0, "end_frame": 120, "absent": False},
             {"segment_id": "right-scene-six", "target_id": "right", "start_frame": 48, "end_frame": 96,
-             "coordinate_fallback": True, "fallback_anchor": anchor}],
+             "coordinate_fallback": True, "fallback_anchor": anchor, "absent": False},
+            {"segment_id": "right-before", "target_id": "right", "start_frame": 0, "end_frame": 48, "absent": True},
+            {"segment_id": "right-after", "target_id": "right", "start_frame": 96, "end_frame": 120, "absent": True}],
         "target_styles": [{"label": 1, "color": "#00dcff"}, {"label": 2, "color": "#ff4fd8"}]}
     class Records:
         data = copy.deepcopy(job)

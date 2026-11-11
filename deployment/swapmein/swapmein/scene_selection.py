@@ -66,3 +66,50 @@ def reviewed_mask_targets(metadata: dict, plan: dict, choices: list[dict], assig
                 "coordinate_fallback": bool(resolved.get(section["id"], {}).get("coordinate_fallback"))})
         result.append({**target, "scenes": scenes})
     return result
+
+
+def mask_quality_targets(targets: list[dict], report: dict) -> list[dict]:
+    """Keep reviewed identity/absence choices while describing withheld guide tint.
+
+    A rejected anchor must not be repeated as if it identified the performer.
+    Coordinates from unaffected scenes and the original target stay authoritative.
+    """
+    from copy import deepcopy
+    result = deepcopy(targets)
+    for target in result:
+        ranges = [item for item in report.get("suppressed_ranges", [])
+                  if item.get("target_id") == target.get("id")]
+        for scene in target.get("scenes", []):
+            scene.pop("guide_mask_suppressed_ranges", None)
+            scene.pop("guide_anchor_untrusted", None)
+            if scene.get("absent"):
+                continue
+            overlaps = [{"start": max(scene["start"], item["start_frame"] / 24),
+                         "end": min(scene["end"], item["end_frame"] / 24),
+                         "reason": item["reason"]}
+                        for item in ranges
+                        if item["start_frame"] / 24 < scene["end"]
+                        and item["end_frame"] / 24 > scene["start"]]
+            if overlaps:
+                scene["guide_mask_suppressed_ranges"] = overlaps
+                anchor = scene.get("anchor")
+                if anchor and any(item["start"] <= anchor["time"] < item["end"] for item in overlaps):
+                    scene["guide_anchor_untrusted"] = True
+        target.pop("guide_anchor_untrusted", None)
+        initial = target.get("anchor")
+        if initial and any(item["start_frame"] / 24 <= initial["time"] < item["end_frame"] / 24 for item in ranges):
+            reliable = [scene["anchor"] for scene in target.get("scenes", [])
+                        if not scene.get("absent") and scene.get("anchor")
+                        and not scene.get("guide_anchor_untrusted")]
+            if reliable:
+                target["anchor"] = deepcopy(min(reliable, key=lambda point: point["time"]))
+            else:
+                target["guide_anchor_untrusted"] = True
+    return result
+
+
+def mask_quality_review_pending(job: dict) -> bool:
+    report = job.get("reviewed_mask_quality") or {}
+    return bool(report.get("review_required") and (
+        not report.get("sha256") or job.get("mask_quality_approved_sha256") != report["sha256"]
+        or job.get("mask_quality_approved_revision") != job.get("tracking_applied_revision")))

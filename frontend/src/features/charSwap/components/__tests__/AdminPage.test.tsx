@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AdminPage } from "../AdminPage";
@@ -11,11 +11,12 @@ vi.mock("../../services/commerce", () => ({
   loadCreditGrants: vi.fn().mockResolvedValue({grants: [], next_cursor: null}),
   saveWatermarkSettings: api.watermark, savePipelineSettings: api.pipeline, saveReplicateApiKey: api.replicateKey, saveCloudflareApiKey: api.cloudflareKey, saveCreditCatalog: api.save, saveCreditFeatures: vi.fn(), savePrivateProviderKey: vi.fn(), setApiKeyAccess: vi.fn(), loadApiKeyAccess: vi.fn().mockResolvedValue({email: "helper@example.com", enabled: true}), loadRegisteredAccounts: vi.fn().mockResolvedValue({accounts: [{email: "helper@example.com", display_name: "Helper", disabled: false}], next_cursor: null}), loadCreditStaff: vi.fn().mockResolvedValue({email: "helper@example.com", role: "viewer", active: false, permissions: []}), setCreditStaff: vi.fn(),
 }));
-async function renderExpandedAdmin() {
+async function renderExpandedAdmin(sections = ["Service controls", "Audio processing", "Experimental", "Credit pricing", "System API key", "Grant user credits", "Credit grant history"]) {
   render(<AdminPage />);
   await screen.findByRole("heading", {name: "Service controls"});
-  for (const name of ["Service controls", "Audio processing", "Experimental", "Credit pricing", "System API key", "Grant user credits", "Credit grant history"]) {
-    await userEvent.click(screen.getByRole("heading", {name}));
+  for (const name of sections) {
+    // Accordion expansion is fixture setup; interactions under test remain user events.
+    fireEvent.click(screen.getByRole("heading", {name}));
   }
 }
 beforeEach(() => {
@@ -63,10 +64,12 @@ it("lets pricing staff edit prices but not service or account access", async () 
 it("lets owners grant credits and reuses the same operation when a response is uncertain", async () => {
   api.grant.mockRejectedValueOnce(new Error("Connection lost")).mockResolvedValueOnce({email: "customer@example.com", credits: 100, balance: 150});
   const user = userEvent.setup();
-  await renderExpandedAdmin();
-  await user.type(await screen.findByLabelText("Credit recipient email"), "customer@example.com");
+  await renderExpandedAdmin(["Grant user credits"]);
+  await user.click(await screen.findByLabelText("Credit recipient email"));
+  await user.paste("customer@example.com");
   await user.type(screen.getByLabelText("Credits to grant"), "100");
-  await user.type(screen.getByLabelText("Reason for credit grant"), "Support adjustment");
+  await user.click(screen.getByLabelText("Reason for credit grant"));
+  await user.paste("Support adjustment");
   await user.click(screen.getByRole("button", {name: "Grant credits"}));
   await user.click(await screen.findByRole("button", {name: "Retry credit grant"}));
   await screen.findByText(/Granted 100 credits.*Current balance: 150 credits/);
@@ -77,7 +80,7 @@ it("lets owners grant credits and reuses the same operation when a response is u
 
 it("lets admins preview a margin-based rate before saving", async () => {
   const user = userEvent.setup();
-  await renderExpandedAdmin();
+  await renderExpandedAdmin(["Credit pricing"]);
   await user.click(await screen.findByRole("switch", {name: "Calculate pricing from target margin"}));
   expect(screen.getByLabelText("Target margin (%)")).toHaveValue(30);
   expect(screen.getByLabelText("Price per video second (USD)")).toHaveValue(0.13);
@@ -468,16 +471,20 @@ it("saves the Cloudflare prompt option with a revision while preserving manual-m
 });
 
 it("saves Cloudflare credentials without exposing the token or changing the prompt version", async () => {
-  await renderExpandedAdmin();
+  await renderExpandedAdmin(["System API key"]);
   const token = screen.getByLabelText("Cloudflare API key");
   expect(token).toHaveAttribute("type", "password");
   expect(token).toHaveValue("");
   expect(screen.getByText("Cloudflare API key: Not configured")).toBeInTheDocument();
   expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
-  await userEvent.type(screen.getByLabelText(/Cloudflare account ID/), "52b56b12e8c965d69f81d15dbb4e5f52");
-  await userEvent.type(token, "test-cloudflare-secret");
+  const user = userEvent.setup();
+  await user.click(screen.getByLabelText(/Cloudflare account ID/));
+  await user.paste("52b56b12e8c965d69f81d15dbb4e5f52");
+  await user.click(token);
+  await user.paste("test-cloudflare-secret");
   expect(screen.getByRole("button", {name: "Save Cloudflare key"})).toBeDisabled();
-  await userEvent.type(screen.getByLabelText(/Cloudflare Gateway ID/), "recastfx-matching-test");
+  await user.click(screen.getByLabelText(/Cloudflare Gateway ID/));
+  await user.paste("recastfx-matching-test");
   await userEvent.click(screen.getByRole("button", {name: "Save Cloudflare key"}));
   await screen.findByText("Cloudflare credentials saved securely.");
   expect(api.cloudflareKey).toHaveBeenCalledWith({key: "test-cloudflare-secret", account_id: "52b56b12e8c965d69f81d15dbb4e5f52", gateway_id: "recastfx-matching-test"});

@@ -112,6 +112,8 @@ def test_source_rate_resampling_preserves_audio_time_and_target_coordinates(tmp_
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
     metadata = normalize(source, prepared, setup(anchor=None, targets=targets))
     assert (metadata["width"], metadata["height"], metadata["frames"]) == (640, 360, 96)
+    assert metadata["source_duration"] == pytest.approx(4.5, abs=.03)
+    assert metadata["duration"] == 4
     assert metadata["targets"][0]["anchor"] == {"x": .25, "y": .5, "time": .75, "frame": 18}
     assert metadata["preparation_version"] == 2
     assert metadata["resolution_policy"] == "short_side_768_no_upscale"

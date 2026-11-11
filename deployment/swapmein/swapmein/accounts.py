@@ -48,9 +48,18 @@ def index_path(account_id: str, job_id: str) -> str:
 
 
 def bind_job(records, job: dict, session: dict, title: str = "Your clip") -> dict:
+    # A recipient may only come from the verified Firebase server session,
+    # never an uploaded setup or a recipient already present in a draft record.
+    job = {key: value for key, value in job.items()
+           if key not in {"notification_email", "notifications_enabled"}}
     account_id = session.get("account_id")
     if not account_id:
         return job
+    email = session.get("email")
+    if isinstance(email, str):
+        email = email.strip().lower()
+        if len(email) <= 254 and re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.-]+\.[a-z]{2,}", email):
+            job.update(notification_email=email, notifications_enabled=True)
     job = {**job, "account_id": account_id, "key_fingerprint": session["key_fingerprint"],
            "title": title[:120]}
     records.create(index_path(account_id, job["id"]), {

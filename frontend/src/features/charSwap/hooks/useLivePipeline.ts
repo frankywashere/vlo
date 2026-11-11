@@ -390,12 +390,33 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       attemptedJobs.current.add(active.id);
       requestStarted = true;
       const submitted = await generateLiveJob(active.id, access.token, apiKey, controller.signal, accessMode, active.generation_destination);
-      if (!controller.signal.aborted && epoch.current === version) publishJob(submitted);
+      if (!controller.signal.aborted && epoch.current === version) {
+        if (submitted.status === "tracking_review") attemptedJobs.current.delete(active.id);
+        publishJob(submitted);
+      }
     } catch (cause) {
       if (!controller.signal.aborted && epoch.current === version) {
         if (!requestStarted) {
           const message = cause instanceof LivePipelineError ? cause.message : "Access could not be checked. Your job is retained.";
           setError(safeMessage(message, apiKey, session.current?.token));
+          return;
+        }
+        // Only these explicit server preflight refusals prove that no paid
+        // submission was made. A generic conflict or lost reply stays locked.
+        const reviewRefused = cause instanceof LivePipelineError && cause.status === 409
+          && ["mask_quality_identity_unresolved", "mask_quality_review_required", "tracking_review_invalid"].includes(cause.code ?? "");
+        if (reviewRefused) {
+          attemptedJobs.current.delete(active.id);
+          try {
+            if (!session.current) throw cause;
+            const next = await getLiveJob(active.id, session.current.token, controller.signal);
+            if (controller.signal.aborted || epoch.current !== version) return;
+            publishJob(next);
+          } catch {
+            if (controller.signal.aborted || epoch.current !== version) return;
+            publishJob(active);
+          }
+          setError(safeMessage(cause.message, apiKey, session.current?.token));
           return;
         }
         const refused = cause instanceof LivePipelineError && cause.status !== null && cause.status < 500 && cause.status !== 409;

@@ -1525,7 +1525,15 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     if plan.get("version") == 3:
         from .scene_selection import resolve
         choices = [choice.model_dump() for choice in review.choices]
-        targets = resolve(job["tracking_metadata"], plan, choices)
+        if job.get("identity_recovery"):
+            from .mask_quality_recovery import resolve_identity_recovery
+            targets = resolve_identity_recovery(job, choices)
+        else:
+            targets = resolve(job["tracking_metadata"], plan, choices)
+        # Source-coordinate recovery always returns to the sanitized preview.
+        # Scene confirmation cannot silently approve a different guide version.
+        if job.get("identity_recovery"):
+            review = review.model_copy(update={"generate_after_review": False})
         from .self_hosted_jobs import is_self_hosted
         from .self_hosted_preparation import reviewed_shots
         shot_fields = ({"self_hosted_shots": reviewed_shots(job["tracking_metadata"], targets)}
@@ -1540,7 +1548,10 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                 "generation_after_review_revision": review.revision if review.generate_after_review else None,
                 "recover_missing_masks": False, "review_generation_queued": review.generate_after_review,
                 "tracking_task_token": task_token, "auto_key_ciphertext": auto_key,
-                "tracking_choices": choices, "message": "Scene selections saved. Review your clip before generating.",
+                "tracking_choices": choices, "identity_recovery": False,
+                "identity_recovery_completed_revision": review.revision if current.get("identity_recovery") else current.get("identity_recovery_completed_revision"),
+                "message": "Person positions saved. Review the cleaned guide before generating." if current.get("identity_recovery")
+                    else "Scene selections saved. Review your clip before generating.",
                 "updated_at": time.time()}
         job = records.update(f"jobs/{job_id}.json", apply_scene_choices)
         emit("scene_selections_applied", job_id=job_id, section_count=len(choices),
@@ -1850,6 +1861,17 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
     key = "" if is_self_hosted(job) else key_for_session(active_session, x_reapi_key)
     if not approval.approved:
         raise PublicError("Review the guide and approve the selected person before generating.")
+    from .scene_selection import mask_quality_review_pending
+    if job.get("status") == "ready" and mask_quality_review_pending(job):
+        records, _, _ = services()
+        expected_sha = job["reviewed_mask_quality"]["sha256"]
+        expected_revision = job.get("tracking_applied_revision")
+        job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+            "mask_quality_approved_sha256": expected_sha,
+            "mask_quality_approved_revision": expected_revision}
+            if current and current.get("status") == "ready"
+            and current.get("reviewed_mask_quality", {}).get("sha256") == expected_sha
+            and current.get("tracking_applied_revision") == expected_revision else current)
     return submit_generation(job_id, job, active_session, key)
 
 
@@ -1860,6 +1882,10 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         return view(job)
     if job.get("tracking_plan", {}).get("review_required") and not job.get("tracking_reviewed"):
         raise PublicError("Confirm your scene matches before generating.", 409, code="tracking_review_invalid")
+    from .scene_selection import mask_quality_review_pending
+    if mask_quality_review_pending(job):
+        raise PublicError("Some uncertain guide masks were withheld. Review the preview before generating.",
+                          409, code="mask_quality_review_required")
     records, cloud, provider = services()
     from .self_hosted_jobs import is_self_hosted
     if is_self_hosted(job):
@@ -2326,6 +2352,9 @@ def generate_task(task: InternalTask, authorization: str | None = Header(default
     if not job or job.get("status") != "ready":
         return {"ok": True}
     if job.get("generation_capacity_token") and job["generation_capacity_token"] != task.task_token:
+        return {"ok": True}
+    from .scene_selection import mask_quality_review_pending
+    if mask_quality_review_pending(job):
         return {"ok": True}
     reviewed_submission = bool(job.get("generation_after_review_revision")
         and job.get("generation_after_review_revision") == job.get("tracking_applied_revision")

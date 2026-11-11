@@ -160,13 +160,16 @@ def test_five_references_use_multiple_batches_with_at_most_four_images(tmp_path,
     assert all(not scene["absent"] for target in result["targets"] for scene in target["scenes"])
 
 
-def test_track_fragment_outside_sample_routes_to_review_before_paid_call(tmp_path, monkeypatch):
+def test_selected_person_fragment_is_rechecked_where_visible_before_review(tmp_path, monkeypatch):
     archive, metadata, targets, images = fixture(tmp_path, fragmented=True)
     stub_decoder(monkeypatch, images)
-    monkeypatch.setattr(matching.requests, "post", lambda *args, **kwargs: pytest.fail("Unexpected API call"))
-    with pytest.raises(PublicError, match="track changes"):
+    observed = []
+    install_api(monkeypatch, observed=observed)
+    with pytest.raises(PublicError, match="after identity rechecking"):
         matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
                               credentials=CREDENTIALS, workdir=tmp_path)
+    assert len(observed) == 4
+    assert any(len(kwargs["json"]["images"]) == 3 for _, kwargs in observed)
     assert not (tmp_path / "identity-masks.zip").exists()
 
 
@@ -328,19 +331,21 @@ def test_single_shot_stable_anchor_needs_no_matching_request(tmp_path, monkeypat
     assert not result["assignments"][0]["absent"]
 
 
-def test_single_shot_fragment_logs_reason_before_any_paid_call(tmp_path, monkeypatch, capsys):
+def test_anchored_person_fragment_gets_focused_identity_calls_before_review(tmp_path, monkeypatch, capsys):
     archive, metadata, targets, images = fixture(tmp_path, fragmented=True, people=1)
     metadata["scene_cuts"] = []
     stub_decoder(monkeypatch, images)
-    monkeypatch.setattr(matching.requests, "post", lambda *args, **kwargs: pytest.fail("Unexpected paid call"))
-    with pytest.raises(PublicError, match="track changes"):
+    observed = []
+    install_api(monkeypatch, observed=observed)
+    with pytest.raises(PublicError, match="after identity rechecking"):
         matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
                               credentials=CREDENTIALS, workdir=tmp_path)
+    assert len(observed) == 2
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    rejected = next(item for item in events if item["event"] == "cloudflare_matching_rejected")
-    assert rejected["reason"] == "within_scene_track_change"
-    assert rejected["requests_submitted"] == 0
-    assert rejected["unseen_labels"]
+    rejected = next(item for item in events if item.get("outcome") == "unresolved_fragment")
+    assert rejected["candidate_label"] == 30
+    assert rejected["sample_frame"] in [6, 7]
+    assert not (tmp_path / "identity-masks.zip").exists()
 
 
 @pytest.mark.parametrize("bad_first_frame", ["wrong_person", "unmatched"])
@@ -453,3 +458,93 @@ def test_transient_unrelated_id_cannot_force_one_frame_identity_decision(tmp_pat
     assignments = [item for item in result["assignments"] if item["start_frame"] == 4]
     assert [item["selected_label"] for item in assignments] == [11, 10]
     assert len(assignments[0]["evidence_frames"]) == 2
+
+
+def add_brief_candidate(archive, images, frame=4, label=30):
+    with zipfile.ZipFile(archive) as source:
+        frames = [np.array(Image.open(BytesIO(source.read(name)))) for name in sorted(source.namelist())]
+    frames[frame][1:3, 70:74] = label
+    image = np.array(images[frame]);image[1:3, 70:74] = [220, 160, 30];images[frame] = Image.fromarray(image)
+    with zipfile.ZipFile(archive, "w") as output:
+        for index, labels in enumerate(frames):
+            data = BytesIO();Image.fromarray(labels).save(data, "PNG")
+            output.writestr(f"labels/labels_{index:05d}.png", data.getvalue())
+
+
+def test_clear_different_brief_candidate_allows_verified_absence_and_keeps_confirmed_mask(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path, second_absent=True)
+    add_brief_candidate(archive, images)
+    stub_decoder(monkeypatch, images)
+    observed = []
+    install_api(monkeypatch, observed=observed)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    assert result["targets"][1]["scenes"][1]["absent"] is True
+    assert result["targets"][0]["scenes"][1]["absent"] is False
+    assert result["diagnostics"]["requests"] == len(observed) == 4
+    assert result["diagnostics"]["scene_evidence"][1]["excluded_labels"] == [30]
+    assert result["diagnostics"]["scene_evidence"][1]["focused_checks"] == [{"label":30,"frame":4}]
+    with zipfile.ZipFile(result["masks_path"]) as masks:
+        labels = np.asarray(Image.open(BytesIO(masks.read("labels/labels_00004.png"))))
+        assert np.all(labels[4:28, 2:14] == 1)
+        assert not labels[1:3, 70:74].any()
+
+
+@pytest.mark.parametrize("same,different,uncertain", [(.01,.2,.79), (.0446,.9554,0), (.8,.2,0)])
+def test_brief_candidate_uncertain_or_selected_person_cannot_be_treated_as_absent(
+        tmp_path, monkeypatch, same, different, uncertain):
+    archive, metadata, targets, images = fixture(tmp_path, second_absent=True)
+    add_brief_candidate(archive, images)
+    stub_decoder(monkeypatch, images)
+    def post(url, **kwargs):
+        payload=kwargs["json"]
+        refs=len({key.split("c")[0] for key in payload["questions"]})
+        answers={}
+        for key in payload["questions"]:
+            person,candidate=(int(x) for x in key[1:].split("c"))
+            source=crop_identity(payload["images"][person]);subject=crop_identity(payload["images"][refs+candidate])
+            values=({"same":same,"different":different,"uncertain":uncertain} if subject>=4
+                    else {"same":.82 if source==subject else .01,"different":.18 if source==subject else .99,"uncertain":0})
+            answers[key]={"probabilities":values}
+        return Response({"result":{"answers":answers,"usage":{"input_tokens":800}}})
+    monkeypatch.setattr(matching.requests,"post",post)
+    with pytest.raises(PublicError,match="after identity rechecking"):
+        matching.match_tracks(tmp_path / "original.mp4",archive,metadata,targets,
+                              credentials=CREDENTIALS,workdir=tmp_path)
+    assert not (tmp_path / "identity-masks.zip").exists()
+
+
+def test_focused_rechecks_are_included_in_request_limit_before_any_call(tmp_path, monkeypatch):
+    archive,metadata,targets,images=fixture(tmp_path,fragmented=True)
+    stub_decoder(monkeypatch,images)
+    monkeypatch.setattr(matching,"MAX_REQUESTS",3)
+    monkeypatch.setattr(matching.requests,"post",lambda *a,**k:pytest.fail("Request cap must precede inference"))
+    with pytest.raises(PublicError,match="request limit"):
+        matching.match_tracks(tmp_path / "original.mp4",archive,metadata,targets,
+                              credentials=CREDENTIALS,workdir=tmp_path)
+
+
+def test_id_missing_from_max_visible_sample_gets_actual_sighting_check(tmp_path, monkeypatch, capsys):
+    archive, metadata, targets, images = fixture(tmp_path, second_absent=True)
+    add_brief_candidate(archive, images, frame=4, label=30)
+    add_brief_candidate(archive, images, frame=7, label=31)
+    stub_decoder(monkeypatch, images)
+    observed = []
+    install_api(monkeypatch, observed=observed)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert any(event.get("unseen_labels") == [31] for event in events)
+    evidence = result["diagnostics"]["scene_evidence"][1]
+    assert evidence["focused_checks"] == [{"label": 30, "frame": 4}, {"label": 31, "frame": 7}]
+    assert evidence["excluded_labels"] == [30, 31]
+    assert observed
+    assert result["targets"][1]["scenes"][1]["absent"] is True
+    assert result["targets"][0]["scenes"][1]["absent"] is False
+
+
+def test_focused_different_result_cannot_override_positive_standard_observation():
+    shot = {"people": [0], "candidates": [{"label":30}], "excluded_labels":{30},
+            "used_views":[{"scores":[[.82]]}]}
+    with pytest.raises(PublicError, match="disagree with the focused"):
+        matching._resolve_views(shot, None)

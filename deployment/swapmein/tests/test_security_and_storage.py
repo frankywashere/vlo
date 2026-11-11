@@ -304,3 +304,12 @@ def test_approved_review_generation_queue_does_not_count_as_waiting_for_user():
     assert queued["review_wait_seconds"] == 30 and "review_paused_at" not in queued
     running = account_review_wait(queued, {**queued, "status": "generating"}, 120)
     assert running["review_wait_seconds"] == 30
+
+
+def test_kling_delivery_host_is_allowed_but_private_addresses_and_lookalikes_are_not():
+    url = "https://file.deepytb.com/results/video.mp4"
+    assert validate_media_url(url, resolver("172.64.80.1")) == url
+    with pytest.raises(PublicError):
+        validate_media_url(url, resolver("127.0.0.1"))
+    with pytest.raises(PublicError):
+        validate_media_url("https://file.deepytb.com.attacker.example/video.mp4", resolver("8.8.8.8"))

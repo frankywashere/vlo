@@ -3,6 +3,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 import json
 import math
+import re
 import time
 
 from google.api_core.exceptions import BadRequest, NotFound, PreconditionFailed
@@ -92,6 +93,20 @@ class Records:
             if_generation_match=generation,
         )
 
+    def _queue_job_notification(self, path: str, job: dict):
+        # The outbox is a separate write after the processing state commits.
+        # Never let an email/storage failure replay a successful job mutation.
+        if (not re.fullmatch(r"jobs/[a-f0-9]{32}\.json", path)
+                or not isinstance(job, dict) or path != f"jobs/{job.get('id')}.json"
+                or job.get("notifications_enabled") is not True
+                or not job.get("notification_email")):
+            return
+        try:
+            from .job_notifications import queue_job_notification
+            queue_job_notification(self, job)
+        except Exception as error:
+            emit("notification_enqueue_failed", job_id=job.get("id"), error_type=type(error).__name__)
+
     def update(self, path: str, mutation: Callable[[dict | None], dict]):
         for _ in range(12):
             try:
@@ -114,6 +129,7 @@ class Records:
                          stage=next_phase, elapsed_seconds=round(max(0, now - started), 6)
                          if type(started) in (int, float) and math.isfinite(started) else None,
                          timing_basis="wall_clock", human_wait=previous_phase in {"scene_review_wait", "approval_wait"})
+                self._queue_job_notification(path, updated)
                 return updated
             except PreconditionFailed:
                 continue
@@ -121,10 +137,11 @@ class Records:
 
     def create(self, path: str, data: dict):
         self.write(path, data, 0)
+        self._queue_job_notification(path, data)
 
     def delete(self, path: str):
         """Remove an internal index pointer, never a financial/media record."""
-        if not path.startswith("task-active/"):
+        if not (path.startswith("task-active/") or re.fullmatch(r"notification-active/[a-f0-9]{32}\.json", path)):
             raise ValueError("Only delivery index pointers may be removed")
         try:
             self.bucket.blob(path).delete()

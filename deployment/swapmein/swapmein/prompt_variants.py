@@ -62,7 +62,7 @@ def _point(point):
 
 
 def _fallbacks(targets):
-    return any(target.get("coordinate_fallback") or any(scene.get("coordinate_fallback")
+    return any(target.get("coordinate_fallback") or any(scene.get("coordinate_fallback") or scene.get("guide_mask_suppressed_ranges")
                for scene in target.get("scenes", [])) for target in targets or [])
 
 
@@ -226,6 +226,9 @@ def _scene_lines(index, target, *, compact):
         interval = f"{scene['start']:.2f}-{scene['end']:.2f}s"
         if scene["absent"]:
             lines.append(f"{interval}: absent." if compact else f"<Subject {index}> {interval}: absent; replace nobody for this assignment.")
+        elif scene.get("guide_anchor_untrusted"):
+            lines.append(f"<Subject {index}> {interval}: local selection uncertain; identify the same original "
+                         "source performer from confirmed appearances. Do not use a foreground object as the identity anchor.")
         else:
             point = scene["anchor"]
             fallback = bool(scene.get("coordinate_fallback") or target.get("coordinate_fallback"))
@@ -237,6 +240,10 @@ def _scene_lines(index, target, *, compact):
                 lines.append(f"<Subject {index}> from {scene['start']:.2f} to {scene['end']:.2f} seconds: "
                     f"identify at {_point(point)}; apply this subject's reference throughout this interval."
                     + (" No selection mask is present; use the original visible person, never another masked person." if fallback else ""))
+        for withheld in scene.get("guide_mask_suppressed_ranges", []):
+            lines.append(f"<Subject {index}> {withheld['start']:.2f}-{withheld['end']:.2f}s: "
+                         "selection tint withheld because its mask is uncertain, not because the performer is absent. "
+                         "Use the confirmed original source identity and reliable positions, never another person's mask.")
     return lines
 
 

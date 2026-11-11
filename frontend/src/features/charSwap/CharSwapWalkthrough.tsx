@@ -370,6 +370,13 @@ export function CharSwapWalkthrough({
     }
   }, [step, noFlaggedSections, pipeline.job?.status, reviewTracking, visit]);
   useEffect(() => {
+    // A manual generation can return a reopened review without submitting.
+    // Keep its uploaded source and characters, and display those saved choices.
+    if (live && !easyMode && step === "generation" && pipeline.job?.status === "tracking_review") {
+      visit("matches");
+    }
+  }, [live, easyMode, step, pipeline.job?.status, visit]);
+  useEffect(() => {
     headingRef.current?.focus();
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [step]);

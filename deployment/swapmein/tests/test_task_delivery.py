@@ -318,3 +318,32 @@ def test_missing_control_queue_does_not_leave_poisoned_delivery_records(runtime)
     with pytest.raises(PublicError,match='queue is not configured'):
         TaskDelivery(settings,records,tasks).enqueue('generate',JOB,task_token=TOKEN)
     assert not records.data and tasks.posts==0
+
+
+def test_notification_maintenance_is_authenticated_and_isolated_from_video_work(runtime, monkeypatch):
+    settings, records, tasks, _, _ = runtime
+    calls=[]
+    monkeypatch.setattr('swapmein.task_worker.verify_task_identity',lambda *args:calls.append('auth'))
+    monkeypatch.setattr('swapmein.google_lifecycle.wake_google',lambda *args:{'ok':True})
+    def broken_sender(*args, **kwargs):
+        calls.append('mail')
+        raise RuntimeError('sender unavailable')
+    monkeypatch.setattr('swapmein.job_notifications.deliver_pending_notifications',broken_sender)
+    app=FastAPI(); register_delivery_recovery(app,lambda:(settings,records,SimpleNamespace(tasks=tasks)))
+    with TestClient(app) as client:
+        response=client.post('/maintenance/recover-deliveries',headers={'Authorization':'Bearer scheduler'})
+    assert response.status_code==200
+    assert calls==['auth','mail'] and tasks.posts==0
+
+
+def test_invalid_maintenance_identity_cannot_trigger_email(runtime, monkeypatch):
+    settings, records, tasks, _, _ = runtime
+    calls=[]
+    def reject(*args):raise PublicError('no',401)
+    monkeypatch.setattr('swapmein.task_worker.verify_task_identity',reject)
+    monkeypatch.setattr('swapmein.job_notifications.deliver_pending_notifications',lambda *args,**kwargs:calls.append('mail'))
+    app=FastAPI(); register_delivery_recovery(app,lambda:(settings,records,SimpleNamespace(tasks=tasks)))
+    with TestClient(app) as client, pytest.raises(PublicError) as error:
+        client.post('/maintenance/recover-deliveries',headers={'Authorization':'Bearer wrong'})
+    assert error.value.status_code==401
+    assert not calls and tasks.posts==0

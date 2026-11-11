@@ -382,6 +382,27 @@ describe("explicit generation approval", () => {
     expect(screen.queryByRole("button", {name: "Start a new recast while this processes"})).not.toBeInTheDocument();
   });
 
+  it("reopens a refused manual render's saved scene review without resetting source or references", () => {
+    const store = useCharSwapStore.getState();
+    store.visit("generation");
+    const before = useCharSwapStore.getState();
+    live.job = {id: "saved-review", status: "ready", duration: 5};
+    const view = render(<CharSwapWalkthrough />);
+    const resetCalls = live.reset.mock.calls.length;
+    live.job = {...live.job, status: "tracking_review", tracking_revision: 2,
+      source_preview_url: "https://storage.googleapis.com/source.mp4",
+      tracking_segments: [{id: "s0", target_id: "person", start_frame: 0, end_frame: 120,
+        start: 0, end: 5, seek_time: 1, reason: "scene_selection", needs_review: true}]};
+    view.rerender(<CharSwapWalkthrough />);
+    expect(screen.getByRole("heading", {name: "Check scene matches"})).toBeVisible();
+    expect(useCharSwapStore.getState().step).toBe("matches");
+    expect(useCharSwapStore.getState().clip).toBe(before.clip);
+    expect(useCharSwapStore.getState().references).toBe(before.references);
+    expect(live.reset.mock.calls.length).toBe(resetCalls);
+    expect(live.prepare).not.toHaveBeenCalled();
+    expect(live.generate).not.toHaveBeenCalled();
+  });
+
   it("offers a fresh recast and explains Library recovery only after upload confirmation", () => {
     const store = useCharSwapStore.getState();
     store.setEasyMode(true);

@@ -142,6 +142,14 @@ def register_delivery_recovery(app, context):
         try:
             wake_google(settings, records, cloud)
         except Exception as error:
-            from .diagnostics import emit
             emit("google_worker_lifecycle_delayed", error=error)
-        return TaskDelivery(settings, records, cloud.tasks).sweep()
+        result = TaskDelivery(settings, records, cloud.tasks).sweep()
+        # Email retries are independent of paid generation delivery. A sender
+        # outage must never fail or repeat video work in this maintenance sweep.
+        try:
+            from .job_notifications import deliver_pending_notifications
+            notifications = deliver_pending_notifications(records, limit=10, time_budget_seconds=20)
+            emit("notification_sweep_finished", **notifications)
+        except Exception as error:
+            emit("notification_sweep_delayed", error=error)
+        return result

@@ -943,3 +943,58 @@ Experimental also exposes `minimax_2k_enabled` (default true). Turning it off hi
 2K from ordinary users and rejects new 2K intake from stale clients before uploads
 or preparation. Staff can still test it. Accepted upload tickets and jobs retain
 their 2K choice and quote after the switch changes. Other Admin edits preserve it.
+
+## Duration diagnostics
+
+New submissions include the browser's measured source length as
+`setup.browser_source_duration`. It is diagnostic input only: server validation,
+pricing, and trim limits still use the submitted trim and measured media.
+Normalization reuses its existing source probe and saves `duration_audit` with
+browser/source duration, submitted trim bounds and length, and prepared length
+and frame count. `duration_prepared` emits the same values. Export saves
+`duration_output_audit` and emits `duration_exported` with actual delivered
+length and video frames. A diagnostic export failure is logged without failing
+an otherwise completed render. These records do not reconstruct slider movements
+or numeric edits made before the final submitted selection.
+
+## Recovery after uncertain reviewed masks
+
+A mask-quality failure is a geometry problem, not proof of who appears in the
+shot. If no reliable identity anchor survives, the checked guide withholds all
+tint for that target while preserving other targets' masks. The job atomically
+reopens the existing scene review for only the affected identities, using the
+original normalized video. Old choice IDs, auto-generation approvals, and capacity
+claims are cleared before this review becomes visible.
+
+The user can select those people in each scene or mark them not visible. This
+source-coordinate review merges choices back into the original target/reference
+order without repeating SAM or the same mask-quality rejection. It returns to
+preview approval before any paid generation. Prompt metadata explains that
+withheld tint does not imply absence. Old review revisions cannot replace newer
+choices. Explicit pre-submission review refusals can reopen the browser's saved
+review; ambiguous submissions retain duplicate-generation protection.
+
+## Transactional email notifications
+
+New account-authenticated jobs privately snapshot the verified account email.
+Client setup cannot select a recipient. Review-needed (scene selection or guide
+approval) and completion transitions queue idempotent records under
+`notifications/outbox/`. Repeated status polls cannot resend the same event.
+Initial automatic-generation readiness is not a manual-review notification;
+obsolete review events are cancelled before sending. No media attachments or
+signed media links are emailed; users open the authenticated Library.
+
+The authenticated five-minute delivery-maintenance sweep drains the outbox and
+repairs missed enqueue hooks using a bounded job scan. Sender errors do not fail
+or resubmit video work. Delivery uses a stable Resend idempotency key, a delivery
+lease, and local reservations bounded to 100 daily/3,000 monthly emails. Unknown
+outcomes are quarantined before Resend's 24-hour deduplication window expires.
+
+Sending stays disabled unless these runtime variables are configured:
+
+- `RESEND_SECRET_NAME=projects/charswap-franky-20261013/secrets/recastfx-resend-key`
+- `RESEND_FROM=RecastFX <updates@notify.recastfx.com>` (verify this domain first)
+- `NOTIFICATION_SITE_ORIGIN=https://recastfx.com`
+
+Only the maintenance service identity needs access to the sending secret. Incoming
+mail routing records are independent of the `notify.recastfx.com` sender records.
