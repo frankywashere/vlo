@@ -1,0 +1,9 @@
+{
+  "pieces": 21,
+  "frames": 1200,
+  "duration_seconds": 50,
+  "contiguous": true,
+  "full_batch_started": false,
+  "candidate": "audio-only runner; mesh variant pending pilot review",
+  "subprocess_pythonpath_fixed": true
+}

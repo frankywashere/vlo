@@ -1,0 +1,31 @@
+{
+  "at": 1794378378.385798,
+  "prepared_shots": 20,
+  "sampled_reviewed_shots": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20
+  ],
+  "scope": "middle and end samples; additional actual frame14 examined for shot13",
+  "observations": "Foreground people isolated without obvious audience spill in inspected samples. Shot13 mask misses the last bright-flash frame and repeated padding, but temporal token pooling includes prior valid frames24-25 for delivered frame26. Full-frame continuous identity correctness remains subject to rendered review.",
+  "corrected_plan": "plan-full-v2.json",
+  "corrected_piece_count": 21,
+  "source_frames": 1200
+}

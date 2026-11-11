@@ -1,0 +1,143 @@
+{
+  "text": {
+    "class_type": "CLIPLoaderDisTorch2MultiGPU",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "type": "minimax",
+      "device": "cuda:1",
+      "donor_device": "cpu",
+      "eject_models": true,
+      "expert_mode_allocations": "cuda:1,6g;cpu,*",
+      "virtual_vram_gb": 0.0
+    }
+  },
+  "vae": {
+    "class_type": "VAELoaderMultiGPU",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors",
+      "device": "cuda:0"
+    }
+  },
+  "audio_vae": {
+    "class_type": "VAELoaderMultiGPU",
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors",
+      "device": "cuda:0"
+    }
+  },
+  "source": {
+    "class_type": "PrettyCutSource",
+    "inputs": {
+      "job_key": "mcma_policy_only_pilot_v1",
+      "start_frame": 0,
+      "end_frame": 49,
+      "conditioning_frames": 56
+    }
+  },
+  "paired_audio": {
+    "class_type": "PrettyCutAudio",
+    "inputs": {
+      "job_key": "mcma_policy_only_pilot_v1",
+      "start_frame": 0,
+      "end_frame": 49,
+      "conditioning_frames": 56
+    }
+  },
+  "condition": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+      "clip": [
+        "text",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only.",
+      "width": 1088,
+      "height": 768,
+      "length": 56,
+      "ref_image_size": "match",
+      "ref_videos.ref_video_1": [
+        "source",
+        0
+      ],
+      "audio_vae": [
+        "audio_vae",
+        0
+      ],
+      "ref_video_audios.ref_video_audio_1": [
+        "paired_audio",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "reference_1",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "reference_2",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "reference_3",
+        0
+      ]
+    }
+  },
+  "persist": {
+    "class_type": "RecastFXWorkerSaveBundle",
+    "inputs": {
+      "conditioning": [
+        "condition",
+        0
+      ],
+      "latent": [
+        "lock",
+        0
+      ],
+      "shot_index": 1,
+      "job_key": "mcma_policy_only_pilot_v1"
+    }
+  },
+  "reference_1": {
+    "class_type": "RecastFXWorkerReference",
+    "inputs": {
+      "job_key": "mcma_policy_only_pilot_v1",
+      "reference_index": 0
+    }
+  },
+  "reference_2": {
+    "class_type": "RecastFXWorkerReference",
+    "inputs": {
+      "job_key": "mcma_policy_only_pilot_v1",
+      "reference_index": 1
+    }
+  },
+  "reference_3": {
+    "class_type": "RecastFXWorkerReference",
+    "inputs": {
+      "job_key": "mcma_policy_only_pilot_v1",
+      "reference_index": 2
+    }
+  },
+  "lock": {
+    "class_type": "PrettySourceLockedLatent",
+    "inputs": {
+      "positive": [
+        "condition",
+        0
+      ],
+      "latent": [
+        "condition",
+        1
+      ],
+      "job_key": "mcma_policy_only_pilot_v1",
+      "shot_index": 1,
+      "keep_from_frame": 56,
+      "feather_tokens": 0,
+      "feather_value": 0.5,
+      "generate_value": 1.0
+    }
+  }
+}

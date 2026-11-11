@@ -1,0 +1,188 @@
+{
+  "model": {
+    "class_type": "UNETLoaderDisTorch2MultiGPU",
+    "inputs": {
+      "unet_name": "minimax_h3_ref2va_pruned_bf16.safetensors",
+      "weight_dtype": "default",
+      "compute_device": "cuda:0",
+      "donor_device": "cpu",
+      "eject_models": true,
+      "expert_mode_allocations": "cuda:0,2g;cuda:2,2g;cpu,*",
+      "virtual_vram_gb": 0.0
+    }
+  },
+  "shift": {
+    "class_type": "MiniMaxH3SigmaShift",
+    "inputs": {
+      "model": [
+        "model",
+        0
+      ],
+      "shift_video": 12.0,
+      "shift_audio": 3.0
+    }
+  },
+  "attention": {
+    "class_type": "ModelAttentionBackend",
+    "inputs": {
+      "model": [
+        "shift",
+        0
+      ],
+      "attention": "pytorch attention"
+    }
+  },
+  "vae": {
+    "class_type": "VAELoaderMultiGPU",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors",
+      "device": "cuda:0"
+    }
+  },
+  "noise": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 904239
+    }
+  },
+  "guider": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "character",
+        0
+      ],
+      "positive": [
+        "bundle",
+        0
+      ],
+      "negative": [
+        "bundle",
+        0
+      ],
+      "cfg": 1.0
+    }
+  },
+  "sampler": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "er_sde"
+    }
+  },
+  "schedule": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "character",
+        0
+      ],
+      "scheduler": "normal",
+      "steps": 8,
+      "denoise": 1.0
+    }
+  },
+  "sample": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "noise",
+        0
+      ],
+      "guider": [
+        "guider",
+        0
+      ],
+      "sampler": [
+        "sampler",
+        0
+      ],
+      "sigmas": [
+        "schedule",
+        0
+      ],
+      "latent_image": [
+        "bundle",
+        1
+      ]
+    }
+  },
+  "separate": {
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "checkpoint",
+        0
+      ]
+    }
+  },
+  "decode": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": {
+      "samples": [
+        "separate",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ],
+      "tile_size": 512,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 8
+    }
+  },
+  "save": {
+    "class_type": "PrettyCutSaveExact",
+    "inputs": {
+      "images": [
+        "decode",
+        0
+      ],
+      "job_key": "mcma_audio_pilot_v1",
+      "shot_index": 1,
+      "delivery_frames": 49,
+      "trim_start_frames": 0
+    }
+  },
+  "turbo": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "attention",
+        0
+      ],
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "character": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "turbo",
+        0
+      ],
+      "lora_name": "h3_character_swap_v1.5.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "bundle": {
+    "class_type": "RecastFXWorkerLoadBundle",
+    "inputs": {
+      "job_key": "mcma_audio_pilot_v1",
+      "shot_index": 1
+    }
+  },
+  "checkpoint": {
+    "class_type": "PrettyCheckpointSampledLatent",
+    "inputs": {
+      "latent": [
+        "sample",
+        0
+      ],
+      "job_key": "mcma_audio_pilot_v1",
+      "shot_index": 1
+    }
+  }
+}

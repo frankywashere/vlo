@@ -1,0 +1,401 @@
+{
+  "geometry": {
+    "width": 1074,
+    "height": 768,
+    "canvas_width": 1088,
+    "canvas_height": 768,
+    "pad_left": 7,
+    "pad_top": 0,
+    "fps": 24,
+    "frames": 1200,
+    "has_audio": true
+  },
+  "shots": [
+    {
+      "index": 1,
+      "start_frame": 0,
+      "end_frame": 49,
+      "start": 0.0,
+      "end": 2.0416666666666665,
+      "frames": 49,
+      "delivery_frames": 49,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 0,
+      "conditioning_end_frame": 49,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 2,
+      "start_frame": 49,
+      "end_frame": 300,
+      "start": 2.0416666666666665,
+      "end": 12.5,
+      "frames": 251,
+      "delivery_frames": 251,
+      "conditioning_frames": 260,
+      "conditioning_start_frame": 49,
+      "conditioning_end_frame": 300,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 3,
+      "start_frame": 300,
+      "end_frame": 334,
+      "start": 12.5,
+      "end": 13.916666666666666,
+      "frames": 34,
+      "delivery_frames": 34,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 300,
+      "conditioning_end_frame": 334,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 4,
+      "start_frame": 334,
+      "end_frame": 385,
+      "start": 13.916666666666666,
+      "end": 16.041666666666668,
+      "frames": 51,
+      "delivery_frames": 51,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 334,
+      "conditioning_end_frame": 385,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 5,
+      "start_frame": 385,
+      "end_frame": 428,
+      "start": 16.041666666666668,
+      "end": 17.833333333333332,
+      "frames": 43,
+      "delivery_frames": 43,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 385,
+      "conditioning_end_frame": 428,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 6,
+      "start_frame": 428,
+      "end_frame": 550,
+      "start": 17.833333333333332,
+      "end": 22.916666666666668,
+      "frames": 122,
+      "delivery_frames": 122,
+      "conditioning_frames": 124,
+      "conditioning_start_frame": 428,
+      "conditioning_end_frame": 550,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 7,
+      "start_frame": 550,
+      "end_frame": 648,
+      "start": 22.916666666666668,
+      "end": 27.0,
+      "frames": 98,
+      "delivery_frames": 98,
+      "conditioning_frames": 107,
+      "conditioning_start_frame": 550,
+      "conditioning_end_frame": 648,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 8,
+      "start_frame": 648,
+      "end_frame": 698,
+      "start": 27.0,
+      "end": 29.083333333333332,
+      "frames": 50,
+      "delivery_frames": 50,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 648,
+      "conditioning_end_frame": 698,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 9,
+      "start_frame": 698,
+      "end_frame": 732,
+      "start": 29.083333333333332,
+      "end": 30.5,
+      "frames": 34,
+      "delivery_frames": 34,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 698,
+      "conditioning_end_frame": 732,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 10,
+      "start_frame": 732,
+      "end_frame": 759,
+      "start": 30.5,
+      "end": 31.625,
+      "frames": 27,
+      "delivery_frames": 27,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 732,
+      "conditioning_end_frame": 759,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 11,
+      "start_frame": 759,
+      "end_frame": 806,
+      "start": 31.625,
+      "end": 33.583333333333336,
+      "frames": 47,
+      "delivery_frames": 47,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 759,
+      "conditioning_end_frame": 806,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 12,
+      "start_frame": 806,
+      "end_frame": 893,
+      "start": 33.583333333333336,
+      "end": 37.208333333333336,
+      "frames": 87,
+      "delivery_frames": 87,
+      "conditioning_frames": 90,
+      "conditioning_start_frame": 806,
+      "conditioning_end_frame": 893,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 13,
+      "start_frame": 893,
+      "end_frame": 920,
+      "start": 37.208333333333336,
+      "end": 38.333333333333336,
+      "frames": 27,
+      "delivery_frames": 27,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 893,
+      "conditioning_end_frame": 920,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 14,
+      "start_frame": 920,
+      "end_frame": 942,
+      "start": 38.333333333333336,
+      "end": 39.25,
+      "frames": 22,
+      "delivery_frames": 22,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 920,
+      "conditioning_end_frame": 942,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 15,
+      "start_frame": 942,
+      "end_frame": 1039,
+      "start": 39.25,
+      "end": 43.291666666666664,
+      "frames": 97,
+      "delivery_frames": 97,
+      "conditioning_frames": 107,
+      "conditioning_start_frame": 942,
+      "conditioning_end_frame": 1039,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 16,
+      "start_frame": 1039,
+      "end_frame": 1055,
+      "start": 43.291666666666664,
+      "end": 43.958333333333336,
+      "frames": 16,
+      "delivery_frames": 16,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 1039,
+      "conditioning_end_frame": 1055,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 17,
+      "start_frame": 1055,
+      "end_frame": 1095,
+      "start": 43.958333333333336,
+      "end": 45.625,
+      "frames": 40,
+      "delivery_frames": 40,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 1055,
+      "conditioning_end_frame": 1095,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 18,
+      "start_frame": 1095,
+      "end_frame": 1117,
+      "start": 45.625,
+      "end": 46.541666666666664,
+      "frames": 22,
+      "delivery_frames": 22,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 1095,
+      "conditioning_end_frame": 1117,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 19,
+      "start_frame": 1117,
+      "end_frame": 1180,
+      "start": 46.541666666666664,
+      "end": 49.166666666666664,
+      "frames": 63,
+      "delivery_frames": 63,
+      "conditioning_frames": 73,
+      "conditioning_start_frame": 1117,
+      "conditioning_end_frame": 1180,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    },
+    {
+      "index": 20,
+      "start_frame": 1180,
+      "end_frame": 1200,
+      "start": 49.166666666666664,
+      "end": 50.0,
+      "frames": 20,
+      "delivery_frames": 20,
+      "conditioning_frames": 56,
+      "conditioning_start_frame": 1180,
+      "conditioning_end_frame": 1200,
+      "trim_start_frames": 0,
+      "reference_indexes": [
+        0,
+        1,
+        2
+      ],
+      "prompt": "In <Video 1>, replace the main foreground man wearing a tan suit with the SAME man shown in <Picture 1> and <Picture 2>, two angles of one replacement man. Replace the face of the main foreground blonde woman wearing black with the woman in <Picture 3>, preserving her original clothing and hair. Do not replace the audience. Keep each replacement assigned to its original performer across turns and occlusions. Follow exact source camera movement, framing, head turns, body actions, expressions and mouth movements, including silent moments. Do not invent speech, people, cuts or camera moves. Reference photographs supply identity only."
+    }
+  ],
+  "reference_indexes": [
+    0,
+    1,
+    2
+  ],
+  "guide_files": {}
+}

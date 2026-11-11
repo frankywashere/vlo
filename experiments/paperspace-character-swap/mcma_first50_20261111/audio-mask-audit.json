@@ -1,0 +1,16 @@
+{
+  "job": "mcma_audio_pilot_v1",
+  "shape": [
+    1,
+    1,
+    17,
+    48,
+    68
+  ],
+  "minimum": 0,
+  "maximum": 1,
+  "editable_share": 0.42807453870773315,
+  "source_preserved_share": 0.5719254612922668,
+  "source": "Actual immutable saved conditioning bundle on Paperspace",
+  "at": 1794378378.386174
+}

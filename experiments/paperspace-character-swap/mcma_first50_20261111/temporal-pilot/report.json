@@ -1,0 +1,11 @@
+{
+  "job_id": "mcma_temporal_pilot_v1",
+  "encode_seconds": 205.73812174797058,
+  "render_seconds": 1102.690868139267,
+  "sampling_seconds": 911.9,
+  "total_wall_seconds": 1401.8,
+  "new_female_reference_sha256": "98c872581e971719e63c6ffc3a2767c2ae5587f8193ac6e5a8850fc31322dbb9",
+  "creative_status": "Rejected: source performers and tan suit remain largely unchanged. Temporal alignment active but replacement fails.",
+  "full50_started": false,
+  "output_sha256": "6d9d0fe6a6fe5430f4ff23c001fbc87356106b6bb7b8466b798cc54b2df49892"
+}

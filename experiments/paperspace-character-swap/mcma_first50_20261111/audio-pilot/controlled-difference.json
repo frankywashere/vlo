@@ -1,0 +1,13 @@
+{
+  "encode": {
+    "changed_nodes": [
+      "audio_vae",
+      "condition",
+      "paired_audio"
+    ]
+  },
+  "render": {
+    "changed_nodes": []
+  },
+  "verified": "After ignoring separate job IDs, only paired source audio and audio VAE encoding differ. Render graph identical."
+}

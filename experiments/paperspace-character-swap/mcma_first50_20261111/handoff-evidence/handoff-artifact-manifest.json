@@ -1,0 +1,38 @@
+{
+  "MCMA_MOUTH_MOTION_HANDOFF.md": {
+    "bytes": 22827,
+    "sha256": "74827dd6580c530a28d21826074d7c947b5647b476200691b1cec44d3c992030"
+  },
+  "policy-only-pilot/shot-001-with-audio.mp4": {
+    "bytes": 1653690,
+    "sha256": "9018aa5fda9137822ea48c1b1f2dcd4f5383bd80f17a95b7e6799dd154284dbf"
+  },
+  "policy-only-pilot/graphs/encode-001-graph.json": {
+    "bytes": 3629,
+    "sha256": "256cb3522647ac6768842426613eed257bb6f3b2f2e3e6dc6a64ace476472ac3"
+  },
+  "policy-only-pilot/graphs/render-001-graph.json": {
+    "bytes": 5084,
+    "sha256": "d97084ae44bb3360f08ee846138501ee8f729267b4250c27e71b292d46fee309"
+  },
+  "reference-0.jpg": {
+    "bytes": 360429,
+    "sha256": "4719ccd6721ac6d2ab19a19360b294f56289cf62fe444a00c2069ff1a00d436a"
+  },
+  "reference-1.jpg": {
+    "bytes": 113121,
+    "sha256": "ca362788aefa3b0ae0760456cead3731558b0f82797a059b356db6e764c3f9c1"
+  },
+  "reference-woman-v2.jpg": {
+    "bytes": 20369,
+    "sha256": "98c872581e971719e63c6ffc3a2767c2ae5587f8193ac6e5a8850fc31322dbb9"
+  },
+  "policy_only_native_temporal.py": {
+    "bytes": 21603,
+    "sha256": "a9502362e2ee9f5800056918120f48fd08f3510f2c888e64bf91f092f683ef46"
+  },
+  "handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_native_temporal.py": {
+    "bytes": 21603,
+    "sha256": "a9502362e2ee9f5800056918120f48fd08f3510f2c888e64bf91f092f683ef46"
+  }
+}

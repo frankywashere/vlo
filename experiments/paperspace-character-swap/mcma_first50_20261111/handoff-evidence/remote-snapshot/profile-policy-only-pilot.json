@@ -1,0 +1,30 @@
+{
+  "private_runtime": true,
+  "entrypoint": "/home/paperspace/ai/recastfx_mcma_first50_20261111/launcher_memory.py",
+  "runtime_directory": "/home/paperspace/ai/recastfx_mcma_first50_20261111/runtime",
+  "extra_model_paths": "/home/paperspace/ai/recastfx_site_worker_20261104_v1/model_paths.yaml",
+  "loader_variants": {
+    "encode": "/home/paperspace/ai/recastfx_character_swap_full15_20261103_v1/distorch_encode.py",
+    "render": "/home/paperspace/ai/recastfx_character_swap_full15_20261103_v1/distorch_render.py"
+  },
+  "loader_destination": "custom_nodes/ComfyUI-MultiGPU/distorch_2.py",
+  "whitelist": [
+    "ComfyUI-MultiGPU",
+    "recastfx_worker_nodes",
+    "pretty_continuity_nodes",
+    "mcma_policy_only_nodes"
+  ],
+  "arguments": [
+    "--disable-dynamic-vram",
+    "--lowvram",
+    "--reserve-vram",
+    "2",
+    "--disable-cuda-malloc"
+  ],
+  "required_paths": [
+    "/home/paperspace/ai/recastfx_character_swap_short_20261103_v1/source/main.py",
+    "/home/paperspace/ai/recastfx_character_swap_short_20261103_v1/attention_rows_patch.py",
+    "/home/paperspace/ai/recastfx_character_swap_short_20261103_v1/source/comfy/ldm/minimax/model.py",
+    "/home/paperspace/ai/recastfx_mcma_first50_20261111/long_attention.py"
+  ]
+}

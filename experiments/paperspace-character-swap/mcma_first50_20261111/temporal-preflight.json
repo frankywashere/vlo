@@ -1,0 +1,11 @@
+{
+  "import_ok": true,
+  "native_packed_layout_api": true,
+  "paired_audio_layout": true,
+  "layout_not_mutated": true,
+  "flash_lse_kernel_ran": true,
+  "tiny_attention_max_absolute_error_vs_fp32_sdpa": 0.00390625,
+  "full_model_compatibility_proven": false,
+  "character_swap_quality_proven": false,
+  "shared_runtime_unchanged": true
+}

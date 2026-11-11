@@ -1,0 +1,93 @@
+{
+  "job_id": "mcma_temporal_bind_pilot_v1",
+  "tasks": {
+    "encode-001": {
+      "status": "success",
+      "limit_seconds": 3600,
+      "submitted_at": 1794402918.7370517,
+      "prompt_id": "6c683b85-dae6-47b0-8993-a822f0b4a85f",
+      "seconds": 200.8986234664917,
+      "history_status": {
+        "status_str": "success",
+        "completed": true,
+        "messages": [
+          [
+            "execution_start",
+            {
+              "prompt_id": "6c683b85-dae6-47b0-8993-a822f0b4a85f",
+              "timestamp": 1794402918742
+            }
+          ],
+          [
+            "execution_cached",
+            {
+              "nodes": [],
+              "prompt_id": "6c683b85-dae6-47b0-8993-a822f0b4a85f",
+              "timestamp": 1794402918746
+            }
+          ],
+          [
+            "execution_success",
+            {
+              "prompt_id": "6c683b85-dae6-47b0-8993-a822f0b4a85f",
+              "timestamp": 1794403118868
+            }
+          ]
+        ]
+      }
+    },
+    "render-001": {
+      "status": "success",
+      "limit_seconds": 7200,
+      "submitted_at": 1794403129.887309,
+      "prompt_id": "e909fd59-a7e8-493d-bac8-903d0a75c6cb",
+      "seconds": 1112.4970541000366,
+      "history_status": {
+        "status_str": "success",
+        "completed": true,
+        "messages": [
+          [
+            "execution_start",
+            {
+              "prompt_id": "e909fd59-a7e8-493d-bac8-903d0a75c6cb",
+              "timestamp": 1794403129893
+            }
+          ],
+          [
+            "execution_cached",
+            {
+              "nodes": [],
+              "prompt_id": "e909fd59-a7e8-493d-bac8-903d0a75c6cb",
+              "timestamp": 1794403129906
+            }
+          ],
+          [
+            "execution_success",
+            {
+              "prompt_id": "e909fd59-a7e8-493d-bac8-903d0a75c6cb",
+              "timestamp": 1794404237526
+            }
+          ]
+        ]
+      }
+    }
+  },
+  "completed_shots": [
+    1
+  ],
+  "started_at": 1794402906.4910672,
+  "hard_deadline_epoch": 1794748506.4910674,
+  "launcher": {},
+  "status": "all_shots_ready",
+  "phase": "idle",
+  "error": null,
+  "last_heartbeat_at": 1794404241.9572396,
+  "current_shot": null,
+  "outputs": {
+    "1": {
+      "sha256": "1f2a8874c18d86ffe333de51c2cea7bead4508925366b5ee695e57f5c4715fd8",
+      "bytes": 1522380,
+      "frames": 49
+    }
+  }
+}

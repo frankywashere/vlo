@@ -1,0 +1,10 @@
+{
+  "audio_pilot_job": "mcma_audio_pilot_v1",
+  "queued_controller_pid": 3824943,
+  "waits_for_mask_preparation_pid": 3823374,
+  "only_change": "Restore paired original source-audio conditioning and audio VAE to the same opening49frame pilot; same masks, references, prompt, seed, geometry and render settings. Face mesh remains off.",
+  "output_expected_remote": "/home/paperspace/ai/recastfx_mcma_first50_20261111/jobs/mcma_audio_pilot_v1/shot-001.mp4",
+  "full_batch_on_hold_for_mouth_comparison": true,
+  "automatic_mouth_measurement": "Not usable: insufficient face detections on tiny profile faces; no quantitative conclusion drawn.",
+  "at": 1794377233.926049
+}

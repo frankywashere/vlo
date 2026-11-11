@@ -1,0 +1,95 @@
+{
+  "sam": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    }
+  },
+  "source": {
+    "class_type": "PrettyCutSource",
+    "inputs": {
+      "job_key": "mcma_first50_v1",
+      "start_frame": 0,
+      "end_frame": 49,
+      "conditioning_frames": 56
+    }
+  },
+  "maletext": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "sam",
+        1
+      ],
+      "text": "foreground man wearing tan suit"
+    }
+  },
+  "male": {
+    "class_type": "SAM3_Detect",
+    "inputs": {
+      "model": [
+        "sam",
+        0
+      ],
+      "image": [
+        "source",
+        0
+      ],
+      "conditioning": [
+        "maletext",
+        0
+      ],
+      "threshold": 0.5,
+      "refine_iterations": 2,
+      "individual_masks": false
+    }
+  },
+  "femaletext": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "sam",
+        1
+      ],
+      "text": "foreground blonde woman wearing black outfit"
+    }
+  },
+  "female": {
+    "class_type": "SAM3_Detect",
+    "inputs": {
+      "model": [
+        "sam",
+        0
+      ],
+      "image": [
+        "source",
+        0
+      ],
+      "conditioning": [
+        "femaletext",
+        0
+      ],
+      "threshold": 0.5,
+      "refine_iterations": 2,
+      "individual_masks": false
+    }
+  },
+  "save": {
+    "class_type": "McmaSaveEditMask",
+    "inputs": {
+      "images": [
+        "source",
+        0
+      ],
+      "male": [
+        "male",
+        0
+      ],
+      "female": [
+        "female",
+        0
+      ],
+      "shot_index": 1
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "registration_json_ok": true,
+  "male_female_mask_disjoint": true,
+  "male_photo_biases_equal": true,
+  "reference_controls_do_not_mutate_base_model": true,
+  "paired_audio_layout_ok": true,
+  "biases_finite_and_bounded": true,
+  "quality_proven": false
+}

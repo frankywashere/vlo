@@ -1,0 +1,25 @@
+# Text/code archive only. Media, weights, and private runtime assets stay outside Git.
+*
+!*/
+!*.py
+!*.md
+!*.json
+!*.yaml
+!*.yml
+!*.txt
+!LICENSE
+!COPYING
+!NOTICE
+!.gitignore
+
+.env*
+.secrets/
+.venv*/
+__pycache__/
+node_modules/
+*service-account*.json
+*credentials*.json
+
+# macOS resource-fork metadata
+._*
+.DS_Store

@@ -1,0 +1,12 @@
+{
+  "pilot_shot": 1,
+  "delivery_frames": 49,
+  "delivery_seconds": 2.0416666666666665,
+  "render_prompt_seconds": 1148,
+  "sampler_seconds": 902,
+  "total_seconds": 1414.3,
+  "status": "technical_success",
+  "visual_review": "Sampled six frames: both reference identities present, arena and desk composition retained; normal-speed creative approval not yet obtained.",
+  "output": "/Users/frank/Desktop/Coding/CharSwap/experiments/mcma_first50_20261111/pilot/shot-001-with-audio.mp4",
+  "remaining_phase": "prepare all foreground masks before full diffusion batch"
+}

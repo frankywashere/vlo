@@ -1,0 +1,83 @@
+{
+  "repository": "https://github.com/alisson-anjos/ComfyUI-BFSNodes",
+  "commit": "9dcb9e4d0827864d75fe2d94c7e48fe36735112b",
+  "installed_into_runtime": false,
+  "files": {
+    "minimax_h3_clip_video.py": {
+      "bytes": 8492,
+      "sha256": "e3d8e6d70d7a2f611ac5990eafa6aa4dce0560153a8bd2d1037f91355dbc1f64"
+    },
+    "minimax_h3_direct_decode.py": {
+      "bytes": 4335,
+      "sha256": "1090650112dfc6488943619f2c8e641f5be310eb918a35caf11c1a01eb0f1873"
+    },
+    "minimax_h3_downscaled_guide.py": {
+      "bytes": 22952,
+      "sha256": "148d18bd7eba94eec19073b7f5df69cc6c2d84694501656800ed741a60509ccd"
+    },
+    "minimax_h3_native_temporal.py": {
+      "bytes": 21569,
+      "sha256": "c2197c949435ad611ecac60476eb492efe2a9ed8d693df96d278452377359f9c"
+    },
+    "minimax_h3_native_temporal_core.py": {
+      "bytes": 7244,
+      "sha256": "6c5b7b761806be6b07930efa929e06cdeb23c614c4ae6f9503c3234e0bbcb31d"
+    },
+    "minimax_h3_reference_binding.py": {
+      "bytes": 6008,
+      "sha256": "effafa3bcd2de785ac7a8d409da19852429b99a7bd3a31e83fff89ba4b7ec6d5"
+    },
+    "minimax_h3_reference_rope.py": {
+      "bytes": 3528,
+      "sha256": "111c0db60119658adccaffb2bffeed9da36609720264d8cb366f6217805e71ee"
+    },
+    "minimax_h3_rope_layout.py": {
+      "bytes": 2817,
+      "sha256": "ab79b29036e8e7e840856c63c1fd2d25bcc033e4ac44c7283a4aa4608568c492"
+    },
+    "minimax_h3_singleframe_vae.py": {
+      "bytes": 9909,
+      "sha256": "327e6bb035a999a0adf102cc3b0b023141fadc351128780ffdb234a2877fd59a"
+    },
+    "minimax_h3_sparse_compat.py": {
+      "bytes": 3378,
+      "sha256": "61f8a8a57348a992e3f532533be959c6d9ca2db887b8e81244d5933a84c21b8d"
+    },
+    "minimax_h3_temporal_bootstrap.py": {
+      "bytes": 8279,
+      "sha256": "4bc9192d7485123f66727e63c27d4ccbc01983ef0417e25099d6d2cda64f55c0"
+    },
+    "minimax_h3_temporal_fast.py": {
+      "bytes": 5853,
+      "sha256": "80070ed5e4eb864f9aa2ab217ca07e43333a6d4531beee2dfed67a19955feefc"
+    },
+    "minimax_h3_temporal_kernel.py": {
+      "bytes": 2403,
+      "sha256": "79750fadb8cc6b35c643b6220871730e9d5d7ef65f9ef64f6a8b50e8c9c9a8ea"
+    },
+    "minimax_h3_temporal_kitchen.py": {
+      "bytes": 2715,
+      "sha256": "0c92100409d22a97b351b1c1bc6490a50c830309977f00ad503a3676e2065dbe"
+    },
+    "minimax_h3_temporal_lock.py": {
+      "bytes": 1103,
+      "sha256": "3e1420fad7af7e135b2454ad0bae616bcbf2551f112e0e6ec64640c1d40af262"
+    },
+    "minimax_h3_temporal_sol.py": {
+      "bytes": 3415,
+      "sha256": "e8f712d13a023bbdb79c4f72fb745462454033440b7570efff93322ca9397d56"
+    },
+    "minimax_h3_token_weights.py": {
+      "bytes": 15807,
+      "sha256": "f8e40788d0c358449ac1ad098d0a724c84b8e5c5f6ca8afa82b0db4f8999699e"
+    },
+    "LICENSE": {
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "H3_NATIVE_TEMPORAL.md": {
+      "bytes": 30817,
+      "sha256": "2d323eedeecfdf3c46ea971bddee2fb925cd02fbde5b5118029d370edbc796dc"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "male_references": [
+    "reference-0.jpg",
+    "reference-1.jpg"
+  ],
+  "female_reference": "reference-woman-v2.jpg",
+  "female_sha256": "98c872581e971719e63c6ffc3a2767c2ae5587f8193ac6e5a8850fc31322dbb9",
+  "source": "/Users/frank/Desktop/images.jpg",
+  "applies_to": "all subsequent MCMA pilots and full50 batch",
+  "prior_female_reference_preserved": {
+    "index": 2,
+    "file": "reference-women.png",
+    "sha256": "4ccadb4592dac7010c8c71f840078add55841917e8d11b73f45f14d6b360dbc1"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "requested_by_user": true,
+  "status": "paused_for_review",
+  "current_test_complete": true,
+  "latest_job": "mcma_policy_only_pilot_v1",
+  "latest_output": "/Users/frank/Desktop/Coding/CharSwap/experiments/mcma_first50_20261111/policy-only-pilot/shot-001-with-audio.mp4",
+  "full50_complete": false,
+  "start_further_tests": false,
+  "start_full_batch": false
+}

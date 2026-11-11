@@ -1,0 +1,900 @@
+{
+  "scope": "Current MCMA text/code evidence plus approved clip4 V2 baseline; no media, model weights, mask binaries, secrets, or environments",
+  "source_root": "/Users/frank/Desktop/Coding/CharSwap/experiments",
+  "files": [
+    {
+      "path": "mcma_first50_20261111/MCMA_MOUTH_MOTION_HANDOFF.md",
+      "bytes": 22827,
+      "sha256": "74827dd6580c530a28d21826074d7c947b5647b476200691b1cec44d3c992030"
+    },
+    {
+      "path": "mcma_first50_20261111/RECIPE_AND_REVIEW.md",
+      "bytes": 15015,
+      "sha256": "be6795cb05544ad42f90eb31c76b647f6e6f0ccd8dc85c47273c4c7627417587"
+    },
+    {
+      "path": "mcma_first50_20261111/STATUS.md",
+      "bytes": 7432,
+      "sha256": "40c7a254a4bf7c70e27983313102b538725a97e62cf95449c0f3dcc5897204ab"
+    },
+    {
+      "path": "mcma_first50_20261111/active-reference-selection.json",
+      "bytes": 497,
+      "sha256": "b4388b64ae80e15b756752828b774ce0ac5e2b9b43975a2d3ffe8a614ffbffd9"
+    },
+    {
+      "path": "mcma_first50_20261111/audio-collector-process.json",
+      "bytes": 38,
+      "sha256": "b454f11440266e0b566fc87b0bfd966995cd82db7c932df7dfdca50bf834d2c6"
+    },
+    {
+      "path": "mcma_first50_20261111/audio-mask-audit.json",
+      "bytes": 309,
+      "sha256": "91ddb4319f34f65b583b24304b2173e1219502e3eeb3ae7472cb54e7b5f6933f"
+    },
+    {
+      "path": "mcma_first50_20261111/audio-pilot/controlled-difference.json",
+      "bytes": 282,
+      "sha256": "7f8e3042f7e6bfc1a2b8edfc63a1ae928ce38997ba87e11aea7886f558af303f"
+    },
+    {
+      "path": "mcma_first50_20261111/audio-pilot/graphs/encode-001-graph.json",
+      "bytes": 3587,
+      "sha256": "1022b3884b7bb4a58f144d09c17c1b4e6d624e952054f2016558719926059065"
+    },
+    {
+      "path": "mcma_first50_20261111/audio-pilot/graphs/render-001-graph.json",
+      "bytes": 3456,
+      "sha256": "858e50587de7bae63a50a5940e6a3c5d9d2b229fcaed4fef245fad7510c53df1"
+    },
+    {
+      "path": "mcma_first50_20261111/audio-pilot/remote-status.json",
+      "bytes": 282,
+      "sha256": "d6688a6ea649532acbae6d00e841009a1e631cdf433f104314e31a9fd39dfb42"
+    },
+    {
+      "path": "mcma_first50_20261111/audio-pilot-plan.json",
+      "bytes": 668,
+      "sha256": "b3ffebc3eb7f8c90b8a1ed22502ae5b0459ec606bf55f170bd0e8a1dfb472ee2"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_and_assemble.py",
+      "bytes": 3223,
+      "sha256": "b793770ea557ba1e07965685afcd208120a50f05e26979f2838d4116ed907ae3"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_audio_pilot.py",
+      "bytes": 1950,
+      "sha256": "d94461c6f8e53478dc55fce83b6f7070e926341be1b43ee43c5e251000af2245"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_full_v2.py",
+      "bytes": 3287,
+      "sha256": "4c1308aac9c60ddeedff560fdd1a3f74ca81a88af89a28d0ef373a96ce27f582"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_mesh_pilot.py",
+      "bytes": 1955,
+      "sha256": "3e77df8a8ce81ed49347f8743230fe767fe6071669ba7d82c35700486022fa32"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_motion085_pilot.py",
+      "bytes": 1969,
+      "sha256": "1150bb1030b5970d985aa8ab75f618d29e0f24197cbe05af1554e53bacb3431d"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_policy_only_pilot.py",
+      "bytes": 2013,
+      "sha256": "94ee487d5447d94f78a09cb1031f8bb1f574032ec638fb74780a7f9040efb75d"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_temporal_bind_pilot.py",
+      "bytes": 2024,
+      "sha256": "cf9bafec7ace4a889dbd7d5f1a499505e575596de154d74200dde082573569d5"
+    },
+    {
+      "path": "mcma_first50_20261111/collect_temporal_pilot.py",
+      "bytes": 1998,
+      "sha256": "218657a698fa7149836b43a9f4a2bc3f21adf351d5725326c6a43e896623528a"
+    },
+    {
+      "path": "mcma_first50_20261111/collection-status.json",
+      "bytes": 440,
+      "sha256": "d2aad0d150b5c2f4a2510fbefd8c11ab16944b643d73437b5d19232b11ec05c6"
+    },
+    {
+      "path": "mcma_first50_20261111/collector-process.json",
+      "bytes": 47,
+      "sha256": "ef1943023938fe9e864140d41232a9065df39435c6e8301605624656e572651c"
+    },
+    {
+      "path": "mcma_first50_20261111/compare_mesh_pilot.py",
+      "bytes": 921,
+      "sha256": "d4bca6b3f5236c2e3603ef8a6f77ab3c3da37f60880a6724776865103be32cf8"
+    },
+    {
+      "path": "mcma_first50_20261111/cut-review/cfr-boundary-scores.json",
+      "bytes": 4130,
+      "sha256": "6b6e1c0d13148222984e2d757c66a12be05821ed5b09c32b77c0939334a64a7d"
+    },
+    {
+      "path": "mcma_first50_20261111/full-plan-preflight.json",
+      "bytes": 225,
+      "sha256": "6862b54433ac5c679d6eaa49298cf97af1eb63e4e742a777c01d8f3abbf001e5"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/handoff-artifact-manifest.json",
+      "bytes": 1379,
+      "sha256": "97f323802c04410efd87dcdd7503dbffe3e319a2537e987fcbf30e094a48ca69"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/launcher_memory.py",
+      "bytes": 2535,
+      "sha256": "2534c6f92e2f66b2b6c95e72aa1b98dac1a0b590087adbbcafc20874ad278e0b"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/long_attention.py",
+      "bytes": 3324,
+      "sha256": "7f6794e9a270e72b3ee7ef3986cb6e6e2b9a357e9c6c472fd7fee7f4947666fe"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/policy-only-preflight.json",
+      "bytes": 179,
+      "sha256": "982798fc3b1c815f16e1cc33e4026bbc9ee00c38ae93760606336a569f41201d"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/profile-policy-only-pilot.json",
+      "bytes": 1240,
+      "sha256": "8779698842e1b2544b1af827b23b3dde8e346d5bcbcb9c51037b0b2528c68aa0"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/COMPATIBILITY_NOTES.md",
+      "bytes": 1300,
+      "sha256": "7a5971a74ea9ba6758d914f75b67d04d557e09b137fcb0e670ec90868e51071b"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/H3_NATIVE_TEMPORAL.md",
+      "bytes": 30817,
+      "sha256": "2d323eedeecfdf3c46ea971bddee2fb925cd02fbde5b5118029d370edbc796dc"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/LICENSE",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/__init__.py",
+      "bytes": 384,
+      "sha256": "2801cd0e1e19594c545c820a8f2127e3b2a51db7b2866be9f1b9ae720b59ddcc"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/h3_temporal_binaries.json",
+      "bytes": 3422,
+      "sha256": "7a13fd7fd5d01c2420d0ec3a0ff12ca90ae57668dce54d0999fad37fd3fc174c"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_clip_video.py",
+      "bytes": 8492,
+      "sha256": "e3d8e6d70d7a2f611ac5990eafa6aa4dce0560153a8bd2d1037f91355dbc1f64"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_direct_decode.py",
+      "bytes": 4335,
+      "sha256": "1090650112dfc6488943619f2c8e641f5be310eb918a35caf11c1a01eb0f1873"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_downscaled_guide.py",
+      "bytes": 22952,
+      "sha256": "148d18bd7eba94eec19073b7f5df69cc6c2d84694501656800ed741a60509ccd"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_native_temporal.py",
+      "bytes": 21834,
+      "sha256": "72428f2609489755839a4d7df936699881a557ffcac58a0ca7a57d5aa223d34f",
+      "source_sha256": "a9502362e2ee9f5800056918120f48fd08f3510f2c888e64bf91f092f683ef46",
+      "archive_change": "Nonfunctional modification/provenance notice added to the already-modified policy-only source"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_native_temporal_core.py",
+      "bytes": 7244,
+      "sha256": "6c5b7b761806be6b07930efa929e06cdeb23c614c4ae6f9503c3234e0bbcb31d"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_reference_binding.py",
+      "bytes": 6008,
+      "sha256": "effafa3bcd2de785ac7a8d409da19852429b99a7bd3a31e83fff89ba4b7ec6d5"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_reference_rope.py",
+      "bytes": 3528,
+      "sha256": "111c0db60119658adccaffb2bffeed9da36609720264d8cb366f6217805e71ee"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_rope_layout.py",
+      "bytes": 2817,
+      "sha256": "ab79b29036e8e7e840856c63c1fd2d25bcc033e4ac44c7283a4aa4608568c492"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_singleframe_vae.py",
+      "bytes": 9909,
+      "sha256": "327e6bb035a999a0adf102cc3b0b023141fadc351128780ffdb234a2877fd59a"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_sparse_compat.py",
+      "bytes": 3378,
+      "sha256": "61f8a8a57348a992e3f532533be959c6d9ca2db887b8e81244d5933a84c21b8d"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_temporal_bootstrap.py",
+      "bytes": 8279,
+      "sha256": "4bc9192d7485123f66727e63c27d4ccbc01983ef0417e25099d6d2cda64f55c0"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_temporal_fast.py",
+      "bytes": 5853,
+      "sha256": "80070ed5e4eb864f9aa2ab217ca07e43333a6d4531beee2dfed67a19955feefc"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_temporal_kernel.py",
+      "bytes": 2403,
+      "sha256": "79750fadb8cc6b35c643b6220871730e9d5d7ef65f9ef64f6a8b50e8c9c9a8ea"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_temporal_kitchen.py",
+      "bytes": 2715,
+      "sha256": "0c92100409d22a97b351b1c1bc6490a50c830309977f00ad503a3676e2065dbe"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_temporal_lock.py",
+      "bytes": 1103,
+      "sha256": "3e1420fad7af7e135b2454ad0bae616bcbf2551f112e0e6ec64640c1d40af262"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_temporal_sol.py",
+      "bytes": 3415,
+      "sha256": "e8f712d13a023bbdb79c4f72fb745462454033440b7570efff93322ca9397d56"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/minimax_h3_token_weights.py",
+      "bytes": 15807,
+      "sha256": "f8e40788d0c358449ac1ad098d0a724c84b8e5c5f6ca8afa82b0db4f8999699e"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/source-manifest.json",
+      "bytes": 2993,
+      "sha256": "5bde955f1b7fc0ad305325d445c56583d423e13f2e5f21f92595e0a1a30e4921"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/runtime/custom_nodes/mcma_policy_only_nodes/spatial.py",
+      "bytes": 9888,
+      "sha256": "0976d7c7e19813b800d16fec181b713dd8b04dded178cd386f0336f91241b851"
+    },
+    {
+      "path": "mcma_first50_20261111/handoff-evidence/remote-snapshot/temporal-bind-preflight.json",
+      "bytes": 259,
+      "sha256": "c2023593166ad7deaf6aa893d05451b38e6cf1ed14882d740b0429faa48a0891"
+    },
+    {
+      "path": "mcma_first50_20261111/job.json",
+      "bytes": 21421,
+      "sha256": "182a8654fc05b9502ec129ee95c1161bff8c7900971f0a4266d7915920076b54"
+    },
+    {
+      "path": "mcma_first50_20261111/latent_lock_nodes.py",
+      "bytes": 8874,
+      "sha256": "2c36d9e1d8a7e052a0a7c2e1fc1b3c922c2017bf2c0fcf5fe6c5ae25c11e5ed9"
+    },
+    {
+      "path": "mcma_first50_20261111/make_mask_boards.py",
+      "bytes": 781,
+      "sha256": "932b604de2f8f370d391e41f34303591723b54d22863f89a280c067ead72bee7"
+    },
+    {
+      "path": "mcma_first50_20261111/mask-review/reviewed-all-shots.json",
+      "bytes": 751,
+      "sha256": "8466221391c55587930592d1684cf955bc64d46d9b18d2b1285bad6623ef8f95"
+    },
+    {
+      "path": "mcma_first50_20261111/mask-review/reviewed-through-008.json",
+      "bytes": 492,
+      "sha256": "b60eb42788e343cbb8d7e3568822c4ef874fd7d22ad12808107a0e8c8448640f"
+    },
+    {
+      "path": "mcma_first50_20261111/measure_mouth_crops.py",
+      "bytes": 2062,
+      "sha256": "419e5558f68355eb6d42ff14ab632a06b90f1932750502cda6c9cb3438eaa31a"
+    },
+    {
+      "path": "mcma_first50_20261111/measure_mouths.py",
+      "bytes": 2062,
+      "sha256": "b0214e346d2bccb6d6663e3edef8d1bdef0c2c2ab5c03a1c3727b869a678497d"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-collector-process.json",
+      "bytes": 49,
+      "sha256": "2dff50b0e6c5f722d082dcaae00c7d1a6a82bfa37513f1e00aaa7582f459026b"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/compare_face_motion.py",
+      "bytes": 1768,
+      "sha256": "7fb0093d00e45491782853365ad755ce550142297bbe3c41c2204d4ada210e15"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/comparison-media-report.json",
+      "bytes": 3603,
+      "sha256": "4a10c92a3ee58f123b36db1f9337db64f7a18afc8fdfd05ceb371532203b25e3"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/dryrun_mesh.py",
+      "bytes": 1796,
+      "sha256": "d792533317e229b25a6eb9752b33fa321e215f37848ef83e881ff02154cd7049"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/face-mesh-report.json",
+      "bytes": 2882,
+      "sha256": "6540dce7b099bca432da6ad7fc7738d88d033d19f4eb50d85f55134fbab24df3"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/fan_landmark_probe.py",
+      "bytes": 1894,
+      "sha256": "c386728978979fefd7e6f871cef823b2bd5ffb1927125f46ed73e51c366cf4e9"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/graphs/encode-001-graph.json",
+      "bytes": 4204,
+      "sha256": "7197067a248b458fba66b67f4787ada2884ea2e41645c529a0ebf4694ed0b017"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/graphs/render-001-graph.json",
+      "bytes": 3453,
+      "sha256": "2109b4ae244152eb2ef2dca0781879dd5ed02947785fc13ac546d3746fd789fe"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/inspect_fan_all.py",
+      "bytes": 801,
+      "sha256": "1812c504e1b06ef76876d5f6b998f421092c0fb3cc9d418c7fde19b864b9bdf2"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/inspect_fan_man.py",
+      "bytes": 799,
+      "sha256": "c9f200d1e8dffe761c6747fa8a8d18efa8e9d45ab1510a3d183b8000028eb2ca"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/journal.json",
+      "bytes": 2387,
+      "sha256": "1eedc7d1d4084a43175b1fcb3a16a481e547948b8548c35ec41aa8ef07fc3479"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/mesh-coverage-reviewed.json",
+      "bytes": 745,
+      "sha256": "42ecce958fbab7d3882c2df8bc8069f89dabc29c51ac52c5c58fb32c86bb931a"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/prepare_face_mesh.py",
+      "bytes": 5353,
+      "sha256": "8920e54ed12d9f252727ea9d06c064a494452fdb49f8b735a99bf55dbce93112"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/probe_mediapipe_profile.py",
+      "bytes": 1596,
+      "sha256": "4866aec936f62718212dfd7b6c9491f39c29a76a836792d10fa6d903c07c52f4"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/probe_profile_boxes.py",
+      "bytes": 1329,
+      "sha256": "68c55a1f7645c3fcae7131e3fab66d2f7b1f58da425c2ed40bb4f0a7cd6fe971"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/probe_profile_boxes_v2.py",
+      "bytes": 1332,
+      "sha256": "8be481f4dcd307e65408694a8392d0df76995baf938214428a47491923a951ba"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/remote-status.json",
+      "bytes": 281,
+      "sha256": "21dcf0b378e5739a367413f5d73e5af9f5e50e53631379b3ad3f76ab1733c232"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/report.json",
+      "bytes": 772,
+      "sha256": "2a0055c8a28277daa521dacb9d11f4937a606a551602ff7181713be2fbc57260"
+    },
+    {
+      "path": "mcma_first50_20261111/mesh-pilot/track_fan_profile.py",
+      "bytes": 1509,
+      "sha256": "d513f21f891e2fc8f8a68fb206aa3699ec559c2c5e18a1bb479f5311fea7d972"
+    },
+    {
+      "path": "mcma_first50_20261111/motion085-collector-process.json",
+      "bytes": 14,
+      "sha256": "6e28d566c5331a2527fa59e1fc54d1cced684404007975022e9efbe034f310c5"
+    },
+    {
+      "path": "mcma_first50_20261111/motion085-pilot/graphs/encode-001-graph.json",
+      "bytes": 3615,
+      "sha256": "96a3abad242688df2f7ddb5de4c8749363f920487f2ddd60d52d1614cb3d33cd"
+    },
+    {
+      "path": "mcma_first50_20261111/motion085-pilot/graphs/render-001-graph.json",
+      "bytes": 3469,
+      "sha256": "87d61be8bff84baba2bb7fc623500a4f3ea9156f3feba0e9ff004efcf63a3148"
+    },
+    {
+      "path": "mcma_first50_20261111/motion085-pilot/journal.json",
+      "bytes": 2389,
+      "sha256": "19196430ebcea3346653a5dc995068b732227261efc1717ea07d395db39347e6"
+    },
+    {
+      "path": "mcma_first50_20261111/motion085-pilot/remote-status.json",
+      "bytes": 284,
+      "sha256": "063d432ff29d1dbd46e3e8a04d1b8f9148705e187fdd472189b5d1ca666e8ddf"
+    },
+    {
+      "path": "mcma_first50_20261111/motion085-pilot/report.json",
+      "bytes": 631,
+      "sha256": "db7f01ec750ac2fe35df1145c691db259989b76c1ad6616ca1f185b234580e15"
+    },
+    {
+      "path": "mcma_first50_20261111/mouth-crop-diagnostic.json",
+      "bytes": 23016,
+      "sha256": "2bd81608fda26f5497d5f3ca0db7b291e775ab93efb5f29faabae657b1bdb78c"
+    },
+    {
+      "path": "mcma_first50_20261111/mouth-diagnostic.json",
+      "bytes": 5188,
+      "sha256": "23139cf5fe805f616621bc99581d4f615635e8f500c71201298bfdabd95b7a67"
+    },
+    {
+      "path": "mcma_first50_20261111/pause-after-current-test.json",
+      "bytes": 366,
+      "sha256": "8ff7f1db1182810e2c8455e511219e27030e55b31bab0ccb55f937ea75638e5a"
+    },
+    {
+      "path": "mcma_first50_20261111/person_mask_nodes.py",
+      "bytes": 2564,
+      "sha256": "5e8933e4127d0b54e4396231a1e8de0f4c02433e37844bfdb51a72742309b5d5"
+    },
+    {
+      "path": "mcma_first50_20261111/pilot/graphs/encode-001-graph.json",
+      "bytes": 3044,
+      "sha256": "57f272b3a19a6668d366bcd85a6cf09d3bca45b45c556984b429cac357ba789d"
+    },
+    {
+      "path": "mcma_first50_20261111/pilot/graphs/mask-001-graph.json",
+      "bytes": 1617,
+      "sha256": "1826092cae64747d1902cf88ec2c97be82b728b2a0e47d47d3f28ed8d843d5c9"
+    },
+    {
+      "path": "mcma_first50_20261111/pilot/graphs/render-001-graph.json",
+      "bytes": 3444,
+      "sha256": "e827725441e1eb6709499059f075c212239f1c13babd65bbfc52cebfa97c44d8"
+    },
+    {
+      "path": "mcma_first50_20261111/pilot/report.json",
+      "bytes": 567,
+      "sha256": "36d1dc29e56fdd0eba43a2ac1655d070abc59665a9c49f0d3a6eee997aca2025"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-audio-pilot.json",
+      "bytes": 24879,
+      "sha256": "13b4e1f52c0daf68a32c3ae772c9a9256cb4f1705cf934e74b84dbe50f5ae35e"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-full-v2.json",
+      "bytes": 26131,
+      "sha256": "7963adff3ab9e67caf8b3829db39d872eedeb3a72773c3cb4f1e2f3f8596a27b"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-full-v3.json",
+      "bytes": 26235,
+      "sha256": "fd0b64ed8e861657228b9c7b66ec609a08d89a4501f10c90feecaa863f82b1da"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-mesh-pilot.json",
+      "bytes": 25075,
+      "sha256": "abeb86a5975742ff0030e9d03b3c2ff8d3e9cda20abc82889bed73dd6c29081b"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-motion085-pilot.json",
+      "bytes": 25144,
+      "sha256": "03ead493e1e72fdf810797d5c9e3269a12df5c68f3bee86474a052ada615fae8"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-policy-only-pilot.json",
+      "bytes": 25957,
+      "sha256": "156599c989927e9d9cae42f4b27d5fc89b17c26ea5475291703adacd23b582d5"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-temporal-bind-pilot.json",
+      "bytes": 25664,
+      "sha256": "758eaf155fbebe22b692f11fd74ce4995ecd26fd5522b136347c6e69eb641459"
+    },
+    {
+      "path": "mcma_first50_20261111/plan-temporal-pilot.json",
+      "bytes": 25340,
+      "sha256": "5ee373a385a1cebd8c543fe416091cb64007b55b2b76d7ead25892793404fe03"
+    },
+    {
+      "path": "mcma_first50_20261111/plan.json",
+      "bytes": 24845,
+      "sha256": "d99cdff02ffa3dc89dde6a10499447064c092bfd75d00a8271b4afc5ac2a11c0"
+    },
+    {
+      "path": "mcma_first50_20261111/policy-only-collector-process.json",
+      "bytes": 14,
+      "sha256": "a44dac491ba413bf0d6e41f002c027d4bada0e71227c01cd09d1b54236481ae2"
+    },
+    {
+      "path": "mcma_first50_20261111/policy-only-pilot/comparison-media-report.json",
+      "bytes": 3612,
+      "sha256": "1fea97ea3525d6935238f626008da0a03f6d96925258ab487cd30256b40dc9e4"
+    },
+    {
+      "path": "mcma_first50_20261111/policy-only-pilot/graphs/encode-001-graph.json",
+      "bytes": 3629,
+      "sha256": "256cb3522647ac6768842426613eed257bb6f3b2f2e3e6dc6a64ace476472ac3"
+    },
+    {
+      "path": "mcma_first50_20261111/policy-only-pilot/graphs/render-001-graph.json",
+      "bytes": 5084,
+      "sha256": "d97084ae44bb3360f08ee846138501ee8f729267b4250c27e71b292d46fee309"
+    },
+    {
+      "path": "mcma_first50_20261111/policy-only-pilot/journal.json",
+      "bytes": 2394,
+      "sha256": "e1ddb42d6f1861c1cc12736bdc81aea2b629ad0b6baa6b3d34261b537cf4ba24"
+    },
+    {
+      "path": "mcma_first50_20261111/policy-only-pilot/remote-status.json",
+      "bytes": 288,
+      "sha256": "5d1dce86c663373ee7c1ccc86bad4a58f38c6b4cfce12f24dcfddff69c674308"
+    },
+    {
+      "path": "mcma_first50_20261111/policy-only-pilot/report.json",
+      "bytes": 636,
+      "sha256": "0590f985e6a7c96b6cdfeb15fd5370bc6f36d1f1318e8468642d8623e901e974"
+    },
+    {
+      "path": "mcma_first50_20261111/policy_only_native_temporal.py",
+      "bytes": 21834,
+      "sha256": "72428f2609489755839a4d7df936699881a557ffcac58a0ca7a57d5aa223d34f",
+      "source_sha256": "a9502362e2ee9f5800056918120f48fd08f3510f2c888e64bf91f092f683ef46",
+      "archive_change": "Nonfunctional modification/provenance notice added to the already-modified policy-only source"
+    },
+    {
+      "path": "mcma_first50_20261111/preflight_policy_only.py",
+      "bytes": 1921,
+      "sha256": "afe115c4ae88f99aa949a09f02d5a7da1766ae7d22fb9b0576b492c8b27af8cb"
+    },
+    {
+      "path": "mcma_first50_20261111/preflight_temporal.py",
+      "bytes": 2111,
+      "sha256": "719b96d4b5d786f008582b4e68701eb38c3d3b09541c0a6d1e999bf59ce96163"
+    },
+    {
+      "path": "mcma_first50_20261111/preflight_temporal_bind.py",
+      "bytes": 2154,
+      "sha256": "c9c84cfde99bf2ebeb185c48c932f7b92151e60b7f4b0fb5c0e79015a662a6c3"
+    },
+    {
+      "path": "mcma_first50_20261111/prepare_masks.py",
+      "bytes": 2252,
+      "sha256": "95e55ffd02c572a4a05d921c48a3860bccd21802d68c04eb4bd90c4bf10597ec"
+    },
+    {
+      "path": "mcma_first50_20261111/prepare_person_masks.py",
+      "bytes": 3441,
+      "sha256": "c598bf366a9bab76d57eef6fe284e596884904b1a5dcfa7b8bbb900babf5c3d4"
+    },
+    {
+      "path": "mcma_first50_20261111/queue_audio_pilot.py",
+      "bytes": 1210,
+      "sha256": "287e697be088948fdf1315b4401281213e606ce13305adc84620ff3c35ec9001"
+    },
+    {
+      "path": "mcma_first50_20261111/recipe-file-sha256.json",
+      "bytes": 651,
+      "sha256": "92f6a59706c799e847a02f95297cdc9eb77683ba2aa2c2c7e54cee381aa791a2"
+    },
+    {
+      "path": "mcma_first50_20261111/runner.py",
+      "bytes": 9214,
+      "sha256": "8dadecbfd1d305781d9855a70f2ad1bceb56aa3b94d74ba9068bb1ac5f314c67"
+    },
+    {
+      "path": "mcma_first50_20261111/runner_audio_pilot.py",
+      "bytes": 9178,
+      "sha256": "3942352d2699009a43675001098ea434028c0214eee3aad7d0afae96dd24be5a"
+    },
+    {
+      "path": "mcma_first50_20261111/runner_full_v2_audio.py",
+      "bytes": 9433,
+      "sha256": "2f5ffa6479e39fd7c4f10edb5d8bb88c9d9f8be71159738998b66974baa1aaef"
+    },
+    {
+      "path": "mcma_first50_20261111/runner_mesh_pilot.py",
+      "bytes": 9781,
+      "sha256": "22680453fe3e7b9554af8bf57264d2575e1adc8a5b7f266336420765d996b600"
+    },
+    {
+      "path": "mcma_first50_20261111/runner_motion085_pilot.py",
+      "bytes": 9282,
+      "sha256": "e978547995e1ef65a8c495cd31ba3951812c22af15451404006d61af06eac40b"
+    },
+    {
+      "path": "mcma_first50_20261111/runner_policy_only_pilot.py",
+      "bytes": 9985,
+      "sha256": "ae30fca39490fdc9b83eb9cc85a6f32099d296566ac2c3b35ec0a975ddb63868"
+    },
+    {
+      "path": "mcma_first50_20261111/runner_temporal_bind_pilot.py",
+      "bytes": 9999,
+      "sha256": "8724921dd3bef914082605b6aa177b70372f7a60529ee7b028644da9fec2f5f4"
+    },
+    {
+      "path": "mcma_first50_20261111/runner_temporal_pilot.py",
+      "bytes": 9557,
+      "sha256": "19891a5799ab38a75318079559ed9bb9a46f0eef7cb074a10a55bbcbccce3759"
+    },
+    {
+      "path": "mcma_first50_20261111/spatial_nodes_full_v2.py",
+      "bytes": 9050,
+      "sha256": "961d52d5f122b9c3df9a74e4df48658c1f85b69eae9badaaaa66f8f3177dc90d"
+    },
+    {
+      "path": "mcma_first50_20261111/spatial_nodes_mesh_pilot.py",
+      "bytes": 10909,
+      "sha256": "9d6834740ad1ec52b627de644cce0a71cbb9ef5035c195d2c53b29a82c6b6599"
+    },
+    {
+      "path": "mcma_first50_20261111/spatial_nodes_motion085.py",
+      "bytes": 9058,
+      "sha256": "4cca211ebc45b94eb3518a2a7e264335fb34700cf5a6bf0b559dd7d5cb1d261c"
+    },
+    {
+      "path": "mcma_first50_20261111/spatial_nodes_policy_only.py",
+      "bytes": 9888,
+      "sha256": "0976d7c7e19813b800d16fec181b713dd8b04dded178cd386f0336f91241b851"
+    },
+    {
+      "path": "mcma_first50_20261111/spatial_nodes_temporal.py",
+      "bytes": 9057,
+      "sha256": "1e8c0bd1ecc4a2ac361680c71b61c0ccbfcb43c8a4436773816c9a6867c01f87"
+    },
+    {
+      "path": "mcma_first50_20261111/spatial_nodes_temporal_bind.py",
+      "bytes": 9890,
+      "sha256": "594edd6d995e18397f29b0dbaa6b00fb00f655d46c86c2581e5f0f93e14677b8"
+    },
+    {
+      "path": "mcma_first50_20261111/stage_policy_only.py",
+      "bytes": 1049,
+      "sha256": "0085e1ef9c623e04aa46ffe8812d8216ce2e09dc3f1b53800752ec19533d99b5"
+    },
+    {
+      "path": "mcma_first50_20261111/stage_temporal_bind.py",
+      "bytes": 1689,
+      "sha256": "ed7fc3a44f9f13106b02aeb81ab93d5d30adb1e57635935635d6b13c0d7f6f3c"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-bind-collector-process.json",
+      "bytes": 14,
+      "sha256": "30070ab2566300995af6e562110f6ef1e1ba8e284a9b44a1a76df15a354d5c1d"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-bind-pilot/graphs/encode-001-graph.json",
+      "bytes": 3643,
+      "sha256": "4976dc4bc07431823e012c2e9a44b2fc889966e3d3369dc01284605a0e9dcc2c"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-bind-pilot/graphs/render-001-graph.json",
+      "bytes": 5092,
+      "sha256": "798309cd599d7a92b0bbd4702c9144dd3e3f0223a7485d96f98366f41e3e0ac2"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-bind-pilot/journal.json",
+      "bytes": 2395,
+      "sha256": "a34f6e5c2abf89407fe751ecd5ad59ab6908dfd5927c9f93a5bdf487225ba634"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-bind-pilot/remote-status.json",
+      "bytes": 290,
+      "sha256": "f9eb345824295ab8f341e5083c0aa8ab22b4f2f2ab105a20158853f7f4b16296"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-bind-pilot/report.json",
+      "bytes": 550,
+      "sha256": "b40a6054fef11b01dc11a54d3249967ebc0af445b731e10b3054fa57d2a364d6"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-collector-process.json",
+      "bytes": 14,
+      "sha256": "a8450131b27bf09cddf333ead664edac868905aebdf98267a6efc4a85444ca34"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/COMPATIBILITY_NOTES.md",
+      "bytes": 1300,
+      "sha256": "7a5971a74ea9ba6758d914f75b67d04d557e09b137fcb0e670ec90868e51071b"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/H3_NATIVE_TEMPORAL.md",
+      "bytes": 30817,
+      "sha256": "2d323eedeecfdf3c46ea971bddee2fb925cd02fbde5b5118029d370edbc796dc"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/LICENSE",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/h3_temporal_binaries.json",
+      "bytes": 3422,
+      "sha256": "7a13fd7fd5d01c2420d0ec3a0ff12ca90ae57668dce54d0999fad37fd3fc174c"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_clip_video.py",
+      "bytes": 8492,
+      "sha256": "e3d8e6d70d7a2f611ac5990eafa6aa4dce0560153a8bd2d1037f91355dbc1f64"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_direct_decode.py",
+      "bytes": 4335,
+      "sha256": "1090650112dfc6488943619f2c8e641f5be310eb918a35caf11c1a01eb0f1873"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_downscaled_guide.py",
+      "bytes": 22952,
+      "sha256": "148d18bd7eba94eec19073b7f5df69cc6c2d84694501656800ed741a60509ccd"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_native_temporal.py",
+      "bytes": 21569,
+      "sha256": "c2197c949435ad611ecac60476eb492efe2a9ed8d693df96d278452377359f9c"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_native_temporal_core.py",
+      "bytes": 7244,
+      "sha256": "6c5b7b761806be6b07930efa929e06cdeb23c614c4ae6f9503c3234e0bbcb31d"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_reference_binding.py",
+      "bytes": 6008,
+      "sha256": "effafa3bcd2de785ac7a8d409da19852429b99a7bd3a31e83fff89ba4b7ec6d5"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_reference_rope.py",
+      "bytes": 3528,
+      "sha256": "111c0db60119658adccaffb2bffeed9da36609720264d8cb366f6217805e71ee"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_rope_layout.py",
+      "bytes": 2817,
+      "sha256": "ab79b29036e8e7e840856c63c1fd2d25bcc033e4ac44c7283a4aa4608568c492"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_singleframe_vae.py",
+      "bytes": 9909,
+      "sha256": "327e6bb035a999a0adf102cc3b0b023141fadc351128780ffdb234a2877fd59a"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_sparse_compat.py",
+      "bytes": 3378,
+      "sha256": "61f8a8a57348a992e3f532533be959c6d9ca2db887b8e81244d5933a84c21b8d"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_temporal_bootstrap.py",
+      "bytes": 8279,
+      "sha256": "4bc9192d7485123f66727e63c27d4ccbc01983ef0417e25099d6d2cda64f55c0"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_temporal_fast.py",
+      "bytes": 5853,
+      "sha256": "80070ed5e4eb864f9aa2ab217ca07e43333a6d4531beee2dfed67a19955feefc"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_temporal_kernel.py",
+      "bytes": 2403,
+      "sha256": "79750fadb8cc6b35c643b6220871730e9d5d7ef65f9ef64f6a8b50e8c9c9a8ea"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_temporal_kitchen.py",
+      "bytes": 2715,
+      "sha256": "0c92100409d22a97b351b1c1bc6490a50c830309977f00ad503a3676e2065dbe"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_temporal_lock.py",
+      "bytes": 1103,
+      "sha256": "3e1420fad7af7e135b2454ad0bae616bcbf2551f112e0e6ec64640c1d40af262"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_temporal_sol.py",
+      "bytes": 3415,
+      "sha256": "e8f712d13a023bbdb79c4f72fb745462454033440b7570efff93322ca9397d56"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/minimax_h3_token_weights.py",
+      "bytes": 15807,
+      "sha256": "f8e40788d0c358449ac1ad098d0a724c84b8e5c5f6ca8afa82b0db4f8999699e"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-fallback-source/source-manifest.json",
+      "bytes": 3139,
+      "sha256": "c2fa632a5d0da88891bdc3f90001bb1f9a535797ae062e3caa0b4a833a38f3d0"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-pilot/graphs/encode-001-graph.json",
+      "bytes": 3608,
+      "sha256": "048d2834e8fd99b463c7486bbc194555aac47d2c7856878fce4fb6d79694219c"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-pilot/graphs/render-001-graph.json",
+      "bytes": 3944,
+      "sha256": "6e898d68ccbcb971a01a8f06f5057012b9fd6f0bb22dda863bd9cf6eb8c884b4"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-pilot/journal.json",
+      "bytes": 2389,
+      "sha256": "3a49327fc1bd8cc182734b76d257446a43712e73fb34218039ec6791be1ae6b8"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-pilot/remote-status.json",
+      "bytes": 284,
+      "sha256": "65c0624bdaa2325c063839fed156b71be423913b443f0f8b14f808b5b46d9010"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-pilot/report.json",
+      "bytes": 535,
+      "sha256": "88380272e25a5c6370cd7316a8880d8d593e6b4db1eefb06cc6ba5019ad5a16b"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal-preflight.json",
+      "bytes": 338,
+      "sha256": "815c0c61ce9811a01037b3a9c2286584c4a2d1e948fd458be3e2dbec068fd752"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal_bind_plugin_init.py",
+      "bytes": 384,
+      "sha256": "2801cd0e1e19594c545c820a8f2127e3b2a51db7b2866be9f1b9ae720b59ddcc"
+    },
+    {
+      "path": "mcma_first50_20261111/temporal_plugin_init.py",
+      "bytes": 250,
+      "sha256": "d3cabdbe7d672910e84ada457681d9f574417f417af612995b9a770ca5ae668d"
+    },
+    {
+      "path": "pretty_full_music_video_20261109_v3/CLIP_004_CAMERA_AND_MOUTH_HANDOFF.md",
+      "bytes": 21996,
+      "sha256": "38b6d80152445425281b3b68cf266bbcae989f788e6c5ff74d76ca66177477bc"
+    },
+    {
+      "path": "pretty_full_music_video_20261109_v3/latent-lock-test/v2/latent_lock_nodes.py",
+      "bytes": 6309,
+      "sha256": "6147c92c3b6bf0dd4a70a48eeb6ed162aea2241a6cb6faf9528ad41afe5b4974"
+    },
+    {
+      "path": "pretty_full_music_video_20261109_v3/latent-lock-test/v2/offline_runner_latentlock_v2.py",
+      "bytes": 9036,
+      "sha256": "3bf828401914c918225e173689111523901465ea877b2f8a193244dcadb1faf4"
+    },
+    {
+      "path": "pretty_full_music_video_20261109_v3/latent-lock-test/v2/plan-shot004-latentlock_v2.json",
+      "bytes": 4493,
+      "sha256": "f58cc14a8ee31909c892bcdc6ead76d56140ceff3aac63562ca8891d6894c54b"
+    },
+    {
+      "path": "pretty_full_music_video_20261109_v3/latent-lock-test/v2/queue_shot004_latentlock_v2.py",
+      "bytes": 6004,
+      "sha256": "3530f2eb6a89fb9f0c41c9df91dd7a530aa3e90b8ab6b8ca7902f3bd4320b9c5"
+    },
+    {
+      "path": "pretty_full_music_video_20261109_v3/latent-lock-test/v2/run_latentlock_v2_when_idle.py",
+      "bytes": 3856,
+      "sha256": "76df13e3b14d7417f0530bdfebc2f772cda244557d0b3665daeadd31630c5b2d"
+    },
+    {
+      "path": "pretty_full_music_video_20261109_v3/latent-lock-test/v2/stage_latentlock_v2.py",
+      "bytes": 1926,
+      "sha256": "aa2804381c7f6ee9b64dcb4845ce343580707af9c6225ea9d520bf6fa4244bbb"
+    }
+  ]
+}

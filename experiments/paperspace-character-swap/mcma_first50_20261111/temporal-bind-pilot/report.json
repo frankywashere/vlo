@@ -1,0 +1,14 @@
+{
+  "job_id": "mcma_temporal_bind_pilot_v1",
+  "generation_status": "all_shots_ready",
+  "encode_seconds": 200.8986234664917,
+  "render_seconds": 1112.4970541000366,
+  "total_wall_seconds": 1337.2,
+  "frames": 49,
+  "duration_seconds": 2.0416666666666665,
+  "original_audio_restored": true,
+  "female_reference": "reference-woman-v2.jpg",
+  "creative_review": "Rejected: source actors largely retained, per-person boost insufficient.",
+  "full50_started": false,
+  "output_sha256": "fdc631bbcd1c1dd7278e164b336ba7490ee5a86af46f7b9d62119981c964d565"
+}

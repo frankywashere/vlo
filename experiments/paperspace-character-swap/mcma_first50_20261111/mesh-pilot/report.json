@@ -1,0 +1,17 @@
+{
+  "job_id": "mcma_mesh_pilot_v1",
+  "technical_status": "all_shots_ready",
+  "encode_seconds": 221.13023948669434,
+  "render_seconds": 1117.4492781162262,
+  "sampling_seconds": 906.2,
+  "total_wall_seconds": 1386.9,
+  "frames": 49,
+  "duration_seconds": 2.0416666666666665,
+  "original_audio_muxed": true,
+  "source_audio_conditioning": true,
+  "mesh_coverage": "partial for both foreground faces; see mesh-coverage-reviewed.json",
+  "sha256": "5864a9fcdba62f14f77a9966ca805f33dba4683d9b602e601ddbe20da852a724",
+  "review": "Both replacements visible, no obvious remaining guide lines in sampled frames. Expressions still look held in samples. Mouth movement NOT creatively approved. User review requested.",
+  "full_batch_started": false,
+  "hosted_ai_submissions": 0
+}

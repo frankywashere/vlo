@@ -1,0 +1,14 @@
+{
+  "status": "all_shots_ready",
+  "phase": "idle",
+  "current_shot": null,
+  "completed_shots": [
+    1
+  ],
+  "started_at": 1794377917.9740746,
+  "error": null,
+  "hard_deadline_epoch": 1794723517.9740748,
+  "mode": "audio_pilot",
+  "total_shots": 1,
+  "elapsed_seconds": 1323.3
+}

@@ -1,0 +1,14 @@
+{
+  "job_id": "mcma_policy_only_pilot_v1",
+  "generation_status": "all_shots_ready",
+  "encode_seconds": 185.8044238090515,
+  "render_seconds": 1147.7004778385162,
+  "total_wall_seconds": 1356.2,
+  "frames": 49,
+  "duration_seconds": 2.0416666666666665,
+  "original_audio_restored": true,
+  "female_reference": "reference-woman-v2.jpg",
+  "creative_review": "Both replacements visible again; more varied mouth shapes in sampled frames. Full-speed timing and creative acceptance pending user review. Full50 not launched.",
+  "full50_started": false,
+  "output_sha256": "9018aa5fda9137822ea48c1b1f2dcd4f5383bd80f17a95b7e6799dd154284dbf"
+}

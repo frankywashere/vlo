@@ -1,0 +1,16 @@
+{
+  "at": 1794377333.5571048,
+  "shots_reviewed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "sample_scope": "middle and padded-end samples per shot, plus first/middle/end for shots1 and2",
+  "observations": "Foreground man/woman identified; no obvious audience leakage in these samples. Close-up shot8 includes the foreground woman shoulder/hand as intended. Expanded32px mask and temporal pooling still require output review.",
+  "full_frame_tracking_verified": false
+}

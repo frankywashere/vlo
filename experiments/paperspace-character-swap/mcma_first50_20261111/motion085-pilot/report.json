@@ -1,0 +1,15 @@
+{
+  "job_id": "mcma_motion085_pilot_v1",
+  "generation_status": "all_shots_ready",
+  "encode_seconds": 185.7124319076538,
+  "render_seconds": 1127.6515238285065,
+  "total_wall_seconds": 1337.3,
+  "denoise": 0.85,
+  "source_audio": true,
+  "mesh": false,
+  "female_reference": "reference-women.png (old reference)",
+  "creative_status": "Rejected: male jacket reverts to source tan suit later in opening. Not approved for full50.",
+  "hosted_api_submissions": 0,
+  "local_transfer": "Initial SCP timeout recovered by SSH stream, no resampling",
+  "output_sha256": "995b6e87709440c19c37e0051e0a7b4c858a0688fd9a12c944f6afbcd8658b7f"
+}

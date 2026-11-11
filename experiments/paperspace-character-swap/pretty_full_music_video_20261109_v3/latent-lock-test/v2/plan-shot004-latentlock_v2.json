@@ -1,0 +1,110 @@
+{
+  "job_key": "pretty_shot004_latentlock_v2",
+  "source": "/Users/frank/Desktop/pretty.mp4",
+  "source_sha256": "5bbb605aaa96d6bfd29107eb87536e2c246a57c90485260af30d720d875dd045",
+  "original_frames": 5000,
+  "fps": 24,
+  "width": 1102,
+  "height": 768,
+  "source_job_id": "ebd564416f4b4fd0819db8768fc15f89",
+  "reference_groups": {
+    "main_male": [
+      0,
+      1
+    ],
+    "all_women_face_only": [
+      2
+    ]
+  },
+  "references": [
+    {
+      "index": 0,
+      "file": "reference-0.jpg",
+      "sha256": "4719ccd6721ac6d2ab19a19360b294f56289cf62fe444a00c2069ff1a00d436a"
+    },
+    {
+      "index": 1,
+      "file": "reference-1.jpg",
+      "sha256": "ca362788aefa3b0ae0760456cead3731558b0f82797a059b356db6e764c3f9c1"
+    },
+    {
+      "index": 2,
+      "file": "reference-women.png",
+      "sha256": "4ccadb4592dac7010c8c71f840078add55841917e8d11b73f45f14d6b360dbc1"
+    }
+  ],
+  "shots": [
+    {
+      "start_frame": 676,
+      "end_frame": 803,
+      "start": 28.166666666666668,
+      "end": 33.458333333333336,
+      "frames": 127,
+      "source_shot": 3,
+      "main_male": true,
+      "women": false,
+      "index": 4,
+      "delivery_frames": 127,
+      "conditioning_frames": 141,
+      "reference_indexes": [
+        0,
+        1
+      ],
+      "prompt": "Replace the only man, in the foreground facing the camera in the therapy room in <Video 1> with the man in <Picture 1>. <Picture 2> is another angle of that SAME replacement man. Use his face, silver-gray hair, glasses and shiny dark-purple puffer jacket with dark trousers. Follow the source man's exact position, scale, movements, head turns and exact original mouth movements, including silent or listening moments throughout this shot. Match the source camera, framing, background, person count and performance timing. Keep every person in their source position and size. Show only the filmed scene. Do not invent or reassign dialogue. Preserve the original mouth-opening and closing timing and all source camera zooms and transitions.",
+      "trim_start_frames": 0,
+      "conditioning_start_frame": 676,
+      "conditioning_end_frame": 803
+    }
+  ],
+  "pilot_order": null,
+  "recipe": {
+    "model": "ref2va_bf16",
+    "text_encoder": "existing_int8_convrot",
+    "steps": 8,
+    "seed": 904239,
+    "sampler": "er_sde",
+    "scheduler": "normal",
+    "cfg": 1,
+    "shift_video": 12,
+    "shift_audio": 3,
+    "character_swap_strength": 1,
+    "turbo_strength": 1,
+    "sam": false,
+    "face_mesh": false,
+    "depth": false,
+    "fps": 24
+  },
+  "paid_api": false,
+  "new_vms": false,
+  "new_model_downloads": false,
+  "original_audio_policy": "restore original AAC stream at final assembly and verify decoded PCM hash",
+  "full_batch_requires_pilot_review": true,
+  "full_batch_hard_cap_hours": 96,
+  "delivery_path": "/Users/frank/Desktop/pretty-recast-paperspace-v3.mp4",
+  "opening_policy": "Six source-contiguous ~3.8s pieces to bound long-shot sampling cost; same references/settings, no timeline change.",
+  "plan_revision": 4,
+  "working_sha256": "323ba4d61119eb3a1b8cde87494d716e32ebb9cfb9a133163388239e7d8c4bda",
+  "long_shot_policy": "Bound remaining long model shots at 150 source frames, keeping all source frames and cuts in order.",
+  "priority": [
+    "main male identity, outfit and performance",
+    "all visible women facial identity, best effort"
+  ],
+  "source_prefix_preservation": {
+    "13": {
+      "frames": 7,
+      "reason": "source starts with seven empty frames before man enters"
+    }
+  },
+  "prompt_review_note": "v1 pilots invented additional people; revised descriptions name the source subjects and counts. Pilots14 and26 retain the exact v2 tested prompts.",
+  "continuity_policy": "Actual source cuts; only the22.625-second opening exceeds15s and is split at15s with22frames of generated motion overlap. No continuity guide crosses a true camera cut.",
+  "parallel_gpu_renders": false,
+  "parallel_reason": "85GiB host RAM available before model load; two CPU-offloaded BF16 copies plus activations and long-video conditioning lack safe headroom; swap already full.",
+  "latent_lock": {
+    "keep_from_frame": 64,
+    "feather_tokens": 1,
+    "feather_value": 0.5,
+    "generate_value": 1.0,
+    "render_denoise": 1.0,
+    "note": "Target latent = source latent; tokens 0-17 (frames 0-59) generated, token 18 (frames 60-63) 50/50 latent blend, tokens 19-41 (frames 64-140) held at source. Prompt, photos, seed and recipe are the no-audio baseline, unchanged."
+  }
+}
