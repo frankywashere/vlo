@@ -2,7 +2,7 @@ import {useRef,useState} from "react";
 import type {DragEvent} from "react";
 
 // File-picker and drop paths share their import/validation function.
-export function useFileDrop(onImport: (file: File) => void, disabled: boolean) {
+export function useFileDrop(onImport: (file: File) => void, disabled: boolean, onImportMultiple?: (files: File[]) => void) {
   const depth = useRef(0);
   const [dragging,setDragging] = useState(false);
   const hasFiles = (event: DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types ?? []).includes("Files");
@@ -22,8 +22,11 @@ export function useFileDrop(onImport: (file: File) => void, disabled: boolean) {
     },
     onDrop(event: DragEvent<HTMLElement>) {
       event.preventDefault(); event.stopPropagation(); depth.current=0; setDragging(false);
-      const file = event.dataTransfer.files[0];
-      if (file && !disabled) onImport(file);
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length && !disabled) {
+        if (onImportMultiple) onImportMultiple(files);
+        else onImport(files[0]);
+      }
     },
   }};
 }

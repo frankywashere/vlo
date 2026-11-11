@@ -182,10 +182,86 @@ it("adds several angles without replacing the primary and lets the user promote 
  const user=userEvent.setup(),add=vi.fn();
  useCharSwapStore.getState().assignReference("a",{id:"front",name:"Front",url:"blob:front"});
  useCharSwapStore.getState().addReferences("a",[{id:"side",name:"Side",url:"blob:side"}]);
- render(<ReferencesStep demo={null} onImport={vi.fn()} onImportAdditional={add} pendingIds={[]}/>);
- const input=screen.getByLabelText("Add reference angles for Person A");expect(input).toHaveAttribute("multiple");
+ const legacy=vi.fn();
+ const {container}=render(<ReferencesStep demo={null} onImport={legacy} onImportAdditional={add} pendingIds={[]}/>);
+ const input=fileInput("Person A");expect(input).toHaveAttribute("multiple");
+ expect(container.querySelectorAll('input[type="file"]')).toHaveLength(PEOPLE.length);
+ expect(screen.queryByLabelText("Add reference angles for Person A")).not.toBeInTheDocument();
+ expect(screen.getByRole("button",{name:"Add photos for Person A"})).toBeInTheDocument();
+ expect(screen.queryByRole("button",{name:"Change image for Person A"})).not.toBeInTheDocument();
  const photos=[new File(["a"],"back.png",{type:"image/png"}),new File(["b"],"profile.png",{type:"image/png"})];
  fireEvent.change(input,{target:{files:photos}});expect(add).toHaveBeenCalledWith("a",photos);
+ expect(legacy).not.toHaveBeenCalled();expect(useCharSwapStore.getState().assignments.a).toBe("front");
  await user.click(screen.getByRole("button",{name:"Make primary"}));expect(useCharSwapStore.getState().assignments.a).toBe("side");
  await user.click(screen.getByRole("button",{name:"Remove angle 2 for Person A"}));expect(useCharSwapStore.getState().referenceGroups?.a).toEqual(["side"]);
+});
+
+it("uses one picker for multi-file first upload and additive later photos", async () => {
+  const user = userEvent.setup(), legacy = vi.fn();
+  const add = vi.fn((id: string, files: File[]) => useCharSwapStore.getState().addReferences(id,
+    files.map(file => ({id: file.name, name: file.name, url: `blob:${file.name}`}))));
+  const {container} = render(<ReferencesStep demo={null} onImport={legacy} onImportAdditional={add} pendingIds={[]} />);
+  const input = fileInput("Person B");
+  expect(input).toHaveAttribute("multiple");
+  expect(container.querySelectorAll('input[type="file"]')).toHaveLength(2);
+  const openPicker = vi.spyOn(input, "click");
+  await user.click(screen.getByRole("button", {name: "Upload reference for Person B"}));
+  expect(openPicker).toHaveBeenCalledOnce();
+  const photos = ["front.png", "side.png"].map(name => new File([name], name, {type: "image/png"}));
+  await user.upload(input, photos);
+  expect(add).toHaveBeenLastCalledWith("b", photos);
+  expect(useCharSwapStore.getState().assignments.b).toBe("front.png");
+  expect(useCharSwapStore.getState().referenceGroups?.b).toEqual(["front.png", "side.png"]);
+  expect(useCharSwapStore.getState().assignments.a).toBeUndefined();
+  const back = new File(["back"], "back.png", {type: "image/png"});
+  await user.upload(input, back);
+  expect(useCharSwapStore.getState().assignments.b).toBe("front.png");
+  expect(useCharSwapStore.getState().referenceGroups?.b).toEqual(["front.png", "side.png", "back.png"]);
+  expect(input.value).toBe("");
+  expect(legacy).not.toHaveBeenCalled();
+});
+
+it("blocks unified uploads while pending or at six shared photos and reopens after removal", async () => {
+  const user = userEvent.setup(), add = vi.fn(), legacy = vi.fn();
+  const view = render(<ReferencesStep demo={null} onImport={legacy} onImportAdditional={add} pendingIds={["a"]} />);
+  expect(fileInput("Person A")).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Upload reference image for Person A"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Upload reference for Person A"})).toBeDisabled();
+  expect(fileInput("Person B")).toBeEnabled();
+  const files = [new File(["a"], "a.png", {type: "image/png"})];
+  fireEvent.change(fileInput("Person A"), {target: {files}});
+  expect(add).not.toHaveBeenCalled();
+  act(() => {
+    const store = useCharSwapStore.getState();
+    const photos = Array.from({length: 6}, (_, index) => ({id: `photo-${index}`, name: `Photo ${index}`, url: `blob:${index}`}));
+    store.addReferences("a", photos.slice(0, 3));
+    store.addReferences("b", [photos[0], ...photos.slice(3)]);
+  });
+  view.rerender(<ReferencesStep demo={null} onImport={legacy} onImportAdditional={add} pendingIds={[]} />);
+  expect(screen.getByText(/6 of 6 photos total/)).toBeInTheDocument();
+  for (const name of ["Person A", "Person B"]) {
+    expect(fileInput(name)).toBeDisabled();
+    expect(screen.getByRole("button", {name: `Add photos for ${name}`})).toBeDisabled();
+    expect(screen.getByRole("button", {name: `Add reference photos for ${name}`})).toBeDisabled();
+    fireEvent.change(fileInput(name), {target: {files}});
+  }
+  expect(add).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", {name: "Remove angle 2 for Person A"}));
+  expect(screen.getByText(/5 of 6 photos total/)).toBeInTheDocument();
+  expect(fileInput("Person A")).toBeEnabled();
+  expect(fileInput("Person B")).toBeEnabled();
+  expect(legacy).not.toHaveBeenCalled();
+});
+
+it("routes every dropped file to the additive target handler and guards pending drops", () => {
+  const add = vi.fn(), legacy = vi.fn();
+  const view = render(<ReferencesStep demo={null} onImport={legacy} onImportAdditional={add} pendingIds={[]} />);
+  const files = ["front.png", "side.png"].map(name => new File([name], name, {type: "image/png"}));
+  const tile = screen.getByRole("button", {name: "Upload reference image for Person B"});
+  fireEvent.drop(tile, {dataTransfer: {files, types: ["Files"]}});
+  expect(add).toHaveBeenCalledExactlyOnceWith("b", files);
+  expect(legacy).not.toHaveBeenCalled();
+  view.rerender(<ReferencesStep demo={null} onImport={legacy} onImportAdditional={add} pendingIds={["b"]} />);
+  fireEvent.drop(tile, {dataTransfer: {files, types: ["Files"]}});
+  expect(add).toHaveBeenCalledOnce();
 });

@@ -37,6 +37,7 @@ interface ReferencesStepProps {
 
 interface ReferenceCardProps extends ReferencesStepProps {
   person: TargetPerson;
+  atLimit: boolean;
   reference?: ReferenceAsset;
   assignReference: (id: string, reference: ReferenceAsset) => void;
   clearReference: (id: string, referenceId?: string) => void;
@@ -48,6 +49,8 @@ function ReferenceCard({
   demo,
   pendingIds,
   onImport,
+  onImportAdditional,
+  atLimit,
   assignReference,
   clearReference,
   cleanupEnabled,
@@ -55,7 +58,9 @@ function ReferenceCard({
 }: ReferenceCardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const pending = pendingIds.includes(person.id);
-  const {dragging,dropHandlers} = useFileDrop(file => onImport(person.id,file),pending);
+  const uploadDisabled = pending || (!!onImportAdditional && atLimit);
+  const {dragging,dropHandlers} = useFileDrop(file => onImport(person.id,file),uploadDisabled,
+    onImportAdditional ? files => onImportAdditional(person.id, files) : undefined);
   return (
     <Box role="group" aria-label={`Reference upload area for ${person.name}`} {...dropHandlers}
       sx={{ ...PANEL, borderLeft: `3px solid ${person.color}`, outline:dragging?"2px dashed":"none",outlineColor:"primary.main",outlineOffset:3 }}>
@@ -72,11 +77,13 @@ function ReferenceCard({
         <ButtonBase
           component="button"
           type="button"
-          disabled={pending}
+          disabled={uploadDisabled}
           onClick={() => {
-            if (!pending) inputRef.current?.click();
+            if (!uploadDisabled) inputRef.current?.click();
           }}
-          aria-label={`${reference ? "Change" : "Upload"} reference image for ${person.name}`}
+          aria-label={reference && onImportAdditional
+            ? `Add reference photos for ${person.name}`
+            : `${reference ? "Change" : "Upload"} reference image for ${person.name}`}
           sx={{
             width: "100%",
             height: 220,
@@ -121,7 +128,7 @@ function ReferenceCard({
             {reference ? reference.name : person.id === ALL_PEOPLE_TARGET_ID ? "Your replacement character" : `Who replaces ${person.name}?`}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            The primary photo defines the character’s outfit and appearance. Add other angles below to support identity.
+            The primary photo defines the character’s outfit and appearance. Select one or more photos to add other angles of the same character.
           </Typography>
           <Stack direction="row" spacing={1}>
             <ReferenceUpload
@@ -129,6 +136,8 @@ function ReferenceCard({
               pending={pending}
               hasReference={!!reference}
               onImport={onImport}
+              onImportAdditional={onImportAdditional}
+              atLimit={atLimit}
               inputRef={inputRef}
             />
             {reference && (
@@ -190,12 +199,13 @@ export function ReferencesStep({
         clearReference: s.clearReference,
       })),
     );
+  const photoCount = submittedReferences({targets, references, assignments, referenceGroups}).length;
   return (
     <Stack spacing={2.5}>
       <Typography variant="body2" color="text.secondary">
         JPG, PNG and WebP photos are converted automatically. For multi-picture JPEGs, we use the main photo.
       </Typography>
-      <Typography variant="body2" color="text.secondary">{submittedReferences({targets, references, assignments, referenceGroups}).length} of {MAX_REFERENCE_IMAGES} photos total · share a photo between characters without uploading it twice.</Typography>
+      <Typography variant="body2" color="text.secondary">{photoCount} of {MAX_REFERENCE_IMAGES} photos total · share a photo between characters without uploading it twice.</Typography>
       {targets.map((person) => (
         <Stack key={person.id} spacing={1}>
         <ReferenceCard
@@ -209,13 +219,14 @@ export function ReferencesStep({
           cleanupEnabled={cleanupEnabled}
           cleanupEndpoint={cleanupEndpoint}
           onImport={onImport}
+          onImportAdditional={onImportAdditional}
+          atLimit={photoCount >= MAX_REFERENCE_IMAGES}
           assignReference={assignReference}
           clearReference={clearReference}
         />
-        {onImportAdditional && <ReferenceAngles targetId={person.id} name={person.name} onImport={onImportAdditional}
+        {onImportAdditional && <ReferenceAngles targetId={person.id} name={person.name}
           pending={pendingIds.includes(person.id)} cleanupEnabled={cleanupEnabled} cleanupEndpoint={cleanupEndpoint}
           references={references} ids={referenceIds({assignments, referenceGroups}, person.id)} primary={assignments[person.id]}
-          count={submittedReferences({targets, references, assignments, referenceGroups}).length}
           onRemove={referenceId => clearReference(person.id, referenceId)}
           onPrimary={referenceId => makePrimaryReference(person.id, referenceId)}
           onReuse={reference => addReferences(person.id, [reference])} />}
@@ -230,12 +241,11 @@ export function ReferencesStep({
   );
 }
 
-function ReferenceAngles({targetId,name,onImport,pending,cleanupEnabled,cleanupEndpoint,references,ids,primary,count,onRemove,onPrimary,onReuse}: {
-  targetId:string;name:string;onImport:(targetId:string,files:File[])=>void;pending:boolean;
-  cleanupEnabled:boolean;cleanupEndpoint?:string;references:ReferenceAsset[];ids:string[];primary?:string;count:number;
+function ReferenceAngles({targetId,name,pending,cleanupEnabled,cleanupEndpoint,references,ids,primary,onRemove,onPrimary,onReuse}: {
+  targetId:string;name:string;pending:boolean;
+  cleanupEnabled:boolean;cleanupEndpoint?:string;references:ReferenceAsset[];ids:string[];primary?:string;
   onRemove:(referenceId:string)=>void;onPrimary:(referenceId:string)=>void;onReuse:(reference:ReferenceAsset)=>void;
 }) {
-  const picker=useRef<HTMLInputElement>(null);
   const available=references.filter(reference=>!ids.includes(reference.id));
   return <Stack spacing={1.5} sx={{...PANEL}}>
     <Typography fontWeight={650}>Reference angles for {name}</Typography>
@@ -250,10 +260,6 @@ function ReferenceAngles({targetId,name,onImport,pending,cleanupEnabled,cleanupE
         {cleanupEnabled&&reference&&index>0&&<ReferenceBackground targetId={targetId} reference={reference} cleanupEndpoint={cleanupEndpoint}/>}
       </Stack>;})}
     </Box>}
-    <Button variant="outlined" disabled={pending||count>=MAX_REFERENCE_IMAGES} onClick={()=>picker.current?.click()}>Add photos for {name}</Button>
-    <input ref={picker} type="file" multiple hidden disabled={pending||count>=MAX_REFERENCE_IMAGES} accept="image/jpeg,image/png,image/webp,image/mpo,.mpo" aria-label={`Add reference angles for ${name}`} onChange={event=>{
-      const files=Array.from(event.target.files??[]);if(files.length&&!pending)onImport(targetId,files);event.target.value="";
-    }}/>
     {available.length>0&&<FormControl size="small"><InputLabel id={`reuse-${targetId}`}>Reuse uploaded photo</InputLabel>
       <Select labelId={`reuse-${targetId}`} label="Reuse uploaded photo" value="" disabled={pending} onChange={event=>{const reference=references.find(item=>item.id===event.target.value);if(reference)onReuse(reference);}}>
         {available.map(reference=><MenuItem key={reference.id} value={reference.id}>{reference.name}</MenuItem>)}
