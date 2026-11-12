@@ -192,6 +192,10 @@ def job_estimate(job):
 
 
 def check_generation_funding(records, setup: Setup, active_session: dict, *, generation_route="current", pinned_quote=None):
+    if settings.preparation_only:
+        if not staff_role(records, active_session):
+            raise PublicError("Guide testing is available to authorized staff only.", 403)
+        return {"credits": 0, "preparation_only": True}
     if setup.auto_generate and not setup.easy_mode:
         raise PublicError("Automatic generation requires Easy mode.", 409)
     if active_session.get("access_mode") != "credits":
@@ -233,6 +237,8 @@ def preparation_job_snapshot(defaults, options, *, is_admin=False, self_hosted=F
         snapshot.update(**mesh, audio_processing=defaults["audio_processing"],
                         depth_guidance=defaults["depth_guidance"],
                         retry_missing_masks_with_sam=defaults["retry_missing_masks_with_sam"])
+    if settings.preparation_only:
+        snapshot.update(preparation_only=True, auto_generate=False)
     return snapshot
 
 
@@ -285,6 +291,7 @@ def view(job: dict, *, review_thumbnails: bool = True, signer=None):
         status = "queued"
     credits_mode = job.get("access_mode") == "credits"
     result = {"id": job["id"], "status": status,
+              "preparation_only": settings.preparation_only or job.get("preparation_only", False),
               "message": ("Your video is processing." if credits_mode and not self_hosted and status in {"generating", "finalizing"}
                           else failure_message(job.get("provider_failure"), True) if credits_mode and status == "failed" and job.get("provider_failure")
                           else "Generation needs review." if credits_mode and status == "failed"
@@ -366,8 +373,13 @@ def view(job: dict, *, review_thumbnails: bool = True, signer=None):
         if field in job:
             result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
-        if job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available):
+        if (job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available)
+                and not (field == "guide_uri" and job.get("retained_guide"))):
             result[output] = sign(job[field])
+    if job.get("retained_guide") and (status == "completed" or job.get("preparation_only")):
+        from .guide_retention import retained_guide_view
+        result.pop("guide_url", None)
+        result.update(retained_guide_view(job, cloud))
     if job.get("tracking_plan") and temporary_media_available:
         if (job.get('targeted_mask_review') or {}).get('pending'):
             result['review_action'] = 'recheck_masks'
@@ -422,6 +434,7 @@ def config():
     credit_ready = feature_view(services()[0])["credit_generation"] if settings.available else False
     mesh = pipeline_settings(services()[0]) if settings.available else {}
     return {"live": True, "providers": [] if settings.require_account else ["reAPI", "ToAPIs"],
+            "preparation_only": settings.preparation_only,
             "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "multi-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
             "accounts_required": settings.require_account, "credits_available": credit_ready,
@@ -1035,7 +1048,11 @@ def session(options: ProviderSelection = Body(default=ProviderSelection()), x_re
             x_firebase_token: str | None = Header(default=None)):
     records, _, provider = services()
     account = verify_account(x_firebase_token, settings.project) if settings.require_account or x_firebase_token else {}
-    if options.access_mode == "credits":
+    if settings.preparation_only:
+        if not account.get("account_id") or not staff_role(records, account):
+            raise PublicError("Guide testing is available to authorized staff only.", 403)
+        balance, key_fingerprint = 0, digest("recastfx-guide-only")
+    elif options.access_mode == "credits":
         if options.provider != "reAPI" or not account.get("account_id"):
             raise PublicError("Sign in to use recastfx credits with MiniMax H3.", 400)
         if not feature_view(records)["credit_generation"]:
@@ -1539,6 +1556,8 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                           authorization: str | None = Header(default=None),
                           x_reapi_key: str | None = Header(default=None)):
     job, active_session = owned_job(job_id, authorization)
+    if settings.preparation_only:
+        review = review.model_copy(update={"generate_after_review": False, "generate_after_recovery": False})
     records, cloud, _ = services()
     invalid = "These tracking sections have changed. Refresh the review before applying matches."
     if job["status"] != "tracking_review":
@@ -1840,6 +1859,8 @@ def account_jobs(x_firebase_token: str | None = Header(default=None)):
                 if item.get("output_uri") and item.get("expires_at", 0) > time.time():
                     public.update(status="completed", output_url=sign(item["output_uri"]), message="Your saved video is ready.")
                     public.update(character_view(item, cloud, signer=sign))
+                    from .guide_retention import retained_guide_view
+                    public.update(retained_guide_view({**item, "account_id": account["account_id"]}, cloud))
                     for key, output in (("thumbnail_uri", "thumbnail_url"), ("before_uri", "source_preview_url"),
                                         ("comparison_uri", "comparison_url")):
                         if item.get(key):
@@ -2006,6 +2027,8 @@ def library_visibility(job_id: str, options: LibraryVisibility,
 def generate(job_id: str, approval: Approval, authorization: str | None = Header(default=None),
              x_reapi_key: str | None = Header(default=None)):
     job, active_session = owned_job(job_id, authorization)
+    from .preparation_only import require_rendering
+    require_rendering(settings)
     job = refresh_stale_job(job)
     if job.get("access_mode", "api-key") != active_session.get("access_mode", "api-key"):
         raise PublicError("This clip needs its original access method.", 403)
@@ -2029,6 +2052,8 @@ def generate(job_id: str, approval: Approval, authorization: str | None = Header
 
 @timed("generation_submission", job_arg="job_id")
 def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
+    from .preparation_only import require_rendering
+    require_rendering(settings)
     if job["status"] != "ready":
         # Idempotent response after any completed/claimed submission; never POST again.
         return view(job)
@@ -2499,6 +2524,8 @@ def finish_task(task: InternalTask, authorization: str | None = Header(default=N
 @app.post("/internal/generate")
 def generate_task(task: InternalTask, authorization: str | None = Header(default=None)):
     internal_pipeline(task, authorization)
+    if settings.preparation_only:
+        return {"ok": True, "generation_disabled": True}
     records, _, _ = services()
     job, _ = records.read(f"jobs/{task.job_id}.json")
     if not job or job.get("status") != "ready":

@@ -141,6 +141,7 @@ def main():
         lifecycle = {"rule": [
             {"action": {"type": "Delete"}, "condition": {"age": 2, "matchesPrefix": ["uploads/", "outputs/", "sessions/", "jobs/"]}},
             {"action": {"type": "Delete"}, "condition": {"age": 30, "matchesPrefix": ["library/"]}},
+            {"action": {"type": "Delete"}, "condition": {"age": 1, "matchesPrefix": ["retained-guides/"]}},
         ]}
         policy = temp / "library-lifecycle.json"
         policy.write_text(json.dumps(lifecycle))

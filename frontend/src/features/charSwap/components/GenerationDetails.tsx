@@ -54,7 +54,7 @@ export function GenerationDetails({
   const complete = job.status === "completed" && Boolean(job.output_url);
   const preview = complete
     ? job.output_url
-    : job.status === "ready" && !job.easy_mode
+    : job.status === "ready" && (!job.easy_mode || job.preparation_only)
       ? (job.guide_url ?? job.source_preview_url)
       : (job.source_preview_url ?? job.guide_url);
   const references = job.reference_urls?.length
@@ -232,7 +232,7 @@ export function GenerationDetails({
                     aria-label={
                       complete
                         ? `Video preview: ${job.title}`
-                        : job.status === "ready" && !job.easy_mode
+                        : job.status === "ready" && (!job.easy_mode || job.preparation_only)
                           ? "Prepared guide"
                           : `Uploaded clip for ${job.title}`
                     }

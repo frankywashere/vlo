@@ -10,6 +10,21 @@ beforeEach(() => {
 });
 afterEach(() => {cleanup();vi.useRealTimers();});
 
+it("finishes guide-only preparation with a download instead of a render or endless progress", () => {
+  const {rerender} = render(<GenerationPage job={{id: "guide", status: "ready", preparation_only: true,
+    easy_mode: true, guide_url: "https://storage.googleapis.com/private/guide.mp4"}}
+    busy={false} error={null} preparation={null} onRefresh={vi.fn()} onReview={vi.fn()} onNew={vi.fn()} />);
+  expect(screen.getByRole("heading", {name: "Your guide is ready."})).toBeVisible();
+  expect(screen.getByRole("button", {name: "Download guide"})).toBeEnabled();
+  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  expect(screen.queryByText("Recast the character")).not.toBeInTheDocument();
+  rerender(<GenerationPage job={{id: "guide", status: "ready", preparation_only: true}}
+    busy={false} error={null} preparation={null} onRefresh={vi.fn()} onReview={vi.fn()} onNew={vi.fn()} />);
+  expect(screen.getByRole("heading", {name: "Your guide has expired."})).toBeVisible();
+  expect(screen.getByRole("button", {name: "Start a new recast"})).toBeEnabled();
+  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+});
+
 it("shows a safety failure without needing a separate hook error and freezes the correct total", () => {
   vi.useFakeTimers();vi.setSystemTime(2_000_000);
   render(<GenerationPage job={{id: "job",status: "failed",failure_category: "content_rejected",

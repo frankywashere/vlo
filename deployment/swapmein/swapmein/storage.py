@@ -155,7 +155,8 @@ class Records:
 
     def delete(self, path: str):
         """Remove an internal index pointer, never a financial/media record."""
-        if not (path.startswith("task-active/") or re.fullmatch(r"notification-active/[a-f0-9]{32}\.json", path)):
+        if not (path.startswith("task-active/") or re.fullmatch(r"notification-active/[a-f0-9]{32}\.json", path)
+                or re.fullmatch(r"guide-expiry/[0-9]{10}-[a-f0-9]{32}\.json", path)):
             raise ValueError("Only delivery index pointers may be removed")
         try:
             self.bucket.blob(path).delete()

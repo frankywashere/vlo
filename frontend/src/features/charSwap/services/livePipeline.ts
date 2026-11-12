@@ -21,6 +21,7 @@ export interface FaceMeshOptions {
 }
 
 export interface LivePipelineConfig {
+  preparation_only?: boolean;
   kling4_enabled?: boolean;
   minimax_2k_enabled?: boolean;
   max_duration_seconds?: number;
@@ -84,6 +85,7 @@ export interface JobSettingsUsed {
 }
 
 export interface LivePipelineJob {
+  preparation_only?: boolean;
   generation_destination?: MultiPersonGenerationRoute;
   generation_fallback?: {from: "google_h3"; reason: "capacity_unavailable"};
   self_hosted_progress?: {
@@ -447,6 +449,7 @@ function readJob(value: unknown): LivePipelineJob {
   if (typeof value.replace_all_people === "boolean") job.replace_all_people = value.replace_all_people;
   if (typeof value.easy_mode === "boolean") job.easy_mode = value.easy_mode;
   if (typeof value.auto_generate === "boolean") job.auto_generate = value.auto_generate;
+  if (typeof value.preparation_only === "boolean") job.preparation_only = value.preparation_only;
   if (typeof value.tracking_performed === "boolean")
     job.tracking_performed = value.tracking_performed;
   if (typeof value.tracking_continuous === "boolean")
@@ -637,6 +640,7 @@ export async function getLiveConfig(
     );
   }
   return {
+    preparation_only: value.preparation_only === true,
     kling4_enabled: value.kling4_enabled === true,
     minimax_2k_enabled:value.minimax_2k_enabled!==false,
     max_duration_seconds: value.kling4_enabled === true ? 30 : 15,

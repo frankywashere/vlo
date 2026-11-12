@@ -358,7 +358,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             {selected && !sceneReview && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used}
               creditsUsed={selected.consumer_credits_used} creditsReturned={selected.consumer_credits_returned}
               accessMode={selected.access_mode} /></>}
-            {fullPageReview && selected?.status === "ready" && selected.guide_url && !selected.easy_mode && (
+            {fullPageReview && selected?.status === "ready" && selected.guide_url && (!selected.easy_mode || selected.preparation_only) && (
               <Box
                 component="video"
                 controls
@@ -381,7 +381,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                 sx={{ maxWidth: 160, maxHeight: 160, objectFit: "contain" }}
               />
             ))}
-            {selected?.status === "ready" && (
+            {selected?.status === "ready" && selected.preparation_only && <Alert severity="info">Guide-only test. Video generation is disabled.</Alert>}
+            {selected?.status === "ready" && !selected.preparation_only && (
               <Alert severity="info">
                 {selectedSelfHosted ? <>
                   Review the source and references. Approving below starts experimental CharacterSwap generation
@@ -518,7 +519,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
               Refresh status
             </Button>
           )}
-          {selected?.status === "ready" && (
+          {selected?.status === "ready" && !selected.preparation_only && (
             <Button
               variant="contained"
               disabled={busy || selectedRemovalPending || selectedAccessBlocked}

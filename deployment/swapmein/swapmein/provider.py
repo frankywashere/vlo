@@ -450,6 +450,8 @@ class Provider:
             raise PublicError("reAPI could not validate your account. Try again later.", 502) from None
 
     def submit(self, key: str, payload: dict, *, job_id: str | None = None):
+        from .preparation_only import require_rendering
+        require_rendering()
         fingerprint = submission_event(payload, provider="reAPI", endpoint="/api/v1/videos/generations", job_id=job_id)
         # No retry transport: a timeout/ambiguous response must never duplicate a charge.
         try:
@@ -512,6 +514,8 @@ class ToAPIsProvider(Provider):
             raise PublicError("ToAPIs could not validate this key and its allowance. Check your token settings.", 401) from None
 
     def submit(self, key: str, payload: dict, *, job_id: str | None = None):
+        from .preparation_only import require_rendering
+        require_rendering()
         if payload.get("model") != "minimax-h3":
             raise PublicError("Kling generation requires reAPI. No generation was submitted.", 409)
         import uuid

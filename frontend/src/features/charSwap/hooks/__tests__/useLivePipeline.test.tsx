@@ -88,6 +88,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("uses the guide-only server without a provider key and never submits a render", async () => {
+  requests.mockImplementation((input) => {
+    if (input === "/api/config") return Promise.resolve(json({...CONFIG, preparation_only: true}));
+    if (input === "/api/uploads/job-1/complete") return Promise.resolve(json({id: "job-1", status: "ready", preparation_only: true}));
+    return defaultRequest(input);
+  });
+  const {result} = await renderLive("");
+  expect(result.current.preparationOnly).toBe(true);
+  await act(async () => { expect(await result.current.prepare(setup(), true)).toBe(true); });
+  const upload = calls("/api/uploads")[0];
+  expect(JSON.parse(String(upload[1]?.body)).setup.auto_generate).toBe(false);
+  await act(async () => { await result.current.generate(); });
+  expect(calls("/api/jobs/job-1/generate")).toHaveLength(0);
+  expect(result.current.error).toMatch(/generation is disabled/);
+});
+
 describe("live BYOK pipeline", () => {
   it.each(["google_h3", "paperspace_h3"] as const)("uses the saved %s destination for generation and both status checks", async (destination) => {
     vi.useFakeTimers();

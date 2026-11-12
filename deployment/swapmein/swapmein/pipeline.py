@@ -112,6 +112,9 @@ class Pipeline:
                 # Jobs created before the Easy mode option retain their scene-review policy.
                 options = Setup.model_validate({"preparation_version": 1, "enhanced_character_masking": True,
                                                "easy_mode": False, **job["setup"]})
+                if self.settings.preparation_only:
+                    options = options.model_copy(update={"auto_generate": False})
+                    job = self.update_job(job_id, preparation_only=True)
                 if (options.generation_model == "kling-4-0" and not options.replace_all_people
                         and job.get("prompt_variant") != "cloudflare_identity_v1"):
                     # Without automatic identity matching, take the established
@@ -546,14 +549,19 @@ class Pipeline:
                         message="Select each person in every scene, or mark them not visible. Masking is off; these choices guide the generation prompt.")
                     emit("scene_selection_review_required", job_id=job_id, section_count=len(plan["segments"]))
                     return
-                self.update_job(job_id, status="ready", message=message,
+                job = self.update_job(job_id, status="ready", message=message,
                     duration=metadata["duration"], guide_uri=guide_uri, tracking_uri=preview, selected_label=label,
                     normalized_anchor={"x": metadata["anchor"]["x"], "y": metadata["anchor"]["y"], "time": metadata["anchor"].get("time", metadata["anchor"]["frame"] / 24)},
                     mask_style=mask_style, tracking_performed=tracking_needed, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous,
                     **tracking_fields)
+                if self.settings.preparation_only:
+                    from .guide_retention import retain_guide
+                    job = retain_guide(self.settings, self.records, self.cloud, job)
                 from .scene_selection import mask_quality_review_pending
-                if (options.auto_generate or job.get("google_fallback_approved") is True) and not mask_quality_review_pending(job):
+                if (not self.settings.preparation_only
+                        and (options.auto_generate or job.get("google_fallback_approved") is True)
+                        and not mask_quality_review_pending(job)):
                     try:
                         self.cloud.enqueue("generate", job_id)
                     except Exception as error:
@@ -933,7 +941,7 @@ class Pipeline:
         if not kling:
             guide_uri = self.cloud.copy(prepared, self.settings.app_bucket,
                 preparation_prefix(job, "app") + f"guide-reviewed-{uuid.uuid4().hex}.mp4")
-        auto_submit = bool(not job.get("mask_recovery_conflicts")
+        auto_submit = bool(not self.settings.preparation_only and not job.get("mask_recovery_conflicts")
             and (not job.get("recover_missing_masks") or job.get("mask_recovery_completed"))
             and job.get("generation_after_review_revision") is not None
             and job.get("generation_after_review_revision") == job.get("tracking_applied_revision"))
@@ -952,7 +960,10 @@ class Pipeline:
             preparation_kind="initial", tracking_revision=job["tracking_applied_revision"] + 1)
         if recovery:
             ready_fields.update(recovery)
-        self.update_job(job_id, **ready_fields)
+        saved = self.update_job(job_id, **ready_fields)
+        if self.settings.preparation_only and not recovery:
+            from .guide_retention import retain_guide
+            retain_guide(self.settings, self.records, self.cloud, saved)
         emit("tracking_guide_rebuilt", job_id=job_id,
             section_count=len(job["tracking_plan"]["segments"]))
         if recovery:
@@ -1124,6 +1135,8 @@ class Pipeline:
         try:
             job = self.ensure_library_before(job)
             job = retain_characters(self, job)
+            from .guide_retention import retain_guide
+            job = retain_guide(self.settings, self.records, self.cloud, job)
             job = self.ensure_library_poster(job)
             archive_completed(self.records, job)
             award_watermark_bonus(self.records, job)

@@ -10,6 +10,7 @@ import { GenerationOptions } from "./GenerationOptions";
 import { formatTime } from "../utils/videoGeometry";
 
 interface ReviewStepProps {
+  preparationOnly?: boolean;
   accessMode?: "credits" | "api-key";
   watermarkOffer?: {bonusCredits: number};
   faceMeshOptions?: FaceMeshOptions;
@@ -33,6 +34,7 @@ interface ReviewStepProps {
 }
 
 export function ReviewStep({
+  preparationOnly = false,
   isAdmin, faceMeshOptions, hideAudioToggle, watermarkOffer, accessMode = "credits", apiKeyAllowed = false, hasKey = false, provider = "reAPI",
   onApiSettings, onAccessModeChange, trackingReady = false, onOptionsChange,
   live = false,
@@ -64,16 +66,17 @@ export function ReviewStep({
   if (!clip) return null;
   const guideIdentity = String(job?.id) + ":" + String(job?.guide_url);
   const guide =
-    !easyMode && job?.status === "ready" && job.guide_url
+    (!easyMode || preparationOnly) && job?.status === "ready" && job.guide_url
       ? job.guide_url
       : null;
   const enoughCredits =
-    accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits;
+    preparationOnly || (accessMode === "api-key" ? hasKey : creditBalance !== undefined && creditBalance >= generationCredits);
   const needsPreparation = !job || ["failed", "completed"].includes(job.status);
   const manualPreparationComplete = live && !easyMode && !!job && (job.status === "ready" || trackingReady);
   const cleanupIssue = targets.flatMap(target => targetReferences({targets,references,assignments,referenceGroups},target.id))
     .map(reference => reference && referenceCleanupBlocker(reference)).find(Boolean);
-  const canSubmit = !cleanupIssue && enoughCredits && !busy && creditsAvailable && (
+  const canSubmit = !cleanupIssue && enoughCredits && !busy && (creditsAvailable || preparationOnly) && (
+    preparationOnly ? needsPreparation :
     live ? (easyMode ? needsPreparation : needsPreparation || job?.status === "ready" && trackingReady && playableGuide === guideIdentity)
     : !easyMode && enhancedCharacterMasking && !trackingReady
   );
@@ -310,7 +313,8 @@ export function ReviewStep({
             borderRadius: "5px",
           }}
         >
-          {apiKeyAllowed && <Box>
+          {preparationOnly && <Alert severity="info">Guide-only test: SAM preparation runs, but video generation is disabled. No generation credits are charged.</Alert>}
+          {!preparationOnly && apiKeyAllowed && <Box>
             <RadioGroup aria-label="Generation access" value={accessMode}
               onChange={(_, value) => { if (value === "credits" || value === "api-key") onAccessModeChange?.(value); }}>
               <FormControlLabel disabled={busy} value="credits" control={<Radio />} label="recastfx credits" />
@@ -318,7 +322,7 @@ export function ReviewStep({
             </RadioGroup>
             {accessMode === "api-key" && <Button disabled={busy} onClick={onApiSettings}>{hasKey ? "Edit API key" : "Add API key"}</Button>}
           </Box>}
-          {accessMode === "credits" ? <>
+          {!preparationOnly && (accessMode === "credits" ? <>
           <Box>
             <Typography variant="body2" color="text.secondary">
               Generation cost
@@ -389,8 +393,8 @@ export function ReviewStep({
               Add credits
             </Button>
           )}
-          </> : <Typography>Generation uses your {provider} account.</Typography>}
-          {live && !creditsAvailable && (
+          </> : <Typography>Generation uses your {provider} account.</Typography>)}
+          {live && !creditsAvailable && !preparationOnly && (
             <Alert severity="warning">
               Credit generation is unavailable right now. Your setup is kept
               here.
@@ -402,10 +406,10 @@ export function ReviewStep({
             disabled={!canSubmit}
             onClick={onGenerate}
           >
-            {busy ? "Preparing…" : !easyMode && needsPreparation && !trackingReady ? "Prepare and review" : "Generate video"}
+            {busy ? "Preparing…" : preparationOnly ? "Prepare guide" : !easyMode && needsPreparation && !trackingReady ? "Prepare and review" : "Generate video"}
           </Button>
           <Typography variant="caption" color="text.secondary">
-            Your video will appear in your library.
+            {preparationOnly ? "Your guide will be available for one day." : "Your video will appear in your library."}
           </Typography>
         </Stack>
       </Stack>

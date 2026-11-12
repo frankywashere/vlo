@@ -224,8 +224,8 @@ export function CharSwapWalkthrough({
   );
   const generationCredits = pipeline.job && !["failed", "completed"].includes(pipeline.job.status)
     ? pipeline.job.generation_credits ?? trimCredits : trimCredits;
-  const entryFunded = apiKeyAllowed || (balance !== undefined && balance >= minimumCredits && !creditAccount.error);
-  const fullyFunded = accessMode === "api-key" || (balance !== undefined && balance >= generationCredits && !creditAccount.error);
+  const entryFunded = pipeline.preparationOnly || apiKeyAllowed || (balance !== undefined && balance >= minimumCredits && !creditAccount.error);
+  const fullyFunded = pipeline.preparationOnly || accessMode === "api-key" || (balance !== undefined && balance >= generationCredits && !creditAccount.error);
   const unknownSubmission = pipeline.job?.status === "submission_unknown";
   const locked = pipeline.busy || unknownSubmission;
   const renderCanContinueInLibrary = Boolean(
@@ -409,6 +409,7 @@ export function CharSwapWalkthrough({
     }
   }
   function fundingReady() {
+    if (pipeline.preparationOnly) return true;
     if (!fullyFunded) {
       setError("Add enough credits for this clip before continuing.");
       return false;
@@ -452,7 +453,7 @@ export function CharSwapWalkthrough({
     if (easyMode) {
       if (pipeline.job && !["failed", "completed"].includes(pipeline.job.status)) return;
       visit("generation");
-      await pipeline.prepare(state, true);
+      await pipeline.prepare(state, !pipeline.preparationOnly);
     } else if (!pipeline.job || ["failed", "completed"].includes(pipeline.job.status)) {
       if (!(await pipeline.prepare(state))) return;
       visit("matches");
@@ -516,6 +517,7 @@ export function CharSwapWalkthrough({
         />
       ) : (
         <>
+          {pipeline.preparationOnly && <Alert severity="info" sx={{mb: 2}}>Guide-only test · Video generation is disabled.</Alert>}
           {step !== "generation" && !manualPreparation && (
             <Stack
               direction="row"
@@ -568,7 +570,7 @@ export function CharSwapWalkthrough({
           )}
           {step !== "generation" && !manualPreparation &&
             clip &&
-            ((!clipStep && !fullyFunded) || creditAccount.error) && (
+            !pipeline.preparationOnly && ((!clipStep && !fullyFunded) || creditAccount.error) && (
               <Alert
                 severity="warning"
                 sx={{ mb: 2 }}
@@ -715,6 +717,7 @@ export function CharSwapWalkthrough({
               ))}
             {step === "review" && (
               <ReviewStep
+                preparationOnly={pipeline.preparationOnly}
                 live={live}
                 accessMode={accessMode}
                 apiKeyAllowed={apiKeyAllowed}

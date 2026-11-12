@@ -297,7 +297,8 @@ def ensure_bucket(temp: Path, origins: list[str]):
         raise SetupError("Application and worker buckets must differ.")
     # Never expire control/: it holds the global monthly/daily preparation counter.
     lifecycle = {"rule": [{"action": {"type": "Delete"},
-                            "condition": {"age": 2, "matchesPrefix": ["uploads/", "outputs/", "sessions/", "jobs/"]}}]}
+                            "condition": {"age": 2, "matchesPrefix": ["uploads/", "outputs/", "sessions/", "jobs/"]}},
+                           {"action": {"type": "Delete"}, "condition": {"age": 1, "matchesPrefix": ["retained-guides/"]}}]}
     lifecycle_file = temp / "app-lifecycle.json"
     lifecycle_file.write_text(json.dumps(lifecycle))
     # Upload bodies go directly to private storage, beyond Cloud Run's HTTP/1

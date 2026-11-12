@@ -59,10 +59,12 @@ export function GenerationPage({
   if (!clip) return null;
   const uploadSaved = Boolean(job && !job.upload_confirmation_pending && !isUploadUnconfirmed(preparation));
   const complete = job?.status === "completed";
+  const guidePrepared = job?.preparation_only && job.status === "ready";
+  const guideReady = guidePrepared && Boolean(job.guide_url);
   const failed = job?.status === "failed" || Boolean(error && !job);
   const unknown = job?.status === "submission_unknown";
   const needsReview = job?.status === "tracking_review";
-  const stage = complete
+  const stage = guidePrepared ? 1 : complete
     ? 3
     : job?.status === "finalizing"
       ? 2
@@ -70,7 +72,7 @@ export function GenerationPage({
         ? 1
         : 0;
   const stageCopy = processingStageCopy(job);
-  const title = needsReview ? "Your clip needs attention" : stageCopy?.title ?? (complete
+  const title = guidePrepared ? (guideReady ? "Your guide is ready." : "Your guide has expired.") : needsReview ? "Your clip needs attention" : stageCopy?.title ?? (complete
     ? "Your recast is ready."
     : unknown
       ? "Checking your submission"
@@ -107,9 +109,9 @@ export function GenerationPage({
             <Typography color="text.secondary" sx={{ mt: 1 }}>
               Your clip and reference photos are saved. Open your library and choose “Check scene matches” to continue.
             </Typography>
-          ) : uploadSaved && !complete && !stageCopy ? <UploadSavedNotice /> : (
+          ) : uploadSaved && !complete && !guidePrepared && !stageCopy ? <UploadSavedNotice /> : (
             <Typography color="text.secondary" sx={{ mt: 1 }}>
-              {complete ? "Watch it, save it, and make another."
+              {guidePrepared ? (guideReady ? "Guide-only test. No video render was submitted." : "Guides are kept for one day. Start a new test to prepare another.") : complete ? "Watch it, save it, and make another."
                 : stageCopy ? stageCopy.detail : "Keep this tab open until your upload is confirmed."}
             </Typography>
           )}
@@ -139,7 +141,9 @@ export function GenerationPage({
         <Box sx={{ minWidth: 0 }}>
           <VideoPreview
             clip={
-              complete && job.output_url
+              guideReady && job?.guide_url
+                ? {...clip, url: job.guide_url, duration: job.duration ?? trim[1] - trim[0]}
+                : complete && job.output_url
                 ? {
                     ...clip,
                     url: job.output_url,
@@ -149,7 +153,7 @@ export function GenerationPage({
                   }
                 : clip
             }
-            trim={complete ? [0, job?.duration ?? trim[1] - trim[0]] : trim}
+            trim={complete || guideReady ? [0, job?.duration ?? trim[1] - trim[0]] : trim}
             maxPreviewHeight={400}
             poster={complete ? job?.thumbnail_url : undefined}
           />
@@ -158,7 +162,7 @@ export function GenerationPage({
             color="text.secondary"
             sx={{ display: "block", mt: 1 }}
           >
-            {complete ? "Your finished video" : "Your source clip"}
+            {guideReady ? "Your prepared guide" : complete ? "Your finished video" : "Your source clip"}
           </Typography>
         </Box>
         <Stack
@@ -189,11 +193,11 @@ export function GenerationPage({
             </Stack>
           )}
           <Stack spacing={2}>
-            {[
+            {(job?.preparation_only ? ["Prepare the guide"] : [
               "Prepare the clip",
               "Recast the character",
               "Finish the video",
-            ].map((label, index) => (
+            ]).map((label, index) => (
               <Stack
                 key={label}
                 direction="row"
@@ -230,7 +234,7 @@ export function GenerationPage({
               </Stack>
             ))}
           </Stack>
-          {!complete && !failed && !needsReview && (
+          {!complete && !guidePrepared && !failed && !needsReview && (
             <LinearProgress
               aria-label="Generation in progress"
               variant={
@@ -257,6 +261,10 @@ export function GenerationPage({
             </Typography>
           )}
           {download.error && <Alert severity="error">{download.error}</Alert>}
+          {guideReady && job?.guide_url && <Button variant="contained" disabled={download.busy}
+            onClick={() => void download.download(job.guide_url!)}>
+            {download.busy ? "Downloading…" : "Download guide"}
+          </Button>}
           {complete && job?.output_url && (
             <Button
               variant="contained"
@@ -278,7 +286,7 @@ export function GenerationPage({
             </Button>
           )}
           {failed && <Button onClick={onReview}>Review setup</Button>}
-          {(complete || canCreateAnother) && (
+          {(complete || guidePrepared || canCreateAnother) && (
             <Button variant={needsReview ? "outlined" : "contained"} onClick={onNew}>Start a new recast</Button>
           )}
         </Stack>

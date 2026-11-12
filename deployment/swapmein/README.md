@@ -16,6 +16,33 @@ traffic and Firebase bundle before reporting a rollout complete. The older
 [pipeline overview](../../docs/charswap-walkthrough.md) contains historical proofs;
 use the contracts below for these changes.
 
+## One-day guide inspection
+
+Completed website jobs preserve a private, byte-verified copy of the actual
+provider input video before scratch cleanup. The job and Library index record
+its SHA-256, size, object generation and expiry. For “submit without audio,” the
+silent provider input is retained instead of the audible preview. Existing jobs
+whose guides were already cleaned up cannot be reconstructed by this feature.
+
+Authenticated job/Library views return a guide URL only before its expiry, with
+signed-link lifetime capped by the remaining retention window. Guide expiry is
+24 hours after completion (or after preparation on the isolated test site).
+The existing authenticated five-minute maintenance sweep deletes the exact
+owned object generations; an age-one-day bucket lifecycle rule is a backup.
+Physical deletion can lag the deadline; signing access stops at the deadline.
+Originals, finished videos and character references retain their existing rules.
+
+The `recastfx-polished-preview` Firebase site targets `recastfx-long-test`, with
+separate test storage and CPU/background workers. Set `PREPARATION_ONLY=true`
+on both gateway and background worker, `COMMERCE_OWNER_EMAILS` to authorized
+staff, and use the same preparation defaults and CPU image as production.
+Staff can upload, select characters, complete scene review and inspect/download
+the guide without funding a generation. Public/internal generation entry points,
+private routing and provider submission are blocked independently; neither an
+old browser nor a direct generation request can render. SAM preparation still
+uses its normal provider allowance. The test service does not inherit production
+payment or email-sending credentials. Production must leave the flag false.
+
 ## Watermark rewards
 
 Credit-funded accounts can opt into a lower-right RecastFX watermark at generation review.

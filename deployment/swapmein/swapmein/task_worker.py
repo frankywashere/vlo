@@ -144,6 +144,11 @@ def register_delivery_recovery(app, context):
         except Exception as error:
             emit("google_worker_lifecycle_delayed", error=error)
         result = TaskDelivery(settings, records, cloud.tasks).sweep()
+        try:
+            from .guide_retention import delete_expired_guides
+            delete_expired_guides(settings, records, cloud)
+        except Exception as error:
+            emit("guide_expiry_sweep_delayed", error=error)
         # Email retries are independent of paid generation delivery. A sender
         # outage must never fail or repeat video work in this maintenance sweep.
         try:

@@ -30,6 +30,7 @@ const ACTIVE_STATUSES = new Set(["queued", "preparing", "generating", "finalizin
 const POLL_STATUSES = new Set([...ACTIVE_STATUSES, "submission_unknown"]);
 
 export interface LivePipelineHandle {
+  preparationOnly?: boolean;
   kling4Enabled?: boolean;
   minimax2kEnabled?:boolean;
   hideAudioToggle?: boolean;
@@ -200,13 +201,13 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       }
       return session.current;
     }
-    if (accessMode === "api-key") assertLiveKey(apiKey);
+    if (accessMode === "api-key" && !config?.preparation_only) assertLiveKey(apiKey);
     if (session.current && session.current.expiresAt > Date.now() + 30000) return session.current;
-    const created = await createLiveSession(apiKey, signal, provider, accessMode);
+    const created = await createLiveSession(apiKey, signal, provider, config?.preparation_only ? "credits" : accessMode);
     signal.throwIfAborted();
     session.current = created;
     return created;
-  }, [apiKey, provider, accessMode]);
+  }, [apiKey, provider, accessMode, config?.preparation_only]);
 
   useEffect(() => {
     if (!enabled || !jobId || !jobStatus || !POLL_STATUSES.has(jobStatus)) return;
@@ -258,7 +259,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     if (operation.current) return false;
     try {
       if (!enabled) throw new LivePipelineError("Live preparation is unavailable on this page.");
-      if (accessMode === "api-key") assertLiveKey(apiKey);
+      if (accessMode === "api-key" && !config?.preparation_only) assertLiveKey(apiKey);
       validateLiveSetup(state);
       if(state.generationModel!=="kling-4-0"&&state.generationResolution==="2K"&&state.minimax2kEnabled===false)throw new LivePipelineError("MiniMax 2K is currently unavailable. Choose 768p to continue.");
       if (config?.multi_characters === false && (state.targets.length > 1 || state.replaceAllPeople)) {
@@ -285,7 +286,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       const submittedState = state.generationModel === "kling-4-0" || config?.face_mesh_options?.face_mesh_enabled === false ? {...state, faceMesh: false} : state;
       const prepared = await createLiveJob(submittedState, access.token, controller.signal, (progress) => {
         if (!controller.signal.aborted && epoch.current === version) setPreparationProgress(progress);
-      }, autoGenerate, accessMode === "api-key" ? apiKey : "");
+      }, config?.preparation_only ? false : autoGenerate, accessMode === "api-key" ? apiKey : "");
       if (controller.signal.aborted || epoch.current !== version) return false;
       pollStartedAt.current = Date.now();
       publishJob(prepared);
@@ -303,7 +304,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [config?.kling4_enabled, config?.face_mesh_options?.face_mesh_enabled, config?.multi_characters, enabled, apiKey, accessMode, reset, ensureSession, publishJob]);
+  }, [config?.preparation_only, config?.kling4_enabled, config?.face_mesh_options?.face_mesh_enabled, config?.multi_characters, enabled, apiKey, accessMode, reset, ensureSession, publishJob]);
 
   const resolveTracking = useCallback(async (choices: TrackingReviewChoice[]) => {
     const active = currentJob.current;
@@ -339,7 +340,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal,
         {enabled: !reviewOnly && (active.mask_style !== "none" || active.settings_used?.face_mesh === true),
           key: reviewOnly || active.generation_destination === "google_h3" || active.generation_destination === "paperspace_h3" ? undefined : apiKey,
-          generateAfterReview: !reviewOnly});
+          generateAfterReview: !reviewOnly && !config?.preparation_only});
       if (controller.signal.aborted || epoch.current !== version) return false;
       preparationStartedAt.current = Date.now();
       setPreparationElapsedSeconds(0);
@@ -360,10 +361,14 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [enabled, apiKey, ensureSession, publishJob]);
+  }, [enabled, apiKey, ensureSession, publishJob, config?.preparation_only]);
 
   const generate = useCallback(async () => {
     const active = currentJob.current;
+    if (config?.preparation_only || active?.preparation_only) {
+      setError("This test site prepares guides only. Video generation is disabled.");
+      return;
+    }
     if (operation.current) return;
     if (!enabled || !active || active.status !== "ready") {
       setError("Prepare the job and review its preview before generating.");
@@ -438,7 +443,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
         setWorking(false);
       }
     }
-  }, [enabled, apiKey, accessMode, ensureSession, publishJob]);
+  }, [enabled, apiKey, accessMode, ensureSession, publishJob, config?.preparation_only]);
 
   const refresh = useCallback(async () => {
     const active = currentJob.current;
@@ -492,6 +497,7 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
   }, [enabled, jobId, jobStatus, refresh]);
 
   return {
+    preparationOnly: config?.preparation_only === true,
     enabled,
     kling4Enabled: config?.kling4_enabled === true,
     minimax2kEnabled:config?.minimax_2k_enabled!==false,

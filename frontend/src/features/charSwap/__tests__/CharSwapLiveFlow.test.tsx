@@ -17,6 +17,7 @@ import type { LivePipelineJob } from "../services/livePipeline";
 
 const live = vi.hoisted(() => ({
   enabled: true,
+  preparationOnly: false,
   creditsAvailable: true,
   job: null as LivePipelineJob | null,
   preparationProgress: null as PreparationProgressState | null,
@@ -53,6 +54,7 @@ beforeEach(() => {
   };
   live.busy = false;
   live.creditsAvailable = true;
+  live.preparationOnly = false;
   live.preparationProgress = null;
   live.prepare.mockResolvedValue(true);
   vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
@@ -90,6 +92,18 @@ afterEach(() => {
 });
 
 describe("explicit generation approval", () => {
+  it("prepares a guide with no credits and explicitly disables Easy-mode generation", async () => {
+    const user = userEvent.setup();
+    live.preparationOnly = true; live.creditsAvailable = false; live.job = null;
+    useCharSwapStore.getState().setEasyMode(true);
+    useCharSwapStore.getState().visit("review");
+    render(<CharSwapWalkthrough credits={{catalog: null, wallet: {balance: 0, transactions: []}, error: ""}} />);
+    await user.click(screen.getByRole("button", {name: "Prepare guide"}));
+    expect(live.prepare).toHaveBeenCalledOnce();
+    expect(live.prepare.mock.calls[0][1]).toBe(false);
+    expect(live.generate).not.toHaveBeenCalled();
+    expect(useCharSwapStore.getState().step).toBe("generation");
+  });
   it("uses the supplemental mask review action in Create without starting generation", async () => {
     const choices = [{segment_id: "fragment", absent: false, anchor: {x: .4, y: .5, time: 1}}];
     live.job = {...live.job!, status: "tracking_review", review_action: "recheck_masks",

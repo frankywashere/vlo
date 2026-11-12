@@ -17,6 +17,14 @@ function properties() {
     onApiSettings: vi.fn(), creditBalance: 2000, generationCredits: 50};
 }
 
+it("prepares guides with no generation credits and hides paid rendering controls", () => {
+  render(<ReviewStep {...properties()} preparationOnly creditsAvailable={false} creditBalance={0} onGenerate={vi.fn()} />);
+  expect(screen.getByRole("button", {name: "Prepare guide"})).toBeEnabled();
+  expect(screen.queryByRole("button", {name: "Generate video"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: "Add credits"})).not.toBeInTheDocument();
+  expect(screen.getByText(/No generation credits are charged/)).toBeVisible();
+});
+
 describe("truthful preparation status at final review", () => {
   it.each([false, true])("shows the prepared manual settings without editable switches (masking: %s)", (enhanced) => {
     const store = useCharSwapStore.getState();
