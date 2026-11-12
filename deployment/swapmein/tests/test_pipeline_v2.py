@@ -664,8 +664,12 @@ def test_matched_easy_option_six_keeps_identity_depth_tints_without_manual_rebui
     def match(self, job, video, masks, metadata, targets, root, remaining):
         stable = root / "matched.zip"
         coverage = build_selected_masks(masks, metadata, selected_tracks(masks, metadata, targets), stable)
-        matched = [{**target, "scenes": [{"start": 0, "end": 4, "absent": False,
-            "anchor": target["anchor"]}]} for target in targets]
+        # Match the real identity service: assignments are local to each cut.
+        boundaries = [0, *metadata["scene_cuts"], metadata["duration"]]
+        matched = [{**target, "scenes": [{"start": start, "end": end, "absent": False,
+            "anchor": {"x": target["anchor"]["x"], "y": target["anchor"]["y"],
+                       "time": (start + end) / 2}}
+            for start, end in zip(boundaries, boundaries[1:])]} for target in targets]
         return {"masks_path": stable, "coverage": coverage, "targets": matched,
                 "assignments": [], "diagnostics": {"calls": 1}}
     monkeypatch.setattr(Pipeline, "match_cloudflare_identities", match)
@@ -693,8 +697,12 @@ def test_kling_keeps_distinct_body_tints_and_publishes_provider_compatible_guide
     def match(self, job, video, masks, metadata, targets, root, remaining):
         stable = root / "matched.zip"
         coverage = build_selected_masks(masks, metadata, selected_tracks(masks, metadata, targets), stable)
-        matched = [{**target, "scenes": [{"start": 0, "end": 4, "absent": False,
-            "anchor": target["anchor"]}]} for target in targets]
+        # Match the real identity service: assignments are local to each cut.
+        boundaries = [0, *metadata["scene_cuts"], metadata["duration"]]
+        matched = [{**target, "scenes": [{"start": start, "end": end, "absent": False,
+            "anchor": {"x": target["anchor"]["x"], "y": target["anchor"]["y"],
+                       "time": (start + end) / 2}}
+            for start, end in zip(boundaries, boundaries[1:])]} for target in targets]
         return {"masks_path": stable, "coverage": coverage, "targets": matched,
                 "assignments": [], "diagnostics": {"calls": 1}}
     monkeypatch.setattr(Pipeline, "match_cloudflare_identities", match)
