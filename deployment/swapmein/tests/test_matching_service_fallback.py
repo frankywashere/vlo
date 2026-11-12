@@ -115,3 +115,10 @@ def test_existing_confirmed_evidence_survives_later_service_outage(example, monk
     assert result['reviewed_mask_quality']['identity_rechecks']['confirmed']==1
     assert not result.get('targeted_mask_review')
     assert_other_person_unchanged(example,result)
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)

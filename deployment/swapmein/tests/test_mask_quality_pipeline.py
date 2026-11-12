@@ -75,3 +75,10 @@ def test_final_recovered_masks_are_checked_before_composition(monkeypatch):
     with pytest.raises(RuntimeError,match='stop-before-compose'):
         Pipeline(Settings(),None,None).rebuild_reviewed_guide({'id':'job','recover_missing_masks':True},lambda:60)
     assert order==['recover','check']
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)

@@ -785,8 +785,16 @@ class Pipeline:
 
     @timed("reviewed_mask_quality", job_arg="job")
     def check_reviewed_mask_quality(self, job, remaining=None):
-        """Conservatively withhold suspect guide regions without changing identities."""
-        from .mask_quality import POLICY_VERSION, sanitize_reviewed_masks
+        """Validate source assignments; retain SAM shapes during the cleanup pause."""
+        from .mask_quality import CONTINUITY_CLEANUP_ENABLED, sanitize_reviewed_masks
+        from .mask_quality import POLICY_VERSION as LEGACY_POLICY
+        from .mask_retention import POLICY_VERSION as RETENTION_POLICY, retain_assigned_masks
+        # An explicit old fragment decision remains authoritative. Finish that
+        # saved workflow under its original policy rather than restore a part
+        # the user deliberately dismissed. New guides create no such reviews.
+        CONTINUITY_CLEANUP_ENABLED = CONTINUITY_CLEANUP_ENABLED or bool(
+            (job.get('targeted_mask_review') or {}).get('decisions'))
+        POLICY_VERSION = LEGACY_POLICY if CONTINUITY_CLEANUP_ENABLED else RETENTION_POLICY
         from .scene_selection import mask_quality_targets
         # A release must not silently accept an existing customer's pending
         # component question. Only its explicit authenticated review can do so.
@@ -816,11 +824,17 @@ class Pipeline:
                 job.get('pre_quality_masks_uri') if report.get('review_revision') == revision
                 and report.get('output_uri') == job['reviewed_masks_uri'] else None) or job['reviewed_masks_uri']
             self.cloud.download(input_uri, original, 80 * 1024 * 1024)
-            report = sanitize_reviewed_masks(original, job["tracking_metadata"], job["tracking_plan"],
-                job["tracking_choices"], job["tracking_assignments"], checked, review_revision=revision)
-            from .mask_recheck_runtime import recheck_masks
-            job, checked, report, targeted_candidates = recheck_masks(
-                self, job, original, checked, report, root, remaining or (lambda: 90))
+            if CONTINUITY_CLEANUP_ENABLED:
+                report = sanitize_reviewed_masks(original, job["tracking_metadata"], job["tracking_plan"],
+                    job["tracking_choices"], job["tracking_assignments"], checked, review_revision=revision)
+                from .mask_recheck_runtime import recheck_masks
+                job, checked, report, targeted_candidates = recheck_masks(
+                    self, job, original, checked, report, root, remaining or (lambda: 90))
+            else:
+                report = retain_assigned_masks(original, job["tracking_metadata"], job["tracking_plan"],
+                    job["tracking_choices"], job["tracking_assignments"], checked, review_revision=revision)
+                report['mask_context_key'] = quality_context_key(job, report['input_sha256'])
+                targeted_candidates = []
             # A bad mask must not leave identity tint behind while the user
             # confirms that person on original pixels in the recovery review.
             targets = mask_quality_targets(job.get("normalized_targets", []), report)

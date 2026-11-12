@@ -421,3 +421,10 @@ def test_losing_v4_review_claim_cannot_release_winners_preparation_lease(api,exa
     assert records.data[path]['tracking_task_token']=='winning-preview-task'
     assert identifier in preparation_leases(records.data.get('control/preparation.json'))
     assert not cloud.enqueued and not provider.submissions
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)

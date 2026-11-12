@@ -57,3 +57,10 @@ def test_cached_v1_report_is_rechecked_under_corrected_uncertainty_policy(tmp_pa
     assert checked["reviewed_mask_quality"]["policy_version"] == POLICY_VERSION
     assert checked["reviewed_mask_quality"]["policy_version"] != "reviewed_anchor_components_v1"
     assert cloud.objects["original"] == original
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)

@@ -218,3 +218,10 @@ def test_existing_pending_v4_is_untouched_without_any_io(example, monkeypatch):
     monkeypatch.setattr(example.cloud, 'download', lambda *args: pytest.fail('Pending source review must stay untouched'))
     assert example.pipeline.check_reviewed_mask_quality(job) == job
     assert not example.records.history and not example.calls
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)

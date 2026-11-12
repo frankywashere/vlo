@@ -1,4 +1,29 @@
-# Confirmed-person guide gaps
+# Assigned SAM masks: continuity cleanup paused
+
+The current standard MiniMax and Kling routes retain assigned SAM shapes under
+`assigned_sam_masks_continuity_paused_v1`. The extra CPU shape-continuity cleanup
+is temporarily disabled by `CONTINUITY_CLEANUP_ENABLED = False`; its historical
+implementation and explicit regression tests remain available for rollback.
+
+Normalization, selected-person masks, cross-cut identity matching, validated
+manual choices, cut-residue handling and provider overlap checks are unchanged.
+The retention stage validates categorical labels, explicit absence, canonical
+source choices and cut-local assignments. An anchor must still point inside its
+assigned person's mask; a bad anchor keeps the identity-reselection path. It
+does not discard masks because bodies move, change shape or split at occluders.
+Valid archives are retained byte-for-byte, with unchanged source/output hashes,
+zero removed pixels and no paid component rechecks. No generation authorization
+is created by this stage.
+
+Pending legacy fragment reviews are not silently accepted. Explicit completed
+fragment decisions finish under the prior policy so a deliberately dismissed
+piece cannot reappear. A new full source review clears that legacy workflow.
+CPU approval cache keys include the retention policy and pause state; paid
+comparison receipt keys remain unchanged. Coverage is in
+`tests/test_mask_retention.py`; legacy pipeline tests explicitly enable the
+paused policy rather than claiming it is production's default behavior.
+
+## Previous continuity/gap policy, retained for legacy review and rollback
 
 The standard MiniMax and Kling preparation routes may continue when conservative
 mask cleanup leaves small areas untinted. The video model receives the remaining

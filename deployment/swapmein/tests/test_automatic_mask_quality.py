@@ -109,3 +109,10 @@ def test_automatic_plan_keeps_per_scene_anchors_absence_and_stable_labels(exampl
     assert choices[1]['anchor']==second
     assert choices[3]['absent'] and choices[3]['anchor'] is None
     assert_other_person_unchanged(example,result)
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)

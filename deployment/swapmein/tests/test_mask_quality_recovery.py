@@ -114,3 +114,10 @@ def test_legacy_cached_quality_report_rechecks_until_unsafe_tint_fully_withheld(
     assert not (pixels == 1).any() and np.array_equal(pixels == 2, before == 2)
     assert pipeline.check_reviewed_mask_quality(checked) == checked
     assert cloud.downloads == 1
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)

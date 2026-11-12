@@ -19,6 +19,9 @@ from .errors import PublicError
 from .tracking import FPS, _maps, _metadata
 
 POLICY_VERSION = "reviewed_anchor_components_v3"
+# Temporary production pause: SAM shapes may change legitimately with motion
+# and occlusion. Keep the legacy implementation available for rollback/testing.
+CONTINUITY_CLEANUP_ENABLED = False
 SEED_MAX_SHARE = .65
 SUBSTANTIAL_SHARE = .25
 MAX_AREA_GROWTH = 2.0

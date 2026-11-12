@@ -23,8 +23,13 @@ def quality_context_key(job, input_sha):
     """Invalidate CPU approval semantics without invalidating paid receipts."""
     from .mask_gap_tolerance import POLICY_VERSION as GAP_POLICY
     from .mask_quality import POLICY_VERSION as COMPONENT_POLICY
+    from .mask_quality import CONTINUITY_CLEANUP_ENABLED
+    from .mask_retention import POLICY_VERSION as RETENTION_POLICY
     value = {'identity_context_key': context_key(job, input_sha),
         'component_policy_version': COMPONENT_POLICY, 'gap_policy_version': GAP_POLICY,
+        'continuity_cleanup_enabled': CONTINUITY_CLEANUP_ENABLED,
+        'retention_policy_version': RETENTION_POLICY,
+        'completed_component_review': bool((job.get('targeted_mask_review') or {}).get('decisions')),
         'identity_provenance': job.get('mask_identity_provenance'),
         'identity_matching_completed': job.get('identity_matching_completed'),
         'matching_fallback_used': job.get('matching_fallback_used'),

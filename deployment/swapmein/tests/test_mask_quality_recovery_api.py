@@ -1,4 +1,5 @@
 """A suspect mask opens a usable review and never spends on re-selection."""
+import pytest
 from copy import deepcopy
 
 import swapmein.app as gateway
@@ -94,3 +95,10 @@ def test_rebuilt_unsafe_guide_never_publishes_ready_or_queues_generation(api, mo
     assert statuses and statuses[-1]=='tracking_review' and 'ready' not in statuses
     assert records.data[f'jobs/{identifier}.json']['guide_uri']=='gs://private-app/clean-guide.mp4'
     assert not provider.submissions and not cloud.enqueued
+
+
+@pytest.fixture(autouse=True)
+def legacy_continuity_regression_policy(monkeypatch):
+    # Preserve explicit regression coverage for the paused implementation.
+    # Production's default-disabled path is covered in test_mask_retention.py.
+    monkeypatch.setattr('swapmein.mask_quality.CONTINUITY_CLEANUP_ENABLED', True)
