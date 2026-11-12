@@ -1,3 +1,4 @@
+import type { SelectionAnchor } from "../model/model";
 import { trimDuration } from "../utils/trimRange";
 import { MAX_REFERENCE_BYTES, MAX_SOURCE_BYTES, MAX_TARGET_PEOPLE, TARGET_COLORS } from "../limits";
 import type { PreparationProgressState } from "../model/preparation";
@@ -156,7 +157,7 @@ export interface SelectionTarget {
   thumbnail_url?: string;
   id: string;
   name: string;
-  anchor: { x: number; y: number; time: number };
+  anchor: SelectionAnchor;
   reference_index: number;
   reference_indexes?: number[];
   color?: string;

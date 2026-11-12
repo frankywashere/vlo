@@ -23,7 +23,7 @@ interface VideoPreviewProps {
   seekTo?: number;
   selectable?: boolean;
   overlay?: (time: number) => ReactNode;
-  onPoint?: (point: NormalizedPoint, video: HTMLVideoElement) => void;
+  onPoint?: (point: NormalizedPoint, video: HTMLVideoElement, frameTime?: number) => void;
   onPlayableChange?: (playable: boolean) => void;
   maxPreviewHeight?: number;
 }
@@ -48,6 +48,21 @@ export function VideoPreview({
   const [start, end] = trim;
   const lastFrameTime = Math.max(start, end - 1 / 24);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const presentedTime = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const video = videoRef.current;
+    presentedTime.current = undefined;
+    if (!video?.requestVideoFrameCallback) return;
+    let callback = 0;
+    let active = true;
+    function receiveFrame(_now: number, metadata: VideoFrameCallbackMetadata) {
+      if (!active || !video) return;
+      presentedTime.current = metadata.mediaTime;
+      callback = video.requestVideoFrameCallback(receiveFrame);
+    }
+    callback = video.requestVideoFrameCallback(receiveFrame);
+    return () => { active = false; video.cancelVideoFrameCallback(callback); };
+  }, [clip.url]);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(trim[0]);
   const [muted, setMuted] = useState(true);
@@ -73,6 +88,7 @@ export function VideoPreview({
     if (!video) return;
     const settled = !sourceChanged && pendingSeek.current === null && video.readyState >= 2
       && !video.seeking && Math.abs(video.currentTime - next) < 1 / 48;
+    if (!settled) presentedTime.current = undefined;
     pendingSeek.current = settled ? null : next;
     setFrameReady(settled && !scrubbing.current);
     video.pause();
@@ -107,8 +123,11 @@ export function VideoPreview({
       setFrameReady(false);
       return;
     }
-    video.pause();
-    onPoint?.(point, video);
+    // The first tap during playback freezes the picture; selection is made
+    // only once it is still, so a cut cannot move underneath the tap.
+    if (!video.paused) { video.pause(); return; }
+    if (presentedTime.current === undefined) onPoint?.(point, video);
+    else onPoint?.(point, video, presentedTime.current);
   }
   return (
     <Box
@@ -160,7 +179,7 @@ export function VideoPreview({
               onPlayableChange?.(true);
               reportFrameReady();
             }}
-            onSeeking={() => setFrameReady(false)}
+            onSeeking={() => { presentedTime.current = undefined; setFrameReady(false); }}
             onSeeked={reportFrameReady}
             onCanPlay={reportFrameReady}
             onError={() => {

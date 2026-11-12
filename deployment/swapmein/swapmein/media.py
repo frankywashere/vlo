@@ -14,7 +14,7 @@ import zipfile
 
 import numpy as np
 from PIL import Image, ImageOps, ImageDraw, ImageFont
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_serializer, model_validator
 
 from .errors import PublicError
 from .diagnostics import emit, timed
@@ -52,6 +52,21 @@ class Anchor(BaseModel):
     x: float = Field(ge=0, le=1)
     y: float = Field(ge=0, le=1)
     time: float = Field(ge=0)
+    frame_time: float | None = Field(default=None, ge=0, le=86400)
+    frame_signature: str | None = Field(default=None, pattern=r"^[0-9a-f]{1536}$")
+
+    @model_serializer(mode="wrap")
+    def serialize_frame_evidence(self, handler):
+        data = handler(self)
+        # Keep legacy saved/review anchors compatible without frame evidence.
+        return {key: value for key, value in data.items()
+                if key not in {"frame_time", "frame_signature"} or value is not None}
+
+    @model_validator(mode="after")
+    def validate_frame_evidence(self):
+        if self.frame_time is not None and self.frame_signature is None:
+            raise ValueError("The displayed frame must belong to the selected moment.")
+        return self
 
 
 class Target(BaseModel):
@@ -272,15 +287,23 @@ def normalize(source: Path, output: Path, setup: Setup, *, high_detail=False):
              previous_audio_seconds=next((s.get("duration") for s in normalized["streams"]
                                           if s.get("codec_type") == "audio"), None))
     scene_cuts = detect_scene_cuts(output)
+    from .selection_frames import resolve_selection_frames
+    selections = ([] if setup.replace_all_people else
+                  [target.anchor for target in setup.targets] if setup.targets else [setup.anchor])
+    verified_frames = resolve_selection_frames(output, selections, start=start, frames=duration * 24,
+        crop=(sw, sh, (width - sw) // 2, (height - sh) // 2))
     # Group mode needs no user tap. The normalized metadata still carries a
     # valid frame origin for media validation; it is never used to select an ID.
     def mapped_anchor(selection):
+        verified = verified_frames.get(id(selection))
         return {"x": (selection.x * sw + (width - sw) / 2) / width,
                 "y": (selection.y * sh + (height - sh) / 2) / height,
-                "time": selection.time - start,
-                "frame": min(duration * 24 - 1, round((selection.time - start) * 24))}
+                "time": verified["frame"] / 24 if verified else selection.time - start,
+                "frame": verified["frame"] if verified else min(duration * 24 - 1, round((selection.time - start) * 24)),
+                **({"selection_frame_verified": True, "requested_time": selection.time - start,
+                    "frame_time": selection.frame_time, "frame_match_error": verified["error"]} if verified else {})}
     selection = (Anchor(x=.5, y=.5, time=start) if setup.replace_all_people
-                 else setup.anchor or setup.targets[0].anchor)
+                 else setup.targets[0].anchor if setup.targets else setup.anchor)
     anchor = mapped_anchor(selection)
     targets = [{"id": target.id, "name": target.name, "anchor": mapped_anchor(target.anchor),
                 "reference_index": target.reference_index,

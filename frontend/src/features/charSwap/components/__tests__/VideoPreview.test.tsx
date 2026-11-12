@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VideoPreview } from "../VideoPreview";
 import type { ClipAsset } from "../../model/model";
@@ -261,4 +261,40 @@ it("keeps waiting for the latest frame when only an older seek finished during t
   expect(surface).toHaveAttribute("aria-disabled", "false");
   tap();
   expect(onPoint).toHaveBeenCalledTimes(1);
+});
+
+it("binds a tap to the presented frame PTS rather than the later playback position", () => {
+  let callback: VideoFrameRequestCallback = () => {};
+  Object.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {configurable: true,
+    value: vi.fn((next: VideoFrameRequestCallback) => {callback = next; return 1;})});
+  Object.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", {configurable: true, value: vi.fn()});
+  try {
+    const {video, load, tap, onPoint} = preview();
+    load();
+    video.currentTime = 4.583333333333333;
+    act(() => callback(0, {mediaTime: 4.546667} as VideoFrameCallbackMetadata));
+    tap();
+    expect(onPoint).toHaveBeenLastCalledWith({x: .5, y: .5}, video, 4.546667);
+    fireEvent.change(screen.getByRole("slider"), {target: {value: "6"}});
+    fireEvent.seeking(video);
+    fireEvent.seeked(video);
+    tap();
+    expect(onPoint.mock.lastCall).toHaveLength(2); // Never reuse an old seek's PTS.
+  } finally {
+    cleanup();
+    delete (HTMLVideoElement.prototype as Partial<HTMLVideoElement>).requestVideoFrameCallback;
+    delete (HTMLVideoElement.prototype as Partial<HTMLVideoElement>).cancelVideoFrameCallback;
+  }
+});
+
+it("pauses a moving video before accepting a person selection", () => {
+  const {video, load, tap, onPoint} = preview();
+  load();
+  Object.defineProperty(video, "paused", {configurable: true, value: false});
+  tap();
+  expect(video.pause).toHaveBeenCalled();
+  expect(onPoint).not.toHaveBeenCalled();
+  Object.defineProperty(video, "paused", {configurable: true, value: true});
+  tap();
+  expect(onPoint).toHaveBeenCalledOnce();
 });

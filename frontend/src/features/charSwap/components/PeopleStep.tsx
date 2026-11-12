@@ -16,6 +16,7 @@ import { useCharSwapStore } from "../useCharSwapStore";
 import type { TargetPerson } from "../model/model";
 import type { DemoManifest, SamplePerson } from "../services/demo";
 import { boxAtTime } from "../services/demo";
+import { captureFrameSignature } from "../services/selectionFrame";
 import { captureAnchor } from "../services/localMedia";
 import type { NormalizedPoint } from "../utils/videoGeometry";
 import { createLocalId } from "../utils/createLocalId";
@@ -64,7 +65,7 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
         anchor: { x: box.x + box.width / 2, y: box.y + box.height / 2, time },
       });
   }
-  function choosePoint(point: NormalizedPoint, video: HTMLVideoElement) {
+  function choosePoint(point: NormalizedPoint, video: HTMLVideoElement, frameTime?: number) {
     if (sample.length) {
       const match = sample
         .filter((person) => {
@@ -101,11 +102,15 @@ export function PeopleStep({ demo, maxPeople = MAX_TARGET_PEOPLE }: PeopleStepPr
         (number) =>
           !targets.some((target) => target.name === `Person ${number}`),
       ) ?? targets.length + 1;
+    let frameSignature: string;
+    try { frameSignature = captureFrameSignature(video); }
+    catch { setError("Wait for the picture to load, then select the person again."); return; }
     choose({
       id: createLocalId(),
       name: `Person ${index}`,
       color: TARGET_COLORS[targets.length % TARGET_COLORS.length],
-      anchor: { ...point, time: video.currentTime },
+      anchor: { ...point, time: video.currentTime, frame_signature: frameSignature,
+        ...(frameTime !== undefined ? {frame_time: frameTime} : {}) },
       thumbnail: captureAnchor(video, point),
     });
   }

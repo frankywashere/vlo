@@ -5,12 +5,14 @@ import { useCharSwapStore } from "../../useCharSwapStore";
 import { TARGET_COLORS } from "../../limits";
 import type { NormalizedPoint } from "../../utils/videoGeometry";
 
+vi.mock("../../services/selectionFrame", () => ({captureFrameSignature: () => "ab".repeat(768)}));
 vi.mock("../../services/localMedia", () => ({captureAnchor: () => "blob:thumbnail"}));
 vi.mock("../VideoPreview", () => ({
-  VideoPreview: ({onPoint}: {onPoint: (point: NormalizedPoint, video: HTMLVideoElement) => void}) =>
+  VideoPreview: ({onPoint}: {onPoint: (point: NormalizedPoint, video: HTMLVideoElement, frameTime?: number) => void}) =>
     <div>{Array.from({length: 6}, (_, index) => <button key={index} onClick={() => {
       const video = document.createElement("video");
-      onPoint({x: .1 + index * .15, y: .5}, video);
+      video.currentTime = 4.583333;
+      onPoint({x: .1 + index * .15, y: .5}, video, 4.546667);
     }}>Tap person {index + 1}</button>)}</div>,
 }));
 
@@ -86,4 +88,11 @@ it("does not count the Replace all people slot as multiple individual selections
   expect(screen.getByText(/Replacing multiple people is experimental/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "Replace all people"}));
   expect(screen.queryByText(/Replacing multiple people is experimental/)).not.toBeInTheDocument();
+});
+
+it("sends the actual presented frame time and full-frame witness with the selected point", () => {
+  render(<PeopleStep demo={null} />);
+  fireEvent.click(screen.getByRole("button", {name: "Tap person 1"}));
+  expect(useCharSwapStore.getState().targets[0].anchor.frame_time).toBe(4.546667);
+  expect(useCharSwapStore.getState().targets[0].anchor.frame_signature).toBe("ab".repeat(768));
 });

@@ -21,11 +21,19 @@ export interface ClipAsset {
   mode: "demo" | "upload";
 }
 
+export interface SelectionAnchor {
+  x: number;
+  y: number;
+  time: number;
+  frame_time?: number;
+  frame_signature?: string;
+}
+
 export interface TargetPerson {
   id: string;
   name: string;
   color: string;
-  anchor: { x: number; y: number; time: number };
+  anchor: SelectionAnchor;
   thumbnail?: string;
 }
 
