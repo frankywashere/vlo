@@ -205,7 +205,9 @@ class Cloud:
         region = (self.settings.gpu_region or self.settings.region) if service == "gpu" else self.settings.region
         name = "proof-gpu" if service == "gpu" else getattr(self.settings, "audio_service", "proof-audio")
         allowed = {"proof-gpu", "proof-audio", "recastfx-audio"}
-        if (service == "audio" and self.settings.preparation_only and self.settings.request_scaled_audio
+        from .preparation_only import isolated_test_site
+        if (service == "audio" and (self.settings.preparation_only or isolated_test_site(self.settings))
+                and self.settings.request_scaled_audio
                 and self.settings.app_bucket == self.settings.project + "-long-test"
                 and self.settings.worker_bucket == self.settings.app_bucket):
             allowed.add("recastfx-long-cpu")

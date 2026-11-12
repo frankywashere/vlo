@@ -43,6 +43,25 @@ old browser nor a direct generation request can render. SAM preparation still
 uses its normal provider allowance. The test service does not inherit production
 payment or email-sending credentials. Production must leave the flag false.
 
+## Staff Kling prompt comparison
+
+The isolated preview can also exercise the complete hosted generation flow:
+set `TEST_SITE=true` and `PREPARATION_ONLY=false` on its gateway and worker.
+`TEST_SITE` requires staff access for sessions and authenticated job actions;
+its dedicated CPU worker is allowed only with request scaling and both private
+test buckets. Private CharacterSwap routes stay disabled on this site.
+Restore the existing provider secret reference and enable credit generation in
+its separate test ledger. Use production generation pricing with test-only
+credit grants; keep checkout disabled and never copy production wallets.
+
+New Kling jobs on the isolated test deployment pin
+`kling_edit_prompt_variant=preserve_source_shots_v1`. That variant adds explicit
+source-camera, composition, cut-point and side/rear-view preservation to the
+existing prompt. Both the actual submitted prompt and variant are audited.
+Production jobs keep the original prompt unless that variant is deliberately
+rolled out later. Enabling the site submits no render by itself; the normal
+Easy Mode or reviewed submission controls still govern each paid request.
+
 ## Watermark rewards
 
 Credit-funded accounts can opt into a lower-right RecastFX watermark at generation review.

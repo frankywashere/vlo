@@ -192,6 +192,8 @@ def job_estimate(job):
 
 
 def check_generation_funding(records, setup: Setup, active_session: dict, *, generation_route="current", pinned_quote=None):
+    if settings.test_site and not staff_role(records, active_session):
+        raise PublicError("This test site is available to authorized staff only.", 403)
     if settings.preparation_only:
         if not staff_role(records, active_session):
             raise PublicError("Guide testing is available to authorized staff only.", 403)
@@ -239,6 +241,9 @@ def preparation_job_snapshot(defaults, options, *, is_admin=False, self_hosted=F
                         retry_missing_masks_with_sam=defaults["retry_missing_masks_with_sam"])
     if settings.preparation_only:
         snapshot.update(preparation_only=True, auto_generate=False)
+    from .preparation_only import isolated_test_site
+    if isolated_test_site(settings) and generation_model(options) == KLING:
+        snapshot["kling_edit_prompt_variant"] = "preserve_source_shots_v1"
     return snapshot
 
 
@@ -258,6 +263,8 @@ def authenticate(authorization: str | None):
     session_id = digest(bearer_token(authorization))
     session, _ = records.read("sessions/" + session_id + ".json")
     session = check_session(session)
+    if settings.test_site and not staff_role(records, session):
+        raise PublicError("This test site is available to authorized staff only.", 403)
     if settings.require_account and not session.get("account_id"):
         raise PublicError("Sign in to continue.", 401)
     if settings.require_account and session.get("access_mode", "api-key") == "api-key" and not api_key_permission(records, session):
@@ -376,7 +383,7 @@ def view(job: dict, *, review_thumbnails: bool = True, signer=None):
         if (job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available)
                 and not (field == "guide_uri" and job.get("retained_guide"))):
             result[output] = sign(job[field])
-    if job.get("retained_guide") and (status == "completed" or job.get("preparation_only")):
+    if job.get("retained_guide") and (status in {"completed", "ready"} or job.get("preparation_only")):
         from .guide_retention import retained_guide_view
         result.pop("guide_url", None)
         result.update(retained_guide_view(job, cloud))
@@ -435,6 +442,7 @@ def config():
     mesh = pipeline_settings(services()[0]) if settings.available else {}
     return {"live": True, "providers": [] if settings.require_account else ["reAPI", "ToAPIs"],
             "preparation_only": settings.preparation_only,
+            "test_site": settings.test_site,
             "provider": "recastfx" if settings.require_account else "reAPI", "model": "minimax-h3", "delivery": "native",
             "beta": "multi-person", "available": settings.available, "max_source_bytes": MAX_SOURCE_BYTES,
             "accounts_required": settings.require_account, "credits_available": credit_ready,
@@ -1048,6 +1056,8 @@ def session(options: ProviderSelection = Body(default=ProviderSelection()), x_re
             x_firebase_token: str | None = Header(default=None)):
     records, _, provider = services()
     account = verify_account(x_firebase_token, settings.project) if settings.require_account or x_firebase_token else {}
+    if settings.test_site and not staff_role(records, account):
+        raise PublicError("This test site is available to authorized staff only.", 403)
     if settings.preparation_only:
         if not account.get("account_id") or not staff_role(records, account):
             raise PublicError("Guide testing is available to authorized staff only.", 403)
@@ -2126,7 +2136,9 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         prompt_variant=job.get("prompt_variant") or "current", easy_mode=options.easy_mode,
         **({"generation_model": KLING} if generation_model(job) == KLING else {}),
         **({"generation_resolution":"2K"} if generation_resolution(job) == "2K" else {}),
-        **({"reference_indexes":options.reference_indexes} if options.reference_indexes is not None else {}))
+        **({"reference_indexes":options.reference_indexes} if options.reference_indexes is not None else {}),
+        **({"preserve_shots": True} if job.get("kling_edit_prompt_variant") == "preserve_source_shots_v1"
+           and generation_model(job) == KLING else {}))
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
         charge = pinned_generation_credits(job, records)
@@ -2164,7 +2176,9 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
     try:
         records.update(f"jobs/{job_id}.json", lambda current: {
             **claim_job(current, {"ready"}, "submitting"),
-            "generation_settings": {"model": payload["model"], "resolution": payload["resolution"]}})
+            "generation_settings": {"model": payload["model"], "resolution": payload["resolution"],
+                **({"prompt_variant": "preserve_source_shots_v1"}
+                   if job.get("kling_edit_prompt_variant") == "preserve_source_shots_v1" and generation_model(job) == KLING else {})}})
     except PublicError as error:
         if error.status_code == 409:
             current, _ = records.read(f"jobs/{job_id}.json")

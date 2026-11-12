@@ -44,6 +44,7 @@ class Settings:
     allowed_origins: tuple[str, ...] = ()
     require_account: bool = False
     preparation_only: bool = False
+    test_site: bool = False
     # The calendar-month allowance accommodates 100 attempts on all 31 days.
     monthly_preparations: int = 3100
     daily_preparations: int = 100
@@ -82,6 +83,7 @@ class Settings:
             allowed_origins=tuple(x.strip() for x in os.getenv("ALLOWED_ORIGINS", "").split(",") if x.strip()),
             require_account=os.getenv("REQUIRE_ACCOUNT", "false").lower() == "true",
             preparation_only=os.getenv("PREPARATION_ONLY", "false").lower() == "true",
+            test_site=os.getenv("TEST_SITE", "false").lower() == "true",
             monthly_preparations=positive_integer_env("MONTHLY_PREPARATIONS", cls.monthly_preparations),
             daily_preparations=positive_integer_env("DAILY_PREPARATIONS", cls.daily_preparations),
         )

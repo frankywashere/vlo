@@ -250,14 +250,15 @@ def shared_cyan_guidance(mask_style, face_mesh, replace_all_people):
                else "Remove all overlay colors from the finished video."))
 
 
-def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False, generation_model: str = "minimax-h3", generation_resolution: str = "768P", reference_indexes: list[int] | None = None):
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False, generation_model: str = "minimax-h3", generation_resolution: str = "768P", reference_indexes: list[int] | None = None, preserve_shots: bool = False):
     if generation_model not in {"minimax-h3", "kling-4-0"}:
         raise PublicError("Choose a supported generation model.")
     if generation_model == "kling-4-0":
         return kling_generation_payload(duration, image_url, video_url, anchor=anchor,
             mask_style=mask_style, replace_all_people=replace_all_people, targets=targets,
             face_mesh=face_mesh, reference_indexes=reference_indexes,
-            audio_processing=audio_processing, submit_without_audio=submit_without_audio)
+            audio_processing=audio_processing, submit_without_audio=submit_without_audio,
+            preserve_shots=preserve_shots)
     if generation_resolution not in {"768P", "2K"}:
         raise PublicError("Choose MiniMax 768P or 2K.")
     if isinstance(targets, list) and any(isinstance(target, dict) and target.get("guide_anchor_untrusted") for target in targets):
@@ -320,7 +321,7 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
 
 def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mask_style="none",
                              replace_all_people=False, targets=None, face_mesh=False, reference_indexes=None,
-                             audio_processing=False, submit_without_audio=False):
+                             audio_processing=False, submit_without_audio=False, preserve_shots=False):
     """The reviewed body-tint edit recipe, with dynamic person assignments.
 
     Colors mark the person slot, not the reference's array index. An identity
@@ -347,6 +348,11 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
                           409, code="mask_quality_identity_unresolved")
     shared = mask_style in SHARED_CYAN_STYLES
     lines = ["Edit @Video1."]
+    if preserve_shots:
+        lines.append("@Video1 controls the complete edit; reference images define replacement appearance only. "
+                     "Preserve every original shot, cut point, camera position, camera movement, composition, "
+                     "framing and head orientation exactly. Side and rear views remain side and rear views, "
+                     "with the same amount of each face visible as in @Video1.")
     if replace_all_people:
         lines.append("Replace every person with the character in " + kling_words(top_group) + ", using their face, hair and clothing. "
                      "Keep each replacement separate and in its source person's position.")

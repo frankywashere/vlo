@@ -30,8 +30,8 @@ def effective_generation_route(setup, configured_route):
 
 
 def generation_route_snapshot(setup, configured_route):
-    from .preparation_only import preparation_only
-    if preparation_only():
+    from .preparation_only import preparation_only, isolated_test_site
+    if preparation_only() or isolated_test_site():
         return {"multi_person_generation_route": "current"}
     route = effective_generation_route(setup, configured_route)
     snapshot = {"multi_person_generation_route": route}

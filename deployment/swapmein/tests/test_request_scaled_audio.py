@@ -167,3 +167,17 @@ def test_isolated_cpu_identity_is_verified_without_accessing_legacy_service(monk
     cloud.settings.audio_service = 'unrelated-service'
     with pytest.raises(ValueError, match='Unknown worker service'):
         cloud._admin_url('audio')
+
+
+def test_staff_rendering_preview_keeps_using_its_own_request_scaled_cpu(monkeypatch):
+    body = state()
+    body['name'] = body['name'].replace('proof-audio', 'recastfx-long-cpu')
+    body['uri'] = body['uri'].replace('proof-audio', 'recastfx-long-cpu')
+    cloud, events = audio_cloud(monkeypatch, service_state=body)
+    cloud.settings.audio_service = 'recastfx-long-cpu'
+    cloud.settings.preparation_only = False
+    cloud.settings.test_site = True
+    cloud.settings.app_bucket = cloud.settings.worker_bucket = cloud.settings.project + '-long-test'
+    with cloud.worker('audio') as invoke:
+        invoke('/compose', {'run_id': 'staff-kling-test'})
+    assert not any(event[0] == 'PATCH' for event in events)
