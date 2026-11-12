@@ -149,6 +149,25 @@ describe("live BYOK pipeline", () => {
     expect(result.current.job?.status).toBe("queued");
   });
 
+  it("saves supplemental mask decisions without requesting SAM recovery or generation", async () => {
+    const review = {id: "job-1", status: "tracking_review", review_action: "recheck_masks", mask_style: "cyan_overlay_multi_20",
+      duration: 5, width: 854, height: 480, tracking_revision: 2,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", tracking_segments: [
+        {id: "fragment", start: 0, end: 5, start_frame: 0, end_frame: 120, seek_time: 3, needs_review: true,
+          reason: "uncertain_mask_component", focus_box: [.1, .2, .3, .4]}]};
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? Promise.resolve(json(review))
+      : input === "/api/jobs/job-1/tracking-review" ? Promise.resolve(json({id: "job-1", status: "queued"}))
+        : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    const choices = [{segment_id: "fragment", absent: true, anchor: null}];
+    await act(async () => {expect(await result.current.resolveTracking(choices)).toBe(true);});
+    const request = calls("/api/jobs/job-1/tracking-review")[0][1];
+    expect(request?.headers).not.toHaveProperty("X-Reapi-Key");
+    expect(JSON.parse(String(request?.body))).toEqual({revision: 2, choices});
+    expect(calls("/api/jobs/job-1/generate")).toHaveLength(0);
+  });
+
   it("warns on browser exit only until upload confirmation and removes the guard afterward", async () => {
     const pending = deferred<Response>();
     requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? pending.promise : defaultRequest(input));

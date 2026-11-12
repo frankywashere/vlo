@@ -307,4 +307,36 @@ describe("character-first one-frame scene review", () => {
     expect(screen.getByRole("button", {name: "Next"})).toBeDisabled();
     expect(screen.queryByText("Not present")).not.toBeInTheDocument();
   });
+
+  it("dismisses only supplemental fragments and submits mask rechecks without promising generation", async () => {
+    const props = properties();
+    const segments = props.segments.map(section => ({...section, focus_box: [.1, .2, .3, .4] as [number, number, number, number]}));
+    render(<SceneTrackingReview {...props} segments={segments} reviewAction="recheck_masks" trackingUrl="https://storage.googleapis.com/masks.mp4" />);
+    expect(screen.queryByRole("switch", {name: "Show detected people"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Not in this scene"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Show another frame"})).not.toBeInTheDocument();
+    expect(screen.getByText("Tap the highlighted part.")).toBeVisible();
+    expect(document.querySelector("video")).toHaveAttribute("src", props.sourceUrl);
+    readyFrame();
+    expect(screen.getByTestId("review-focus-box")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", {name: "Skip this fragment"}));
+    expect(screen.getByText("Fragment skipped")).toBeVisible();
+    next();
+    const submit = screen.getByRole("button", {name: "Recheck masks"});
+    expect(submit).toBeDisabled();
+    select(); fireEvent.click(submit);
+    await waitFor(() => expect(props.onApply).toHaveBeenCalledOnce());
+    expect(props.onApply.mock.calls[0][0][0]).toEqual({segment_id: "cut", absent: true, anchor: null});
+    expect(screen.queryByRole("button", {name: "Submit and generate"})).not.toBeInTheDocument();
+  });
+
+  it("keeps a supplemental check on its exact candidate frame even if an old saved point used another time", () => {
+    const props = properties();
+    render(<SceneTrackingReview {...props} reviewAction="recheck_masks"
+      initialChoices={[{segment_id: "cut", absent: false, anchor: {x: .5, y: .5, time: 2.5}}]} />);
+    const frame = readyFrame();
+    expect(frame.currentTime).toBe(reviewFrameTime(36));
+    expect(screen.queryByRole("button", {name: "Show another frame"})).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Selected person marker")).not.toBeInTheDocument();
+  });
 });

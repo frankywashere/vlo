@@ -68,7 +68,7 @@ def test_final_recovered_masks_are_checked_before_composition(monkeypatch):
     import swapmein.mask_recovery as recovery
     order=[]
     def recover(pipeline,job,remaining):order.append('recover');return {**job,'mask_recovery_completed':True}
-    def check(self,job):
+    def check(self,job,remaining=None):
         assert job['mask_recovery_completed'];order.append('check');raise RuntimeError('stop-before-compose')
     monkeypatch.setattr(recovery,'recover_reviewed_masks',recover)
     monkeypatch.setattr(Pipeline,'check_reviewed_mask_quality',check)

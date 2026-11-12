@@ -19,13 +19,114 @@ def _failure():
                        409, code="cloudflare_anchor_recovery")
 
 
+def _component_evidence(region, source, point=None):
+    """Measure one connected recovery body, including its original SAM pixels.
+
+    Row runs avoid allocating a Python object for every foreground pixel. The
+    anchor must belong to the main component, not a disconnected SAM island.
+    """
+    parents, sizes, overlaps = [], [], []
+    previous, anchor = [], None
+
+    def find(index):
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    for y, row in enumerate(region):
+        changes = np.flatnonzero(np.diff(np.r_[False, row, False]))
+        current, cursor = [], 0
+        for left, right in zip(changes[::2], changes[1::2]):
+            left, right = int(left), int(right)
+            index = len(parents)
+            parents.append(index)
+            sizes.append(right - left)
+            overlaps.append(int(np.count_nonzero(source[y, left:right])))
+            if point is not None and y == point[1] and left <= point[0] < right:
+                anchor = index
+            while cursor < len(previous) and previous[cursor][1] < left:
+                cursor += 1
+            for old_left, old_right, old_index in previous[cursor:]:
+                if old_left > right:
+                    break
+                a, b = find(index), find(old_index)
+                if a != b:
+                    if sizes[a] < sizes[b]:
+                        a, b = b, a
+                    parents[b] = a
+                    sizes[a] += sizes[b]
+                    overlaps[a] += overlaps[b]
+            current.append((left, right, index))
+        previous = current
+    roots = [index for index in range(len(parents)) if parents[index] == index]
+    if not roots:
+        return 0, 0, False
+    largest = max(roots, key=lambda index: sizes[index])
+    return sizes[largest], overlaps[largest], point is None or (anchor is not None and find(anchor) == largest)
+
+
+def _contained_overlap_labels(original, repaired, metadata, requests, tracks):
+    """Allow only a single-person-shot extension of an existing partial mask.
+
+    A recovery rooted in the user's tap may include the person's existing
+    jacket mask. That is not a collision with a second person. Containment
+    alone is insufficient in a multi-person shot, so those cases still stop
+    for review. This does not establish identities across cuts; the normal
+    source-image matching step remains responsible for that.
+    """
+    width, height, _, _, _ = _metadata(metadata)
+    replacements, report = {}, []
+    anchor_frames = [_metadata({**metadata, "anchor": target["anchor"]})[3] for target in tracks]
+    for request in requests:
+        scene_ids, overlap_ids, observations = set(), set(), []
+        source_frames, recovered_frames = 0, 0
+        start, end = request["start_frame"], request["end_frame"]
+        for frame in range(start, end):
+            source = original(frame)
+            region = repaired(frame) == request["label"]
+            source_region = source != 0
+            source_pixels, recovered_pixels = int(np.count_nonzero(source_region)), int(np.count_nonzero(region))
+            scene_ids.update(int(label) for label in np.unique(source) if label)
+            source_frames += bool(source_pixels)
+            recovered_frames += bool(recovered_pixels)
+            overlap_ids.update(int(label) for label in np.unique(source[region]) if label)
+            if recovered_pixels:
+                point = ((min(width - 1, int(request["x"] * width)),
+                          min(height - 1, int(request["y"] * height))) if frame == request["frame"] else None)
+                main_pixels, main_overlap, anchor_in_main = _component_evidence(region, source_region, point)
+                observations.append((source_pixels, recovered_pixels, main_pixels, main_overlap, anchor_in_main))
+        if not overlap_ids:
+            continue
+        # Never join two raw tracks, another selected anchor, or a one-frame
+        # coincidence. Requiring the whole scene to have one ID deliberately
+        # leaves crowded/partially detected shots for the existing review.
+        if (len(overlap_ids) != 1 or scene_ids != overlap_ids or source_frames != recovered_frames
+                or recovered_frames < 3
+                or sum(start <= frame < end for frame in anchor_frames) != 1
+                or any(not source_pixels or main_overlap / source_pixels < .99
+                       or main_overlap / recovered_pixels < .20
+                       or main_pixels / recovered_pixels < .999 or not anchor_in_main
+                       for source_pixels, recovered_pixels, main_pixels, main_overlap, anchor_in_main in observations)):
+            raise _failure()
+        label = next(iter(overlap_ids))
+        replacements[request["label"]] = label
+        report.append({"segment_id": request["segment_id"], "policy": "single_person_containment_v1",
+                       "source_label": label, "evidence_frames": recovered_frames,
+                       "minimum_original_containment": min(item[3] / item[0] for item in observations),
+                       "minimum_recovery_overlap": min(item[3] / item[1] for item in observations),
+                       "minimum_main_component_share": min(item[2] / item[1] for item in observations)})
+    return replacements, report
+
+
 @timed("identity_anchor_recovery", job_arg="job")
 def recover_identity_anchors(pipeline, job, masks, metadata, targets, root, remaining):
     """Return a separate repaired raw archive, or None when no retry is needed.
 
     The existing point-recovery worker accepts only selected labels 1..5. Give
     it an empty archive with those temporary slots, then merge its additions
-    into the original all-person SAM archive under globally unused labels.
+    into the original all-person SAM archive under globally unused labels. A
+    tightly bounded single-person containment case extends its original ID.
     """
     permissive = {**metadata, "allow_unmatched_anchor": True, "review_all_scenes": True}
     tracks = selected_tracks(masks, permissive, targets, allow_unmatched=True)
@@ -85,12 +186,12 @@ def recover_identity_anchors(pipeline, job, masks, metadata, targets, root, rema
     try:
         with _maps(masks, metadata) as original, _maps(recovered, metadata) as repaired, zipfile.ZipFile(
                 partial, "w", zipfile.ZIP_DEFLATED) as destination:
+            contained, merge_report = _contained_overlap_labels(original, repaired, metadata, requests, tracks)
+            raw_labels.update(contained)
             for frame in range(frames):
                 source, additions = original(frame), repaired(frame)
                 if any(int(label) not in {0, *raw_labels} for label in np.unique(additions)):
                     raise _failure()
-                if np.any((additions != 0) & (source != 0)):
-                    raise _failure()  # Preserve every original SAM pixel and person ID.
                 mapped = source.astype(np.uint16, copy=True)
                 for request in requests:
                     region = additions == request["label"]
@@ -100,7 +201,11 @@ def recover_identity_anchors(pipeline, job, masks, metadata, targets, root, rema
                         x, y = min(width - 1, int(request["x"] * width)), min(height - 1, int(request["y"] * height))
                         if not region[y, x]:
                             raise _failure()
-                    mapped[region] = raw_labels[request["label"]]
+                    if np.any(region & (source != 0) & (source != contained.get(request["label"], -1))):
+                        raise _failure()
+                    # Retain every original pixel and raw person ID. A proven
+                    # partial/full containment only fills background around it.
+                    mapped[region & (source == 0)] = raw_labels[request["label"]]
                 buffer = BytesIO()
                 Image.fromarray(mapped).save(buffer, "PNG")
                 destination.writestr(f"labels/labels_{frame:05d}.png", buffer.getvalue())
@@ -111,11 +216,12 @@ def recover_identity_anchors(pipeline, job, masks, metadata, targets, root, rema
                 if _pixel_label(read, request["frame"], request, width, height) != raw_labels[request["label"]]:
                     raise _failure()
         uri = pipeline.cloud.upload(pipeline.settings.worker_bucket, prefix + "raw-repaired-masks.zip", output, "application/zip")
+        pipeline.update_job(job['id'], identity_anchor_recovery_merge_report=merge_report)
     except Exception:
         output.unlink(missing_ok=True)
         raise
     finally:
         partial.unlink(missing_ok=True)
     emit("cloudflare_initial_masks_recovered", job_id=job["id"], recovered_targets=len(requests),
-         raw_labels_preserved=True)
+         raw_labels_preserved=True, contained_partial_masks=len(merge_report))
     return output, uri, report

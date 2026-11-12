@@ -33,7 +33,7 @@ byte-SHA identity; production jobs retain their original `source_uri`.
 `_segmentation.decode_mask_to_raster` alias strictly decodes and canonically
 re-encodes each mask, then discards the raster. The adapter installs one guarded
 dispatcher at that alias. A `ContextVar` selects an isolated request cache; no
-per-request global mutation occurs. The original official codec still performs
+per-request global mutation occurs. The official codec still performs
 every validation check. Progressive export reuses those immutable validated bytes
 instead of performing the expensive strict decode twice.
 
@@ -45,10 +45,37 @@ projection uses the official renderer's pixel-center transform with nearest
 sampling for binary masks. Tests match four recorded full-body masks to the
 original official-parser export SHA-256 values.
 
+## Local decoder optimization, not deployed
+
+The working tree now prefers Meta's unmodified `@meta-sam/parser@0.1.0` codec
+inside the already-packaged Deno runtime. Meta's compatibility matrix gives it
+the same protocol/conformance identity as Python parser 0.2.0. Python still owns
+stream, identity, frame and bounds validation; only strict mask-to-raster work
+uses the JavaScript implementation. Canonical decode/re-encode validation and
+lossless thresholding remain intact.
+
+The vendored runtime includes its upstream license and a SHA-256 file manifest.
+A request-local child has no network/filesystem/environment/process authority or
+inherited credentials, bounded messages and deadlines, and deterministic cleanup.
+Startup is checked before a new paid request. A missing Deno binary uses Python;
+a broken installed codec stops explicitly. `META_MASK_CODEC=python` selects the
+original implementation for diagnostics. No runtime package downloads occur.
+
+Offline replay of the same 30-second response took 157.56 seconds with the pinned
+release decoder versus 5.01 seconds with this change. All 720 PNG member bytes,
+label arrays, object metadata and archive-member digests are identical. This is
+a local replay result; Cloud Run speed has not been measured with the new code.
+The build context now includes the codec assets, and the Dockerfile requires an
+actual JavaScript decode smoke test. A full image build remains to be run before
+any future deployment; the local Docker daemon was unavailable.
+
+Evidence and all other local fixes:
+`/Users/frank/Desktop/Coding/CharSwap/experiments/meta_followups_local_20261112/README.md`.
+
 Run the offline checks (no API requests or credential retrieval):
 
 ```sh
 cd /Users/frank/Desktop/Coding/vlo/deployment/swapmein
 .venv/bin/python -m pytest \
-  tests/test_meta_preparation.py tests/test_meta_credentials.py
+  tests/test_meta_preparation.py tests/test_meta_credentials.py tests/test_meta_mask_codec.py
 ```

@@ -128,6 +128,26 @@ describe("private account library", () => {
     expect(generateLiveJob).not.toHaveBeenCalled();
   });
 
+  it("saves a skipped supplemental fragment without starting generation from Library", async () => {
+    const saved = {...job, status: "tracking_review" as const, access_mode: "credits" as const,
+      review_action: "recheck_masks" as const, mask_style: "cyan_overlay_multi_20" as const,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4, tracking_revision: 2,
+      tracking_segments: [{id: "fragment", start: 0, end: 4, start_frame: 0, end_frame: 96,
+        seek_time: 1, needs_review: true, reason: "uncertain_mask_component"}]};
+    vi.mocked(loadAccountJobs).mockResolvedValueOnce([saved]).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(resumeAccountJob).mockResolvedValue({token: "mask-session", expires_at: 9999999999});
+    vi.mocked(resolveLiveTracking).mockResolvedValue({id: saved.id, status: "queued"});
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    await user.click(screen.getByRole("button", {name: "Skip this fragment"}));
+    await user.click(screen.getByRole("button", {name: "Recheck masks"}));
+    await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledWith(saved.id, "mask-session", 2,
+      [{segment_id: "fragment", absent: true, anchor: null}], expect.any(AbortSignal),
+      {enabled: false, key: undefined, generateAfterReview: false}));
+    expect(generateLiveJob).not.toHaveBeenCalled();
+  });
+
   it("shows actual consumer credits and refunds in completed clip settings", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "completed", access_mode: "credits",
       output_url: "https://storage.googleapis.com/result.mp4",
@@ -379,6 +399,60 @@ it("keeps the Library scene review free of the old warning, filename and full re
   expect(screen.getByAltText("Replacement for Person 1")).toBeVisible();
   expect(screen.queryByRole("img", {name: "Person 1 source selection"})).not.toBeInTheDocument();
   expect(screen.getByText("Tap the person to replace with the character above.")).toBeVisible();
+});
+
+it.each(["legacy", "multi-person", "meta-seed"] as const)("opens %s review from the thumbnail in the standalone slideshow", async (plan) => {
+  const target = {id: "person-1", name: "Person 1", reference_index: 0,
+    anchor: {x: .4, y: .5, time: 1}, thumbnail_url: "https://storage.googleapis.com/person.jpg"};
+  const review = {...job, title: "private-source.mp4", status: "tracking_review" as const,
+    access_mode: "credits" as const, meta_seed_review: plan === "meta-seed", duration: 4,
+    source_preview_url: "https://storage.googleapis.com/source.mp4", selection_targets: [target],
+    settings_used: {face_mesh: true}, tracking_revision: 1,
+    tracking_segments: [{id: "s0", ...(plan === "legacy" ? {} : {target_id: target.id}),
+      start: 0, end: 4, start_frame: 0, end_frame: 96, seek_time: 1, needs_review: true, reason: "scene_selection"}]};
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([review]).mockImplementation(() => new Promise(() => {}));
+  const user = userEvent.setup();
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Open private-source.mp4"}));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("tab", {name: "Preview"})).not.toBeInTheDocument();
+  expect(screen.queryByText("private-source.mp4")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Prepared guide")).not.toBeInTheDocument();
+  expect(screen.queryByText("Face mesh")).not.toBeInTheDocument();
+  expect(screen.queryByAltText("Person 1 replacement reference")).not.toBeInTheDocument();
+  expect(screen.getByAltText("Replacement for Person 1")).toBeVisible();
+  expect(screen.getAllByLabelText("Select the person in this frame")).toHaveLength(1);
+  expect(screen.getAllByRole("button", {name: "Back to Library"})).toHaveLength(1);
+  expect(screen.getByRole("button", {name: plan === "meta-seed" ? "Build person masks" : "Submit and generate"})).toBeDisabled();
+  expect(resolveLiveTracking).not.toHaveBeenCalled();
+});
+
+it("switches open details to guided review when a background refresh requests selections", async () => {
+  const preparing = {...job, status: "preparing" as const, access_mode: "credits" as const};
+  const review = {...preparing, status: "tracking_review" as const, duration: 4,
+    source_preview_url: "https://storage.googleapis.com/source.mp4",
+    tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+      seek_time: 1, needs_review: true, reason: "scene_selection"}]};
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([preparing]).mockResolvedValue([review]);
+  const user = userEvent.setup();
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "View reference images"}));
+  expect(screen.getByRole("dialog")).toBeVisible();
+  act(() => window.dispatchEvent(new Event("focus")));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByRole("heading", {name: "Check scene matches", level: 1})).toBeVisible();
+  expect(screen.getAllByLabelText("Select the person in this frame")).toHaveLength(1);
+  expect(screen.queryByLabelText("Prepared guide")).not.toBeInTheDocument();
+});
+
+it("keeps the server message visible if review frames are unavailable", async () => {
+  vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "tracking_review",
+    message: "Your review frames are being restored. Refresh shortly."}]);
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", {name: "Open My clip"}));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByText("Your review frames are being restored. Refresh shortly.")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Back to Library"})).toBeEnabled();
 });
 
 it("shows refresh feedback while preserving the visible Library cards", async () => {

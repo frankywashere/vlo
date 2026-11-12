@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { recoveredVideoFile, restoreRetryDraft } from "../jobRecovery";
 import { readLocalClip } from "../localMedia";
 import { useCharSwapStore } from "../../useCharSwapStore";
+import { getStepBlocker } from "../../model/model";
 vi.mock("../localMedia", () => ({readLocalClip: vi.fn(async (_file: File, url: string) => ({id: "recovered", name: "Recovered.mp4", url, duration: 25, width: 1920, height: 1080, mode: "upload"}))}));
 afterEach(() => {vi.unstubAllGlobals(); vi.restoreAllMocks(); useCharSwapStore.getState().reset();});
 const target = {id: "left", name: "Left boxer", anchor: {x: .2, y: .6, time: 4}, reference_index: 1};
@@ -27,6 +28,35 @@ describe("restoring failed setups", () => {
     expect(useCharSwapStore.getState().targets[0].id).toBe("left");
     useCharSwapStore.getState().reset();
     expect(useCharSwapStore.getState().retryNotice).toBeUndefined();
+  });
+  it("preserves a saved Kling 20-second selection when browser metadata is fractionally shorter", async () => {
+    const draft = await restoreRetryDraft({...recovery, trim: [0, 20], settings: {...recovery.settings, model: "kling-4-0"}}, new AbortController().signal);
+    useCharSwapStore.getState().setKling4Enabled(true);
+    useCharSwapStore.getState().restoreRetry(draft);
+    useCharSwapStore.getState().loadClip({id: "same-source", name: "original.mp4", url: "blob:same", duration: 19.9999999, width: 1280, height: 720, mode: "upload"});
+    const restored = useCharSwapStore.getState();
+    expect(restored.trim).toEqual([0, 20]);
+    expect(restored.generationModel).toBe("kling-4-0");
+    expect(restored.targets).toEqual(draft.targets);
+    expect(restored.assignments).toEqual(draft.assignments);
+    expect(restored.retryNeedsSource).toBe(false);
+    expect(getStepBlocker(restored, "trim")).toBeNull();
+  });
+  it("does not silently shorten a saved selection or discard people when a retry upload is too short", async () => {
+    const draft = await restoreRetryDraft({...recovery, trim: [0, 20], settings: {...recovery.settings, model: "kling-4-0"}}, new AbortController().signal);
+    useCharSwapStore.getState().setKling4Enabled(true);
+    useCharSwapStore.getState().restoreRetry(draft);
+    const original = {id: "source", name: "original.mp4", url: "blob:source", duration: 10, width: 1280, height: 720, mode: "upload" as const};
+    useCharSwapStore.getState().loadClip(original);
+    const short = useCharSwapStore.getState();
+    expect(short.trim).toEqual([0, 20]);
+    expect(short.targets).toEqual(draft.targets);
+    expect(short.retryNotice).toMatch(/shorter than your saved selection/);
+    expect(getStepBlocker(short, "trim")).not.toBeNull();
+    useCharSwapStore.getState().loadClip({...original, duration: 25});
+    expect(useCharSwapStore.getState().trim).toEqual([0, 20]);
+    expect(useCharSwapStore.getState().targets).toEqual(draft.targets);
+    expect(useCharSwapStore.getState().retryNotice).not.toMatch(/shorter than/);
   });
   it("restores Replace All with its group reference slot", async () => {
     const draft = await restoreRetryDraft({...recovery, targets: [], settings: {replace_all_people: true}}, new AbortController().signal);

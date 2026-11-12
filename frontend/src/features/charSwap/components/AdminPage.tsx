@@ -243,17 +243,7 @@ export function AdminPage() {
             </RadioGroup>
           </FormControl>
           <Typography variant="body2" color="text.secondary">Applies to new normal-route jobs in every mode. Existing jobs keep their saved prompt version.</Typography>
-          <FormControlLabel control={<Switch checked={admin.pipeline?.matching_no_review ?? false}
-            disabled={busy || !can("pipeline_settings")}
-            onChange={(event) => {
-              const enabled = event.target.checked;
-              void run(async () => {
-                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, matching_no_review: enabled});
-                setAdmin(current => current ? {...current, pipeline} : current);
-                setMessage(`Automatic matching failure review ${enabled ? "disabled" : "enabled"} for new jobs.`);
-              });
-            }} />} label="No review on automatic matching failure" />
-          <Typography variant="body2" color="text.secondary">For new normal-route jobs, if Cloudflare matching cannot complete, continue with Option 5 Easy Mode instead of asking for scene review. CharacterSwap still requires scene review for uncertain matches.</Typography>
+          <Typography variant="body2" color="text.secondary">For normal-route jobs, unavailable or uncertain Cloudflare matching requires scene confirmation before generation. Saved masks and selections are kept.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.multi_characters ?? true}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

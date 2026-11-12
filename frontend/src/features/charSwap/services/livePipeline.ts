@@ -122,6 +122,7 @@ export interface LivePipelineJob {
   tracking_reviewed?: boolean;
   tracking_review_error?: boolean;
   meta_seed_review?: boolean;
+  review_action?: "recheck_masks";
   tracking_error_segment_id?: string;
   tracking_choices?: TrackingReviewChoice[];
   guide_url?: string;
@@ -161,6 +162,7 @@ export interface SelectionTarget {
 }
 
 export interface TrackingReviewSegment {
+  focus_box?: [number, number, number, number];
   thumbnail_url?: string;
   tracking_thumbnail_url?: string;
   scene_index?: number;
@@ -456,6 +458,11 @@ function readJob(value: unknown): LivePipelineJob {
       throw new LivePipelineError("The service returned an unreadable mask selection step. Refresh the job before continuing.");
     job.meta_seed_review = value.meta_seed_review;
   }
+  if (value.review_action !== undefined) {
+    if (value.review_action !== "recheck_masks")
+      throw new LivePipelineError("The service returned an unreadable mask review action. Refresh the job before continuing.");
+    job.review_action = value.review_action;
+  }
   if (typeof value.tracking_error_segment_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.tracking_error_segment_id))
     job.tracking_error_segment_id = value.tracking_error_segment_id;
   if (
@@ -558,12 +565,17 @@ function readJob(value: unknown): LivePipelineJob {
         (segment.selected_label !== undefined && segment.selected_label !== null && (typeof segment.selected_label !== "number" || !Number.isSafeInteger(segment.selected_label) || segment.selected_label < 1))
         || (segment.target_id !== undefined && (typeof segment.target_id !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(segment.target_id)))
         || (segment.target_name !== undefined && (typeof segment.target_name !== "string" || segment.target_name.length > 40))
+        || (job.review_action === "recheck_masks" && segment.focus_box === undefined)
+        || (segment.focus_box !== undefined && (!Array.isArray(segment.focus_box) || segment.focus_box.length !== 4
+          || segment.focus_box.some((value: unknown) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)
+          || !(Number(segment.focus_box[0]) < Number(segment.focus_box[2])) || !(Number(segment.focus_box[1]) < Number(segment.focus_box[3]))))
         || (segment.scene_index !== undefined && (typeof segment.scene_index !== "number" || !Number.isSafeInteger(segment.scene_index) || segment.scene_index < 0 || segment.scene_index >= 720));
     })) throw new LivePipelineError("The service returned an unreadable scene review. Refresh the job before continuing.");
     job.tracking_segments = (segments as TrackingReviewSegment[]).map((segment) => ({
       id: segment.id, start_frame: segment.start_frame, end_frame: segment.end_frame,
       start: segment.start, end: segment.end, seek_time: segment.seek_time,
       reason: segment.reason, needs_review: segment.needs_review,
+      ...(segment.focus_box ? {focus_box: [...segment.focus_box] as [number, number, number, number]} : {}),
       ...(typeof segment.thumbnail_url === "string" && isSafeMediaUrl(segment.thumbnail_url) ? {thumbnail_url: segment.thumbnail_url} : {}),
       ...(typeof segment.tracking_thumbnail_url === "string" && isSafeMediaUrl(segment.tracking_thumbnail_url) ? {tracking_thumbnail_url: segment.tracking_thumbnail_url} : {}),
       ...(segment.scene_index !== undefined ? {scene_index: segment.scene_index} : {}),

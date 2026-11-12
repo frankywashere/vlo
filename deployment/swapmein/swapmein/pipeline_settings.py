@@ -34,6 +34,8 @@ def pipeline_settings(records):
             "face_mesh_unmasked_default": current.get("face_mesh_unmasked_default") is True,
             "face_mesh_user_control": current.get("face_mesh_user_control") is True,
             "retry_missing_masks_with_sam": current.get("retry_missing_masks_with_sam") is True,
+            # Retained for old snapshots/API clients; failed matching always
+            # requires scene confirmation, regardless of this legacy value.
             "matching_no_review": current.get("matching_no_review") is True,
             "preparation_provider": provider,
             "sam_provider": sam_provider if sam_provider in {"workers", "replicate", "meta"} else provider,
@@ -55,7 +57,7 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
     if multi_person_generation_route is not None:
         validate_generation_route(multi_person_generation_route)
     if matching_no_review is not None and type(matching_no_review) is not bool:
-        raise PublicError("Choose whether automatic matching may continue without scene review.")
+        raise PublicError("The legacy matching review field must be true or false.")
     if prompt_variant is not None and prompt_variant not in PROMPT_VARIANTS:
         raise PublicError("Choose a supported generation prompt.")
     if prompt_variant == "cloudflare_identity_v1":

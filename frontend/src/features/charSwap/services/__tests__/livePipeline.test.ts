@@ -197,6 +197,32 @@ const reviewSegment = {id: "segment-001", start_frame: 48, end_frame: 120, start
 const reviewJob = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 1, tracking_segments: [reviewSegment]};
 
 describe("scene tracking review contract", () => {
+  it("preserves the preparation-only targeted mask review action", async () => {
+    const focus_box = [.2, .3, .4, .8];
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, review_action: "recheck_masks",
+      tracking_segments: [{...reviewSegment, focus_box}]})));
+    const job = await getLiveJob("job-1", "session", new AbortController().signal);
+    expect(job.review_action).toBe("recheck_masks");
+    expect(job.tracking_segments?.[0].focus_box).toEqual(focus_box);
+  });
+
+  it.each([[0, 0, 0, 1], [0, .8, 1, .3], [-.1, 0, .4, .8], [0, 0, 1.1, 1], [0, 0, "1", 1], [0, 0, 1], null]
+    .map(focus_box => ({focus_box})))("rejects an invalid normalized fragment box ($focus_box)", async ({focus_box}) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, review_action: "recheck_masks",
+      tracking_segments: [{...reviewSegment, focus_box}]})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/unreadable scene review/);
+  });
+
+  it("rejects a mask recheck without a visible highlight binding", async () => {
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, review_action: "recheck_masks"})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/unreadable scene review/);
+  });
+
+  it.each(["generate", true, null])("rejects an unreadable targeted review action (%o)", async (review_action) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, review_action})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/mask review action/);
+  });
+
   it.each([true, false])("preserves the Meta seed review flag (%s) without changing the review contract", async (meta_seed_review) => {
     requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, meta_seed_review})));
     expect(await getLiveJob("job-1", "session", new AbortController().signal)).toEqual({...reviewJob, meta_seed_review});

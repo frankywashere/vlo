@@ -144,6 +144,10 @@ def prepare_audio_job(monkeypatch, fixture, *, manual, enabled, silent):
     def match(self,job,source,masks,metadata,targets,root,remaining):
         destination=root/"matched.zip"
         coverage=build_selected_masks(masks,metadata,selected_tracks(masks,metadata,targets),destination)
+        # Match the real matcher contract: shot-local source anchors accompany
+        # its stable masks, and now feed the shared component-quality checks.
+        targets=[{**target,'scenes':[{'start':0,'end':metadata['frames']/24,'absent':False,
+            'anchor':{key:target['anchor'][key] for key in ('x','y','time')}}]} for target in targets]
         return {"masks_path":destination,"coverage":coverage,"targets":targets,"assignments":[],"diagnostics":{"calls":0}}
     monkeypatch.setattr(Pipeline,"match_cloudflare_identities",match)
     monkeypatch.setattr(Pipeline,"save_scene_thumbnails",lambda *_:None)

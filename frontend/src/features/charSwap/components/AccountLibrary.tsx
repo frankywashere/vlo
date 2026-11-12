@@ -57,6 +57,11 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const [trackingErrorSegmentId, setTrackingErrorSegmentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<AccountJob | null>(null);
   const [reviewPage, setReviewPage] = useState(false);
+  // A thumbnail and a review button must open the same guided review. Also
+  // cover jobs that return to review while their details are already open.
+  const sceneReview = selected?.status === "tracking_review";
+  const fullPageReview = reviewPage || sceneReview;
+  const sceneReviewAvailable = sceneReview && Boolean(selected.source_preview_url && selected.tracking_segments?.length);
   const [visibilityPending, setVisibilityPending] = useState<string[]>([]);
   const visibilityRequests = useRef(new Set<string>());
   const hiddenJobs = useRef(new Set<string>());
@@ -293,10 +298,10 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const selectedReferences = selected?.reference_urls ?? (selected?.reference_url ? [selected.reference_url] : []);
   const processingCount = jobs.filter(isGenerationRunning).length;
   const details = (<>
-        <Box sx={{px: reviewPage ? 0 : 3, pb: reviewPage ? 0 : 2}}>
+        <Box sx={{px: fullPageReview ? 0 : 3, pb: fullPageReview ? 0 : 2}}>
           <Stack spacing={2}>
             {selected?.status === "failed" ? <JobFailureNotice job={selected} />
-              : (!reviewPage || selected?.status !== "tracking_review") && <Typography>{selected?.message}</Typography>}
+              : !sceneReviewAvailable && <Typography>{selected?.message}</Typography>}
             {checkingRecovery && <LinearProgress aria-label="Checking saved files" />}
             {recovery && <Alert severity={recovery.action === "support" ? "warning" : "info"}>
               {recovery.message}
@@ -306,10 +311,10 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                 <br />{recovery.credits_charged ? `${recovery.credits_charged} credits charged; ${recovery.credits_returned ?? 0} credits returned.` : "No generation credits were charged."}
               </>}
             </Alert>}
-            {selected && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used}
+            {selected && !sceneReview && <><JobElapsedTime job={selected} /><JobSettings settings={selected.settings_used}
               creditsUsed={selected.consumer_credits_used} creditsReturned={selected.consumer_credits_returned}
               accessMode={selected.access_mode} /></>}
-            {reviewPage && selected?.guide_url && !selected.easy_mode && (
+            {fullPageReview && selected?.status === "ready" && selected.guide_url && !selected.easy_mode && (
               <Box
                 component="video"
                 controls
@@ -319,7 +324,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                 sx={{ width: "100%", maxHeight: 420, bgcolor: "#211e1d" }}
               />
             )}
-            {!reviewPage && (selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
+            {!fullPageReview && (selectedTargets.length > 0 ? <Stack direction="row" flexWrap="wrap" gap={2}>
               {selectedTargets.map((target) => <Stack key={target.id} spacing={0.5} sx={{borderLeft: `3px solid ${target.color}`, pl: 1}}>
                 <Typography fontWeight={600}>{target.name}</Typography>
                 <Stack direction="row" flexWrap="wrap" gap={1}>{(target.reference_indexes ?? [target.reference_index]).map((referenceIndex,angle)=>selectedReferences[referenceIndex]&&<Box key={referenceIndex} component="img" src={selectedReferences[referenceIndex]} alt={`${target.name} ${angle===0?"replacement reference":`additional angle ${angle}`}`} sx={{width:112,height:112,objectFit:"contain"}}/>)}</Stack>
@@ -401,6 +406,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                   initialChoices={selected.tracking_choices}
                   requireExplicitChoices={selected.generation_destination === "google_h3" || selected.generation_destination === "paperspace_h3"}
                   metaSeedReview={selected.meta_seed_review}
+                  reviewAction={selected.review_action}
                   errorSegmentId={trackingErrorSegmentId ?? selected.tracking_error_segment_id}
                   errorMessage={error ?? (selected.tracking_review_error ? selected.message : undefined)}
                   onRefresh={() => void refresh()}
@@ -411,19 +417,21 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                     controller.current = new AbortController();
                     try {
                       const session = await resumeAccountJob(selected.id, key);
+                      const reviewOnly = selected.meta_seed_review || selected.review_action === "recheck_masks";
                       const result = await resolveLiveTracking(
                         selected.id,
                         session.token,
                         selected.tracking_revision ?? 0,
                         choices,
                         controller.current.signal,
-                        {enabled: !selected.meta_seed_review && (selected.mask_style !== "none" || selected.settings_used?.face_mesh === true),
-                          key: selected.meta_seed_review ? undefined : key, generateAfterReview: !selected.meta_seed_review},
+                        {enabled: !reviewOnly && (selected.mask_style !== "none" || selected.settings_used?.face_mesh === true),
+                          key: reviewOnly ? undefined : key, generateAfterReview: !reviewOnly},
                       );
                       if (mounted.current) {
                         // Publish the saved state to the list before navigation;
                         // discard refreshes started before this acknowledgement.
                         savedReviewVersion.current += 1;
+                        setReviewPage(true);
                         setJobs((current) => current.map((job) => job.id === selected.id ? {...job, ...result} : job));
                         setSelected({ ...selected, ...result });
                         void refresh();
@@ -447,11 +455,11 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                 />
               )}
             {busy && <LinearProgress aria-label="Updating job" />}
-            {error && <Alert severity="error">{error}</Alert>}
+            {error && !sceneReviewAvailable && <Alert severity="error">{error}</Alert>}
           </Stack>
         </Box>
-        <Stack direction="row" spacing={1} sx={{mt: 3, p: reviewPage ? 0 : 1, justifyContent: "flex-end", flexWrap: "wrap"}}>
-          {reviewPage && <Button disabled={busy} onClick={close}>Back to Library</Button>}
+        <Stack direction="row" spacing={1} sx={{mt: sceneReview ? 0 : 3, p: fullPageReview ? 0 : 1, justifyContent: "flex-end", flexWrap: "wrap"}}>
+          {fullPageReview && !sceneReview && <Button disabled={busy} onClick={close}>Back to Library</Button>}
           {recovery && (recovery.action === "save" || recovery.action === "retry" && onRetry) && (
             <Button variant="contained" disabled={busy || checkingRecovery || retryDisabled} onClick={() => void recoverJob()}>
               {recovery.action === "save" ? "Retry saving video" : recovery.source_url && recovery.reference_urls?.every(Boolean)
@@ -479,7 +487,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           )}
         </Stack>
   </>);
-  if (reviewPage && selected) return (
+  if (fullPageReview && selected) return (
     <Box component="main" sx={{maxWidth: 1120, mx: "auto", px: {xs: 2, md: 5}, py: 4}}>
       <Button onClick={close} disabled={busy} sx={{mb: 2}}>Back to Library</Button>
       <Typography component="h1" variant="h3" sx={{mb: 1}}>{selected.status === "tracking_review" ? "Check scene matches" : selected.status === "ready" ? "Review prepared clip" : "Your recast"}</Typography>
@@ -626,7 +634,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
               job={job}
               onOpen={() => {
                 setKey("");
-                setReviewPage(false);
+                setReviewPage(job.status === "tracking_review");
                 setSelected(job);
                 setError(null);
               }}

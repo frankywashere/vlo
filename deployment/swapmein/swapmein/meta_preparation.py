@@ -242,6 +242,9 @@ class MetaPreparation:
                                   409, code="meta_submission_unknown")
             return state
         _parser()  # Never pay when the pinned local decoder cannot run.
+        from .meta_mask_codec import StrictMaskCodec
+        preflight = StrictMaskCodec(_strict_codec, remaining)
+        preflight.close()
         seconds = min(600, math.floor(remaining()))
         if seconds < 10:
             raise PublicError("There is not enough preparation time for a new Meta request.", code="meta_timeout")
@@ -366,13 +369,12 @@ class MetaPreparation:
 
     async def _decode(self, operation, state, root, metadata, seeds, remaining, video):
         parser = _parser()
+        from .meta_mask_codec import StrictMaskCodec
         width, height, frames = _metadata(metadata, video)
-        cache = _RasterCache(_strict_codec, max_pixels=width*height)
-        token = _cache_context.set(cache)
         selected = {s["label"] for s in seeds} if seeds is not None else None
         remap, images, seen, emitted, revisions = {}, [], 0, 0, {}
+        next_progress = 48
         decoded = root / "decoded"
-        decoded.mkdir(exist_ok=True)
         async def events():
             chunks = state.get("chunks")
             if not isinstance(chunks, list) or not 1 <= len(chunks) <= 10000:
@@ -390,9 +392,14 @@ class MetaPreparation:
                 for line in data.splitlines():
                     if line:
                         yield json.loads(line)
-        parsed = parser.parse_responses_stream(events(), parser.video_segmentation_format() if video else parser.image_segmentation_format())
-        started = time.monotonic()
+        codec = StrictMaskCodec(_strict_codec, remaining)
+        parsed, token = None, None
         try:
+            cache = _RasterCache(codec.decode, max_pixels=width*height)
+            token = _cache_context.set(cache)
+            decoded.mkdir(exist_ok=True)
+            parsed = parser.parse_responses_stream(events(), parser.video_segmentation_format() if video else parser.image_segmentation_format())
+            started = time.monotonic()
             async for snapshot in parsed:
                 remaining()
                 for record in snapshot.records[seen:]:
@@ -423,17 +430,19 @@ class MetaPreparation:
                         images.append({"id": object_id, "box": box, "mask": full.astype(bool)})
                     emitted += 1
                 seen = len(snapshot.records)
-                if emitted and emitted % 48 == 0:
+                if emitted >= next_progress:
                     emit("meta_mask_decode_progress", job_id=self.job["id"], operation=operation, masks=emitted,
-                         elapsed_seconds=round(time.monotonic()-started, 3))
+                         elapsed_seconds=round(time.monotonic()-started, 3), codec_backend=codec.backend)
+                    next_progress = (emitted // 48 + 1) * 48
             result = await parsed.final_result()
             if result.outcome.status != "completed" or any(d.severity == "error" for d in result.diagnostics):
                 raise PublicError("Meta's mask stream failed strict validation.", 502, code="meta_mask_invalid")
             seconds = round(time.monotonic() - started, 6)
             self._update(operation, decode_seconds=seconds, decoded_masks=emitted, codec_decodes=cache.decodes,
-                         codec_cache_hits=cache.hits, parser_version=PARSER_VERSION)
+                         codec_cache_hits=cache.hits, parser_version=PARSER_VERSION, codec_backend=codec.backend)
             emit("meta_masks_decoded", job_id=self.job["id"], operation=operation, masks=emitted,
-                 elapsed_seconds=seconds, codec_decodes=cache.decodes, codec_cache_hits=cache.hits)
+                 elapsed_seconds=seconds, codec_decodes=cache.decodes, codec_cache_hits=cache.hits,
+                 codec_backend=codec.backend)
             if not video:
                 return images
             labels = sorted(selected if selected is not None else remap.values())
@@ -483,11 +492,14 @@ class MetaPreparation:
             raise PublicError("Meta's mask stream could not be decoded safely. Saved responses are retained for recovery.",
                               502, code="meta_mask_invalid") from None
         finally:
-            try:
-                await parsed.aclose()
-            except Exception:
-                pass
-            _cache_context.reset(token)
+            if parsed is not None:
+                try:
+                    await parsed.aclose()
+                except Exception:
+                    pass
+            if token is not None:
+                _cache_context.reset(token)
+            codec.close()
 
     def _segment(self, operation, path, metadata, remaining, *, video, seeds=None, propagation_direction="both", concept=None):
         if not isinstance(operation, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", operation):

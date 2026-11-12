@@ -27,6 +27,7 @@ interface SceneTrackingReviewProps {
   initialChoices?: TrackingReviewChoice[];
   requireExplicitChoices?: boolean;
   metaSeedReview?: boolean;
+  reviewAction?: "recheck_masks";
   onApply: (choices: TrackingReviewChoice[]) => Promise<boolean>;
   onRefresh: () => void;
 }
@@ -42,18 +43,19 @@ interface SceneChoiceCardProps {
   busy: boolean;
   choice?: TrackingReviewChoice;
   allowAbsent: boolean;
+  dismissCandidate: boolean;
   error?: string | null;
   onChoose: (choice: TrackingReviewChoice) => void;
   onRefresh: () => void;
 }
 
 /** Offscreen decoders are released so a long review doesn't exhaust phone memory. */
-function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected, width, height, busy, choice, allowAbsent, error, onChoose, onRefresh }: SceneChoiceCardProps) {
+function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected, width, height, busy, choice, allowAbsent, dismissCandidate, error, onChoose, onRefresh }: SceneChoiceCardProps) {
   const container = useRef<HTMLElement | null>(null);
   const [visible, setVisible] = useState(typeof IntersectionObserver === "undefined");
   const [selectedFrame, setSelectedFrame] = useState<number>();
   const [failed, setFailed] = useState(false);
-  const frames = reviewFrameNumbers(section, choice?.anchor?.time);
+  const frames = dismissCandidate ? [Math.floor(section.seek_time * 24 + 1e-7)] : reviewFrameNumbers(section, choice?.anchor?.time);
   const frame = selectedFrame !== undefined && frames.includes(selectedFrame) ? selectedFrame : frames[0];
   const detected = Boolean(trackingUrl) && showDetected;
   const url = detected ? trackingUrl! : sourceUrl;
@@ -76,26 +78,29 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
   return <Box component="section" ref={container} aria-label={label}
     aria-description={`${formatTime(section.start)}–${formatTime(section.end)}`} tabIndex={-1}
     sx={{ ...PANEL, outline: "none", scrollMarginTop: 24, borderColor: error ? "error.main" : choice?.anchor ? "success.main" : "divider" }}>
-    <Typography variant="body2" sx={{mb: 1.5}}>Tap the person to replace with the character above.</Typography>
+    <Typography variant="body1" sx={{fontSize: {xs: "1.125rem", sm: "1.25rem"}, fontWeight: 600, lineHeight: 1.4, mb: 1.5}}>
+      {dismissCandidate ? "Tap the highlighted part." : "Tap the person to replace with the character above."}
+    </Typography>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Box sx={{aspectRatio: `${width}/${height}`, mx: "auto", maxWidth: width / height * 500,
       width: {xs: `min(100%, ${width / height * 42}vh)`, sm: `min(100%, ${width / height * 48}vh)`}}}>
       {visible && <SceneReviewFrame key={`${url}:${frame}:${imageUrl ?? ""}`} url={url} imageUrl={imageUrl}
-        frame={frame} width={width} height={height} disabled={busy}
+        frame={frame} width={width} height={height} disabled={busy} focusBox={dismissCandidate ? section.focus_box : undefined}
         selectedPoint={choice?.anchor && Math.floor(choice.anchor.time * 24 + 1e-7) === frame ? choice.anchor : undefined}
         onReadyChange={(ready) => setFailed(!ready)}
         onSelect={(point, time) => onChoose({ segment_id: section.id, absent: false, anchor: { ...point, time } })} />}
     </Box>
     <Typography variant="body2" color={choice?.anchor ? "success.main" : "text.secondary"} sx={{ mt: 1.5 }}>
       {choice?.anchor ? "Selected"
-        : allowAbsent && choice?.absent ? "Not present"
+        : allowAbsent && choice?.absent ? dismissCandidate ? "Fragment skipped" : "Not present"
         : "Selection required"}
     </Typography>
     <Stack direction="row" spacing={1} sx={{mt: 1.5, flexWrap: "wrap", gap: 1, "& .MuiButton-root": {px: {xs: 1, sm: 2.5}, minHeight: 44}}}>
-      <Button size="small" aria-label="Show another frame" startIcon={<RefreshRounded />} disabled={busy || frames.length < 2}
+      {!dismissCandidate && <Button size="small" aria-label="Show another frame" startIcon={<RefreshRounded />} disabled={busy || frames.length < 2}
         onClick={() => { setSelectedFrame(frames[(frames.indexOf(frame) + 1) % frames.length]); setFailed(false); }}>Another frame</Button>
+      }
       {allowAbsent && <Button size="small" disabled={busy} aria-pressed={choice?.absent === true}
-        onClick={() => onChoose({segment_id: section.id, absent: true, anchor: null})}>Not in this scene</Button>
+        onClick={() => onChoose({segment_id: section.id, absent: true, anchor: null})}>{dismissCandidate ? "Skip this fragment" : "Not in this scene"}</Button>
       }
       {failed && <Button size="small" disabled={busy} onClick={onRefresh}>Refresh preview</Button>}
     </Stack>
@@ -109,7 +114,8 @@ function isConfirmed(choice: TrackingReviewChoice | undefined, selectionRequired
 /** Both Library and Create walk through required checks, one character at a time. */
 export function SceneTrackingReview({ sourceUrl, trackingUrl, segments,
   target: fallbackTarget, targets = [], references = [], width, height, busy, errorSegmentId,
-  errorMessage, initialChoices = [], metaSeedReview = false, onApply, onRefresh }: SceneTrackingReviewProps) {
+  errorMessage, initialChoices = [], metaSeedReview = false, reviewAction, onApply, onRefresh }: SceneTrackingReviewProps) {
+  const recheckMasks = reviewAction === "recheck_masks";
   // Single-person plans omit target_id; bind those sections to the supplied
   // person rather than the Library's generic fallback placeholder.
   const implicitTargetId = targets.length === 1 ? targets[0].id : fallbackTarget.id;
@@ -197,13 +203,13 @@ export function SceneTrackingReview({ sourceUrl, trackingUrl, segments,
       </Stack>
       <LinearProgress variant="determinate" value={completedCount / steps.length * 100}
         aria-label="Scene review progress" aria-valuetext={`${completedCount} of ${steps.length} checked`} sx={{mt: 2}} />
-      {trackingUrl && !metaSeedReview && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
+      {trackingUrl && !metaSeedReview && !recheckMasks && <FormControlLabel label="Show detected people" control={<Switch checked={showDetected} disabled={locked}
         onChange={(_event, checked) => setShowDetected(checked)} />} />}
     </Box>
     <SceneChoiceCard key={`${person.id}:${section.id}`} section={section}
       label={`Scene ${step.sceneIndex + 1}${step.checkCount > 1 ? ` · Tracking check ${step.checkIndex + 1} of ${step.checkCount}` : ""}`}
-      sourceUrl={sourceUrl} trackingUrl={metaSeedReview ? undefined : trackingUrl} showDetected={showDetected} width={width} height={height}
-      busy={locked} choice={choices[section.id]} allowAbsent={!metaSeedReview} onChoose={choose} onRefresh={onRefresh}
+      sourceUrl={sourceUrl} trackingUrl={metaSeedReview || recheckMasks ? undefined : trackingUrl} showDetected={showDetected} width={width} height={height}
+      busy={locked} choice={choices[section.id]} allowAbsent={!metaSeedReview} dismissCandidate={recheckMasks} onChoose={choose} onRefresh={onRefresh}
       error={section.id === errorSegmentId ? errorMessage || "This scene needs another look. Review the selected person, or use Show another frame." : null} />
     {last && confirmed && firstUnchecked >= 0 && <Button disabled={locked}
       onClick={() => setNavigation({index: firstUnchecked, acknowledgedError: errorToken})}>Review unchecked scene</Button>}
@@ -212,7 +218,7 @@ export function SceneTrackingReview({ sourceUrl, trackingUrl, segments,
         borderTop: "1px solid", borderColor: "divider", "& .MuiButton-root": {minHeight: 48, flex: {xs: 1, sm: "initial"}}}}>
       <Button disabled={locked || activeIndex === 0} onClick={() => setNavigation({index: activeIndex - 1, acknowledgedError: errorToken})}>Back</Button>
       <Button variant="contained" disabled={locked || !confirmed || last && firstUnchecked >= 0} onClick={() => void advance()}>
-        {submitting ? "Submitting…" : last ? metaSeedReview ? "Build person masks" : "Submit and generate" : "Next"}
+        {submitting ? "Submitting…" : last ? metaSeedReview ? "Build person masks" : recheckMasks ? "Recheck masks" : "Submit and generate" : "Next"}
       </Button>
     </Stack>
   </Stack>;

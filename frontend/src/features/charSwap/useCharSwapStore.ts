@@ -26,6 +26,9 @@ import type {
   GenerationModel,
 } from "./model/model";
 
+const SHORT_RETRY_SOURCE_NOTICE = "This video is shorter than your saved selection. Upload the original video or adjust the trim before continuing.";
+const RESTORED_RETRY_NOTICE = "Your clip and available references are restored. Review the trim, people, references, and current credit cost before submitting again.";
+
 export const STEPS: Step[] = [
   "clip",
   "trim",
@@ -165,9 +168,13 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
     selectionVersion: state.selectionVersion + 1, trackingReady: false, error: null})),
   loadClip: (clip) =>
     set((state) => ({
-      ...(state.retryNeedsSource ? {...state, clip, retryNeedsSource: false,
-        trim: state.trim[1] <= clip.duration ? state.trim : [0, Math.min(15, Math.floor(clip.duration))] as [number, number],
-        ...(state.trim[1] <= clip.duration ? {} : {targets: [], assignments: {}, referenceGroups: {}, replaceAllPeople: false}),
+      ...(state.retryNeedsSource ? {...state, clip,
+        // Browser duration rounding must not turn a saved 20-second selection
+        // into 15 seconds. A genuinely shorter upload remains blocked by trim
+        // validation until the user adjusts it or uploads the original.
+        retryNeedsSource: state.trim[1] > clip.duration + 1e-6,
+        retryNotice: state.trim[1] > clip.duration + 1e-6 ? SHORT_RETRY_SOURCE_NOTICE
+          : state.retryNotice === SHORT_RETRY_SOURCE_NOTICE ? RESTORED_RETRY_NOTICE : state.retryNotice,
       } : {...setClip(state, clip), retryNotice: undefined}),
       selectionVersion: state.selectionVersion + 1,
       step: "clip",
@@ -184,6 +191,9 @@ export const useCharSwapStore = create<CharSwapStore>((set, get) => ({
             ? state.selectionVersion
             : state.selectionVersion + 1,
         trackingReady: updated === state ? state.trackingReady : false,
+        ...(updated !== state && state.retryNotice === SHORT_RETRY_SOURCE_NOTICE ? {
+          retryNeedsSource: false, retryNotice: RESTORED_RETRY_NOTICE,
+        } : {}),
         error: null,
       };
     }),

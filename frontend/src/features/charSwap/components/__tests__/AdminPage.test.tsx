@@ -624,31 +624,29 @@ it("requires provider-key permission to edit Cloudflare credentials", async () =
 });
 
 
-it("defaults matching failure review on and toggles no-review without changing Option 6 or other settings", async () => {
-  api.pipelineSettings = {revision: 4, audio_processing: true, prompt_variant: "cloudflare_identity_v1", depth_guidance: true};
+it.each([undefined, true, false])("requires matching-failure review and removes the obsolete toggle despite legacy value %s", async (matching_no_review) => {
+  api.pipelineSettings = {revision: 4, audio_processing: true, prompt_variant: "cloudflare_identity_v1", depth_guidance: true, matching_no_review};
   await renderExpandedAdmin();
-  const toggle = screen.getByRole("switch", {name: "No review on automatic matching failure"});
-  expect(toggle).not.toBeChecked();
-  await userEvent.click(toggle);
-  await waitFor(() => expect(toggle).toBeChecked());
-  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, matching_no_review: true});
+  expect(screen.queryByRole("switch", {name: "No review on automatic matching failure"})).not.toBeInTheDocument();
+  expect(screen.getByText(/unavailable or uncertain Cloudflare matching requires scene confirmation/)).toBeVisible();
+  expect(api.pipeline).not.toHaveBeenCalled();
   expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
-  await userEvent.click(toggle);
-  await waitFor(() => expect(toggle).not.toBeChecked());
-  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, matching_no_review: false});
-  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
+  const explicitOption5 = screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"});
+  await userEvent.click(explicitOption5);
+  await waitFor(() => expect(explicitOption5).toBeChecked());
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, prompt_variant: "identity_tint_tracking_v1"});
 });
 
-it("shows a saved no-review setting and requires pipeline permission to edit it", async () => {
+it("does not expose the obsolete no-review setting to limited staff", async () => {
   api.pipelineSettings = {revision: 2, audio_processing: false, prompt_variant: "cloudflare_identity_v1", matching_no_review: true};
   api.role = "viewer";
   api.permissions = ["provider_key"];
   await renderExpandedAdmin();
-  const toggle = screen.getByRole("switch", {name: "No review on automatic matching failure"});
-  expect(toggle).toBeChecked();
-  expect(toggle).toBeDisabled();
+  expect(screen.queryByRole("switch", {name: "No review on automatic matching failure"})).not.toBeInTheDocument();
+  expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeDisabled();
+  expect(screen.getByText(/unavailable or uncertain Cloudflare matching requires scene confirmation/)).toBeVisible();
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 
@@ -694,11 +692,11 @@ it("explains the separate CharacterSwap recipe and scopes normal preparation con
   expect(within(group).getByText("CharacterSwap uses its own fixed recipe, skips SAM, face mesh and depth, and restores the original audio.")).toBeVisible();
   expect(screen.getByText("Applies to new normal-route jobs in every mode. Existing jobs keep their saved prompt version.")).toBeVisible();
   expect(screen.getByText(/For normal-route jobs, routes enabled depth processing/)).toBeVisible();
-  expect(screen.getByText(/For new normal-route jobs, if Cloudflare matching cannot complete/)).toHaveTextContent(
-    "CharacterSwap still requires scene review for uncertain matches.");
+  expect(screen.getByText(/unavailable or uncertain Cloudflare matching requires scene confirmation/)).toHaveTextContent(
+    "Saved masks and selections are kept.");
   expect(screen.queryByText("Applies to new jobs in every mode. Existing jobs keep their saved prompt version.")).not.toBeInTheDocument();
   expect(within(group).getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"})).toBeChecked();
-  expect(screen.getByRole("switch", {name: "No review on automatic matching failure"})).toBeChecked();
+  expect(screen.queryByRole("switch", {name: "No review on automatic matching failure"})).not.toBeInTheDocument();
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 

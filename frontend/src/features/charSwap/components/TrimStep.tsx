@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Box, Stack, Typography } from "@mui/material";
+import { Alert, Box, Stack, Typography } from "@mui/material";
 import { BufferedNumberInput } from "../../panelUI";
 import { useCharSwapStore } from "../useCharSwapStore";
 import type { DemoManifest } from "../services/demo";
@@ -24,6 +25,7 @@ export function TrimStep({
   disabled = false,
   klingProviderAvailable = true,
 }: TrimStepProps) {
+  const [trimError, setTrimError] = useState<string | null>(null);
   const { clip, trim, targets, changeTrim, kling4Enabled } = useCharSwapStore(
     useShallow((state) => ({
       clip: state.clip,
@@ -36,6 +38,21 @@ export function TrimStep({
   if (!clip) return null;
   const maxSeconds = maximumClipSeconds({kling4Enabled});
   const minimumLength = Math.min(4, clip.duration);
+  function commitEndpoint(edge: "start" | "end", text: string) {
+    if (!text.trim() || !Number.isFinite(Number(text)) || !clip) return;
+    const value = Number(text);
+    const requestedLength = edge === "start" ? trim[1] - value : value - trim[0];
+    // Explicit in-range timestamps express user intent. Don't silently replace
+    // a requested 20 seconds with 15 when Kling access is unavailable/loading.
+    if (value >= 0 && value <= clip.duration + 1e-6 && Math.round(requestedLength) > maxSeconds) {
+      setTrimError(kling4Enabled
+        ? "Choose up to 30 seconds. Your previous selection is unchanged."
+        : "Clips longer than 15 seconds require Kling 4.0, which is currently unavailable. Your previous selection is unchanged.");
+      return;
+    }
+    setTrimError(null);
+    changeTrim(resizeTrim(trim, edge, value, clip.duration, maxSeconds));
+  }
   return (
     <Box
       sx={{
@@ -57,7 +74,7 @@ export function TrimStep({
             value={trim}
             duration={clip.duration}
             maxSeconds={maxSeconds}
-            onChange={changeTrim}
+            onChange={(value) => { setTrimError(null); changeTrim(value); }}
           />
         </Box>
         <Typography variant="caption" color="text.secondary">
@@ -94,12 +111,7 @@ export function TrimStep({
           <BufferedNumberInput
             label="Start (seconds)"
             value={String(Number(trim[0].toFixed(2)))}
-            onCommit={(value) => {
-              if (value.trim() && Number.isFinite(Number(value)))
-                changeTrim(
-                  resizeTrim(trim, "start", Number(value), clip.duration, maxSeconds),
-                );
-            }}
+            onCommit={(value) => commitEndpoint("start", value)}
             inputProps={{
               min: Math.max(0, trim[1] - maxSeconds),
               max: trim[1] - minimumLength,
@@ -110,12 +122,7 @@ export function TrimStep({
           <BufferedNumberInput
             label="End (seconds)"
             value={String(Number(trim[1].toFixed(2)))}
-            onCommit={(value) => {
-              if (value.trim() && Number.isFinite(Number(value)))
-                changeTrim(
-                  resizeTrim(trim, "end", Number(value), clip.duration, maxSeconds),
-                );
-            }}
+            onCommit={(value) => commitEndpoint("end", value)}
             inputProps={{
               min: trim[0] + minimumLength,
               max: clip.duration,
@@ -124,6 +131,7 @@ export function TrimStep({
             sx={{ flex: 1, minWidth: 0 }}
           />
         </Stack>
+        {trimError && <Alert severity="warning">{trimError}</Alert>}
         {estimatedCredits !== undefined && (
           <Box sx={{ borderTop: "1px solid", borderColor: "divider", pt: 2 }}>
             <Typography

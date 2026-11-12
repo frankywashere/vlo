@@ -1,0 +1,22 @@
+{
+  "name": "@meta-sam/parser",
+  "version": "0.1.0",
+  "python_compatibility_version": "0.2.0",
+  "contract_identity": "sha256:df3c61b659fe2d4730853a686c8d3bb00e7c5dc681f29f51203278d285139d1c",
+  "source": "https://registry.npmjs.org/@meta-sam/parser/-/parser-0.1.0.tgz",
+  "integrity": "sha512-099xq4EhULxm7gV+kEllQ9WTaNgwYumGRvCX5WAT2bny/SEh+U9tVT9bAzN1mISOC7TO6mgOt3MJmZ2Mv2RTmw==",
+  "files": {
+    "LICENSE": "4dea99bfaa016e21bc860d73f344236bd1e5c4977d1a9a8fd32f822b500ae1be",
+    "package.json": "39b34d06bda230c691269a466eaa8eec521c09727d8604990023da8973f8d53f",
+    "dist/coco-rle.js": "8448c2003f03a5b54314d14f2d10b707052f668a57f951358db7377360a2ccc6",
+    "dist/errors.js": "907a37c8301d5646de6897b0660e980058d96860c4df2489396ae4e08206b00e",
+    "dist/index.js": "0fd7c5aa4f253ef9e8b8c5be1d61816512d3bece514c7bab3050875bf3cee609",
+    "dist/mask-codec.js": "a1ee71bf3186904696ff790658214ba4d501e14deac9b139d0831b0476a95005",
+    "dist/mask-conversion.js": "a1a687e6d712043664d91b0bd929938b5037b3d3eb83c61779c918a2489febee",
+    "dist/object-prompt.js": "4449ee5544eb373cdd60ac402cbc63a5187975021d9c7475126d2936deeaf403",
+    "dist/segmentation.js": "c56aada3daf313f0fe05569daf67f7f030d76fad01842a713aa3aa73bc1e4b31",
+    "dist/stream.js": "538b26127b5b5c6e2edb6dcbc4e7be0120cd76aded6419acf3f633609fb51c6c",
+    "dist/svg-path.js": "3a8b1bde1c32ea82352060b50338d282ea00203d4e65f05811cb9a9ec109e27d",
+    "dist/types.js": "dddb798fb4ea8a0bb25da07356ee7481f6872d4e8e6ff342c2c98c034963bfdb"
+  }
+}

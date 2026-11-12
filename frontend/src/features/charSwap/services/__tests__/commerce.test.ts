@@ -79,10 +79,12 @@ it("refuses a Cloudflare credential change when signed out", async () => {
 });
 
 
-it.each([true, false])("saves matching_no_review=%s without changing the selected prompt", async (matching_no_review) => {
-  await savePipelineSettings({revision: 9, matching_no_review});
+it.each([true, false])("retains legacy matching_no_review=%s response metadata without resending it", async (matching_no_review) => {
+  requests.mockResolvedValue(new Response(JSON.stringify({revision: 10, audio_processing: false, matching_no_review})));
+  const settings = await savePipelineSettings({revision: 9, prompt_variant: "cloudflare_identity_v1"});
   expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");
-  expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 9, matching_no_review});
+  expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 9, prompt_variant: "cloudflare_identity_v1"});
+  expect(settings.matching_no_review).toBe(matching_no_review);
 });
 
 

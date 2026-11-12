@@ -90,6 +90,21 @@ afterEach(() => {
 });
 
 describe("explicit generation approval", () => {
+  it("uses the supplemental mask review action in Create without starting generation", async () => {
+    const choices = [{segment_id: "fragment", absent: false, anchor: {x: .4, y: .5, time: 1}}];
+    live.job = {...live.job!, status: "tracking_review", review_action: "recheck_masks",
+      source_preview_url: "https://storage.googleapis.com/test/source.mp4", tracking_revision: 2, tracking_choices: choices,
+      tracking_segments: [{id: "fragment", start_frame: 0, end_frame: 120, start: 0, end: 5, seek_time: 1,
+        reason: "uncertain_mask_component", needs_review: true}]};
+    live.resolveTracking.mockResolvedValue(true);
+    render(<CharSwapWalkthrough />);
+    expect(screen.queryByRole("button", {name: "Submit and generate"})).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Skip this fragment"})).toBeVisible();
+    await userEvent.click(screen.getByRole("button", {name: "Recheck masks"}));
+    expect(live.resolveTracking).toHaveBeenCalledWith(choices);
+    expect(live.generate).not.toHaveBeenCalled();
+  });
+
   it("uses the preparation-only Meta seed review action in Create", async () => {
     const choices = [{segment_id: "seed", absent: false, anchor: {x: .4, y: .5, time: 1}}];
     live.job = {...live.job!, status: "tracking_review", meta_seed_review: true,

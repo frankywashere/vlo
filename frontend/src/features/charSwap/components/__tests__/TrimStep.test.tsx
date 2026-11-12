@@ -134,6 +134,30 @@ describe("trim step", () => {
     expect(useCharSwapStore.getState().trim).toEqual([1.3, 7.3]);
   });
 
+  it("explains an unavailable 20-second request instead of silently accepting a 15-second clamp", async () => {
+    const store = useCharSwapStore.getState();
+    store.selectTarget(PERSON);
+    const before = useCharSwapStore.getState();
+    render(<TrimStep demo={null} />);
+    const end = screen.getByRole("spinbutton", {name: "End (seconds)"});
+    fireEvent.change(end, {target: {value: "20"}});
+    fireEvent.blur(end);
+    expect(screen.getByRole("alert")).toHaveTextContent("Clips longer than 15 seconds require Kling 4.0");
+    expect(screen.getByRole("alert")).toHaveTextContent("Your previous selection is unchanged");
+    expect(useCharSwapStore.getState()).toMatchObject({trim: before.trim, targets: before.targets, selectionVersion: before.selectionVersion});
+    expect(screen.getByLabelText("Preview range")).toHaveTextContent("0,15");
+  });
+
+  it("keeps the complete typed 20-second range and selects Kling when it becomes available", () => {
+    useCharSwapStore.getState().setKling4Enabled(true);
+    render(<TrimStep demo={null} />);
+    const end = screen.getByRole("spinbutton", {name: "End (seconds)"});
+    fireEvent.change(end, {target: {value: "20"}});
+    fireEvent.blur(end);
+    expect(useCharSwapStore.getState()).toMatchObject({trim: [0, 20], generationModel: "kling-4-0", generationResolution: "720p", faceMesh: false});
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it.each([
     { duration: 10, start: 1.3, expected: [1, 10] },
     { duration: 20, start: 6, expected: [6, 15] },

@@ -368,6 +368,8 @@ def view(job: dict, *, review_thumbnails: bool = True):
         if job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available):
             result[output] = cloud.signed_url(job[field])
     if job.get("tracking_plan") and temporary_media_available:
+        if (job.get('targeted_mask_review') or {}).get('pending'):
+            result['review_action'] = 'recheck_masks'
         result["tracking_segments"] = []
         metadata = job.get("tracking_metadata", {})
         cuts = sorted({round(cut * 24) for cut in metadata.get("scene_cuts", [])})
@@ -859,7 +861,9 @@ class PipelineSettingsUpdate(BaseModel):
     preparation_provider: Literal["workers", "replicate"] | None = None
     sam_provider: Literal["workers", "replicate", "meta"] | None = None
     retry_missing_masks_with_sam: bool | None = None
-    matching_no_review: bool | None = None
+    matching_no_review: bool | None = Field(default=None,
+        description='Legacy compatibility field; matching failures always require scene confirmation.',
+        json_schema_extra={'deprecated': True})
     depth_guidance: bool | None = None
     face_mesh_masked_default: bool | None = None
     face_mesh_unmasked_default: bool | None = None
@@ -1556,6 +1560,12 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
         key = key_for_session(active_session, x_reapi_key)
         return (protect_key(job_id, key) if active_session.get("access_mode", "api-key") == "api-key"
                 else job.get("auto_key_ciphertext"))
+    if plan.get('version') == 4:
+        from .targeted_mask_review import resolve_targeted_review
+        resolve_targeted_review(job, [choice.model_dump() for choice in review.choices])
+        # A source-fragment check never authorizes generation or another SAM run.
+        review = review.model_copy(update={'generate_after_review': False,
+            'generate_after_recovery': False, 'recover_missing_masks': False})
     if plan.get("version") == 3:
         from .scene_selection import resolve
         choices = [choice.model_dump() for choice in review.choices]
@@ -1692,16 +1702,26 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     auto_submit = bool(review.generate_after_review or (review.recover_missing_masks
         and review.generate_after_recovery and job.get("retry_missing_masks_with_sam") is True))
     auto_key = approved_review_key() if auto_submit else job.get("auto_key_ciphertext")
+    task_token = uuid.uuid4().hex
     try:
+        if plan.get('version') == 4:
+            def claim_targeted(current):
+                if current.get('tracking_revision') != review.revision:
+                    raise PublicError(invalid, 409, code='tracking_review_invalid')
+                return {**claim_job(current, {'tracking_review'}, 'matching'),
+                    'tracking_review_claim': task_token, 'tracking_applied_revision': review.revision}
+            records.update(f'jobs/{job_id}.json', claim_targeted)
+            claimed = True
         records.update("control/preparation.json", lambda current: reserve_preparation(
             current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations,
             **preparation_limits(records, job)))
         reserved = True
-        task_token = uuid.uuid4().hex
         def claim(current):
             if current.get("tracking_revision") != review.revision:
                 raise PublicError(invalid, 409, code="tracking_review_invalid")
-            return {**claim_job(current, {"tracking_review"}, "queued"),
+            if plan.get('version') == 4 and current.get('tracking_review_claim') != task_token:
+                raise PublicError(invalid, 409, code='tracking_review_invalid')
+            return {**claim_job(current, {"matching"} if plan.get('version') == 4 else {"tracking_review"}, "queued"),
                 "tracking_applied_revision": review.revision, "tracking_task_token": task_token,
                 "preparation_queued_at": time.time(), "preparation_kind": "tracking_rebuild",
                 "tracking_resolution_pending": True, "tracking_review_error": False, "tracking_error_segment_id": None,
@@ -1711,7 +1731,7 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                 "recover_missing_masks": False, "mask_recovery_completed": False, "mask_recovery_conflicts": 0,
                 "review_generation_queued": False,
                 "generation_after_review_revision": review.revision if auto_submit else None,
-                "auto_key_ciphertext": auto_key, "tracking_choices": choices,
+                "auto_key_ciphertext": auto_key, "tracking_choices": choices, "tracking_review_claim": None,
                 "message": "Your scene choices are saved. You can leave this page while we apply them.",
                 "updated_at": time.time()}
         job = records.update(f"jobs/{job_id}.json", claim)
@@ -1727,10 +1747,17 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
             absent_sections=sum(choice["absent"] for choice in choices))
         return view(job, review_thumbnails=False)
     except Exception as error:
+        if plan.get('version') == 4 and reserved and not queued:
+            # Release this owner's lease before making the review editable.
+            records.update('control/preparation.json', lambda current: release_preparation(current, job_id))
+            reserved = False
         if claimed and not queued:
             records.update(f"jobs/{job_id}.json", lambda current: {**current,
                 "status": "tracking_review", "message": "The matches could not be saved. Your tracking review is retained.",
-                "updated_at": time.time()} if current["status"] == "matching" else current)
+                **({'tracking_review_claim': None, 'tracking_applied_revision': job.get('tracking_applied_revision')}
+                   if plan.get('version') == 4 else {}),
+                "updated_at": time.time()} if current["status"] == "matching" and (
+                    plan.get('version') != 4 or current.get('tracking_review_claim') == task_token) else current)
         if reserved and not queued:
             records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
         if isinstance(error, PublicError):

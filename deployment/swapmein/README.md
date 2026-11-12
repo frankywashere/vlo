@@ -735,19 +735,15 @@ and four in flight are permitted per job, with a 180-second matching deadline.
 Safe job-correlated diagnostics retain request counts, scores/assignments, timing
 and usage estimates without photographs, tokens or signed URLs.
 
-Admin Experimental also offers **No review on automatic matching failure**
-(`matching_no_review`), off by default and snapshotted for new jobs in both
-upload paths. When enabled, recoverable Cloudflare matching/credential/budget
-failures use the common Option 5 Easy Mode selection, shared-marker guide and
-prompt path. The job saves its requested variant as `cloudflare_identity_v1`,
-its effective `prompt_variant` as `identity_tint_tracking_v1`, and a
-`matching_fallback_used` audit flag; logs identify the safe failure code and both
-variants. A missing initial mask receives at most one SAM recovery attempt
-before the fallback uses position/time guidance for remaining missing masks.
-Manual mode, Replace Everyone, invalid media, mask corruption, conflicting
-selections, and normal generation funding checks retain their existing behavior.
-This switch handles processing failures; it does not detect incorrect matches
-that the model accepts, nor does it guarantee that Option 5 preparation succeeds.
+Automatic Cloudflare matching failures, including unavailable credentials and
+matching-budget failures, preserve the saved masks and selected people and open
+scene confirmation before generation. Failed matching cannot silently replace
+identity assignments with shared cyan or native SAM IDs. Admin Experimental no
+longer exposes **No review on automatic matching failure**. The
+`matching_no_review` field remains in legacy snapshots/API responses for
+compatibility but cannot bypass this review requirement, even when saved true.
+Selecting Option 5 explicitly remains a separate supported prompt/guide route;
+it is not an automatic recovery from failed Cloudflare matching.
 
 
 Library provider failures retain an allowlisted reason: reAPI workflow error `80006`

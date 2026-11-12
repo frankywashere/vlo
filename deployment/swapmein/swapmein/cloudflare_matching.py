@@ -44,6 +44,13 @@ def _unavailable(message="Automatic scene matching is unavailable. Your clip nee
     return PublicError(message, code="cloudflare_matching_unavailable")
 
 
+def _review_required(message, *, reason):
+    # A successful comparison that cannot establish identity is different from
+    # an unavailable provider. Never route uncertainty to the no-review fallback.
+    emit("cloudflare_matching_rejected", reason=reason)
+    return PublicError(message, 409, code="cloudflare_identity_uncertain")
+
+
 def joint_assignment(scores, threshold=MINIMUM_SAME_SCORE):
     """Maximise total same-person score, allowing unused people and candidates.
 
@@ -306,7 +313,7 @@ def _resolve_focused_results(results, job_id):
                 emit("cloudflare_matching_evidence", job_id=job_id, scene=job["scene"],
                      outcome="unresolved_fragment", candidate_label=job["label"],
                      sample_frame=job["view"]["frame"], probabilities=probabilities)
-                raise _unavailable("A brief person track needs scene review after identity rechecking.",
+                raise _review_required("A brief person track needs scene review after identity rechecking.",
                                    reason="fragment_identity_unresolved")
         job["shot"]["excluded_labels"].add(job["label"])
         emit("cloudflare_matching_evidence", job_id=job_id, scene=job["scene"],
@@ -344,7 +351,7 @@ def _resolve_views(shot, job_id):
            for column, candidate in enumerate(shot["candidates"])
            if candidate["label"] in shot.get("excluded_labels", set())
            for view in views for person in shot["people"]):
-        raise _unavailable("Person matches disagree with the focused track recheck. Check the scene matches.",
+        raise _review_required("Person matches disagree with the focused track recheck. Check the scene matches.",
                            reason="frame_identity_conflict")
     shot["scores"] = [[median(view["scores"][person][candidate] for view in views)
                        for candidate in range(len(shot["candidates"]))]
@@ -361,7 +368,7 @@ def _resolve_views(shot, job_id):
              outcome="insufficient_observations", sample_frames=[view["frame"] for view in views],
              candidate_labels=[item["label"] for item in shot["candidates"]],
              scores=[view["scores"] for view in views], choices=observations)
-        raise _unavailable("Some person tracks have insufficient matching evidence. Check the scene matches.", reason="insufficient_frame_evidence")
+        raise _review_required("Some person tracks have insufficient matching evidence. Check the scene matches.", reason="insufficient_frame_evidence")
     # Conflicting evidence goes through the existing reviewed/no-review policy;
     # never manufacture a confident whole-shot match from one favorable frame.
     for person, choice in enumerate(choices):
@@ -372,7 +379,7 @@ def _resolve_views(shot, job_id):
                  candidate_labels=[item["label"] for item in shot["candidates"]],
                  crop_boxes=[[item["box"] for item in view["candidates"]] for view in views],
                  scores=[view["scores"] for view in views], choices=observations)
-            raise _unavailable("Person matches disagree between frames. Check the scene matches.", reason="frame_identity_conflict")
+            raise _review_required("Person matches disagree between frames. Check the scene matches.", reason="frame_identity_conflict")
         if choice is not None:
             # The prompt fallback anchor must come from a frame that actually
             # supports this identity, rather than an unscored third observation.

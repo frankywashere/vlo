@@ -118,3 +118,27 @@ Meta SAM; other admin settings and existing job snapshots were preserved.
 
 Full deployment, activation, QA and remaining-work evidence is in the local
 rollout folder linked above.
+
+
+## Unreleased local follow-ups (do not deploy)
+
+The owner authorized local investigation/fixes on November 12, 2026 and explicitly
+prohibited deployment. The verified deployment above remains the live baseline.
+
+The working tree adds the exact-output decoder optimization described in
+`META_SAM_ADAPTER.md`, a strict single-person partial/full-mask containment
+exception, the sanitizer uncertainty-counter correction (policy v2), duration
+preservation/explicit-limit warnings, and the standalone desktop Library review
+entry path. Semantic identity uncertainty now has its own internal error code,
+so successful-but-ambiguous matching requires scene review even when service
+unavailability is allowed to fall back to Easy Mode. No identity threshold was
+lowered and no new paid AI test was submitted.
+
+The historical duration cause remains unproven; valid tint can still be withheld
+through prolonged occlusion, and broader real-provider identity coverage remains
+future work. Email configuration was preserved. A full container build is still
+required before a future release; no local Docker daemon was available.
+
+Local benchmark, all-frame parity, regression results, desktop screenshots and
+item-by-item status:
+`/Users/frank/Desktop/Coding/CharSwap/experiments/meta_followups_local_20261112/README.md`.

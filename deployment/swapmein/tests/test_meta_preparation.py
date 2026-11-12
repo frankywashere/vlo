@@ -445,3 +445,50 @@ def test_prompt_groups_exact_frame_and_label_seeds():
                     {"label": 1, "frame": 0, "box": [1,2,5,6], "points": [(2,3)]}], 20, 15, 2)
     assert _prompt(seeds, 20, 15).startswith("<0f>1<|box;")
     assert "\n<1f>2<|box;" in _prompt(seeds, 20, 15)
+
+
+def test_codec_preflight_failure_precedes_any_paid_intent(adapter, monkeypatch):
+    a = adapter
+    def unavailable(*args):
+        raise PublicError("Local decoder unavailable", 503, code="meta_codec_unavailable")
+    monkeypatch.setattr("swapmein.meta_mask_codec.StrictMaskCodec", unavailable)
+    with pytest.raises(PublicError) as error:
+        a.make().segment_video("sam_primary_unavailable_codec", a.video, a.metadata, [a.seed], lambda: 500)
+    assert error.value.code == "meta_codec_unavailable" and not a.calls
+    assert "meta_preparation" not in a.records.data["jobs/job.json"]
+
+
+def test_decode_progress_survives_snapshot_counts_skipping_exact_multiples(adapter, monkeypatch):
+    a = adapter
+    progress = []
+    monkeypatch.setattr(module, "emit", lambda event, **fields: progress.append(fields)
+                        if event == "meta_mask_decode_progress" else None)
+    a.make((record() + "\n") * 49).segment_video("sam_primary_progress", a.video, a.metadata, [a.seed], lambda: 500)
+    assert any(item["masks"] == 49 for item in progress)
+    assert all(item["codec_backend"] in {"python", "javascript"} for item in progress)
+
+
+def test_decode_initialization_failure_releases_codec_and_request_context(adapter, monkeypatch, tmp_path):
+    import asyncio
+    a = adapter
+    closed = []
+    class Codec:
+        backend = "test"
+        decode = staticmethod(module._strict_codec)
+        def __init__(self, *args):
+            pass
+        def close(self):
+            closed.append(True)
+    monkeypatch.setattr("swapmein.meta_mask_codec.StrictMaskCodec", Codec)
+    root = tmp_path / "blocked"
+    root.mkdir()
+    (root / "decoded").write_bytes(b"disk layout conflict")
+    outer = object()
+    token = module._cache_context.set(outer)
+    try:
+        with pytest.raises(PublicError):
+            asyncio.run(a.make()._decode("sam_primary_init", {}, root, a.metadata, [a.seed], lambda: 500, True))
+        assert module._cache_context.get() is outer
+    finally:
+        module._cache_context.reset(token)
+    assert closed == [True]

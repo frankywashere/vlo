@@ -310,40 +310,24 @@ class Pipeline:
                             matched = self.match_cloudflare_identities(job, normalized, masks, metadata,
                                 match_targets, root, remaining)
                         except PublicError as error:
-                            if (job.get("matching_no_review") is True and error.code in {
-                                    "cloudflare_matching_unavailable", "cloudflare_matching_budget", "cloudflare_anchor_recovery"}):
-                                # Reuse Option 5's selection and guide path. The
-                                # saved global variant stays 6 for other jobs;
-                                # this job records both requested and used modes.
-                                targets = match_targets if targets else []
-                                tracking_needed = options.enhanced_character_masking or job.get("face_mesh", False)
-                                job = self.update_job(job_id, requested_prompt_variant="cloudflare_identity_v1",
-                                    prompt_variant="identity_tint_tracking_v1", matching_fallback_used=True,
-                                    identity_matching_completed=False, identity_matching_error=error.code,
-                                    normalized_targets=targets,
-                                    message="Automatic matching is unavailable. Continuing with Easy Mode.")
-                                emit("cloudflare_matching_fallback", job_id=job_id, public_code=error.code,
-                                    requested_prompt_variant="cloudflare_identity_v1",
-                                    effective_prompt_variant="identity_tint_tracking_v1")
-                                fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
-                                if tracking_needed:
-                                    selection = self.prepare_easy_selection(
-                                        job, options, masks, masks_uri, metadata, targets, root, remaining)
-                                    if selection is None:
-                                        return
-                                    masks_uri, label, coverage, targets = selection
-                                else:
-                                    label, coverage = None, []
-                                job = self.update_job(job_id, normalized_targets=targets, target_styles=targets if multi else [])
-                            else:
-                                # Preserve raw masks and use the existing review.
-                                metadata.update(review_all_scenes=True, review_shots_only=True, allow_unmatched_anchor=True)
-                                metadata["targets"] = match_targets
-                                plan = analyze_multi_tracking(masks, metadata, match_targets)
-                                label, coverage = 1, []
-                                self.update_job(job_id, identity_matching_completed=False,
-                                    identity_matching_error=error.code, normalized_targets=match_targets)
-                                emit("cloudflare_matching_review_required", job_id=job_id, public_code=error.code)
+                            # A native SAM ID is not an identity across a cut.
+                            # Legacy matching_no_review snapshots cannot approve
+                            # weaker tracking or an unreviewed paid generation.
+                            metadata.update(review_all_scenes=True, review_shots_only=True, allow_unmatched_anchor=True)
+                            metadata["targets"] = match_targets
+                            plan = analyze_multi_tracking(masks, metadata, match_targets)
+                            label, coverage = 1, []
+                            blocked = error.code in {'cloudflare_matching_unavailable', 'cloudflare_matching_budget'}
+                            job = self.update_job(job_id, identity_matching_completed=False,
+                                identity_matching_error=error.code, normalized_targets=match_targets,
+                                matching_fallback_used=False, identity_matching_manual_fallback=True,
+                                identity_matching_recheck_blocked=blocked,
+                                generation_after_review_revision=None, review_generation_queued=False,
+                                capacity_generation_authorized=False, capacity_approval_revision=None,
+                                generation_capacity_token=None)
+                            emit("cloudflare_matching_review_required", job_id=job_id,
+                                 public_code=error.code, no_review_override_ignored=job.get('matching_no_review') is True,
+                                 rechecks_blocked=blocked)
                         else:
                             targets = matched["targets"]
                             metadata["targets"] = targets
@@ -351,6 +335,8 @@ class Pipeline:
                                 prefix + "identity-matched-masks.zip", matched["masks_path"], "application/zip")
                             label, coverage = 1, matched["coverage"]
                             job = self.update_job(job_id, identity_matching_completed=True,
+                                identity_matching_error=None, identity_matching_manual_fallback=False,
+                                identity_matching_recheck_blocked=False, matching_fallback_used=False,
                                 identity_matching_diagnostics=matched["diagnostics"],
                                 identity_matching_assignments=matched["assignments"],
                                 normalized_targets=targets, target_styles=targets if multi else [])
@@ -444,6 +430,13 @@ class Pipeline:
                             vocals_input = (self.cloud.copy(vocals_uri, self.settings.worker_bucket, prefix + "vocals_plus3.wav")
                                             if audio_processing else source_uri)
                             if not plan or not plan["review_required"]:
+                                if automatic_identity and job.get('identity_matching_completed'):
+                                    job = self.check_automatic_mask_quality(job, metadata, targets,
+                                        masks_uri, vocals_input, depth_input, remaining)
+                                    if job.get('status') == 'tracking_review':
+                                        return
+                                    masks_input, coverage = job['reviewed_masks_uri'], job['reviewed_coverage']
+                                    targets = job['normalized_targets']
                                 compose_payload = {"input_uri": guide_source_uri, "masks_uri": masks_input,
                                     "guide_audio_uri": vocals_input, "selected_label": label, "depth_uri": depth_input,
                                     "fill_mode": fill_mode, "run_id": guide_run,
@@ -555,7 +548,8 @@ class Pipeline:
                     mask_style=mask_style, tracking_performed=tracking_needed, mask_frames=metadata["frames"] if coverage else 0, mask_coverage_min=min(coverage) if coverage else 0, review_required=True,
                     scene_cut_count=len(metadata.get("scene_cuts", [])), tracking_continuous=tracking_continuous,
                     **tracking_fields)
-                if options.auto_generate or job.get("google_fallback_approved") is True:
+                from .scene_selection import mask_quality_review_pending
+                if (options.auto_generate or job.get("google_fallback_approved") is True) and not mask_quality_review_pending(job):
                     try:
                         self.cloud.enqueue("generate", job_id)
                     except Exception as error:
@@ -569,6 +563,8 @@ class Pipeline:
                     public_code=error.code, segment_id=getattr(error, "segment_id", None),
                     selection_diagnostics=getattr(error, "tracking_diagnostics", None))
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
+                **({'tracking_applied_revision': job['targeted_mask_review']['base_tracking_applied_revision'],
+                    'tracking_resolution_pending': False} if job.get('tracking_plan', {}).get('version') == 4 else {}),
                 auto_key_ciphertext=None, generation_after_review_revision=None,
                 tracking_review_error=job.get("preparation_kind") == "tracking_rebuild",
                 tracking_error_segment_id=getattr(error, "segment_id", None), message=error.message,
@@ -576,6 +572,8 @@ class Pipeline:
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
+                **({'tracking_applied_revision': job['targeted_mask_review']['base_tracking_applied_revision'],
+                    'tracking_resolution_pending': False} if job.get('tracking_plan', {}).get('version') == 4 else {}),
                 auto_key_ciphertext=None, generation_after_review_revision=None,
                 tracking_review_error=job.get("preparation_kind") == "tracking_rebuild", tracking_error_segment_id=None,
                 public_preparation_failure=False,
@@ -630,7 +628,7 @@ class Pipeline:
              target_count=len(people), video_submission_started=False)
 
     def prepare_easy_selection(self, job, options, masks, masks_uri, metadata, targets, root, remaining):
-        """Common Option 5 mask path, also used by the opt-in matching fallback."""
+        """Explicit Option 5 selection; failed identity matching requires review."""
         if options.preparation_version >= 2:
             if job.get("sam_provider", job.get("preparation_provider", "workers")) == "meta":
                 selected = targets or [{"id": "person", "name": options.target_name,
@@ -688,6 +686,9 @@ class Pipeline:
     @timed("scene_review_resolution", job_arg="job")
     def resolve_saved_review(self, job):
         """Validate saved choices against masks in the durable background task."""
+        if job.get('tracking_plan', {}).get('version') == 4:
+            from .mask_recheck_resolution import resolve_targeted_masks
+            return resolve_targeted_masks(self, job)
         from .tracking import resolve_tracking, resolve_multi_tracking
         from .scene_selection import reviewed_mask_targets
         job_id = job["id"]
@@ -707,6 +708,9 @@ class Pipeline:
             uri = self.cloud.upload(self.settings.worker_bucket,
                 preparation_prefix(job, "worker") + f"reviewed-masks-{uuid.uuid4().hex}.zip", reviewed, "application/zip")
         saved = self.update_job(job_id, reviewed_masks_uri=uri, reviewed_coverage=resolved["coverage"],
+            pre_quality_masks_uri=uri, mask_recheck_input_uri=uri,
+            mask_identity_recheck_state=None, mask_supplemental_anchors=[],
+            mask_supplemental_context_key=None, targeted_mask_review=None,
             tracking_assignments=resolved["assignments"], normalized_targets=targets,
             coordinate_fallback_sections=fallback_count, recover_missing_masks=recover,
             tracking_resolution_pending=False, generation_after_review_revision=(job.get("generation_after_review_revision")
@@ -717,8 +721,40 @@ class Pipeline:
             recover_missing_masks=recover, generation_approved=saved.get("generation_after_review_revision") is not None)
         return saved
 
+    def check_automatic_mask_quality(self, job, metadata, targets, masks_uri, vocals_uri, depth_uri, remaining):
+        """The same component checks for first-time automatic and reviewed guides."""
+        segments, choices, assignments = [], [], []
+        for index, target in enumerate(targets):
+            for scene_index, scene in enumerate(target['scenes']):
+                start, end = round(scene['start'] * 24), round(scene['end'] * 24)
+                identifier = f'identity-t{index}-s{scene_index}'
+                segments.append(dict(id=identifier, target_id=target['id'],
+                    target_name=target.get('name', f'Person {index + 1}'), scene=scene_index,
+                    reference_index=target['reference_index'], start_frame=start, end_frame=end,
+                    start=scene['start'], end=scene['end'], needs_review=True,
+                    seek_time=scene['anchor']['time'] if scene['anchor'] else (start + end - 1) / 48))
+                choices.append(dict(segment_id=identifier, absent=scene['absent'], anchor=scene['anchor']))
+                assignments.append(dict(segment_id=identifier, target_id=target['id'],
+                    reference_index=target['reference_index'], start_frame=start, end_frame=end,
+                    selected_label=index + 1, absent=scene['absent']))
+        revision = max(1, job.get('tracking_revision', 0))
+        saved = self.update_job(job['id'], tracking_plan={'version': 2, 'targets': targets,
+            'segments': segments, 'review_required': True},
+            tracking_metadata=metadata, tracking_choices=choices, tracking_assignments=assignments,
+            tracking_revision=revision, tracking_applied_revision=revision, tracking_reviewed=True,
+            tracking_vocals_uri=vocals_uri, tracking_depth_uri=depth_uri, tracking_masks_uri=masks_uri,
+            reviewed_masks_uri=masks_uri, mask_recheck_input_uri=masks_uri,
+            normalized_targets=targets)
+        checked = self.check_reviewed_mask_quality(saved, remaining)
+        if not (checked.get('targeted_mask_review') or {}).get('pending'):
+            from .mask_quality_recovery import identity_recovery_fields
+            recovery = identity_recovery_fields(checked)
+            if recovery:
+                return self.update_job(job['id'], **recovery)
+        return checked
+
     @timed("reviewed_mask_quality", job_arg="job")
-    def check_reviewed_mask_quality(self, job):
+    def check_reviewed_mask_quality(self, job, remaining=None):
         """Conservatively withhold suspect guide regions without changing identities."""
         from .mask_quality import POLICY_VERSION, sanitize_reviewed_masks
         from .scene_selection import mask_quality_targets
@@ -727,9 +763,11 @@ class Pipeline:
         unsafe_ids = {target["id"] for target in job.get("normalized_targets", [])
                       if target.get("guide_anchor_untrusted")}
         withheld_ids = set(report.get("identity_recovery_target_ids") or [])
+        from .mask_recheck_runtime import context_key
         if (report.get("policy_version") == POLICY_VERSION
                 and report.get("review_revision") == revision
                 and report.get("output_uri") == job.get("reviewed_masks_uri")
+                and report.get('mask_context_key') == context_key(job, report.get('input_sha256'))
                 and unsafe_ids <= withheld_ids):
             return job
         # Old records lacking saved choices cannot be geometrically validated.
@@ -739,9 +777,15 @@ class Pipeline:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             original, checked = root / "reviewed.zip", root / "checked.zip"
-            self.cloud.download(job["reviewed_masks_uri"], original, 80 * 1024 * 1024)
+            input_uri = job.get('mask_recheck_input_uri') or (
+                job.get('pre_quality_masks_uri') if report.get('review_revision') == revision
+                and report.get('output_uri') == job['reviewed_masks_uri'] else None) or job['reviewed_masks_uri']
+            self.cloud.download(input_uri, original, 80 * 1024 * 1024)
             report = sanitize_reviewed_masks(original, job["tracking_metadata"], job["tracking_plan"],
                 job["tracking_choices"], job["tracking_assignments"], checked, review_revision=revision)
+            from .mask_recheck_runtime import recheck_masks
+            job, checked, report, targeted_candidates = recheck_masks(
+                self, job, original, checked, report, root, remaining or (lambda: 90))
             # A bad mask must not leave identity tint behind while the user
             # confirms that person on original pixels in the recovery review.
             targets = mask_quality_targets(job.get("normalized_targets", []), report)
@@ -751,16 +795,18 @@ class Pipeline:
                 report = withhold_untrusted_masks(checked, withheld,
                     {**job, "reviewed_mask_quality": report, "normalized_targets": targets})
                 checked = withheld
-            uri = job["reviewed_masks_uri"]
+            uri = input_uri
             if report["sha256"] != report["input_sha256"] and report.get("removed_pixels", 0):
                 uri = self.cloud.upload(self.settings.worker_bucket,
                     preparation_prefix(job, "worker") + f"quality-masks-{uuid.uuid4().hex}.zip", checked, "application/zip")
-            if uri == job["reviewed_masks_uri"]:
+            if uri == input_uri:
                 report["sha256"] = report["input_sha256"]
             report["output_uri"] = uri
         targets = mask_quality_targets(job.get("normalized_targets", []), report)
-        saved = self.update_job(job["id"],
-            pre_quality_masks_uri=job.get("pre_quality_masks_uri") or job["reviewed_masks_uri"],
+        saved_fields = dict(pre_quality_masks_uri=input_uri,
+            mask_recheck_input_uri=input_uri,
+            mask_supplemental_anchors=job.get('mask_supplemental_anchors', []),
+            mask_supplemental_context_key=job.get('mask_supplemental_context_key'),
             reviewed_masks_uri=uri, reviewed_coverage=report["coverage"],
             reviewed_mask_quality=report, normalized_targets=targets,
             **({"review_generation_queued": False, "capacity_generation_authorized": False,
@@ -769,6 +815,19 @@ class Pipeline:
                if report.get("review_required") else {}),
             generation_after_review_revision=None if report.get("review_required")
                 else job.get("generation_after_review_revision"))
+        if targeted_candidates:
+            from .targeted_mask_review import build_targeted_review
+            targeted_fields = build_targeted_review({**job, **saved_fields}, targeted_candidates)
+        else:
+            targeted_fields = None
+        if targeted_fields:
+            saved_fields.update(targeted_fields)
+        # Cache and review gate are one durable state change. A worker crash
+        # cannot leave a cached checked guide without its required source check.
+        saved = self.update_job(job['id'], **saved_fields)
+        if targeted_fields:
+            emit('mask_targeted_review_required', job_id=job['id'],
+                 section_count=len(targeted_fields['tracking_plan']['segments']))
         emit("reviewed_mask_quality_checked", job_id=job["id"], policy_version=POLICY_VERSION,
              removed_pixels=report.get("removed_pixels", 0), suppressed_ranges=report.get("suppressed_ranges", []),
              review_required=report.get("review_required", False))
@@ -782,7 +841,9 @@ class Pipeline:
         if job.get("recover_missing_masks") and not job.get("mask_recovery_completed"):
             from .mask_recovery import recover_reviewed_masks
             job = recover_reviewed_masks(self, job, remaining)
-        job = self.check_reviewed_mask_quality(job)
+        job = self.check_reviewed_mask_quality(job, remaining)
+        if (job.get('targeted_mask_review') or {}).get('pending'):
+            return  # Only the needed source-fragment checks, no paid generation.
         job_id = job["id"]
         run_id = "sm-guide-review-" + job_id + "-" + uuid.uuid4().hex[:8]
         self.update_job(job_id, message="Your scene choices are saved. Building the masked preview using the existing preparation.")

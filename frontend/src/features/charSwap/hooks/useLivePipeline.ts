@@ -335,10 +335,11 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     setTrackingErrorSegmentId(null);
     try {
       const access = await ensureSession(controller.signal, true);
+      const reviewOnly = active.meta_seed_review || active.review_action === "recheck_masks";
       const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal,
-        {enabled: !active.meta_seed_review && (active.mask_style !== "none" || active.settings_used?.face_mesh === true),
-          key: active.meta_seed_review || active.generation_destination === "google_h3" || active.generation_destination === "paperspace_h3" ? undefined : apiKey,
-          generateAfterReview: !active.meta_seed_review});
+        {enabled: !reviewOnly && (active.mask_style !== "none" || active.settings_used?.face_mesh === true),
+          key: reviewOnly || active.generation_destination === "google_h3" || active.generation_destination === "paperspace_h3" ? undefined : apiKey,
+          generateAfterReview: !reviewOnly});
       if (controller.signal.aborted || epoch.current !== version) return false;
       preparationStartedAt.current = Date.now();
       setPreparationElapsedSeconds(0);

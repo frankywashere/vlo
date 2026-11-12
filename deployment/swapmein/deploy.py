@@ -399,7 +399,10 @@ def stage_source(destination: Path) -> str:
     mandatory = [SOURCE / "Dockerfile", SOURCE / "requirements.txt", SOURCE / "swapmein" / "app.py"]
     if not all(path.is_file() for path in mandatory):
         raise SetupError("The gateway Dockerfile, requirements and swapmein/app.py must exist before deployment.")
-    paths = [SOURCE / "Dockerfile", SOURCE / "requirements.txt", *sorted((SOURCE / "swapmein").rglob("*.py"))]
+    vendor = SOURCE / "swapmein" / "vendor" / "meta_sam_parser"
+    paths = [SOURCE / "Dockerfile", SOURCE / "requirements.txt", *sorted((SOURCE / "swapmein").rglob("*.py")),
+             SOURCE / "swapmein" / "meta_mask_codec.mjs", vendor / "LICENSE", vendor / "package.json",
+             vendor / "UPSTREAM.json", *sorted((vendor / "dist").glob("*.js"))]
     digest = hashlib.sha256()
     for path in paths:
         relative = path.relative_to(SOURCE)
@@ -411,9 +414,19 @@ def stage_source(destination: Path) -> str:
         digest.update(str(relative).encode() + b"\0" + contents + b"\0")
         copied = destination / relative
         copied.parent.mkdir(parents=True, exist_ok=True)
+        # Docker COPY preserves these root-owned modes. The image's gateway
+        # user must read code/vendors even when a private release wrapper uses
+        # umask 077. Keep the context root private, only its inner tree public.
+        for parent in copied.parents:
+            if parent == destination:
+                break
+            parent.chmod(0o755)
         copied.write_bytes(contents)
-    (destination / ".gcloudignore").write_text(".git\n.env*\n**/.secrets\n**/__pycache__\n**/*.pyc\n**/tests\ndeploy*.json\n")
-    (destination / ".dockerignore").write_text(".git\n.env*\n**/.secrets\n**/__pycache__\n**/*.pyc\n**/tests\ndeploy*.json\n")
+        copied.chmod(0o644)
+    for name in (".gcloudignore", ".dockerignore"):
+        ignored = destination / name
+        ignored.write_text(".git\n.env*\n**/.secrets\n**/__pycache__\n**/*.pyc\n**/tests\ndeploy*.json\n")
+        ignored.chmod(0o644)
     return digest.hexdigest()
 
 

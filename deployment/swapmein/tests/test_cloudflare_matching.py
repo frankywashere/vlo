@@ -165,9 +165,10 @@ def test_selected_person_fragment_is_rechecked_where_visible_before_review(tmp_p
     stub_decoder(monkeypatch, images)
     observed = []
     install_api(monkeypatch, observed=observed)
-    with pytest.raises(PublicError, match="after identity rechecking"):
+    with pytest.raises(PublicError, match="after identity rechecking") as caught:
         matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
                               credentials=CREDENTIALS, workdir=tmp_path)
+    assert caught.value.code == "cloudflare_identity_uncertain"
     assert len(observed) == 4
     assert any(len(kwargs["json"]["images"]) == 3 for _, kwargs in observed)
     assert not (tmp_path / "identity-masks.zip").exists()
@@ -348,6 +349,16 @@ def test_anchored_person_fragment_gets_focused_identity_calls_before_review(tmp_
     assert not (tmp_path / "identity-masks.zip").exists()
 
 
+def test_recorded_frame_648_uncertainty_is_review_not_provider_unavailability():
+    fragment = {"focused": True, "scene": 6, "label": 2, "view": {"frame": 648},
+                "shot": {"excluded_labels": set()}}
+    probabilities = {"different": .7581, "same": .0423, "uncertain": .1996}
+    with pytest.raises(PublicError) as error:
+        matching._resolve_focused_results([(fragment, ({"p0c0": probabilities}, 0, 0))], "offline")
+    assert error.value.code == "cloudflare_identity_uncertain"
+    assert fragment["shot"]["excluded_labels"] == set()
+
+
 @pytest.mark.parametrize("bad_first_frame", ["wrong_person", "unmatched"])
 def test_another_frame_corrects_one_bad_identity_observation(tmp_path, monkeypatch, bad_first_frame):
     archive, metadata, targets, images = fixture(tmp_path)
@@ -380,7 +391,7 @@ def test_unresolved_multiframe_conflict_uses_existing_review_fallback(tmp_path, 
     with pytest.raises(PublicError) as caught:
         matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
                               credentials=CREDENTIALS, workdir=tmp_path)
-    assert caught.value.code == "cloudflare_matching_unavailable"
+    assert caught.value.code == "cloudflare_identity_uncertain"
     assert not (tmp_path / "identity-masks.zip").exists()
 
 

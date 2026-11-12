@@ -89,7 +89,7 @@ def test_rebuilt_unsafe_guide_never_publishes_ready_or_queues_generation(api, mo
     monkeypatch.setattr(cloud,'worker_output',lambda *_:'gs://private-app/composed.mp4',raising=False)
     monkeypatch.setattr(cloud,'copy',lambda *_:'gs://private-app/clean-guide.mp4',raising=False)
     monkeypatch.setattr(pipeline_module,'guide_style',lambda *args,**kwargs:('overlay','cyan_overlay_20'))
-    monkeypatch.setattr(Pipeline,'check_reviewed_mask_quality',lambda self,current:current)
+    monkeypatch.setattr(Pipeline,'check_reviewed_mask_quality',lambda self,current,remaining=None:current)
     Pipeline(gateway.settings,records,cloud).rebuild_reviewed_guide(job,lambda:60)
     assert statuses and statuses[-1]=='tracking_review' and 'ready' not in statuses
     assert records.data[f'jobs/{identifier}.json']['guide_uri']=='gs://private-app/clean-guide.mp4'

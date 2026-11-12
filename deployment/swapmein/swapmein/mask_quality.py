@@ -18,7 +18,7 @@ from PIL import Image
 from .errors import PublicError
 from .tracking import FPS, _maps, _metadata
 
-POLICY_VERSION = "reviewed_anchor_components_v1"
+POLICY_VERSION = "reviewed_anchor_components_v3"
 SEED_MAX_SHARE = .65
 SUBSTANTIAL_SHARE = .25
 MAX_AREA_GROWTH = 2.0
@@ -171,8 +171,38 @@ def _checked_inputs(archive, metadata, plan, choices, assignments, output, revis
     return width, height, frames, targets, labels, selected
 
 
+def _walk(read, label, start, end, seed_frame, seed):
+    yield seed_frame, seed, None
+    for ordered in [range(seed_frame + 1, end), range(seed_frame - 1, start - 1, -1)]:
+        previous = seed.copy(); missing = 0
+        for frame in ordered:
+            current = read(frame) == label
+            n, component, _, _ = _components(current)
+            overlaps = np.bincount(component[previous].ravel(), minlength=n)
+            overlaps[0] = 0
+            candidate_ids = np.flatnonzero(overlaps)
+            if not len(candidate_ids) or missing > MAX_OCCLUSION_FRAMES:
+                missing += 1
+                yield frame, None, "unresolved_component_continuity"
+                continue
+            retained = np.isin(component, candidate_ids)
+            old_area, new_area = int(previous.sum()), int(retained.sum())
+            old_y, old_x = np.nonzero(previous)
+            new_y, new_x = np.nonzero(retained)
+            jump = float(np.linalg.norm(np.array([new_x.mean(), new_y.mean()])
+                         - np.array([old_x.mean(), old_y.mean()]))) / math.hypot(*previous.shape)
+            if new_area > old_area * MAX_AREA_GROWTH or jump > MAX_CENTER_JUMP:
+                # Every rejected frame consumes the same bounded uncertainty.
+                missing += 1
+                yield frame, None, "merged_component_jump"
+                continue
+            previous, missing = retained, 0
+            yield frame, retained, None
+
+
 def sanitize_reviewed_masks(archive: Path, metadata: dict, plan: dict, choices: list,
-                            assignments: list, output: Path, *, review_revision: int = 0):
+                            assignments: list, output: Path, *, review_revision: int = 0,
+                            supplemental_anchors: list | None = None):
     """Preserve confirmed seed-component continuity; suppress unresolved tint.
 
     Reads one label frame at a time, stores per-section binary results compressed
@@ -186,10 +216,16 @@ def sanitize_reviewed_masks(archive: Path, metadata: dict, plan: dict, choices: 
         raise
     except (OSError, TypeError, ValueError, KeyError, OverflowError):
         raise _bad() from None
+    from .mask_recheck_plan import validate_supplemental
+    supplements = validate_supplemental(archive, metadata, assignments,
+        supplemental_anchors or [], review_revision=review_revision)
+    if any(target_labels.get(item['target_id']) != item['label'] for item in supplements):
+        raise _bad('The supplemental mask identities changed.')
     report = dict(policy_version=POLICY_VERSION, review_revision=review_revision,
                   input_sha256=_sha(archive), identity_verified=False, assignment_reports=[],
                   suppressed_ranges=[], component_removed_pixels=0, suppressed_pixels=0)
     flags = defaultdict(dict)
+    walks_by_index = {}
     temporary = Path(output).with_name(Path(output).name + ".partial")
     try:
         with tempfile.TemporaryDirectory() as directory, _maps(archive, metadata) as read:
@@ -243,33 +279,20 @@ def sanitize_reviewed_masks(archive: Path, metadata: dict, plan: dict, choices: 
                             seeded_ids.append(component_id)
                     seed = np.isin(components, seeded_ids)
                     seed_area = int(seed.sum())
-                    _write(keep, f"{index}/{seed_frame}.png", _png(seed))
-                    report["component_removed_pixels"] += total - seed_area
-                    for ordered in [range(seed_frame + 1, end), range(seed_frame - 1, start - 1, -1)]:
-                        previous = seed.copy(); missing = 0
-                        for frame in ordered:
-                            current = read(frame) == label
-                            n, component, cs, cc = _components(current)
-                            overlaps = np.bincount(component[previous].ravel(), minlength=n)
-                            overlaps[0] = 0
-                            candidate_ids = np.flatnonzero(overlaps)
-                            if not len(candidate_ids) or missing > MAX_OCCLUSION_FRAMES:
-                                flags[label][frame] = "unresolved_component_continuity"
-                                missing += 1
+                    walks = [(seed_frame, seed)]
+                    for item in supplements:
+                        if item['segment_id'] == assignment['segment_id']:
+                            from .mask_recheck_plan import component_at
+                            component_seed, _ = component_at(read(item['frame']), label, item['anchor'])
+                            walks.append((item['frame'], component_seed))
+                    walks_by_index[index] = len(walks)
+                    for walk_index, (frame_seed, seed_mask) in enumerate(walks):
+                        for frame, retained, reason in _walk(read, label, start, end, frame_seed, seed_mask):
+                            if retained is None:
+                                if walk_index == 0:
+                                    flags[label][frame] = reason
                                 continue
-                            retained = np.isin(component, candidate_ids)
-                            old_area = int(previous.sum()); new_area = int(retained.sum())
-                            old_y, old_x = np.nonzero(previous)
-                            old_center = np.array([old_x.mean(), old_y.mean()])
-                            new_y, new_x = np.nonzero(retained)
-                            new_center = np.array([new_x.mean(), new_y.mean()])
-                            jump = float(np.linalg.norm(new_center - old_center)) / math.hypot(width, height)
-                            if new_area > old_area * MAX_AREA_GROWTH or jump > MAX_CENTER_JUMP:
-                                flags[label][frame] = "merged_component_jump"
-                                continue
-                            _write(keep, f"{index}/{frame}.png", _png(retained))
-                            report["component_removed_pixels"] += int(current.sum()) - new_area
-                            previous = retained; missing = 0
+                            _write(keep, f"{index}/{walk_index}/{frame}.png", _png(retained))
             coverage = []; changed_frames = 0
             by_frame = defaultdict(list)
             for index, assignment in enumerate(assignments):
@@ -283,9 +306,16 @@ def sanitize_reviewed_masks(archive: Path, metadata: dict, plan: dict, choices: 
                     for index, label, assignment in by_frame[frame]:
                         if assignment.get("absent") or assignment.get("coordinate_fallback"):
                             continue
-                        name = f"{index}/{frame}.png"
-                        if name in names:
-                            valid = np.asarray(Image.open(BytesIO(keep.read(name)))) > 0
+                        valid = np.zeros(original.shape, dtype=bool)
+                        for walk_index in range(walks_by_index.get(index, 0)):
+                            name = f"{index}/{walk_index}/{frame}.png"
+                            if name in names:
+                                valid |= np.asarray(Image.open(BytesIO(keep.read(name)))) > 0
+                        if valid.any():
+                            # Additional confirmed seeds supplement, never
+                            # replace, previously supported body branches.
+                            flags[label].pop(frame, None)
+                            report['component_removed_pixels'] += int(((original == label) & ~valid).sum())
                             sanitized[(original == label) & ~valid] = 0
                         else:
                             report["suppressed_pixels"] += int((original == label).sum())
@@ -300,7 +330,8 @@ def sanitize_reviewed_masks(archive: Path, metadata: dict, plan: dict, choices: 
             report["removed_pixels"] = report["component_removed_pixels"] + report["suppressed_pixels"]
             report.update(sha256=_sha(output), coverage=coverage, changed_frames=changed_frames,
                           review_required=bool(report["suppressed_ranges"]), frames=frames,
-                          geometry_only=True, no_identity_or_absence_inferred=True)
+                          geometry_only=True, no_identity_or_absence_inferred=True,
+                          supplemental_anchor_ids=[item['candidate_id'] for item in supplements])
             return report
     finally:
         temporary.unlink(missing_ok=True)

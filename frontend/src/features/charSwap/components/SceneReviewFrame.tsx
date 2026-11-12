@@ -12,12 +12,13 @@ interface SceneReviewFrameProps {
   height: number;
   disabled: boolean;
   selectedPoint?: NormalizedPoint;
+  focusBox?: [number, number, number, number];
   onSelect: (point: NormalizedPoint, time: number) => void;
   onReadyChange: (ready: boolean) => void;
 }
 
 /** A video decoder displays one still only: no playback, timeline or canvas/CORS dependency. */
-export function SceneReviewFrame({ url, imageUrl, frame, width, height, disabled, selectedPoint, onSelect, onReadyChange }: SceneReviewFrameProps) {
+export function SceneReviewFrame({ url, imageUrl, frame, width, height, disabled, selectedPoint, focusBox, onSelect, onReadyChange }: SceneReviewFrameProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const readyCallback = useRef(onReadyChange);
   const loadingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -25,7 +26,8 @@ export function SceneReviewFrame({ url, imageUrl, frame, width, height, disabled
   const [failed, setFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const useImage = Boolean(imageUrl) && !imageFailed;
-  const [keyboardPoint, setKeyboardPoint] = useState({x: 0.5, y: 0.5});
+  const [keyboardPoint, setKeyboardPoint] = useState(() => focusBox
+    ? {x: (focusBox[0] + focusBox[2]) / 2, y: (focusBox[1] + focusBox[3]) / 2} : {x: 0.5, y: 0.5});
   const time = reviewFrameTime(frame);
   useEffect(() => { readyCallback.current = onReadyChange; }, [onReadyChange]);
   useEffect(() => {
@@ -109,6 +111,10 @@ export function SceneReviewFrame({ url, imageUrl, frame, width, height, disabled
         onError={() => {setFailed(true); setReady(false); readyCallback.current(false);}}
         style={{display: "block", width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none", opacity: ready ? 1 : 0}}
       />}
+      {focusBox && ready && <Box data-testid="review-focus-box" aria-hidden="true" sx={{position: "absolute", pointerEvents: "none",
+        left: `${focusBox[0] * 100}%`, top: `${focusBox[1] * 100}%`, width: `${(focusBox[2] - focusBox[0]) * 100}%`,
+        height: `${(focusBox[3] - focusBox[1]) * 100}%`, border: "2px solid #ffd166", borderRadius: 0.5,
+        boxShadow: "0 0 0 1px #101216aa", bgcolor: "#ffd1660a"}} />}
       {selectedPoint && ready && <Box aria-label="Selected person marker" sx={{position: "absolute", pointerEvents: "none",
         left: `${selectedPoint.x * 100}%`, top: `${selectedPoint.y * 100}%`, transform: "translate(-50%, -50%)",
         width: 38, height: 38, border: "3px solid #75baff", borderRadius: "50%", boxShadow: "0 0 0 4px #0c152788", bgcolor: "#75baff33"}} />}
@@ -120,6 +126,8 @@ export function SceneReviewFrame({ url, imageUrl, frame, width, height, disabled
         <LinearProgress aria-label="Loading scene frame" sx={{minWidth: 140}} />
       </Box>}
     </Box>
-    {failed && <Alert severity="warning" sx={{mt: 1}}>This frame could not be loaded. Try another frame or refresh the preview.</Alert>}
+    {failed && <Alert severity="warning" sx={{mt: 1}}>{focusBox
+      ? "This frame could not be loaded. Refresh the preview."
+      : "This frame could not be loaded. Try another frame or refresh the preview."}</Alert>}
   </Box>;
 }

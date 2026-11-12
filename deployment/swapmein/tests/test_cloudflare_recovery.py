@@ -161,3 +161,103 @@ def test_multiple_missing_people_receive_unique_labels_unused_anywhere_in_raw_cl
     with zipfile.ZipFile(output) as result:
         labels = np.array(Image.open(BytesIO(result.read("labels/labels_00042.png"))))
     assert np.all(labels[1:3, 5:7] == 3) and np.all(labels[1:3, 3:5] == 4)
+
+
+def containment_setup(tmp_path, monkeypatch):
+    pipeline, job, masks, metadata, targets, maps, objects, uploads = setup(tmp_path)
+    # The second shot contains one person, whose jacket was found but face tap
+    # missed. An ID reused in a different shot is not a cross-cut identity cue.
+    for frame in range(24, 48):
+        maps[frame][:] = 0
+        maps[frame][5:7, 5:7] = 300
+    archive(masks, maps)
+    additions = [np.zeros_like(labels) for labels in maps]
+    for frame in range(24, 48):
+        additions[frame][1:7, 5:7] = 1
+
+    def run(*args):
+        result = tmp_path / "worker-result.zip"
+        archive(result, additions)
+        objects["gs://recovered"] = result.read_bytes()
+        return "gs://recovered", [], [{"segment_id": "identity-initial-missing", "outcome": "recovered"}]
+    monkeypatch.setattr(recovery, "run_mask_recovery", run)
+    return pipeline, job, masks, metadata, targets, maps, additions, objects, uploads
+
+
+def test_single_person_partial_mask_extension_keeps_original_pixels_and_id(tmp_path, monkeypatch):
+    pipeline, job, masks, metadata, targets, maps, additions, objects, _ = containment_setup(tmp_path, monkeypatch)
+    original_bytes = masks.read_bytes()
+    output, uri, _ = recovery.recover_identity_anchors(pipeline, job, masks, metadata, targets, tmp_path, lambda: 60)
+    assert masks.read_bytes() == original_bytes and objects[uri] == output.read_bytes()
+    with zipfile.ZipFile(output) as repaired:
+        for frame, before in enumerate(maps):
+            after = np.array(Image.open(BytesIO(repaired.read(f"labels/labels_{frame:05d}.png"))))
+            assert np.array_equal(after[before != 0], before[before != 0])
+            assert np.all(after[additions[frame] == 1] == 300)
+            assert np.all(after[(before == 0) & (additions[frame] == 0)] == 0)
+    assert job["identity_anchor_recovery_merge_report"] == [{
+        "segment_id": "identity-initial-missing", "policy": "single_person_containment_v1",
+        "source_label": 300, "evidence_frames": 24, "minimum_original_containment": 1,
+        "minimum_recovery_overlap": pytest.approx(1 / 3), "minimum_main_component_share": 1}]
+
+
+@pytest.mark.parametrize("invalid", ["another_raw_person", "swallows_second_person", "other_selected_anchor",
+                                     "partial_containment", "disconnected_body", "little_overlap",
+                                     "missing_recovery_frame", "recovery_without_source", "single_frame"])
+def test_ambiguous_containment_still_requires_review(tmp_path, monkeypatch, invalid):
+    pipeline, job, masks, metadata, targets, maps, additions, _, uploads = containment_setup(tmp_path, monkeypatch)
+    if invalid == "another_raw_person":
+        maps[36][0, 0] = 400  # A person outside the recovery also prevents merging.
+    elif invalid == "swallows_second_person":
+        maps[36][3, 6] = 400
+    elif invalid == "other_selected_anchor":
+        targets[0]["anchor"] = {"x": .8, "y": .7, "time": 1.5}
+    elif invalid == "partial_containment":
+        maps[36][7, 6] = 300
+    elif invalid == "disconnected_body":
+        additions[36][3, 5:7] = 0
+    elif invalid == "little_overlap":
+        for frame in range(24, 48):
+            additions[frame][1:7, :] = 1
+    elif invalid == "missing_recovery_frame":
+        additions[35][:] = 0
+    elif invalid == "recovery_without_source":
+        maps[35][:] = 0
+    elif invalid == "single_frame":
+        for frame in range(24, 48):
+            if frame != 36:
+                maps[frame][:] = 0
+                additions[frame][:] = 0
+    archive(masks, maps)
+    original_bytes = masks.read_bytes()
+    with pytest.raises(PublicError, match="safely"):
+        recovery.recover_identity_anchors(pipeline, job, masks, metadata, targets, tmp_path, lambda: 60)
+    assert masks.read_bytes() == original_bytes
+    assert not any(uri.endswith("raw-repaired-masks.zip") for uri, _ in uploads)
+    assert not list(tmp_path.glob("identity-anchor-repaired-*"))
+
+
+def test_component_evidence_does_not_accept_tap_on_tiny_disconnected_island():
+    region = np.zeros((100, 100), dtype=bool)
+    region[10:90, 10:90] = True
+    region[0, 0] = True
+    source = np.zeros_like(region)
+    source[40:90, 10:90] = True
+    main, overlap, anchor = recovery._component_evidence(region, source, (0, 0))
+    assert main == 6400 and overlap == 4000 and not anchor
+    assert main / np.count_nonzero(region) > .999
+
+
+def test_almost_complete_containment_preserves_original_fringe_without_relabeling():
+    source = np.zeros((100, 100), dtype=np.uint16)
+    source[40:90, 10:90] = 9
+    source[90, 10:40] = 9  # Below 1% jacket fringe remains outside the recovery.
+    recovered = np.zeros_like(source)
+    recovered[10:90, 10:90] = 1
+    metadata = {"width": 100, "height": 100, "frames": 3, "duration": .125, "anchor": {"frame": 0}}
+    request = {"segment_id": "identity-initial-one", "start_frame": 0, "end_frame": 3,
+               "frame": 0, "x": .5, "y": .2, "label": 1}
+    labels, report = recovery._contained_overlap_labels(lambda frame: source, lambda frame: recovered,
+        metadata, [request], [{"anchor": {"x": .5, "y": .2, "time": 0}}])
+    assert labels == {1: 9}
+    assert report[0]["minimum_original_containment"] == pytest.approx(4000 / 4030)

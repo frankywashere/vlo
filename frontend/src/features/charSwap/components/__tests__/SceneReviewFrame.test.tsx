@@ -19,6 +19,22 @@ it("uses an exact image without video seeking and only accepts taps after it loa
   expect(p.onSelect).toHaveBeenCalledWith({x: .5, y: .5}, (36.5) / 24);
 });
 
+it("outlines the fragment without intercepting clicks and starts its keyboard crosshair inside the box", () => {
+  const p = props();
+  render(<SceneReviewFrame {...p} imageUrl="https://storage.googleapis.com/test/36.jpg" focusBox={[.25, .5, .5, .75]} />);
+  const picker = screen.getByRole("button", {name: "Select the person in this frame"});
+  fireEvent.load(picker.querySelector("img")!);
+  const outline = screen.getByTestId("review-focus-box");
+  expect(outline).toHaveAttribute("aria-hidden", "true");
+  expect(outline).toHaveStyle({pointerEvents: "none", left: "25%", top: "50%", width: "25%", height: "25%"});
+  fireEvent.keyDown(picker, {key: "Enter"});
+  expect(p.onSelect).toHaveBeenCalledWith({x: .375, y: .625}, 36.5 / 24);
+  vi.spyOn(picker, "getBoundingClientRect").mockReturnValue({x: 0, y: 0, left: 0, top: 0, right: 640, bottom: 480,
+    width: 640, height: 480, toJSON: () => ({})});
+  fireEvent.click(picker, {clientX: 500, clientY: 48});
+  expect(p.onSelect).toHaveBeenLastCalledWith({x: 500/640, y: .1}, 36.5 / 24);
+});
+
 it("falls back on image failure, retries an early Safari seek, and rejects unsettled frames", () => {
   const p = props();
   render(<SceneReviewFrame {...p} imageUrl="https://storage.googleapis.com/test/36.jpg" />);
