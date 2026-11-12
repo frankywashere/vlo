@@ -6,6 +6,7 @@ from .diagnostics import emit
 from .errors import PublicError
 from .security import digest
 from .preparation_credentials import replicate_key_ready
+from .meta_credentials import meta_key_ready
 from .prompt_variants import DEFAULT_PROMPT_VARIANT, PROMPT_VARIANTS
 from .self_hosted_route import MULTI_PERSON_GENERATION_ROUTES, validate_generation_route
 
@@ -16,6 +17,8 @@ def pipeline_settings(records):
     current, _ = records.read(PATH)
     current = current or {}
     provider = current.get("preparation_provider", "workers")
+    provider = provider if provider in {"workers", "replicate"} else "workers"
+    sam_provider = current.get("sam_provider", provider)
     route = current.get("multi_person_generation_route", "current")
     return {"revision": current.get("revision", 0),
             "audio_processing": current.get("audio_processing") is True,
@@ -32,14 +35,16 @@ def pipeline_settings(records):
             "face_mesh_user_control": current.get("face_mesh_user_control") is True,
             "retry_missing_masks_with_sam": current.get("retry_missing_masks_with_sam") is True,
             "matching_no_review": current.get("matching_no_review") is True,
-            "preparation_provider": provider if provider in {"workers", "replicate"} else "workers",
+            "preparation_provider": provider,
+            "sam_provider": sam_provider if sam_provider in {"workers", "replicate", "meta"} else provider,
             "prompt_variant": current.get("prompt_variant") if current.get("prompt_variant") in PROMPT_VARIANTS else DEFAULT_PROMPT_VARIANT,
-            "replicate_api_key_configured": replicate_key_ready()}
+            "replicate_api_key_configured": replicate_key_ready(),
+            "meta_api_key_configured": meta_key_ready()}
 
 
 def save_pipeline_settings(records, actor, revision, audio_processing=None, preparation_provider=None,
                            retry_missing_masks_with_sam=None, depth_guidance=None,
-                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None, matching_no_review=None, multi_person_generation_route=None, kling4_enabled=None, minimax_2k_enabled=None, kling_audio_processing=None):
+                           face_mesh_masked_default=None, face_mesh_unmasked_default=None, face_mesh_user_control=None, hide_audio_toggle=None, multi_characters=None, face_mesh_enabled=None, prompt_variant=None, matching_no_review=None, multi_person_generation_route=None, kling4_enabled=None, minimax_2k_enabled=None, kling_audio_processing=None, sam_provider=None):
     require_permission(records, actor, "pipeline_settings")
     if kling4_enabled is not None and type(kling4_enabled) is not bool:
         raise PublicError("Choose whether Kling 4.0 is available.")
@@ -61,6 +66,12 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
         raise PublicError("Choose a supported preparation provider.")
     if preparation_provider == "replicate" and not replicate_key_ready():
         raise PublicError("Save a Replicate API token before enabling Replicate preparation.", 409)
+    if sam_provider is not None and sam_provider not in {"workers", "replicate", "meta"}:
+        raise PublicError("Choose a supported person-mask provider.")
+    if sam_provider == "replicate" and not replicate_key_ready():
+        raise PublicError("Save a Replicate API token before enabling Replicate masks.", 409)
+    if sam_provider == "meta" and not meta_key_ready():
+        raise PublicError("Configure the Meta SAM API key before enabling Meta masks.", 409)
 
     def update(current):
         current = current or {}
@@ -69,6 +80,12 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
         stored_route = current.get("multi_person_generation_route", "current")
         if not isinstance(stored_route, str) or stored_route not in MULTI_PERSON_GENERATION_ROUTES:
             stored_route = "current"
+        previous_provider = current.get("preparation_provider", "workers")
+        if previous_provider not in {"workers", "replicate"}:
+            previous_provider = "workers"
+        previous_sam = current.get("sam_provider", previous_provider)
+        if previous_sam not in {"workers", "replicate", "meta"}:
+            previous_sam = previous_provider
         return {"revision": revision + 1,
                 "multi_person_generation_route": (multi_person_generation_route if multi_person_generation_route is not None
                     else stored_route),
@@ -81,6 +98,8 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
                 "matching_no_review": (current.get("matching_no_review") is True
                     if matching_no_review is None else matching_no_review),
                 "preparation_provider": preparation_provider or current.get("preparation_provider", "workers"),
+                # A depth-only edit must not migrate a legacy job's SAM route.
+                "sam_provider": sam_provider if sam_provider is not None else previous_sam,
                 "prompt_variant": (prompt_variant if prompt_variant is not None else
                     current.get("prompt_variant") if current.get("prompt_variant") in PROMPT_VARIANTS else DEFAULT_PROMPT_VARIANT),
                 **{key: current.get(key, default) if value is None else value for key, default, value in (
@@ -98,6 +117,7 @@ def save_pipeline_settings(records, actor, revision, audio_processing=None, prep
     emit("admin_audio_processing_changed", actor_id=digest(actor["email"]),
          revision=saved["revision"], depth_guidance=saved["depth_guidance"], audio_processing=saved["audio_processing"],
          kling_audio_processing=saved["kling_audio_processing"], preparation_provider=saved["preparation_provider"],
+         sam_provider=saved["sam_provider"],
          kling4_enabled=saved["kling4_enabled"],
          minimax_2k_enabled=saved["minimax_2k_enabled"],
          retry_missing_masks_with_sam=saved["retry_missing_masks_with_sam"],

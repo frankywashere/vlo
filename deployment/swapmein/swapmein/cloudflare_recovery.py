@@ -32,6 +32,15 @@ def recover_identity_anchors(pipeline, job, masks, metadata, targets, root, rema
     missing = [target for target in tracks if target["selected_label"] == 0]
     if not missing or job.get("retry_missing_masks_with_sam") is not True:
         return None
+    if job.get("sam_provider", job.get("preparation_provider", "workers")) == "meta":
+        # The approved initial SAM budget already includes the full-person
+        # request. An automatic second recovery batch would spend beyond it.
+        # This distinct code intentionally bypasses the no-review fallback and
+        # uses the pipeline's existing explicit scene-selection review instead.
+        emit("meta_initial_anchor_review_required", job_id=job["id"], missing_targets=len(missing),
+             additional_paid_requests=0)
+        raise PublicError("A selected person's mask needs scene review. Check the saved selections before continuing; no additional mask request or generation was submitted.",
+                          409, code="meta_initial_anchor_review")
     width, height, frames, _, cuts = _metadata(metadata)
     used = set()
     with _maps(masks, metadata) as read:

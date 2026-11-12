@@ -400,6 +400,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                   busy={busy || selectedAccessBlocked}
                   initialChoices={selected.tracking_choices}
                   requireExplicitChoices={selected.generation_destination === "google_h3" || selected.generation_destination === "paperspace_h3"}
+                  metaSeedReview={selected.meta_seed_review}
                   errorSegmentId={trackingErrorSegmentId ?? selected.tracking_error_segment_id}
                   errorMessage={error ?? (selected.tracking_review_error ? selected.message : undefined)}
                   onRefresh={() => void refresh()}
@@ -416,7 +417,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                         selected.tracking_revision ?? 0,
                         choices,
                         controller.current.signal,
-                        {enabled: selected.mask_style !== "none" || selected.settings_used?.face_mesh === true, key, generateAfterReview: true},
+                        {enabled: !selected.meta_seed_review && (selected.mask_style !== "none" || selected.settings_used?.face_mesh === true),
+                          key: selected.meta_seed_review ? undefined : key, generateAfterReview: !selected.meta_seed_review},
                       );
                       if (mounted.current) {
                         // Publish the saved state to the list before navigation;

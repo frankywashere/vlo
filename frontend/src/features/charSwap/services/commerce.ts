@@ -97,6 +97,7 @@ export function saveProcessingCapacity(settings: Pick<ProcessingCapacity, "revis
 }
 
 export type PreparationProvider = "workers" | "replicate";
+export type SamProvider = PreparationProvider | "meta";
 export type MultiPersonGenerationRoute = "current" | "google_h3" | "paperspace_h3";
 
 export type PromptVariant = "current" | "favorite_v2" | "structured_v1" | "identity_colors_v1" | "identity_tint_tracking_v1" | "cloudflare_identity_v1";
@@ -118,6 +119,7 @@ export interface PipelineSettings {
   prompt_variant?: PromptVariant;
   matching_no_review?: boolean;
   preparation_provider?: PreparationProvider;
+  sam_provider?: SamProvider;
   retry_missing_masks_with_sam?: boolean;
   depth_guidance?: boolean;
   face_mesh_enabled?: boolean;
@@ -125,9 +127,10 @@ export interface PipelineSettings {
   face_mesh_unmasked_default?: boolean;
   face_mesh_user_control?: boolean;
   replicate_api_key_configured?: boolean;
+  meta_api_key_configured?: boolean;
 }
 
-export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "minimax_2k_enabled" | "kling4_enabled" | "multi_characters" | "multi_person_generation_route" | "prompt_variant" | "matching_no_review" | "hide_audio_toggle" | "audio_processing" | "kling_audio_processing" | "preparation_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_enabled" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
+export function savePipelineSettings(settings: Pick<PipelineSettings, "revision"> & Partial<Pick<PipelineSettings, "minimax_2k_enabled" | "kling4_enabled" | "multi_characters" | "multi_person_generation_route" | "prompt_variant" | "matching_no_review" | "hide_audio_toggle" | "audio_processing" | "kling_audio_processing" | "preparation_provider" | "sam_provider" | "retry_missing_masks_with_sam" | "depth_guidance" | "face_mesh_enabled" | "face_mesh_masked_default" | "face_mesh_unmasked_default" | "face_mesh_user_control">>) {
   return commerceRequest<PipelineSettings>("/api/commerce/admin/pipeline", settings);
 }
 

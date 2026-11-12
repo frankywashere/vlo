@@ -127,6 +127,28 @@ describe("live BYOK pipeline", () => {
     expect(JSON.parse(String(calls("/api/jobs/job-1/tracking-review")[0][1]?.body))).toMatchObject({generate_after_review: true});
   });
 
+  it("saves Meta seed choices for preparation without a generation key or generation request", async () => {
+    const review = {id: "job-1", status: "tracking_review", meta_seed_review: true, mask_style: "cyan_overlay_multi_20",
+      duration: 5, width: 854, height: 480, tracking_revision: 1,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", tracking_segments: [
+        {id: "s0", start: 0, end: 5, start_frame: 0, end_frame: 120, seek_time: 1, needs_review: true, reason: "unmatched_anchor"}]};
+    requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? Promise.resolve(json(review))
+      : input === "/api/jobs/job-1/tracking-review" ? Promise.resolve(json({id: "job-1", status: "queued"}))
+        : defaultRequest(input));
+    const {result} = await renderLive();
+    await act(async () => {await result.current.prepare(setup());});
+    await act(async () => {expect(await result.current.resolveTracking([{segment_id: "s0", absent: true, anchor: null}])).toBe(false);});
+    expect(calls("/api/jobs/job-1/tracking-review")).toHaveLength(0);
+    expect(result.current.error).toMatch(/Select each person/);
+    const choices = [{segment_id: "s0", absent: false, anchor: {x: .4, y: .5, time: 1}}];
+    await act(async () => {expect(await result.current.resolveTracking(choices)).toBe(true);});
+    const request = calls("/api/jobs/job-1/tracking-review")[0][1];
+    expect(request?.headers).not.toHaveProperty("X-Reapi-Key");
+    expect(JSON.parse(String(request?.body))).toEqual({revision: 1, choices});
+    expect(calls("/api/jobs/job-1/generate")).toHaveLength(0);
+    expect(result.current.job?.status).toBe("queued");
+  });
+
   it("warns on browser exit only until upload confirmation and removes the guard afterward", async () => {
     const pending = deferred<Response>();
     requests.mockImplementation((input) => input === "/api/uploads/job-1/complete" ? pending.promise : defaultRequest(input));

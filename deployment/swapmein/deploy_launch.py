@@ -22,6 +22,7 @@ RENDER_QUEUE = "recastfx-renders"
 JOB_KEY_SECRET = "recastfx-job-key"
 PROVIDER_KEY_SECRET = "recastfx-provider-key"
 REPLICATE_KEY_SECRET = "recastfx-replicate-key"
+META_KEY_SECRET = "recastfx-meta-api-key"
 CLOUDFLARE_KEY_SECRET = "recastfx-cloudflare-key"
 CLOUDFLARE_BILLING_SECRET = "recastfx-cloudflare-billing-key"
 
@@ -34,12 +35,17 @@ def ensure_private_provider_secret():
         for role in ("roles/secretmanager.secretAccessor", "roles/secretmanager.secretVersionAdder"):
             deploy.gcloud("secrets", "add-iam-policy-binding", secret,
                           "--member=" + deploy.MEMBER, "--role=" + role)
+    # Meta credentials are managed separately; the runtime only needs read
+    # access, never permission to mint or replace the account's API key.
+    if deploy.gcloud("secrets", "describe", META_KEY_SECRET, optional=True):
+        deploy.gcloud("secrets", "add-iam-policy-binding", META_KEY_SECRET,
+                      "--member=" + deploy.MEMBER, "--role=roles/secretmanager.secretAccessor")
 
 
 def runtime_settings(current: dict, live_account: str | None = None):
     env = current.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])
     values = {item["name"]: item["value"] for item in env
-              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID", "COMMERCE_OWNER_EMAILS", "REFERENCE_CLEANUP_URL", "REPLICATE_SECRET_NAME", "CLOUDFLARE_SECRET_NAME", "RESEND_SECRET_NAME", "RESEND_FROM", "NOTIFICATION_SITE_ORIGIN"} and "value" in item}
+              if item.get("name") in {"STRIPE_MODE", "STRIPE_ACCOUNT_ID", "COMMERCE_OWNER_EMAILS", "REFERENCE_CLEANUP_URL", "REPLICATE_SECRET_NAME", "META_SECRET_NAME", "CLOUDFLARE_SECRET_NAME", "RESEND_SECRET_NAME", "RESEND_FROM", "NOTIFICATION_SITE_ORIGIN"} and "value" in item}
     bindings = {}
     for item in env:
         ref = item.get("valueFrom", {}).get("secretKeyRef")
@@ -112,6 +118,7 @@ def main():
         "REAPI_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{PROVIDER_KEY_SECRET}",
         "REFERENCE_CLEANUP_URL": "https://reference-cleanup-63lqoskl5q-uk.a.run.app",
         "REPLICATE_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{REPLICATE_KEY_SECRET}",
+        "META_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{META_KEY_SECRET}",
         "CLOUDFLARE_SECRET_NAME": f"projects/{deploy.PROJECT}/secrets/{CLOUDFLARE_KEY_SECRET}",
         **runtime_env,
     }

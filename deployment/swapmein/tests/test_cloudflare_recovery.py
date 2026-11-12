@@ -62,6 +62,21 @@ def test_retry_off_or_no_missing_tap_does_not_activate_any_worker(tmp_path, monk
     assert uploads == []
 
 
+@pytest.mark.parametrize("depth_provider", ["workers", "replicate"])
+def test_meta_initial_miss_requires_review_before_upload_or_extra_paid_recovery(tmp_path, monkeypatch, depth_provider):
+    pipeline, job, masks, metadata, targets, _, objects, uploads = setup(tmp_path)
+    job.update(sam_provider="meta", preparation_provider=depth_provider, matching_no_review=True)
+    original = masks.read_bytes()
+    monkeypatch.setattr(recovery, "run_mask_recovery", lambda *args: pytest.fail("Initial Meta budget must not start another paid batch"))
+    with pytest.raises(PublicError) as error:
+        recovery.recover_identity_anchors(pipeline, job, masks, metadata, targets, tmp_path, lambda: 60)
+    assert error.value.code == "meta_initial_anchor_review"
+    assert masks.read_bytes() == original
+    assert uploads == [] and objects == {}
+    assert not job.get("identity_anchor_recovery_attempted")
+    assert not list(tmp_path.glob("identity-recovery-*"))
+
+
 @pytest.mark.parametrize("outcome", ["recovered", "conflict", "coordinate_fallback"])
 def test_existing_worker_receives_empty_labels_and_merge_preserves_every_raw_id(tmp_path, monkeypatch, outcome):
     pipeline, job, masks, metadata, targets, maps, objects, _ = setup(tmp_path)

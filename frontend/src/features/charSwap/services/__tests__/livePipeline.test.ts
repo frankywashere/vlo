@@ -197,6 +197,16 @@ const reviewSegment = {id: "segment-001", start_frame: 48, end_frame: 120, start
 const reviewJob = {id: "job-1", status: "tracking_review", duration: 5, width: 854, height: 480, source_preview_url: "https://storage.googleapis.com/private/source.mp4?signature=test", tracking_revision: 1, tracking_segments: [reviewSegment]};
 
 describe("scene tracking review contract", () => {
+  it.each([true, false])("preserves the Meta seed review flag (%s) without changing the review contract", async (meta_seed_review) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, meta_seed_review})));
+    expect(await getLiveJob("job-1", "session", new AbortController().signal)).toEqual({...reviewJob, meta_seed_review});
+  });
+
+  it.each(["true", 1, null, {}])("rejects an unreadable preparation-only review flag (%o)", async (meta_seed_review) => {
+    requests.mockResolvedValue(new Response(JSON.stringify({...reviewJob, meta_seed_review})));
+    await expect(getLiveJob("job-1", "session", new AbortController().signal)).rejects.toThrow(/mask selection step/);
+  });
+
   it("accepts validated partial matching suggestions only while scene review is pending", async () => {
     const next = {...reviewSegment, id: "segment-002", start_frame: 0, end_frame: 48, start: 0, end: 2, seek_time: 1};
     const tracking_segments = [next, reviewSegment];

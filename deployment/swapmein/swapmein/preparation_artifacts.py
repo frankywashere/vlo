@@ -17,4 +17,13 @@ def fallback_artifact_token(job):
 def preparation_prefix(job, kind):
     base = {"worker": f"inputs/swapmein-{job['id']}/", "app": f"outputs/{job['id']}/"}[kind]
     token = fallback_artifact_token(job)
-    return base + (f"fallback-{token}/" if token else "")
+    prefix = base + (f"fallback-{token}/" if token else "")
+    seed_token = job.get("meta_seed_artifact_token")
+    if seed_token is not None:
+        if (job.get("sam_provider") != "meta" or not isinstance(seed_token, str)
+                or not re.fullmatch(r"[a-f0-9]{32}", seed_token)):
+            raise PublicError("The corrected person selection needs its saved preparation identifier.", 409)
+        # Source-only selection correction reruns normalization/guide prep.
+        # Keep every prior immutable artifact and reuse Meta receipts separately.
+        prefix += f"seed-{seed_token}/"
+    return prefix

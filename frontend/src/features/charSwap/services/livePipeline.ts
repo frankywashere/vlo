@@ -121,6 +121,7 @@ export interface LivePipelineJob {
   tracking_revision?: number;
   tracking_reviewed?: boolean;
   tracking_review_error?: boolean;
+  meta_seed_review?: boolean;
   tracking_error_segment_id?: string;
   tracking_choices?: TrackingReviewChoice[];
   guide_url?: string;
@@ -450,6 +451,11 @@ function readJob(value: unknown): LivePipelineJob {
     job.tracking_continuous = value.tracking_continuous;
   if (typeof value.tracking_reviewed === "boolean") job.tracking_reviewed = value.tracking_reviewed;
   if (typeof value.tracking_review_error === "boolean") job.tracking_review_error = value.tracking_review_error;
+  if (value.meta_seed_review !== undefined) {
+    if (typeof value.meta_seed_review !== "boolean")
+      throw new LivePipelineError("The service returned an unreadable mask selection step. Refresh the job before continuing.");
+    job.meta_seed_review = value.meta_seed_review;
+  }
   if (typeof value.tracking_error_segment_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.tracking_error_segment_id))
     job.tracking_error_segment_id = value.tracking_error_segment_id;
   if (

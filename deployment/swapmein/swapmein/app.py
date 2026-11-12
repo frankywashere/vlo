@@ -218,16 +218,32 @@ def pinned_generation_credits(job, records):
                                   generation_model=model)
 
 
-def normal_generation_snapshot(defaults, options, active_session):
-    """Pin the ordinary pipeline before Google overrides masks/audio/mesh."""
-    mesh = face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(services()[0], active_session)))
+def preparation_job_snapshot(defaults, options, *, is_admin=False, self_hosted=False):
+    """Pin only the credentials that this accepted preparation can use."""
+    mesh = face_mesh_snapshot(defaults, options, is_admin=is_admin)
     tracking = (options.enhanced_character_masking or mesh["face_mesh"]
         or defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people)
+    actual_depth = (not self_hosted and options.enhanced_character_masking
+                    and defaults["depth_guidance"] and generation_model(options) != KLING)
+    snapshot = preparation_snapshot(defaults["preparation_provider"],
+        enhanced_masking=not self_hosted and tracking,
+        sam_provider=defaults.get("sam_provider", defaults["preparation_provider"]),
+        depth_guidance=actual_depth)
+    if not self_hosted:
+        snapshot.update(**mesh, audio_processing=defaults["audio_processing"],
+                        depth_guidance=defaults["depth_guidance"],
+                        retry_missing_masks_with_sam=defaults["retry_missing_masks_with_sam"])
+    return snapshot
+
+
+def normal_generation_snapshot(defaults, options, active_session):
+    """Pin the ordinary pipeline before Google overrides masks/audio/mesh."""
     values = {key: defaults[key] for key in ("audio_processing", "multi_characters", "prompt_variant",
         "matching_no_review", "retry_missing_masks_with_sam", "depth_guidance")}
     values.update(guide_style_version=2, depth_overlay_opacity=.2, depth_identity_colors_version=1,
-                  restore_original_audio=False, **mesh,
-                  **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=tracking))
+                  restore_original_audio=False,
+                  **preparation_job_snapshot(defaults, options,
+                      is_admin=bool(staff_role(services()[0], active_session))))
     return {"version": 1, "settings": values, "provider": active_session.get("provider", "reAPI")}
 
 
@@ -270,6 +286,7 @@ def view(job: dict, *, review_thumbnails: bool = True):
               "message": ("Your video is processing." if credits_mode and not self_hosted and status in {"generating", "finalizing"}
                           else failure_message(job.get("provider_failure"), True) if credits_mode and status == "failed" and job.get("provider_failure")
                           else "Generation needs review." if credits_mode and status == "failed"
+                              and job.get("public_preparation_failure") is not True
                           else job.get("message", "")),
               "access_mode": "credits" if credits_mode else "api-key",
               "settings_used": settings_used(job),
@@ -344,7 +361,7 @@ def view(job: dict, *, review_thumbnails: bool = True):
     from .google_fallback import is_google_fallback
     if is_google_fallback(job):
         result["generation_fallback"] = {"from": "google_h3", "reason": "capacity_unavailable"}
-    for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing", "watermark_applied", "watermark_bonus_awarded"]:
+    for field in ["created_at", "completed_at", "updated_at", "review_wait_seconds", "review_paused_at", "width", "height", "selected_label", "scene_cut_count", "tracking_continuous", "tracking_performed", "generation_started_at", "provider_state", "provider_checked_at", "mask_style", "tracking_revision", "tracking_reviewed", "easy_mode", "auto_generate", "generation_credits", "audio_processing", "watermark_applied", "watermark_bonus_awarded", "meta_seed_review"]:
         if field in job:
             result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
@@ -840,6 +857,7 @@ class PipelineSettingsUpdate(BaseModel):
     audio_processing: bool | None = None
     kling_audio_processing: bool | None = None
     preparation_provider: Literal["workers", "replicate"] | None = None
+    sam_provider: Literal["workers", "replicate", "meta"] | None = None
     retry_missing_masks_with_sam: bool | None = None
     matching_no_review: bool | None = None
     depth_guidance: bool | None = None
@@ -868,7 +886,7 @@ def update_pipeline_settings(body: PipelineSettingsUpdate, x_firebase_token: str
                                   body.retry_missing_masks_with_sam, body.depth_guidance, body.face_mesh_masked_default,
                                   body.face_mesh_unmasked_default, body.face_mesh_user_control, body.hide_audio_toggle, body.multi_characters, body.face_mesh_enabled, body.prompt_variant, body.matching_no_review,
                                   body.multi_person_generation_route, body.kling4_enabled, body.minimax_2k_enabled,
-                                  body.kling_audio_processing)
+                                  body.kling_audio_processing, body.sam_provider)
     return {**saved, "self_hosted_workers": worker_views(settings, records)}
 
 
@@ -1069,9 +1087,13 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     enforce_character_limit(options, 1, defaults["multi_characters"])
     require_model_access(options, defaults, active_session.get("provider", "reAPI"),
                          is_admin=bool(staff_role(records, active_session)))
-    hosted_snapshot = generation_snapshot(options, kling_audio_processing=defaults["kling_audio_processing"])
+    hosted_snapshot = generation_snapshot(options, kling_audio_processing=defaults["kling_audio_processing"],
+                                         sam_provider=defaults.get("sam_provider", defaults["preparation_provider"]))
     route_snapshot = generation_route_snapshot(options, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
+    hosted_snapshot = {**preparation_job_snapshot(defaults, options, self_hosted=self_hosted,
+        is_admin=bool(staff_role(records, active_session))),
+        **hosted_snapshot}
     quote = check_generation_funding(records, options, active_session,
                              generation_route=route_snapshot["multi_person_generation_route"])
     watermark_offer = watermark_snapshot(records, options, active_session)
@@ -1115,7 +1137,6 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
                "depth_identity_colors_version": 1,
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **watermark_offer,
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
                **route_snapshot, **hosted_snapshot}
         if fallback_snapshot:
             job["normal_generation_snapshot"] = fallback_snapshot
@@ -1211,8 +1232,11 @@ def preparation_limits(records, job=None):
     if not capacity.enabled():
         return {}
     capacity.require_ready()
-    provider = (job or {}).get("preparation_provider") or pipeline_settings(records)["preparation_provider"]
-    return {"maximum": capacity.limits()["heavy_jobs"], "requires_gpu": provider == "workers", "legacy_guard": True}
+    saved = job or pipeline_settings(records)
+    provider = saved.get("preparation_provider", "workers")
+    sam_provider = saved.get("sam_provider", provider)
+    gpu_needed = sam_provider == "workers" or (saved.get("depth_guidance", True) and provider == "workers")
+    return {"maximum": capacity.limits()["heavy_jobs"], "requires_gpu": gpu_needed, "legacy_guard": True}
 
 
 @app.get("/api/preparation-capacity")
@@ -1232,9 +1256,13 @@ def start_upload(options: UploadRequest, authorization: str | None = Header(defa
     enforce_character_limit(options.setup, len(options.reference_sizes), defaults["multi_characters"])
     require_model_access(options.setup, defaults, active_session.get("provider", "reAPI"),
                          is_admin=bool(staff_role(records, active_session)))
-    hosted_snapshot = generation_snapshot(options.setup, kling_audio_processing=defaults["kling_audio_processing"])
+    hosted_snapshot = generation_snapshot(options.setup, kling_audio_processing=defaults["kling_audio_processing"],
+                                         sam_provider=defaults.get("sam_provider", defaults["preparation_provider"]))
     route_snapshot = generation_route_snapshot(options.setup, defaults["multi_person_generation_route"])
     self_hosted = route_snapshot["multi_person_generation_route"] in SELF_HOSTED_GENERATION_ROUTES
+    hosted_snapshot = {**preparation_job_snapshot(defaults, options.setup, self_hosted=self_hosted,
+        is_admin=bool(staff_role(records, active_session))),
+        **hosted_snapshot}
     check_available_preparation(records, time.time())
     job_id = uuid.uuid4().hex
     fallback_snapshot = (normal_generation_snapshot(defaults, options.setup, active_session)
@@ -1359,6 +1387,13 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         defaults = pipeline_settings(records)
         enforce_character_limit(options, len(reference_uris), defaults["multi_characters"])
         prompt_variant = manifest.get("prompt_variant") or "current"
+        # New tickets pin both independent preparation routes at acceptance.
+        # Only older manifests need the legacy commit-time defaults; never
+        # resolve a newly changed secret just to overwrite it with saved data.
+        pinned_hosted = manifest.get("generation_snapshot") or {"generation_model": generation_model(options)}
+        legacy_preparation = {} if "preparation_provider" in pinned_hosted else preparation_job_snapshot(
+            {**defaults, "prompt_variant": prompt_variant}, options, self_hosted=self_hosted,
+            is_admin=bool(staff_role(records, active_session)))
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
@@ -1372,8 +1407,7 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
                **face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session))),
                **({key: manifest[key] for key in ("watermark_bonus_credits", "watermark_offer_revision")}
                   if options.add_watermark and "watermark_bonus_credits" in manifest else watermark_snapshot(records, options, active_session)),
-               **preparation_snapshot(defaults["preparation_provider"], enhanced_masking=not self_hosted and (options.enhanced_character_masking or face_mesh_snapshot(defaults, options, is_admin=bool(staff_role(records, active_session)))["face_mesh"] or (prompt_variant == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people))),
-               **route_snapshot, **manifest.get("generation_snapshot", {"generation_model": generation_model(options)})}
+               **legacy_preparation, **route_snapshot, **pinned_hosted}
         for field in ("normal_generation_snapshot", "google_fallback_key_ciphertext", "generation_quote"):
             if field in manifest:
                 job[field] = manifest[field]
@@ -1525,6 +1559,72 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
     if plan.get("version") == 3:
         from .scene_selection import resolve
         choices = [choice.model_dump() for choice in review.choices]
+        if job.get("meta_seed_review"):
+            if job.get("sam_provider") != "meta" or any(choice["absent"] for choice in choices):
+                raise PublicError("Select each character in a clear frame before building person masks.",
+                                  400, code="tracking_review_invalid")
+            targets = resolve(job["tracking_metadata"], plan, choices)
+            overrides = [{"id": target["id"], "anchor": {**target["scenes"][0]["anchor"],
+                "frame": math.floor(target["scenes"][0]["anchor"]["time"] * 24 + 1e-7)}} for target in targets]
+            reserved = claimed = queued = False
+            task_token = uuid.uuid4().hex
+            try:
+                # Claim the review before reserving a shared lease. Otherwise
+                # a concurrent losing POST could release the winner's lease.
+                def claim_seeds(current):
+                    if current.get("tracking_revision") != review.revision or not current.get("meta_seed_review"):
+                        raise PublicError(invalid, 409, code="tracking_review_invalid")
+                    return {**claim_job(current, {"tracking_review"}, "matching"),
+                        "meta_seed_claim": task_token, "tracking_applied_revision": review.revision}
+                records.update(f"jobs/{job_id}.json", claim_seeds)
+                claimed = True
+                records.update("control/preparation.json", lambda current: reserve_preparation(
+                    current, job_id, time.time(), settings.monthly_preparations, settings.daily_preparations,
+                    **preparation_limits(records, job)))
+                reserved = True
+                def corrected_seeds(current):
+                    if (current.get("tracking_revision") != review.revision
+                            or current.get("meta_seed_claim") != task_token or current.get("status") != "matching"):
+                        raise PublicError(invalid, 409, code="tracking_review_invalid")
+                    return {**current, "status": "queued", "meta_seed_claim": None,
+                        "meta_seed_overrides": overrides, "meta_seed_review": False,
+                        "meta_seed_artifact_token": task_token,
+                        "tracking_applied_revision": review.revision, "tracking_task_token": task_token,
+                        "tracking_choices": choices, "tracking_review_error": False,
+                        "tracking_plan": {}, "tracking_metadata": {},
+                        "tracking_error_segment_id": None, "preparation_kind": None,
+                        "preparation_queued_at": time.time(), "tracking_reviewed": False,
+                        "setup": {**current["setup"], "auto_generate": False},
+                        "auto_generate": False, "generation_after_review_revision": None,
+                        "google_fallback_approved": False, "capacity_generation_authorized": False,
+                        "capacity_approval_revision": None, "generation_capacity_token": None,
+                        "review_generation_queued": False,
+                        "message": "Your selections are saved. Building full-person masks before guide review.",
+                        "updated_at": time.time()}
+                job = records.update(f"jobs/{job_id}.json", corrected_seeds)
+                queued = True
+                try:
+                    cloud.enqueue("prepare", job_id, task_token=task_token)
+                except Exception:
+                    job = records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                        "message": "Your selections are saved. Queue confirmation is pending; keep this job in your Library."
+                    } if current.get("status") == "queued" else current)
+                emit("meta_seed_selections_saved", job_id=job_id, target_count=len(overrides),
+                     revision=review.revision, automatic_generation=False)
+                return view(job, review_thumbnails=False)
+            except Exception:
+                # Release before restoring the editable review so a new owner
+                # cannot reserve a lease that this failed attempt then removes.
+                if reserved and not queued:
+                    records.update("control/preparation.json", lambda current: release_preparation(current, job_id))
+                if claimed and not queued:
+                    records.update(f"jobs/{job_id}.json", lambda current: {**current,
+                        "status": "tracking_review", "meta_seed_claim": None,
+                        "tracking_applied_revision": job.get("tracking_applied_revision"),
+                        "message": "Your person selections are retained. The preparation queue is busy; try again shortly.",
+                        "updated_at": time.time()}
+                        if current.get("status") == "matching" and current.get("meta_seed_claim") == task_token else current)
+                raise
         if job.get("identity_recovery"):
             from .mask_quality_recovery import resolve_identity_recovery
             targets = resolve_identity_recovery(job, choices)

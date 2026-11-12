@@ -42,13 +42,18 @@ def require_model_access(setup, defaults, provider, *, is_admin=False):
         if provider != "reAPI":
             raise PublicError("Kling 4.0 requires reAPI access.", 409, code="kling_provider_unavailable")
         if round(setup.trim[1] - setup.trim[0], 6) > 15:
-            from .preparation_credentials import replicate_key_ready
-            if not replicate_key_ready():
-                raise PublicError("Longer Kling clips need Replicate preparation configured by an administrator.",
+            if defaults.get("sam_provider", defaults.get("preparation_provider")) == "meta":
+                from .meta_credentials import meta_key_ready
+                ready = meta_key_ready()
+            else:
+                from .preparation_credentials import replicate_key_ready
+                ready = replicate_key_ready()
+            if not ready:
+                raise PublicError("Longer Kling clips need a hosted SAM provider configured by an administrator.",
                                   409, code="kling_preparation_unavailable")
 
 
-def generation_snapshot(setup, *, kling_audio_processing=False):
+def generation_snapshot(setup, *, kling_audio_processing=False, sam_provider=None):
     model = generation_model(setup)
     snapshot = {"generation_model": model, "generation_resolution": generation_resolution(setup)}
     if model == KLING:
@@ -61,7 +66,9 @@ def generation_snapshot(setup, *, kling_audio_processing=False):
         from .cloudflare_credentials import cloudflare_key_ready
         snapshot.update(prompt_variant="cloudflare_identity_v1" if cloudflare_key_ready() else "identity_colors_v1",
                         matching_no_review=False)
-        if round(setup.trim[1] - setup.trim[0], 6) > 15:
+        if round(setup.trim[1] - setup.trim[0], 6) > 15 and sam_provider != "meta":
             from .replicate_preparation import preparation_snapshot
             snapshot.update(preparation_snapshot("replicate", enhanced_masking=True))
+            if sam_provider is not None:
+                snapshot["sam_provider"] = "replicate"
     return snapshot

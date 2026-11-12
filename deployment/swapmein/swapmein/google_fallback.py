@@ -16,6 +16,7 @@ NORMAL_FIELDS = frozenset({
     "retry_missing_masks_with_sam", "depth_guidance", "guide_style_version",
     "depth_overlay_opacity", "depth_identity_colors_version", "face_mesh",
     "preparation_provider", "replicate_model_versions", "replicate_credential_version",
+    "sam_provider", "meta_model", "meta_credential_version", "meta_max_api_cost_usd",
     "restore_original_audio",
 })
 

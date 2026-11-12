@@ -27,6 +27,7 @@ export function AdminPage() {
   const [selectedEmail, setSelectedEmail] = useState("");
   const permissions: StaffPermission[] = admin?.permissions ?? (admin?.role === "owner" ? ["pricing", "grant_credits", "manage_staff", "service_controls", "pipeline_settings", "provider_key", "api_key_access"] : admin?.role === "pricing_admin" ? ["pricing"] : []);
   const can = (permission: StaffPermission) => permissions.includes(permission);
+  const samProvider = admin?.pipeline?.sam_provider ?? admin?.pipeline?.preparation_provider ?? "workers";
   const [privateKey, setPrivateKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
   const [cloudflareKey, setCloudflareKey] = useState("");
@@ -188,6 +189,28 @@ export function AdminPage() {
                 Google starts for queued work and stops when idle. If Google reports unavailable GPU capacity before rendering, the job restarts normal API preparation, including SAM when enabled, using the normal route’s settings.
               </Typography>}
           </Box>
+          <FormControl disabled={busy || !can("pipeline_settings")}>
+            <FormLabel id="sam-provider-label">SAM mask provider</FormLabel>
+            <RadioGroup aria-labelledby="sam-provider-label" value={samProvider} onChange={(event) => {
+              const provider = event.target.value;
+              if ((provider !== "workers" && provider !== "replicate" && provider !== "meta") || busy || !can("pipeline_settings")
+                  || provider === "meta" && !admin.pipeline?.meta_api_key_configured && samProvider !== "meta"
+                  || provider === "replicate" && !admin.pipeline?.replicate_api_key_configured && samProvider !== "replicate") return;
+              void run(async () => {
+                const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, sam_provider: provider});
+                setAdmin(current => current ? {...current, pipeline} : current);
+                setMessage(`${provider === "workers" ? "Our workers" : provider === "meta" ? "Meta" : "Replicate"} selected for SAM masks in new jobs. Existing jobs keep their saved SAM provider.`);
+              });
+            }}>
+              <FormControlLabel value="workers" control={<Radio />} label="Our workers" />
+              <FormControlLabel value="replicate" control={<Radio />} label="Replicate"
+                disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && samProvider !== "replicate")} />
+              <FormControlLabel value="meta" control={<Radio />} label="Meta"
+                disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.meta_api_key_configured && samProvider !== "meta")} />
+            </RadioGroup>
+          </FormControl>
+          <Typography variant="body2" color="text.secondary">For normal-route jobs, selects SAM masks and mask retries independently of depth. Meta prepares whole-body masks for selected people in MiniMax and Kling jobs, including 30-second Kling clips. Existing jobs keep their saved SAM provider.</Typography>
+          <Typography variant="body2" color="text.secondary">Meta API key: {admin.pipeline?.meta_api_key_configured ? "Configured on the server" : "Not configured. Configure the server key before selecting Meta."}</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
             disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}
             onChange={(event) => {
@@ -195,11 +218,11 @@ export function AdminPage() {
               void run(async () => {
                 const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, preparation_provider: provider});
                 setAdmin(current => current ? {...current, pipeline} : current);
-                setMessage(`${provider === "replicate" ? "Replicate" : "Our workers"} selected for preparation of new jobs. Existing jobs keep their saved provider.`);
+                setMessage(`${provider === "replicate" ? "Replicate" : "Our workers"} selected for depth processing of new jobs. Existing jobs keep their saved provider.`);
               });
-            }} />} label="Use Replicate for SAM and depth" />
-          <Typography variant="body2" color="text.secondary">For normal-route jobs, routes SAM masks, mask retries, and enabled depth processing through Replicate. Off uses our workers. Existing jobs keep their saved provider.</Typography>
-          {!admin.pipeline?.replicate_api_key_configured && <Typography variant="body2" color="text.secondary">Save a Replicate API key under System API key before enabling.</Typography>}
+            }} />} label="Use Replicate for depth" />
+          <Typography variant="body2" color="text.secondary">For normal-route jobs, routes enabled depth processing through Replicate. Off uses our workers. This does not change the SAM provider. Existing jobs keep their saved depth provider.</Typography>
+          {!admin.pipeline?.replicate_api_key_configured && <Typography variant="body2" color="text.secondary">Save a Replicate API key under System API key before selecting Replicate.</Typography>}
           <FormControl disabled={busy || !can("pipeline_settings")}>
             <FormLabel id="prompt-variant-label">Generation prompts</FormLabel>
             <RadioGroup aria-labelledby="prompt-variant-label" value={admin.pipeline?.prompt_variant ?? "cloudflare_identity_v1"} onChange={(event) => {

@@ -76,7 +76,7 @@ def assert_no_tracking_preview(job, cloud, previews):
 def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, legacy=False,
             background_tap=False, no_people=False, preparation_provider="workers", spending_protected=True, depth_guidance=True, face_mesh=False, guide_style_version=1, prompt_variant=None, matching_no_review=False, preview_available=True,
             depth_overlay_opacity=None, depth_identity_colors_version=None, google_fallback=False, generation_model="minimax-h3",
-            generation_resolution="768P"):
+            generation_resolution="768P", sam_provider=None, meta_seed_error=None):
     job_id, path = "f" * 32, f"jobs/{'f' * 32}.json"
     targets = [{"id": "person-1", "name": "Left", "reference_index": 0,
                 "anchor": {"x": .25, "y": .5, "time": 1}}]
@@ -206,6 +206,26 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
                 return {}
             yield invoke
     records, cloud = Records(), Cloud()
+    if sam_provider is not None:
+        records.data[path]["sam_provider"] = sam_provider
+    if sam_provider == "meta":
+        from types import SimpleNamespace
+        cloud.meta_calls = []
+        class MetaPreparation:
+            def __init__(self, saved_records, saved_cloud, job):
+                assert saved_records is records and saved_cloud is cloud
+                self.http = SimpleNamespace(close=lambda: None)
+        def meta_prepare(adapter, root, rgb, checked, normalized_metadata, selected, remaining, *, replace_all_people=False):
+            assert rgb.read_bytes() == media["sam"].read_bytes()
+            assert checked == media["geometry"]
+            assert normalized_metadata["frames"] == checked["frames"]
+            cloud.meta_calls.append((checked, selected, replace_all_people))
+            if meta_seed_error:
+                raise PublicError("Select the person clearly.", 409, code=meta_seed_error)
+            return {"masks_uri": cloud.worker_output({}, "meta-sam", "masks.zip"),
+                    "seed_manifest": {"selected": len(selected)}}
+        monkeypatch.setattr("swapmein.meta_preparation.MetaPreparation", MetaPreparation)
+        monkeypatch.setattr("swapmein.meta_seeds.prepare_meta_masks", meta_prepare)
     if google_fallback:
         from google.api_core.exceptions import PreconditionFailed
         token = "e" * 32
@@ -236,10 +256,15 @@ def harness(monkeypatch, media, *, easy, enhanced, selection, audio_processing, 
         def __init__(self, saved_records, saved_cloud, job):
             assert (enhanced or face_mesh or prompt_variant == "cloudflare_identity_v1") and saved_records is records and saved_cloud is cloud
             assert job["preparation_provider"] == "replicate"
-        def prepare(self, root, checked, sam_metadata, source_uri, sam_uri, remaining):
+            from types import SimpleNamespace
+            self.http = SimpleNamespace(close=lambda: None)
+        def prepare(self, root, checked, sam_metadata, source_uri, sam_uri, remaining, *, include_sam=True):
             assert cloud.objects[source_uri] == media["working"].read_bytes()
-            assert cloud.objects[sam_uri] == media["sam"].read_bytes()
-            assert cloud.objects[sam_uri] != media["depth"].read_bytes()
+            if include_sam:
+                assert cloud.objects[sam_uri] == media["sam"].read_bytes()
+                assert cloud.objects[sam_uri] != media["depth"].read_bytes()
+            else:
+                assert sam_uri is None
             assert checked["frames"] == sam_metadata["frames"] == 96
             cloud.replicate_calls.append((source_uri, sam_uri))
             return {"depth_uri": cloud.worker_output({}, "hosted-depth", "depth.mp4") if depth_guidance else None,

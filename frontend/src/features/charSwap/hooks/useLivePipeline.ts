@@ -313,6 +313,10 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
       return false;
     }
     const required = active.tracking_segments?.filter((segment) => segment.needs_review) ?? [];
+    if (active.meta_seed_review && choices.some((choice) => choice.absent)) {
+      setError("Select each person so we can build their full-body mask.");
+      return false;
+    }
     if (required.length !== choices.length || new Set(choices.map((choice) => choice.segment_id)).size !== required.length || required.some((segment) => {
       const choice = choices.find((item) => item.segment_id === segment.id);
       if (!choice || typeof choice.absent !== "boolean") return true;
@@ -332,9 +336,9 @@ export function useLivePipeline(apiKey: string, provider: GenerationProvider = "
     try {
       const access = await ensureSession(controller.signal, true);
       const next = await resolveLiveTracking(active.id, access.token, active.tracking_revision, choices, controller.signal,
-        {enabled: active.mask_style !== "none" || active.settings_used?.face_mesh === true,
-          key: active.generation_destination === "google_h3" || active.generation_destination === "paperspace_h3" ? undefined : apiKey,
-          generateAfterReview: true});
+        {enabled: !active.meta_seed_review && (active.mask_style !== "none" || active.settings_used?.face_mesh === true),
+          key: active.meta_seed_review || active.generation_destination === "google_h3" || active.generation_destination === "paperspace_h3" ? undefined : apiKey,
+          generateAfterReview: !active.meta_seed_review});
       if (controller.signal.aborted || epoch.current !== version) return false;
       preparationStartedAt.current = Date.now();
       setPreparationElapsedSeconds(0);

@@ -132,6 +132,16 @@ class Pipeline:
                 self.update_job(job_id, duration_audit=duration_audit)
                 emit("duration_prepared", job_id=job_id, **duration_audit)
                 metadata["anchor"].setdefault("time", metadata["anchor"].get("frame", 0) / 24)
+                if job.get("sam_provider") == "meta" and job.get("meta_seed_overrides"):
+                    # Source-only recovery corrects normalized selections, not
+                    # the original upload or its trim/letterbox transform.
+                    corrected = {target["id"]: target["anchor"] for target in job["meta_seed_overrides"]}
+                    if metadata.get("targets"):
+                        metadata["targets"] = [{**target, "anchor": corrected.get(target["id"], target["anchor"])}
+                                               for target in metadata["targets"]]
+                        metadata["anchor"] = metadata["targets"][0]["anchor"]
+                    elif "person" in corrected:
+                        metadata["anchor"] = corrected["person"]
                 if not options.easy_mode:
                     metadata["review_all_scenes"] = True
                     metadata["review_shots_only"] = True
@@ -186,13 +196,42 @@ class Pipeline:
                     depth_uri = None
                     emit("preparation_depth_mode", job_id=job_id, depth_guidance=depth_enabled)
                     sam_run = "sm-sam-" + job_id
-                    if job.get("preparation_provider", "workers") == "replicate":
+                    sam_metadata = metadata
+                    depth_provider = job.get("preparation_provider", "workers")
+                    sam_provider = job.get("sam_provider", depth_provider)
+                    if sam_provider == "meta":
+                        from .meta_preparation import MetaPreparation
+                        from .meta_seeds import prepare_meta_masks
+                        self.cloud.check_cap()
+                        sam_input = root / "sam-input.mp4"
+                        sam_metadata = sam_input_video(normalized, sam_input)
+                        adapter = MetaPreparation(self.records, self.cloud, job)
+                        try:
+                            prepared = prepare_meta_masks(adapter, root, sam_input, sam_metadata, metadata,
+                                targets or [{"id": "person", "name": options.target_name, "reference_index": 0,
+                                             "anchor": metadata["anchor"]}], remaining,
+                                replace_all_people=options.replace_all_people)
+                        except PublicError as error:
+                            if error.code not in {"meta_seed_not_found", "meta_seed_ambiguous"}:
+                                raise
+                            self.enter_meta_seed_review(job, normalized, metadata, targets, root, error)
+                            return
+                        finally:
+                            adapter.http.close()
+                        masks_uri = prepared["masks_uri"]
+                        self.update_job(job_id, meta_seed_manifest=prepared.get("seed_manifest"),
+                            meta_seed_review=False, meta_seed_error=None)
+                        emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
+                             height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
+                             source="normalized_rgb", sam_provider="meta")
+                    elif sam_provider == "replicate":
                         # Composition still uses our CPU worker. Do not pay for
                         # external masks/depth if its spending guard is unavailable.
                         self.cloud.check_cap()
                         # Instantiate (and validate credentials) before creating
                         # any paid prediction. Masking-off never enters here.
-                        hosted = ReplicatePreparation(self.records, self.cloud, {**job, "depth_guidance": depth_enabled})
+                        hosted = ReplicatePreparation(self.records, self.cloud, {**job,
+                            "depth_guidance": depth_enabled and depth_provider == "replicate"})
                         sam_input = root / "sam-input.mp4"
                         sam_metadata = sam_input_video(normalized, sam_input)
                         sam_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "sam-input.mp4", sam_input, "video/mp4")
@@ -201,10 +240,10 @@ class Pipeline:
                         emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
                              height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
                              source="normalized_rgb", preparation_provider="replicate")
-                    elif job.get("preparation_provider", "workers") == "workers":
+                    elif sam_provider == "workers":
                         with self.cloud.worker("gpu") as invoke:
                             if options.preparation_version >= 2:
-                                if depth_enabled:
+                                if depth_enabled and depth_provider == "workers":
                                     depth_run = "sm-depth-" + job_id
                                     depth_result = invoke("/benchmark", {"input_uri": source_uri, "run_id": depth_run, "operation": "depth"}, remaining())
                                     depth_uri = self.cloud.worker_output(depth_result, depth_run, "depth.mp4")
@@ -218,12 +257,31 @@ class Pipeline:
                                      height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
                                      source="normalized_rgb")
                             else:
-                                result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both" if depth_enabled else "sam"}, remaining())
-                                if depth_enabled:
+                                result = invoke("/benchmark", {"input_uri": source_uri, "run_id": sam_run, "operation": "both" if depth_enabled and depth_provider == "workers" else "sam"}, remaining())
+                                if depth_enabled and depth_provider == "workers":
                                     depth_uri = self.cloud.worker_output(result, sam_run, "depth.mp4")
                         masks_uri = self.cloud.worker_output(result, sam_run, "masks.zip")
                     else:
                         raise PublicError("This job's preparation provider is unavailable.", 503)
+                    # SAM and optional depth are independent. In particular a
+                    # hosted mask run must not start our GPU when depth is off.
+                    if depth_enabled and sam_provider != depth_provider:
+                        if depth_provider == "replicate":
+                            hosted_depth = ReplicatePreparation(self.records, self.cloud, {**job, "depth_guidance": True})
+                            try:
+                                depth = hosted_depth.prepare(root, metadata, sam_metadata, source_uri, None,
+                                                             remaining, include_sam=False)
+                                depth_uri = depth["depth_uri"]
+                            finally:
+                                hosted_depth.http.close()
+                        elif depth_provider == "workers":
+                            with self.cloud.worker("gpu") as invoke:
+                                depth_run = "sm-depth-" + job_id
+                                depth = invoke("/benchmark", {"input_uri": source_uri,
+                                    "run_id": depth_run, "operation": "depth"}, remaining())
+                                depth_uri = self.cloud.worker_output(depth, depth_run, "depth.mp4")
+                        else:
+                            raise PublicError("This job's depth provider is unavailable.", 503)
                     masks = root / "masks.zip"
                     self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
                     if options.preparation_version >= 2:
@@ -269,8 +327,11 @@ class Pipeline:
                                     effective_prompt_variant="identity_tint_tracking_v1")
                                 fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
                                 if tracking_needed:
-                                    masks_uri, label, coverage, targets = self.prepare_easy_selection(
+                                    selection = self.prepare_easy_selection(
                                         job, options, masks, masks_uri, metadata, targets, root, remaining)
+                                    if selection is None:
+                                        return
+                                    masks_uri, label, coverage, targets = selection
                                 else:
                                     label, coverage = None, []
                                 job = self.update_job(job_id, normalized_targets=targets, target_styles=targets if multi else [])
@@ -295,8 +356,11 @@ class Pipeline:
                                 normalized_targets=targets, target_styles=targets if multi else [])
                             fill_mode, mask_style = guide_style(job, options.enhanced_character_masking, multi)
                     elif options.easy_mode and not options.replace_all_people:
-                        masks_uri, label, coverage, targets = self.prepare_easy_selection(
+                        selection = self.prepare_easy_selection(
                             job, options, masks, masks_uri, metadata, targets, root, remaining)
+                        if selection is None:
+                            return
+                        masks_uri, label, coverage, targets = selection
                     elif options.replace_all_people:
                         combined = root / "all-people-masks.zip"
                         detection_summary = {}
@@ -342,7 +406,7 @@ class Pipeline:
                     # review, while successful Easy jobs never consume it.
                     review_required = bool(plan and plan["review_required"])
                     if tracking_needed and (not options.easy_mode or review_required):
-                        if review_required or job.get("preparation_provider", "workers") == "replicate":
+                        if review_required or sam_provider != "workers":
                             selection_preview = root / "selection-preview.mp4"
                             create_selection_preview(normalized, masks, selection_preview, metadata)
                             preview = self.cloud.upload(self.settings.app_bucket,
@@ -405,7 +469,7 @@ class Pipeline:
                     self.save_scene_thumbnails(job_id, normalized, root, plan, job)
                     tracking_fields = {"tracking_plan": plan, "tracking_metadata": metadata,
                         "tracking_masks_uri": raw_masks_uri, "tracking_depth_uri": depth_input,
-                        "tracking_vocals_uri": vocals_input, "tracking_revision": 1,
+                        "tracking_vocals_uri": vocals_input, "tracking_revision": job.get("tracking_revision", 0) + 1,
                         "tracking_reviewed": False}
                     if plan["review_required"]:
                         review_message = "Match your person in the flagged sections before the guide is built."
@@ -478,7 +542,7 @@ class Pipeline:
                     self.save_scene_thumbnails(job_id, normalized, root, plan, job)
                     self.update_job(job_id, status="tracking_review", guide_uri=guide_uri,
                         normalized_anchor=metadata["anchor"], normalized_targets=scene_targets,
-                        tracking_plan=plan, tracking_metadata=metadata, tracking_revision=1,
+                        tracking_plan=plan, tracking_metadata=metadata, tracking_revision=job.get("tracking_revision", 0) + 1,
                         tracking_reviewed=False, tracking_performed=False, mask_style="none",
                         tracking_uri=None, selected_label=None, mask_frames=0, tracking_continuous=False,
                         scene_cut_count=len(metadata.get("scene_cuts", [])), review_required=True,
@@ -507,12 +571,14 @@ class Pipeline:
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
                 auto_key_ciphertext=None, generation_after_review_revision=None,
                 tracking_review_error=job.get("preparation_kind") == "tracking_rebuild",
-                tracking_error_segment_id=getattr(error, "segment_id", None), message=error.message)
+                tracking_error_segment_id=getattr(error, "segment_id", None), message=error.message,
+                public_preparation_failure=job.get("preparation_kind") != "tracking_rebuild")
         except Exception as error:
             emit("pipeline_failed", error=error, job_id=job_id)
             self.update_job(job_id, status="tracking_review" if job.get("preparation_kind") == "tracking_rebuild" else "failed",
                 auto_key_ciphertext=None, generation_after_review_revision=None,
                 tracking_review_error=job.get("preparation_kind") == "tracking_rebuild", tracking_error_segment_id=None,
+                public_preparation_failure=False,
                 message="Your choices are saved, but applying them failed. Review and submit them again; no generation was submitted."
                     if job.get("preparation_kind") == "tracking_rebuild" else "Preparation failed. No provider generation was submitted.")
         finally:
@@ -537,9 +603,48 @@ class Pipeline:
                     return current
                 self.records.update("control/preparation.json", retain)
 
+    def enter_meta_seed_review(self, job, normalized, metadata, targets, root, error):
+        """Keep a failed automatic tap lookup editable before any video request.
+
+        This source-only plan deliberately spans the entire trim once per
+        character. It corrects initial selections; the next preparation detects
+        the real cuts again and still performs normal scene/identity validation.
+        """
+        from .scene_selection import analyze
+        people = targets or [{"id": "person", "name": job["setup"].get("target_name", "Person 1"),
+                             "reference_index": 0, "anchor": metadata["anchor"]}]
+        review_metadata = {**metadata, "scene_cuts": [], "targets": people}
+        plan = analyze(review_metadata, people)
+        uri = self.cloud.upload(self.settings.app_bucket,
+            preparation_prefix(job, "app") + f"seed-review-{uuid.uuid4().hex}.mp4", normalized, "video/mp4")
+        self.save_scene_thumbnails(job["id"], normalized, root, plan, job)
+        self.update_job(job["id"], status="tracking_review", guide_uri=None,
+            tracking_uri=uri, tracking_masks_uri=None, tracking_plan=plan,
+            tracking_metadata=review_metadata, tracking_revision=job.get("tracking_revision", 0) + 1,
+            tracking_reviewed=False, tracking_performed=False, review_required=True,
+            normalized_targets=people, mask_style="none", meta_seed_review=True,
+            tracking_choices=[],
+            meta_seed_error=error.code, tracking_review_error=False, tracking_error_segment_id=None,
+            message="We could not identify a full person at an initial tap. Select each character clearly in the video, then build their masks. Your uploads are saved; no generation was submitted.")
+        emit("meta_seed_review_required", job_id=job["id"], public_code=error.code,
+             target_count=len(people), video_submission_started=False)
+
     def prepare_easy_selection(self, job, options, masks, masks_uri, metadata, targets, root, remaining):
         """Common Option 5 mask path, also used by the opt-in matching fallback."""
         if options.preparation_version >= 2:
+            if job.get("sam_provider", job.get("preparation_provider", "workers")) == "meta":
+                selected = targets or [{"id": "person", "name": options.target_name,
+                    "reference_index": 0, "anchor": metadata["anchor"]}]
+                permissive = {**metadata, "allow_unmatched_anchor": True, "review_all_scenes": True}
+                tracks = selected_tracks(masks, permissive, selected, allow_unmatched=True)
+                if any(target["selected_label"] == 0 for target in tracks):
+                    # Initial Meta processing has one approved budget. A miss
+                    # must stay editable, not silently buy another recovery
+                    # batch or continue to an automatically submitted guide.
+                    self.enter_meta_seed_review(job, root / "normalized.mp4", metadata, targets, root,
+                        PublicError("Select the missing person clearly before continuing.", 409,
+                                    code="meta_initial_anchor_review"))
+                    return None
             from .initial_mask_recovery import recover_initial_selection
             recovery_job = job
             if job.get("matching_fallback_used") and job.get("identity_anchor_recovery_attempted"):

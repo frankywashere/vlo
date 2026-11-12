@@ -32,12 +32,6 @@ def test_upload_completion_pins_replicate_for_saved_prompt_not_changed_admin_pro
                             replace_all_people=replace_all)
     if replace_all:
         request["setup"]["anchor"] = None
-    ticket = client.post("/api/uploads", headers=headers, json=request)
-    assert ticket.status_code == 201, ticket.text
-
-    # This is a real interval between reserving signed uploads and finalizing
-    # them. The prompt is snapshotted at ticket creation, unlike new-job defaults.
-    records.data[PATH] = {**defaults, "revision": 2, "prompt_variant": current_variant}
     needs_sam = enhanced or mesh or (saved_variant == "cloudflare_identity_v1" and easy and not replace_all)
     versions_requested = []
     version = "projects/project/secrets/recastfx-replicate-key/versions/2"
@@ -46,13 +40,23 @@ def test_upload_completion_pins_replicate_for_saved_prompt_not_changed_admin_pro
         versions_requested.append(version)
         return version
     monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version", credential_version)
+    ticket = client.post("/api/uploads", headers=headers, json=request)
+    assert ticket.status_code == 201, ticket.text
+    assert versions_requested == ([version] if needs_sam else [])
+
+    # This is a real interval between reserving signed uploads and finalizing
+    # them. Both prompt and credential version are pinned before upload storage;
+    # changing defaults or rotating a key cannot reinterpret an accepted ticket.
+    records.data[PATH] = {**defaults, "revision": 2, "prompt_variant": current_variant}
+    monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version",
+        lambda: pytest.fail("Upload completion must reuse the ticket's credential snapshot"))
 
     response = client.post(f"/api/uploads/{ticket.json()['id']}/complete", headers=headers)
     assert response.status_code == 202, response.text
     job = records.data[f"jobs/{response.json()['id']}.json"]
     assert job["prompt_variant"] == saved_variant
     assert job["face_mesh"] is mesh and job["preparation_provider"] == "replicate"
-    assert bool(versions_requested) is needs_sam
+    assert versions_requested == ([version] if needs_sam else [])
     if needs_sam:
         assert job["replicate_model_versions"] == MODELS
         assert job["replicate_credential_version"] == version

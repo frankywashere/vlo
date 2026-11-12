@@ -76,6 +76,26 @@ def report(records, start, end):
                 "detail": "Video generation", "job_id": job.get("id")})
             identities.add((provider, ref))
     for job in jobs:
+        for operation, state in job.get("meta_preparation", {}).items():
+            if not isinstance(state, dict):
+                continue
+            ref = state.get("finance_reference")
+            if not ref or ("Meta", ref) in identities:
+                continue
+            cost = None
+            if state.get("stream_complete") is True:
+                usage = state.get("usage") or {}
+                frames = usage.get("video_frames_processed", state.get("expected_frames"))
+                if state.get("mode") == "video" and type(frames) is int and 0 <= frames <= 1000000:
+                    cost = float(Decimal(max(50, frames)) * Decimal("0.0002"))
+                elif state.get("mode") == "image":
+                    cost = .0025
+            expenses.append({"id": ref, "provider": "Meta", "reference": ref,
+                "at": state.get("submitted_at", job.get("created_at", 0)), "amount": cost,
+                "currency": "USD", "basis": "estimated" if cost is not None else "unavailable",
+                "detail": f"SAM 3.1 {state.get('mode', 'segmentation')}: {operation}", "job_id": job.get("id")})
+            identities.add(("Meta", ref))
+    for job in jobs:
         for operation, state in job.get("replicate_predictions", {}).items():
             ref = state.get("id")
             if ref and ("Replicate", ref) not in identities:

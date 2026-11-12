@@ -26,7 +26,9 @@ beforeEach(() => {
   api.permissions = undefined;
   api.ready = false;
   api.pipeline.mockReset().mockImplementation(async (settings) => {
-    api.pipelineSettings = {audio_processing: false, ...api.pipelineSettings, ...settings, revision: settings.revision + 1};
+    // The server snapshots the legacy effective SAM provider before depth changes.
+    const sam_provider = api.pipelineSettings?.sam_provider ?? api.pipelineSettings?.preparation_provider ?? "workers";
+    api.pipelineSettings = {audio_processing: false, ...api.pipelineSettings, sam_provider, ...settings, revision: settings.revision + 1};
     return api.pipelineSettings;
   });
   api.replicateKey.mockReset().mockImplementation(async () => {
@@ -127,12 +129,12 @@ it("does not let pricing staff change audio behavior", async () => {
 it("puts the Replicate switch in Experimental and securely saves its key under System API key", async () => {
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeDisabled();
   expect(screen.getByText("Replicate API key: Not configured")).toBeInTheDocument();
   const experimental = screen.getByRole("heading", {name: "Experimental"}).closest("details")!;
   const systemKeys = screen.getByRole("heading", {name: "System API key"}).closest("details")!;
-  expect(within(experimental).getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+  expect(within(experimental).getByRole("switch", {name: "Use Replicate for depth"})).not.toBeChecked();
   const keyField = within(systemKeys).getByLabelText("Replicate API key");
   expect(keyField).toHaveAttribute("type", "password");
   expect(keyField).toHaveValue("");
@@ -143,26 +145,26 @@ it("puts the Replicate switch in Experimental and securely saves its key under S
   expect(keyField).toHaveValue("");
   expect(screen.queryByText("test-replicate-secret")).not.toBeInTheDocument();
   expect(screen.getByText("Replicate API key: Configured")).toBeInTheDocument();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeEnabled();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).not.toBeChecked();
   expect(api.pipeline).not.toHaveBeenCalled();
 });
 
-it("switches the new-job preparation provider without resetting audio or submitting a job", async () => {
+it("switches the new-job depth provider without resetting audio or submitting a job", async () => {
   api.pipelineSettings = {revision: 3, audio_processing: true, preparation_provider: "workers", replicate_api_key_configured: true};
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
-  await screen.findByText(/Replicate selected for preparation of new jobs/);
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for depth"}));
+  await screen.findByText(/Replicate selected for depth processing of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
   expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeChecked();
   await user.click(screen.getByRole("switch", {name: "Enable MiniMax audio processing"}));
   await screen.findByText(/MiniMax audio processing disabled for new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, audio_processing: false});
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
-  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
-  await screen.findByText(/Our workers selected for preparation of new jobs/);
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeChecked();
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for depth"}));
+  await screen.findByText(/Our workers selected for depth processing of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, preparation_provider: "workers"});
   expect(api.replicateKey).not.toHaveBeenCalled();
   expect(api.grant).not.toHaveBeenCalled();
@@ -174,11 +176,11 @@ it("separates routing permission from permission to replace Replicate credential
   api.pipelineSettings = {revision: 0, audio_processing: false, preparation_provider: "workers", replicate_api_key_configured: true};
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeEnabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeEnabled();
   expect(screen.getByLabelText("Replicate API key")).toBeDisabled();
   expect(screen.getByRole("button", {name: "Save Replicate key"})).toBeDisabled();
-  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
-  await screen.findByText(/Replicate selected for preparation of new jobs/);
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for depth"}));
+  await screen.findByText(/Replicate selected for depth processing of new jobs/);
   expect(api.replicateKey).not.toHaveBeenCalled();
 });
 
@@ -187,8 +189,8 @@ it("keeps configured Replicate routing read-only without staff routing permissio
   api.permissions = ["provider_key"];
   api.pipelineSettings = {revision: 0, audio_processing: false, preparation_provider: "replicate", replicate_api_key_configured: true};
   await renderExpandedAdmin();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeDisabled();
   expect(screen.getByLabelText("Replicate API key")).toBeEnabled();
   expect(screen.getByLabelText("Replicate API key")).toHaveValue("");
   expect(api.pipeline).not.toHaveBeenCalled();
@@ -199,19 +201,19 @@ it("keeps the saved provider selected when routing cannot be saved", async () =>
   api.pipeline.mockRejectedValueOnce(new Error("Settings changed. Refresh and try again."));
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  await user.click(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"}));
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for depth"}));
   await screen.findByText("Settings changed. Refresh and try again.");
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).not.toBeChecked();
 });
 
-it.each([true, false])("switches preparation provider independently with depth=%s and preserves face mesh", async (depth_guidance) => {
+it.each([true, false])("switches depth provider independently with depth=%s and preserves face mesh", async (depth_guidance) => {
   api.pipelineSettings = {revision: 3, audio_processing: true, depth_guidance, face_mesh_enabled: true, preparation_provider: "workers", replicate_api_key_configured: true};
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  const toggle = screen.getByRole("switch", {name: "Use Replicate for SAM and depth"});
+  const toggle = screen.getByRole("switch", {name: "Use Replicate for depth"});
   const depthToggle = screen.getByRole("switch", {name: "Add depth to person masks"});
   await user.click(toggle);
-  await screen.findByText(/Replicate selected for preparation of new jobs/);
+  await screen.findByText(/Replicate selected for depth processing of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
   expect(toggle).toBeChecked();
   expect(depthToggle).toHaveProperty("checked", depth_guidance);
@@ -221,7 +223,7 @@ it.each([true, false])("switches preparation provider independently with depth=%
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, depth_guidance: !depth_guidance});
   expect(toggle).toBeChecked();
   await user.click(toggle);
-  await screen.findByText(/Our workers selected for preparation of new jobs/);
+  await screen.findByText(/Our workers selected for depth processing of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 5, preparation_provider: "workers"});
   expect(toggle).not.toBeChecked();
   expect(depthToggle).toHaveProperty("checked", !depth_guidance);
@@ -231,14 +233,116 @@ it.each([true, false])("switches preparation provider independently with depth=%
 it("allows disabling Replicate if its saved key becomes unavailable", async () => {
   api.pipelineSettings = {revision: 2, audio_processing: false, preparation_provider: "replicate", replicate_api_key_configured: false};
   await renderExpandedAdmin();
-  const toggle = screen.getByRole("switch", {name: "Use Replicate for SAM and depth"});
+  const toggle = screen.getByRole("switch", {name: "Use Replicate for depth"});
   expect(toggle).toBeChecked();
   expect(toggle).toBeEnabled();
   await userEvent.click(toggle);
-  await screen.findByText(/Our workers selected for preparation of new jobs/);
+  await screen.findByText(/Our workers selected for depth processing of new jobs/);
   expect(toggle).not.toBeChecked();
   expect(toggle).toBeDisabled();
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 2, preparation_provider: "workers"});
+});
+
+it("saves Meta SAM independently of depth, audio, mesh and generation destination", async () => {
+  api.pipelineSettings = {revision: 6, audio_processing: true, face_mesh_enabled: true,
+    preparation_provider: "replicate", sam_provider: "workers", meta_api_key_configured: true,
+    replicate_api_key_configured: true, multi_person_generation_route: "paperspace_h3",
+    self_hosted_workers: {paperspace_h3: {ready: true}}};
+  const user = userEvent.setup();
+  await renderExpandedAdmin();
+  const sam = screen.getByRole("radiogroup", {name: "SAM mask provider"});
+  expect(within(sam).getByRole("radio", {name: "Our workers"})).toBeChecked();
+  expect(screen.getByText(/Meta prepares whole-body masks for selected people in MiniMax and Kling jobs/)).toHaveTextContent("30-second Kling clips");
+  await user.click(within(sam).getByRole("radio", {name: "Meta"}));
+  await screen.findByText(/Meta selected for SAM masks in new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 6, sam_provider: "meta"});
+  expect(within(sam).getByRole("radio", {name: "Meta"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Enable face mesh"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Multi-person swaps: Paperspace CharacterSwap"})).toBeChecked();
+  await user.click(screen.getByRole("switch", {name: "Use Replicate for depth"}));
+  await screen.findByText(/Our workers selected for depth processing of new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 7, preparation_provider: "workers"});
+  expect(within(sam).getByRole("radio", {name: "Meta"})).toBeChecked();
+  expect(api.replicateKey).not.toHaveBeenCalled();
+  expect(api.grant).not.toHaveBeenCalled();
+});
+
+it("shows the legacy preparation provider as SAM and preserves it when only depth changes", async () => {
+  api.pipelineSettings = {revision: 3, audio_processing: false, preparation_provider: "replicate", replicate_api_key_configured: true};
+  await renderExpandedAdmin();
+  const sam = screen.getByRole("radiogroup", {name: "SAM mask provider"});
+  expect(within(sam).getByRole("radio", {name: "Replicate"})).toBeChecked();
+  expect(api.pipeline).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("switch", {name: "Use Replicate for depth"}));
+  await screen.findByText(/Our workers selected for depth processing of new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "workers"});
+  expect(within(sam).getByRole("radio", {name: "Replicate"})).toBeChecked();
+});
+
+it.each(["workers", "replicate"] as const)("blocks selecting Meta without a key while %s remains selected", async (sam_provider) => {
+  api.pipelineSettings = {revision: 3, audio_processing: false, preparation_provider: "workers", sam_provider,
+    replicate_api_key_configured: true, meta_api_key_configured: false};
+  await renderExpandedAdmin();
+  const sam = screen.getByRole("radiogroup", {name: "SAM mask provider"});
+  const meta = within(sam).getByRole("radio", {name: "Meta"});
+  expect(meta).toBeDisabled();
+  expect(screen.getByText(/Configure the server key before selecting Meta/)).toBeVisible();
+  fireEvent.click(meta);
+  expect(api.pipeline).not.toHaveBeenCalled();
+  expect(within(sam).getByRole("radio", {name: sam_provider === "workers" ? "Our workers" : "Replicate"})).toBeChecked();
+});
+
+it("allows leaving Meta when its saved key becomes unavailable", async () => {
+  api.pipelineSettings = {revision: 9, audio_processing: false, preparation_provider: "replicate", sam_provider: "meta",
+    replicate_api_key_configured: true, meta_api_key_configured: false};
+  await renderExpandedAdmin();
+  const sam = screen.getByRole("radiogroup", {name: "SAM mask provider"});
+  const meta = within(sam).getByRole("radio", {name: "Meta"});
+  expect(meta).toBeChecked();
+  expect(meta).toBeEnabled();
+  await userEvent.click(within(sam).getByRole("radio", {name: "Our workers"}));
+  await screen.findByText(/Our workers selected for SAM masks in new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 9, sam_provider: "workers"});
+  expect(meta).not.toBeChecked();
+  expect(meta).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeChecked();
+});
+
+it("requires pipeline permission for all SAM providers while leaving configured routing visible", async () => {
+  api.role = "viewer";
+  api.permissions = ["provider_key"];
+  api.pipelineSettings = {revision: 4, audio_processing: false, sam_provider: "meta", meta_api_key_configured: true,
+    replicate_api_key_configured: true};
+  await renderExpandedAdmin();
+  const sam = screen.getByRole("radiogroup", {name: "SAM mask provider"});
+  for (const radio of within(sam).getAllByRole("radio")) expect(radio).toBeDisabled();
+  expect(within(sam).getByRole("radio", {name: "Meta"})).toBeChecked();
+  fireEvent.click(within(sam).getByRole("radio", {name: "Our workers"}));
+  expect(api.pipeline).not.toHaveBeenCalled();
+});
+
+it("allows pipeline-only staff to change SAM without credential permission", async () => {
+  api.role = "viewer";
+  api.permissions = ["pipeline_settings"];
+  api.pipelineSettings = {revision: 4, audio_processing: false, sam_provider: "workers", meta_api_key_configured: true};
+  await renderExpandedAdmin();
+  expect(screen.getByLabelText("Replicate API key")).toBeDisabled();
+  await userEvent.click(screen.getByRole("radio", {name: "Meta"}));
+  await screen.findByText(/Meta selected for SAM masks in new jobs/);
+  expect(api.pipeline).toHaveBeenLastCalledWith({revision: 4, sam_provider: "meta"});
+  expect(api.replicateKey).not.toHaveBeenCalled();
+});
+
+it("keeps the saved SAM provider when the change fails", async () => {
+  api.pipelineSettings = {revision: 4, audio_processing: false, sam_provider: "workers", meta_api_key_configured: true};
+  api.pipeline.mockRejectedValueOnce(new Error("Settings changed. Refresh and try again."));
+  await renderExpandedAdmin();
+  await userEvent.click(screen.getByRole("radio", {name: "Meta"}));
+  await screen.findByText("Settings changed. Refresh and try again.");
+  expect(screen.getByRole("radio", {name: "Our workers"})).toBeChecked();
+  expect(screen.getByRole("radio", {name: "Meta"})).not.toBeChecked();
 });
 
 it("lets read-only staff see every section with all mutations disabled", async () => {
@@ -249,7 +353,7 @@ it("lets read-only staff see every section with all mutations disabled", async (
   for (const name of ["Save pricing", "Save system key", "Save Replicate key", "Grant credits"]) expect(screen.getByRole("button", {name})).toBeDisabled();
   expect(screen.getByLabelText("System API key")).toHaveValue("");
   expect(screen.getByLabelText("Replicate API key")).toHaveValue("");
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeDisabled();
   expect(screen.getByRole("switch", {name: "Calculate pricing from target margin"})).toBeDisabled();
   const user = userEvent.setup();
@@ -589,7 +693,7 @@ it("explains the separate CharacterSwap recipe and scopes normal preparation con
   const group = screen.getByRole("region", {name: "Multi-person generation destination"});
   expect(within(group).getByText("CharacterSwap uses its own fixed recipe, skips SAM, face mesh and depth, and restores the original audio.")).toBeVisible();
   expect(screen.getByText("Applies to new normal-route jobs in every mode. Existing jobs keep their saved prompt version.")).toBeVisible();
-  expect(screen.getByText(/For normal-route jobs, routes SAM masks, mask retries/)).toBeVisible();
+  expect(screen.getByText(/For normal-route jobs, routes enabled depth processing/)).toBeVisible();
   expect(screen.getByText(/For new normal-route jobs, if Cloudflare matching cannot complete/)).toHaveTextContent(
     "CharacterSwap still requires scene review for uncertain matches.");
   expect(screen.queryByText("Applies to new jobs in every mode. Existing jobs keep their saved prompt version.")).not.toBeInTheDocument();
@@ -613,7 +717,7 @@ it("saves one multi-person destination at a time and returns to normal when the 
   expect(google).not.toBeChecked();
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 8, multi_person_generation_route: "paperspace_h3"});
   expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
-  expect(screen.getByRole("switch", {name: "Use Replicate for SAM and depth"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "Use Replicate for depth"})).toBeChecked();
   await userEvent.click(paperspace);
   await waitFor(() => expect(paperspace).not.toBeChecked());
   expect(google).not.toBeChecked();

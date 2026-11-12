@@ -671,6 +671,7 @@ export function CharSwapWalkthrough({
                     message={pipeline.job.message}
                     initialChoices={pipeline.job.tracking_choices}
                     requireExplicitChoices={pipeline.job.generation_destination === "google_h3" || pipeline.job.generation_destination === "paperspace_h3"}
+                    metaSeedReview={pipeline.job.meta_seed_review}
                     onApply={pipeline.resolveTracking}
                     onRefresh={() => void pipeline.refresh()}
                   />

@@ -158,8 +158,10 @@ def test_unmasked_easy_option_six_snapshots_internal_sam_provider(api,monkeypatc
     from test_api import upload_options
     from swapmein.pipeline_settings import PATH as SETTINGS_PATH
     client,records,*_=api;headers,_=authenticated(api);seen=[]
-    def snapshot(provider,enhanced_masking=True):
-        seen.append((provider,enhanced_masking));return {'preparation_provider':provider,'replicate_credential_version':'frozen-version'}
+    def snapshot(provider,enhanced_masking=True,sam_provider=None,depth_guidance=None):
+        assert depth_guidance is False, 'Unmasked identity SAM must not require depth credentials'
+        seen.append((provider,enhanced_masking,sam_provider))
+        return {'preparation_provider':provider,'sam_provider':sam_provider,'replicate_credential_version':'frozen-version'}
     monkeypatch.setattr('swapmein.app.preparation_snapshot',snapshot)
     records.data[SETTINGS_PATH]={'preparation_provider':'replicate','prompt_variant':'cloudflare_identity_v1',
         'face_mesh_enabled':False,'face_mesh_masked_default':False,'face_mesh_unmasked_default':False}
@@ -173,4 +175,6 @@ def test_unmasked_easy_option_six_snapshots_internal_sam_provider(api,monkeypatc
         response=client.post('/api/jobs',headers=headers,files={'clip':('clip.mp4',b'source','video/mp4'),
             'reference':('ref.png',im.getvalue(),'image/png')},data={'setup':json.dumps(request['setup'])})
     assert response.status_code==202,response.text
-    assert seen==[('replicate',True)]
+    assert seen==[('replicate',True,'replicate')]
+    saved=records.data[f"jobs/{response.json()['id']}.json"]
+    assert saved['sam_provider']=='replicate'

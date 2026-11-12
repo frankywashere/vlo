@@ -36,6 +36,23 @@ it("updates only preparation routing without resubmitting unrelated pipeline set
   expect(JSON.parse(String(requests.mock.calls[0]?.[1]?.body))).toEqual({revision: 7, preparation_provider: "replicate"});
 });
 
+it.each(["workers", "replicate", "meta"] as const)("updates only the %s SAM provider with its revision", async (sam_provider) => {
+  await savePipelineSettings({revision: 7, sam_provider});
+  expect(requests).toHaveBeenCalledWith("/api/commerce/admin/pipeline", {
+    method: "POST",
+    headers: {"X-Firebase-Token": "account-token", "Content-Type": "application/json"},
+    body: JSON.stringify({revision: 7, sam_provider}),
+    credentials: "omit",
+    cache: "no-store",
+  });
+});
+
+it("refuses a SAM provider change before network access when signed out", async () => {
+  api.token.mockResolvedValue(null);
+  await expect(savePipelineSettings({revision: 7, sam_provider: "meta"})).rejects.toThrow("Sign in");
+  expect(requests).not.toHaveBeenCalled();
+});
+
 it.each(["current", "favorite_v2", "structured_v1", "identity_colors_v1", "identity_tint_tracking_v1", "cloudflare_identity_v1"] as const)("updates only the %s prompt version with its revision", async (prompt_variant) => {
   await savePipelineSettings({revision: 8, prompt_variant});
   expect(requests.mock.calls[0]?.[0]).toBe("/api/commerce/admin/pipeline");

@@ -90,6 +90,21 @@ afterEach(() => {
 });
 
 describe("explicit generation approval", () => {
+  it("uses the preparation-only Meta seed review action in Create", async () => {
+    const choices = [{segment_id: "seed", absent: false, anchor: {x: .4, y: .5, time: 1}}];
+    live.job = {...live.job!, status: "tracking_review", meta_seed_review: true,
+      source_preview_url: "https://storage.googleapis.com/test/source.mp4", tracking_revision: 1, tracking_choices: choices,
+      tracking_segments: [{id: "seed", start_frame: 0, end_frame: 120, start: 0, end: 5, seek_time: 1,
+        reason: "unmatched_anchor", needs_review: true}]};
+    live.resolveTracking.mockResolvedValue(true);
+    render(<CharSwapWalkthrough />);
+    expect(screen.queryByRole("button", {name: "Not in this scene"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Submit and generate"})).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", {name: "Build person masks"}));
+    expect(live.resolveTracking).toHaveBeenCalledWith(choices);
+    expect(live.generate).not.toHaveBeenCalled();
+  });
+
   it("keeps flagged-scene review and requires approval of the rebuilt guide", async () => {
     const user = userEvent.setup();
     live.job = {
@@ -123,6 +138,7 @@ describe("explicit generation approval", () => {
     });
     fireEvent.loadedMetadata(frame);
     fireEvent.seeked(frame);
+    await user.click(screen.getByRole("button", { name: "Not in this scene" }));
     await user.click(screen.getByRole("button", { name: "Submit and generate" }));
     expect(live.resolveTracking).toHaveBeenCalledWith([
       { segment_id: "segment-001", absent: true, anchor: null },

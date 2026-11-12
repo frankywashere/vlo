@@ -107,6 +107,27 @@ describe("private account library", () => {
     expect(resumeAccountJob).toHaveBeenCalledWith(job.id, "");
   });
 
+  it("saves a Meta seed selection without generating or requesting mask recovery", async () => {
+    const choices = [{segment_id: "s0", absent: false, anchor: {x: .4, y: .5, time: 1}}];
+    const saved = {...job, status: "tracking_review" as const, access_mode: "credits" as const,
+      meta_seed_review: true, mask_style: "cyan_overlay_multi_20" as const,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4, tracking_revision: 1,
+      tracking_choices: choices, tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+        seek_time: 1, needs_review: true, reason: "unmatched_anchor"}]};
+    vi.mocked(loadAccountJobs).mockResolvedValueOnce([saved]).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(resumeAccountJob).mockResolvedValue({token: "mask-session", expires_at: 9999999999});
+    vi.mocked(resolveLiveTracking).mockResolvedValue({id: saved.id, status: "queued"});
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    expect(screen.queryByRole("button", {name: "Not in this scene"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Submit and generate"})).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", {name: "Build person masks"}));
+    await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledWith(saved.id, "mask-session", 1,
+      choices, expect.any(AbortSignal), {enabled: false, key: undefined, generateAfterReview: false}));
+    expect(generateLiveJob).not.toHaveBeenCalled();
+  });
+
   it("shows actual consumer credits and refunds in completed clip settings", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "completed", access_mode: "credits",
       output_url: "https://storage.googleapis.com/result.mp4",
@@ -187,7 +208,7 @@ describe("private account library", () => {
     }]);
     render(<AccountLibrary onCreate={vi.fn()} />);
     await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
-    expect(await screen.findByText(/Masking stays off\./)).toBeVisible();
+    expect(screen.getByText("Tap the person to replace with the character above.")).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", {name: "Check scene matches", level: 1})).toBeVisible();
     await user.click(screen.getAllByRole("button", {name: "Back to Library"})[0]);
@@ -355,9 +376,9 @@ it("keeps the Library scene review free of the old warning, filename and full re
   expect(screen.queryByText("private-source.mp4")).not.toBeInTheDocument();
   expect(screen.queryByText(/We could not match an initial selection/)).not.toBeInTheDocument();
   expect(screen.queryByAltText("Person 2 replacement reference")).not.toBeInTheDocument();
-  expect(screen.getByAltText("Person 1 replacement: Reference 1")).toBeVisible();
-  expect(screen.getByRole("img", {name: "Person 1"})).toBeVisible();
-  expect(screen.getByText(/Tap the person in each box below/)).toBeVisible();
+  expect(screen.getByAltText("Replacement for Person 1")).toBeVisible();
+  expect(screen.queryByRole("img", {name: "Person 1 source selection"})).not.toBeInTheDocument();
+  expect(screen.getByText("Tap the person to replace with the character above.")).toBeVisible();
 });
 
 it("shows refresh feedback while preserving the visible Library cards", async () => {
@@ -403,6 +424,7 @@ it.each([{olderRefresh:false,meshOnly:false},{olderRefresh:true,meshOnly:false},
   await screen.findByRole("button", {name: "Check scene matches"});
   if (olderRefresh) await user.click(screen.getByRole("button", {name: "Refresh library"}));
   await user.click(screen.getByRole("button", {name: "Check scene matches"}));
+  await user.click(screen.getByRole("button", {name: "Not in this scene"}));
   await user.click(screen.getByRole("button", {name: "Submit and generate"}));
   await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledTimes(1));
   expect(vi.mocked(resolveLiveTracking).mock.calls[0][5]).toMatchObject({enabled:true,generateAfterReview:true});
@@ -448,7 +470,7 @@ it("opens and saves Option 6 fallback scene review while keeping Easy Mode and t
   await user.click(screen.getByRole("button", {name: "Check scene matches"}));
   expect(screen.getByRole("heading", {name: "Check scene matches", level: 1})).toBeVisible();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByRole("img", {name: "Person 1"})).toBeVisible();
+  expect(screen.queryByRole("img", {name: "Person 1 source selection"})).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", {name: "Submit and generate"}));
   await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledTimes(1));
   expect(resumeAccountJob).toHaveBeenCalledWith(review.id, "");

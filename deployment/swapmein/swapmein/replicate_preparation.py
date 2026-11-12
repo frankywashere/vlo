@@ -30,14 +30,29 @@ MODELS = {
 TERMINAL = {"succeeded", "failed", "canceled", "aborted"}
 
 
-def preparation_snapshot(provider, enhanced_masking=True):
+def preparation_snapshot(provider, enhanced_masking=True, sam_provider=None, depth_guidance=None):
     """Persist no token: only provider, model versions, and a scoped secret version."""
     if provider not in {"workers", "replicate"}:
         raise PublicError("Choose a supported preparation provider.")
+    if depth_guidance is not None and type(depth_guidance) is not bool:
+        raise PublicError("Choose whether depth guidance is enabled.")
     snapshot = {"preparation_provider": provider}
-    if provider == "replicate" and enhanced_masking:
+    if sam_provider is not None:
+        if sam_provider not in {"workers", "replicate", "meta"}:
+            raise PublicError("Choose a supported person-mask provider.")
+        snapshot["sam_provider"] = sam_provider
+    # Older callers omit depth_guidance and retain their coupled provider
+    # policy. Explicit depth-off must not require an unused depth credential.
+    effective_sam = sam_provider or provider
+    needs_replicate = (effective_sam == "replicate"
+                      or provider == "replicate" and depth_guidance is not False)
+    if needs_replicate and enhanced_masking:
         snapshot.update(replicate_model_versions=dict(MODELS),
                         replicate_credential_version=replicate_credential_version())
+    if sam_provider == "meta" and enhanced_masking:
+        from .meta_credentials import meta_credential_version
+        snapshot.update(meta_model="sam-3.1", meta_credential_version=meta_credential_version(),
+                        meta_max_api_cost_usd=.16)
     return snapshot
 
 
@@ -290,9 +305,9 @@ class ReplicatePreparation:
             raise PublicError("Replicate's prepared asset could not be saved safely. No new prediction was submitted.", 502) from None
 
     @timed("replicate_preparation")
-    def prepare(self, root, metadata, sam_metadata, source_uri, sam_uri, remaining):
+    def prepare(self, root, metadata, sam_metadata, source_uri, sam_uri, remaining, *, include_sam=True):
         saved = {}
-        operations = [("sam", sam_uri, sam_metadata)]
+        operations = [("sam", sam_uri, sam_metadata)] if include_sam else []
         if self.job.get("depth_guidance", True):
             operations.append(("depth", source_uri, metadata))
         for operation, uri, working_metadata in operations:
@@ -346,7 +361,7 @@ class ReplicatePreparation:
             self._update(operation, asset_uri=asset_uri, asset_verified=True,
                          output_transfer_validation_seconds=round(time.monotonic() - download_started, 6))
             saved[operation] = asset_uri
-        return {"masks_uri": saved["sam"], "depth_uri": saved.get("depth")}
+        return {"masks_uri": saved.get("sam"), "depth_uri": saved.get("depth")}
 
 
 def _metric(result, key):

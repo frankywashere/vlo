@@ -105,13 +105,15 @@ def test_new_job_snapshots_route_and_versions_without_exposing_secret_resource(a
 
 @pytest.mark.parametrize("direct", [True, False])
 def test_masked_job_missing_replicate_credentials_never_enqueues_paid_work(api, monkeypatch, direct):
-    _, records, cloud, provider = api
+    client, records, cloud, provider = api
     headers, _ = authenticated(api)
     records.data[PATH] = {"revision": 1, "preparation_provider": "replicate"}
     monkeypatch.setattr("swapmein.pipeline_settings.replicate_key_ready", lambda: False)
     def unavailable():
         raise PublicError("Replicate preparation requires an API token.", 503)
     monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version", unavailable)
-    response = create_job(api, headers, direct, True)
+    # Credentials are now pinned at ticket acceptance, before upload storage.
+    response = (client.post("/api/uploads", headers=headers, json=upload_options())
+                if direct else create_job(api, headers, direct, True))
     assert response.status_code == 503
     assert not cloud.enqueued and not provider.submissions

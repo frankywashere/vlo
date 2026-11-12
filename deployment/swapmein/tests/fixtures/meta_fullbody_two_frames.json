@@ -1,0 +1,12 @@
+{
+  "description": "Two unchanged frame records excerpted from the completed Meta SAM 3.1 full-body experiment on 2026-11-12; expected rasters are from its original official-parser export. No source photograph or credential included.",
+  "source_width": 670,
+  "source_height": 480,
+  "text": "<0f>1<|box;x1=453;y1=56;x2=622;y2=409;w=670;h=480;c=0.96875|><|mask;x=0;y=0;c=0.96875;data=354,170,!!!!#xD%kUJDP+Gl.F*Z.JxIh`_@dsB%.oF)_(Z'g%Rf%7bQe4GTPGf4?5j-O'b1zacpy!lTj5=Eh-6KUJ%DcBLFM9ZQHL]1HCZ+TUS/3JWzJKKL%/!55$*1Q/:!Y8cDw+3lm9e&L&{99JM.?]f'qu3Y8'c.p?Nk$[6mmVx8w?8`BR`gouvAiY#GMAhl3C!D`^r%mUp!s2:cIBVp%ERfxM|>,2<|box;x1=136;y1=65;x2=243;y2=386;w=670;h=480;c=0.96875|><|mask;x=0;y=0;c=0.96875;data=322,108,!!!!#tEIJQDGJ&9{@bOOJ1bgB?&)#n_D00%y:$?9=5AQSO5]=i5di[CXV`I`xW)1k0cN3:+CrtcXfslO*ve8p-VmYwPixi3hUwx`{N^uX5qI^UtjiHBJ#`j5h.m&gJ$p{g[:WYKXf^cu]AB3fpx?N0@a*L8D6(O+nM6nZ-Af^1bH?DUvX2EF`qhLaiAg16](ADyZjzE(%br^O16YL|>\n<1f>1<|box;x1=452;y1=57;x2=620;y2=409;w=670;h=480;c=0.988273024559021|><|mask;x=0;y=0;c=0.988273024559021;data=353,169,!!!!#qD)6ZL(S0ExSw@p-vvHXV[z3ZCw%h%)Nj/T#O5lK)Yy@?$vCjftfD`9(Tuc_KT?Xl(!jHvZ]T2DdVu6k'#nO)+JR7m.Dt]GhAX1$zFklQ!BDg1KHgmT+IE1-4ZXO8Y=f!3fm&gtl]sjOrB+Q[W.]T5hmcO^w:RAZxfR8=?Z-N&UJG.cthh*{WR7y4_=&(17kZi/cs+61|>,2<|box;x1=136;y1=66;x2=244;y2=387;w=670;h=480;c=0.9804631471633911|><|mask;x=0;y=0;c=0.9804631471633911;data=322,109,!!!!#oEBr?@Dd!`4OAv?-GDMvZrh`z+.FfA3cj'-K!vA7+J[&93No&-oxJC7jUa%/'h@P:kvQd)6b[j4.=-T4X7TGn1?qaFfdEWjSx_Q+pqWko!o*HWzxhPY0N)DUa^RRTspT@xFxIULc)J%pBh7^UGG(t{2RB^MK=foGAkHfLGxS1f@NFL=n.Bo'JOr6@[q$D{o.(*.ibi|>\n",
+  "expected_mask_sha256": {
+    "0:1": "d5d82f16c27bee02b7419805aa8b4e19c5bc5b29bec5af5740105456a9f382d2",
+    "0:2": "c33c245462ff7c4438ee6c9faf13ff90f0d45748f07c99eba5935ec00698f518",
+    "1:1": "924caa609dd321f70df9f7936c164524858e859b1145603e95dcaf070ddfb1d1",
+    "1:2": "4e7427b8a7a17f535e6471661955009d6b78ab512f5d5b4fbe0c1ee3d10af1a6"
+  }
+}
