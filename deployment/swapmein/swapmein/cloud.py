@@ -204,7 +204,12 @@ class Cloud:
             raise ValueError("Unknown worker")
         region = (self.settings.gpu_region or self.settings.region) if service == "gpu" else self.settings.region
         name = "proof-gpu" if service == "gpu" else getattr(self.settings, "audio_service", "proof-audio")
-        if name not in {"proof-gpu", "proof-audio", "recastfx-audio"}:
+        allowed = {"proof-gpu", "proof-audio", "recastfx-audio"}
+        if (service == "audio" and self.settings.preparation_only and self.settings.request_scaled_audio
+                and self.settings.app_bucket == self.settings.project + "-long-test"
+                and self.settings.worker_bucket == self.settings.app_bucket):
+            allowed.add("recastfx-long-cpu")
+        if name not in allowed:
             raise ValueError("Unknown worker service")
         return f"https://run.googleapis.com/v2/projects/{self.settings.project}/locations/{region}/services/{name}"
 

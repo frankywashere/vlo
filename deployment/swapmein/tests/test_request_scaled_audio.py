@@ -131,6 +131,30 @@ def test_legacy_cpu_mode_keeps_explicit_backup_and_shutdown(monkeypatch):
     assert not any(event[0] == "GET" and event[1].startswith("https://run.googleapis.com") for event in events)
 
 
+@pytest.mark.parametrize("invalid", [None, "production", "worker-bucket", "rendering-enabled", "manual-scaling"])
+def test_guide_preview_cpu_requires_its_isolated_request_scaled_configuration(monkeypatch, invalid):
+    body = state()
+    body['name'] = body['name'].replace('/proof-audio', '/recastfx-long-cpu')
+    body['uri'] = body['uri'].replace('proof-audio-', 'recastfx-long-cpu-')
+    cloud, events = audio_cloud(monkeypatch, service_state=body)
+    settings = cloud.settings
+    settings.audio_service = 'recastfx-long-cpu'
+    settings.preparation_only = True
+    settings.app_bucket = settings.worker_bucket = settings.project + '-long-test'
+    if invalid == 'production': settings.app_bucket = settings.worker_bucket = settings.project + '-app'
+    if invalid == 'worker-bucket': settings.worker_bucket = settings.project + '-proof'
+    if invalid == 'rendering-enabled': settings.preparation_only = False
+    if invalid == 'manual-scaling': settings.request_scaled_audio = False
+    if invalid:
+        with pytest.raises(ValueError, match='Unknown worker service'):
+            cloud._admin_url('audio')
+        assert not events
+    else:
+        with cloud.worker('audio') as invoke:
+            assert invoke('/compose', {'run_id': 'guide-only'})['files'] == ['saved-output']
+        assert not any(event[0] == 'PATCH' for event in events)
+
+
 def test_isolated_cpu_identity_is_verified_without_accessing_legacy_service(monkeypatch):
     body = state()
     body['name'] = body['name'].replace('proof-audio', 'recastfx-audio')
