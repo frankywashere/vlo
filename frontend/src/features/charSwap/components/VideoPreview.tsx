@@ -126,8 +126,11 @@ export function VideoPreview({
     // The first tap during playback freezes the picture; selection is made
     // only once it is still, so a cut cannot move underneath the tap.
     if (!video.paused) { video.pause(); return; }
-    if (presentedTime.current === undefined) onPoint?.(point, video);
-    else onPoint?.(point, video, presentedTime.current);
+    const frameTime = presentedTime.current;
+    // A compositor callback can arrive late after a seek. In that case the
+    // pixel witness still resolves the current picture; never reuse stale PTS.
+    if (frameTime === undefined || Math.abs(frameTime - video.currentTime) > 2 / 24) onPoint?.(point, video);
+    else onPoint?.(point, video, frameTime);
   }
   return (
     <Box

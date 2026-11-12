@@ -275,6 +275,9 @@ it("binds a tap to the presented frame PTS rather than the later playback positi
     act(() => callback(0, {mediaTime: 4.546667} as VideoFrameCallbackMetadata));
     tap();
     expect(onPoint).toHaveBeenLastCalledWith({x: .5, y: .5}, video, 4.546667);
+    act(() => callback(0, {mediaTime: 0} as VideoFrameCallbackMetadata));
+    tap();
+    expect(onPoint.mock.lastCall).toHaveLength(2); // Late compositor frame from before this seek.
     fireEvent.change(screen.getByRole("slider"), {target: {value: "6"}});
     fireEvent.seeking(video);
     fireEvent.seeked(video);
