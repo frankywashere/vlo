@@ -19,6 +19,58 @@ def context_key(job, input_sha):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
+def quality_context_key(job, input_sha):
+    """Invalidate CPU approval semantics without invalidating paid receipts."""
+    from .mask_gap_tolerance import POLICY_VERSION as GAP_POLICY
+    from .mask_quality import POLICY_VERSION as COMPONENT_POLICY
+    value = {'identity_context_key': context_key(job, input_sha),
+        'component_policy_version': COMPONENT_POLICY, 'gap_policy_version': GAP_POLICY,
+        'identity_provenance': job.get('mask_identity_provenance'),
+        'identity_matching_completed': job.get('identity_matching_completed'),
+        'matching_fallback_used': job.get('matching_fallback_used'),
+        # For new records provenance is written only after source validation.
+        # The later UI-ready flag must not invalidate that same approval.
+        'tracking_reviewed': job.get('tracking_reviewed')
+            if job.get('mask_identity_provenance') is None else None,
+        'tracking_resolution_pending': job.get('tracking_resolution_pending'),
+        'tracking_review_error': job.get('tracking_review_error'),
+        'recover_missing_masks': job.get('recover_missing_masks'),
+        'mask_recovery_completed': job.get('mask_recovery_completed')}
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+
+
+def _binding(candidate):
+    # Candidate IDs additionally contain the review revision. A saved receipt
+    # may be rebound to a later, otherwise identical explicit source review.
+    return tuple(candidate.get(field) for field in
+        ('target_id', 'label', 'segment_id', 'frame', 'component_sha256'))
+
+
+def _project_gap_report(report, assessment):
+    """Retain omitted-tint guidance; only subtract forgiven approval ranges."""
+    blocking = []
+    for item in report.get('suppressed_ranges', []):
+        intervals = [(item['start_frame'], item['end_frame'])]
+        for allowed in assessment.get('tolerated_ranges', []):
+            if (allowed['target_id'], allowed['label']) != (item['target_id'], item['label']):
+                continue
+            following = []
+            for start, end in intervals:
+                left, right = max(start, allowed['start_frame']), min(end, allowed['end_frame'])
+                if left >= right:
+                    following.append((start, end))
+                else:
+                    if start < left:
+                        following.append((start, left))
+                    if right < end:
+                        following.append((right, end))
+            intervals = following
+        blocking.extend({**item, 'start_frame': start, 'end_frame': end} for start, end in intervals)
+    report['gap_tolerance'] = assessment
+    report['blocking_suppressed_ranges'] = blocking
+    report['review_required'] = bool(blocking)
+
+
 def recheck_masks(pipeline, job, original, checked, report, root, remaining):
     """A pending/failed request is never replayed; retain it for focused review."""
     revision = job.get('tracking_applied_revision', 0)
@@ -26,8 +78,25 @@ def recheck_masks(pipeline, job, original, checked, report, root, remaining):
     # geometry, determine which components may be compared or restored.
     candidates = plan_rechecks(original, checked, job['tracking_metadata'], job['tracking_plan'],
         job['tracking_choices'], job['tracking_assignments'], review_revision=revision)
+    planned_candidates = candidates
     key = context_key(job, report['input_sha256'])
-    report['mask_context_key'] = key
+    from .mask_gap_tolerance import assess_mask_gaps
+    assessment = assess_mask_gaps(job, original, checked, candidates, review_revision=revision)
+    forgiven_ids = set(assessment['forgiven_candidate_ids'])
+    forgiven_bindings = {_binding(candidate) for candidate in candidates
+                         if candidate['candidate_id'] in forgiven_ids}
+    candidates = [candidate for candidate in candidates if candidate['candidate_id'] not in forgiven_ids]
+    _project_gap_report(report, assessment)
+    report['mask_context_key'] = quality_context_key(job, report['input_sha256'])
+    supplements = deepcopy(job.get('mask_supplemental_anchors') or [])
+    if job.get('mask_supplemental_context_key') != key:
+        supplements = []
+    # Explicit source taps remain authoritative. Automatic confirmations are
+    # unnecessary for omissions this policy leaves untinted, not restored.
+    supplements = [item for item in supplements if item.get('confirmation') == 'explicit_source_review'
+                   or _binding(item) not in forgiven_bindings]
+    for item in supplements:
+        item['review_revision'] = revision
     state = job.get('mask_identity_recheck_state') or {}
     if candidates and state.get('key') != key:
         token = uuid.uuid4().hex
@@ -81,21 +150,15 @@ def recheck_masks(pipeline, job, original, checked, report, root, remaining):
                     raise PublicError('The mask identity review changed.', 409, code='tracking_review_invalid')
                 return {**current, 'mask_identity_recheck_state': state}
             job = pipeline.records.update(f"jobs/{job['id']}.json", finish)
-    if state.get('key') != key:
-        return job, checked, report, None
-    evidence = {item['candidate_id']: item for item in state.get('evidence', [])}
-    supplements = deepcopy(job.get('mask_supplemental_anchors') or [])
-    # Rebinding a completed parent proof to the new review revision is safe only
-    # under the exact same archive, source URI, base plan/choices/assignments key.
-    if job.get('mask_supplemental_context_key') != key:
-        supplements = []
-    for item in supplements:
-        item['review_revision'] = revision
+    current_state = state if state.get('key') == key else {}
+    evidence = {item['candidate_id']: item for item in current_state.get('evidence', [])}
     known = {item['candidate_id'] for item in supplements}
     completed = job.get('targeted_mask_review') or {}
     reviewed_ids = {item['candidate_id'] for item in completed.get('decisions', [])}
     unresolved = []
-    for candidate in state.get('candidates', []):
+    for candidate in current_state.get('candidates', []):
+        if _binding(candidate) in forgiven_bindings:
+            continue
         if candidate['candidate_id'] in reviewed_ids:
             continue
         decision = evidence.get(candidate['candidate_id'], {})
@@ -111,18 +174,22 @@ def recheck_masks(pipeline, job, original, checked, report, root, remaining):
             job['tracking_choices'], job['tracking_assignments'], output, review_revision=revision,
             supplemental_anchors=supplements)
         checked = output
-        report['mask_context_key'] = key
-    interrupted = state.get('status') == 'started'
-    report['identity_rechecks'] = {'context_key': key, 'status': state.get('status'),
-        'requests': None if interrupted else state.get('requests', 0),
-        'request_count_known': not interrupted, 'request_limit': len(state.get('candidates', [])),
-        'usage': state.get('usage') if not interrupted else {'cost_status': 'unknown_after_interruption'},
-        'confirmed': len(supplements), 'unresolved': len(unresolved)}
-    # Every changed checked guide gets a fresh approval; neither model receives
-    # a paid generation merely because a new identity component was accepted.
+        assessment = assess_mask_gaps(job, original, checked, planned_candidates, review_revision=revision)
+        _project_gap_report(report, assessment)
+        report['mask_context_key'] = quality_context_key(job, report['input_sha256'])
+    interrupted = current_state.get('status') == 'started'
+    report['identity_rechecks'] = {'context_key': key,
+        'status': current_state.get('status', 'not_required'),
+        'requests': None if interrupted else current_state.get('requests', 0),
+        'request_count_known': not interrupted, 'request_limit': len(current_state.get('candidates', [])),
+        'usage': current_state.get('usage') if not interrupted else {'cost_status': 'unknown_after_interruption'},
+        'confirmed': len(supplements), 'unresolved': len(unresolved),
+        'skipped_tolerated_candidates': len(forgiven_ids)}
+    # Restored components still require fresh approval; tolerated omissions
+    # remain untinted and do not create a new paid-generation authorization.
     report['review_required'] = bool(report.get('review_required') or supplements or unresolved)
     job = {**job, 'mask_supplemental_anchors': supplements, 'mask_supplemental_context_key': key}
-    emit('mask_identity_rechecks_completed', job_id=job['id'], status=state.get('status'),
+    emit('mask_identity_rechecks_completed', job_id=job['id'], status=report['identity_rechecks']['status'],
          request_count=report['identity_rechecks']['requests'], request_count_known=not interrupted,
          confirmed=len(supplements), unresolved=len(unresolved))
     return job, checked, report, unresolved

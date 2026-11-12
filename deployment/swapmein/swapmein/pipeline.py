@@ -739,6 +739,7 @@ class Pipeline:
             pre_quality_masks_uri=uri, mask_recheck_input_uri=uri,
             mask_identity_recheck_state=None, mask_supplemental_anchors=[],
             mask_supplemental_context_key=None, targeted_mask_review=None,
+            mask_identity_provenance='manual_source_review',
             tracking_assignments=resolved["assignments"], normalized_targets=targets,
             coordinate_fallback_sections=fallback_count, recover_missing_masks=recover,
             tracking_resolution_pending=False, generation_after_review_revision=(job.get("generation_after_review_revision")
@@ -770,6 +771,7 @@ class Pipeline:
             'segments': segments, 'review_required': True},
             tracking_metadata=metadata, tracking_choices=choices, tracking_assignments=assignments,
             tracking_revision=revision, tracking_applied_revision=revision, tracking_reviewed=True,
+            mask_identity_provenance='source_identity_match',
             tracking_vocals_uri=vocals_uri, tracking_depth_uri=depth_uri, tracking_masks_uri=masks_uri,
             reviewed_masks_uri=masks_uri, mask_recheck_input_uri=masks_uri,
             normalized_targets=targets)
@@ -786,16 +788,21 @@ class Pipeline:
         """Conservatively withhold suspect guide regions without changing identities."""
         from .mask_quality import POLICY_VERSION, sanitize_reviewed_masks
         from .scene_selection import mask_quality_targets
+        # A release must not silently accept an existing customer's pending
+        # component question. Only its explicit authenticated review can do so.
+        if ((job.get('targeted_mask_review') or {}).get('pending')
+                or job.get('tracking_plan', {}).get('version') == 4):
+            return job
         report = job.get("reviewed_mask_quality") or {}
         revision = job.get("tracking_applied_revision", 0)
         unsafe_ids = {target["id"] for target in job.get("normalized_targets", [])
                       if target.get("guide_anchor_untrusted")}
         withheld_ids = set(report.get("identity_recovery_target_ids") or [])
-        from .mask_recheck_runtime import context_key
+        from .mask_recheck_runtime import quality_context_key
         if (report.get("policy_version") == POLICY_VERSION
                 and report.get("review_revision") == revision
                 and report.get("output_uri") == job.get("reviewed_masks_uri")
-                and report.get('mask_context_key') == context_key(job, report.get('input_sha256'))
+                and report.get('mask_context_key') == quality_context_key(job, report.get('input_sha256'))
                 and unsafe_ids <= withheld_ids):
             return job
         # Old records lacking saved choices cannot be geometrically validated.
