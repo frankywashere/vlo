@@ -26,7 +26,8 @@ upload tickets/jobs retain the amount promised by the server; the client supplie
 quote to validate, never an authoritative reward. BYOK jobs do not earn account-credit rewards.
 
 The watermark reads `recastfx.com`, with white lettering and coral `fx`, spans about
-46% of the frame width, and sits 4% in from the right and 4.5% above the bottom.
+37% of the frame width (20% smaller in both dimensions), and keeps its existing
+insets of about 4% from the right and 4.5% above the bottom.
 CPU export overlays the transparent Pillow-rendered wordmark in the existing FFmpeg encoding pass, with
 both original-audio restoration and returned-audio paths supported. There is no extra AI render.
 The bonus is applied only after the finished watermarked file and Library entry are saved,
@@ -994,3 +995,32 @@ Sending stays disabled unless these runtime variables are configured:
 
 Only the maintenance service identity needs access to the sending secret. Incoming
 mail routing records are independent of the `notify.recastfx.com` sender records.
+
+### Library loading and cut-boundary masking
+
+Library refreshes are single-flight, with one coalesced follow-up for polling or
+focus events. A failed initial load remains an explicit retry state rather than
+claiming the Library is empty. Authentication, fetch and response parsing share
+one 30-second client deadline; leaving the page cancels its active request.
+Acknowledged review, generation and visibility changes invalidate older snapshots.
+
+The existing authenticated list contract is unchanged. Read-only record fetches
+and response rendering use at most four concurrent tasks and a shared 25-second
+server deadline. Reconciliation remains serial, generation-bound record reads
+retain their preconditions, and any required read failure returns an error.
+Private GET links are deduplicated per response and reused in a bounded cache
+for up to five minutes, leaving sufficient lifetime for the client's 30-minute
+playback reuse. Authorization still runs on every request. Google credentials
+are refreshed under a lock; IAM signing uses the SDK's V4 canonicalization and
+a bounded transport. No worker/scaling configuration is raised by this change.
+
+Selected-person Meta preparation also checks the exact first frame of verified
+RGB cuts for narrowly defined residue: a previously coherent mask collapses
+into small, sparse disconnected fragments and stays absent for the rest of
+that shot. Source anchors, coherent brief people, occlusions and re-entries are
+preserved. The original provider/resized archives and an exact removal report
+remain available; only a separately filtered archive feeds matching and review.
+This shared step covers MiniMax and Kling with Meta SAM. Other SAM providers,
+replace-everyone and private CharacterSwap routes retain their existing behavior.
+Identity thresholds and subsequent component review are unchanged; this policy
+does not guarantee that the rest of a clip needs no review.

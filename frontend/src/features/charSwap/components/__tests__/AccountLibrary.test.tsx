@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import {
   cleanup,
   act,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -39,6 +41,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 const job = {
@@ -251,6 +254,59 @@ describe("private account library", () => {
     expect(loadAccountJobs).toHaveBeenCalledTimes(1);
   });
 
+  it("removes a clip needing review without submitting it, and can undo the removal", async () => {
+    const review = {...job, status: "tracking_review" as const, access_mode: "credits" as const,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
+      tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+        seek_time: 1, needs_review: true, reason: "scene_selection"}]};
+    let finish!: (value: object) => void;
+    vi.mocked(loadAccountJobs).mockResolvedValue([review]);
+    vi.mocked(setJobHidden).mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}))
+      .mockResolvedValue({});
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    await user.click(screen.getByRole("button", {name: "Not in this scene"}));
+    expect(screen.getByRole("button", {name: "Submit and generate"})).toBeEnabled();
+    await user.click(screen.getByRole("button", {name: "Remove from library"}));
+    expect(screen.getByRole("button", {name: "Removing from library"})).toBeDisabled();
+    expect(screen.getByRole("button", {name: "Back to Library"})).toBeDisabled();
+    expect(screen.getByRole("button", {name: "Submit and generate"})).toBeDisabled();
+    expect(setJobHidden).toHaveBeenCalledTimes(1);
+    expect(setJobHidden).toHaveBeenCalledWith(job.id, true);
+    await act(async () => {finish({});});
+    expect(await screen.findByText("Removed from your library.")).toBeVisible();
+    expect(screen.queryByRole("heading", {name: "Check scene matches"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", {name: "Undo"}));
+    expect(setJobHidden).toHaveBeenCalledWith(job.id, false);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    expect(screen.getByRole("heading", {name: "Check scene matches"})).toBeVisible();
+    expect(loadAccountJobs).toHaveBeenCalledTimes(1);
+    expect(resumeAccountJob).not.toHaveBeenCalled();
+    expect(resolveLiveTracking).not.toHaveBeenCalled();
+    expect(generateLiveJob).not.toHaveBeenCalled();
+  });
+
+  it("keeps review choices editable when removing the clip fails", async () => {
+    vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "tracking_review", access_mode: "credits",
+      source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
+      tracking_segments: [{id: "s0", start: 0, end: 4, start_frame: 0, end_frame: 96,
+        seek_time: 1, needs_review: true, reason: "scene_selection"}]}]);
+    vi.mocked(setJobHidden).mockRejectedValue(new Error("Could not save removal"));
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    await user.click(screen.getByRole("button", {name: "Not in this scene"}));
+    await user.click(screen.getByRole("button", {name: "Remove from library"}));
+    expect(await screen.findByText("Could not save removal")).toBeVisible();
+    expect(screen.getByRole("button", {name: "Remove from library"})).toBeEnabled();
+    expect(screen.getByRole("heading", {name: "Check scene matches"})).toBeVisible();
+    expect(screen.getByRole("button", {name: "Submit and generate"})).toBeEnabled();
+    expect(resolveLiveTracking).not.toHaveBeenCalled();
+    expect(generateLiveJob).not.toHaveBeenCalled();
+  });
+
   it("keeps a clip visible and re-enables Remove when saving fails", async () => {
     vi.mocked(loadAccountJobs).mockResolvedValue([{...job, status: "failed"}]);
     vi.mocked(setJobHidden).mockRejectedValue(new Error("Could not save removal"));
@@ -423,6 +479,7 @@ it.each(["legacy", "multi-person", "meta-seed"] as const)("opens %s review from 
   expect(screen.getByAltText("Replacement for Person 1")).toBeVisible();
   expect(screen.getAllByLabelText("Select the person in this frame")).toHaveLength(1);
   expect(screen.getAllByRole("button", {name: "Back to Library"})).toHaveLength(1);
+  expect(screen.getByRole("button", {name: "Remove from library"})).toBeEnabled();
   expect(screen.getByRole("button", {name: plan === "meta-seed" ? "Build person masks" : "Submit and generate"})).toBeDisabled();
   expect(resolveLiveTracking).not.toHaveBeenCalled();
 });
@@ -503,6 +560,7 @@ it.each([{olderRefresh:false,meshOnly:false},{olderRefresh:true,meshOnly:false},
   await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledTimes(1));
   expect(vi.mocked(resolveLiveTracking).mock.calls[0][5]).toMatchObject({enabled:true,generateAfterReview:true});
   await waitFor(() => expect(screen.getAllByRole("button", {name: "Back to Library"})[0]).toBeEnabled());
+  expect(screen.queryByRole("button", {name: "Remove from library"})).not.toBeInTheDocument();
   await user.click(screen.getAllByRole("button", {name: "Back to Library"})[0]);
   expect(await screen.findByRole("region", {name: "Your generations"})).toBeVisible();
   if (finishOlder) await act(async () => {finishOlder?.([review]);});
@@ -573,7 +631,7 @@ it("refreshes terminal failure immediately when returning to the Library and dis
   expect(pollLiveProvider).not.toHaveBeenCalled();expect(generateLiveJob).not.toHaveBeenCalled();
 });
 
-it("does not let an older in-flight refresh overwrite a newly observed failure", async () => {
+it("coalesces focus and visibility refreshes and then shows the latest failure", async () => {
   const generating={...job,status:"generating" as const,access_mode:"credits" as const};
   const failed={...generating,status:"failed" as const,failure_category:"content_rejected" as const};
   let resolveOld!: (jobs: Awaited<ReturnType<typeof loadAccountJobs>>) => void;
@@ -583,8 +641,121 @@ it("does not let an older in-flight refresh overwrite a newly observed failure",
   await screen.findByText("Generating");
   act(()=>window.dispatchEvent(new Event("focus")));
   act(()=>document.dispatchEvent(new Event("visibilitychange")));
-  await screen.findByText("Content safety");
+  expect(loadAccountJobs).toHaveBeenCalledTimes(2);
   await act(async()=>resolveOld([generating]));
+  await screen.findByText("Content safety");
+  expect(loadAccountJobs).toHaveBeenCalledTimes(3);
   expect(screen.getByText("Content safety")).toBeVisible();
   expect(screen.queryByText("Generating")).not.toBeInTheDocument();
+});
+
+it("shows a 20-second response even when polling and focus ask to refresh every 15 seconds", async () => {
+  vi.useFakeTimers();
+  let active = 0;
+  let maximumActive = 0;
+  vi.mocked(loadAccountJobs).mockImplementation(() => new Promise(resolve => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    setTimeout(() => {active -= 1; resolve([job]);}, 20000);
+  }));
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  expect(loadAccountJobs).toHaveBeenCalledTimes(1);
+  await act(async () => {await vi.advanceTimersByTimeAsync(15000);});
+  fireEvent.focus(window);
+  fireEvent(document, new Event("visibilitychange"));
+  expect(loadAccountJobs).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("Your first swap starts here.")).not.toBeInTheDocument();
+  await act(async () => {await vi.advanceTimersByTimeAsync(5000);});
+  expect(screen.getByText("My clip")).toBeVisible();
+  expect(loadAccountJobs).toHaveBeenCalledTimes(2);
+  expect(maximumActive).toBe(1);
+  await act(async () => {await vi.advanceTimersByTimeAsync(20000);});
+  expect(screen.getByText("My clip")).toBeVisible();
+  expect(maximumActive).toBe(1);
+});
+
+it("does not report an empty Library before a failed first load has successfully retried", async () => {
+  vi.mocked(loadAccountJobs).mockRejectedValueOnce(new Error("Your Library took too long to respond."));
+  let finishRetry!: (jobs: Awaited<ReturnType<typeof loadAccountJobs>>) => void;
+  vi.mocked(loadAccountJobs).mockReturnValueOnce(new Promise(resolve => {finishRetry = resolve;}));
+  const user = userEvent.setup();
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  expect(await screen.findByText("Your Library took too long to respond.")).toBeVisible();
+  expect(screen.getByText("Library unavailable")).toBeVisible();
+  expect(screen.queryByText("All caught up")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", {name: "Your first swap starts here."})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Refresh library"}));
+  expect(screen.getByText("Loading your videos")).toBeVisible();
+  await act(async () => {finishRetry([]);});
+  expect(screen.getByText("All caught up")).toBeVisible();
+  expect(screen.queryByText("Your Library took too long to respond.")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: "Your first swap starts here."})).toBeVisible();
+});
+
+it("aborts the active Library request and drops queued refreshes on unmount", async () => {
+  let finish!: (jobs: Awaited<ReturnType<typeof loadAccountJobs>>) => void;
+  vi.mocked(loadAccountJobs).mockReturnValue(new Promise(resolve => {finish = resolve;}));
+  const view = render(<AccountLibrary onCreate={vi.fn()} />);
+  const signal = vi.mocked(loadAccountJobs).mock.calls[0][0];
+  expect(signal).toBeInstanceOf(AbortSignal);
+  fireEvent.focus(window);
+  expect(loadAccountJobs).toHaveBeenCalledTimes(1);
+  view.unmount();
+  expect(signal?.aborted).toBe(true);
+  await act(async () => {finish([job]);});
+  expect(loadAccountJobs).toHaveBeenCalledTimes(1);
+});
+
+it("does not publish the cancelled Strict Mode mount's response into the new mount", async () => {
+  let finishCancelled!: (jobs: Awaited<ReturnType<typeof loadAccountJobs>>) => void;
+  let finishCurrent!: (jobs: Awaited<ReturnType<typeof loadAccountJobs>>) => void;
+  vi.mocked(loadAccountJobs)
+    .mockReturnValueOnce(new Promise(resolve => {finishCancelled = resolve;}))
+    .mockReturnValueOnce(new Promise(resolve => {finishCurrent = resolve;}));
+  render(<StrictMode><AccountLibrary onCreate={vi.fn()} /></StrictMode>);
+  expect(loadAccountJobs).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(loadAccountJobs).mock.calls[0][0]?.aborted).toBe(true);
+  expect(vi.mocked(loadAccountJobs).mock.calls[1][0]?.aborted).toBe(false);
+  await act(async () => {finishCancelled([]);});
+  expect(screen.getByText("Loading your videos")).toBeVisible();
+  expect(screen.queryByText("Your first swap starts here.")).not.toBeInTheDocument();
+  await act(async () => {finishCurrent([job]);});
+  expect(screen.getByText("My clip")).toBeVisible();
+});
+
+it("keeps playing media stable on refresh but replaces links when its review revision changes", async () => {
+  const first = {...job, status: "completed" as const, tracking_revision: 1,
+    output_url: "https://storage.googleapis.com/result.mp4?signature=first"};
+  const refreshed = {...first, output_url: "https://storage.googleapis.com/result.mp4?signature=second"};
+  const rebuilt = {...refreshed, tracking_revision: 2};
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([first]).mockResolvedValueOnce([refreshed]).mockResolvedValueOnce([rebuilt]);
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  const preview = await screen.findByLabelText("Thumbnail for My clip", {selector: "video"});
+  expect(preview).toHaveAttribute("src", first.output_url);
+  fireEvent.focus(window);
+  await waitFor(() => expect(screen.getByRole("button", {name: "Refresh library"})).toBeEnabled());
+  expect(screen.getByLabelText("Thumbnail for My clip", {selector: "video"})).toBe(preview);
+  expect(preview).toHaveAttribute("src", first.output_url);
+  fireEvent.focus(window);
+  await waitFor(() => expect(preview).toHaveAttribute("src", rebuilt.output_url));
+});
+
+it("does not let a pre-removal snapshot erase an acknowledged Undo", async () => {
+  const complete = {...job, status: "completed" as const, output_url: "https://storage.googleapis.com/result.mp4"};
+  let finishOld!: (jobs: Awaited<ReturnType<typeof loadAccountJobs>>) => void;
+  vi.mocked(loadAccountJobs).mockResolvedValueOnce([complete]).mockReturnValueOnce(new Promise(resolve => {finishOld = resolve;}));
+  vi.mocked(setJobHidden).mockResolvedValue({});
+  const user = userEvent.setup();
+  render(<AccountLibrary onCreate={vi.fn()} />);
+  await screen.findByText("My clip");
+  fireEvent.focus(window);
+  await user.click(screen.getByRole("button", {name: "Open My clip"}));
+  await user.click(screen.getByRole("button", {name: "Remove from library"}));
+  await user.click(await screen.findByRole("button", {name: "Undo"}));
+  expect(screen.getByText("My clip")).toBeVisible();
+  await act(async () => {finishOld([]);});
+  expect(screen.getByText("My clip")).toBeVisible();
+  expect(loadAccountJobs).toHaveBeenCalledTimes(2);
+  expect(setJobHidden).toHaveBeenNthCalledWith(1, job.id, true);
+  expect(setJobHidden).toHaveBeenNthCalledWith(2, job.id, false);
 });

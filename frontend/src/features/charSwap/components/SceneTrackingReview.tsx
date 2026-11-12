@@ -78,7 +78,7 @@ function SceneChoiceCard({ section, label, sourceUrl, trackingUrl, showDetected,
   return <Box component="section" ref={container} aria-label={label}
     aria-description={`${formatTime(section.start)}–${formatTime(section.end)}`} tabIndex={-1}
     sx={{ ...PANEL, outline: "none", scrollMarginTop: 24, borderColor: error ? "error.main" : choice?.anchor ? "success.main" : "divider" }}>
-    <Typography variant="body1" sx={{fontSize: {xs: "1.125rem", sm: "1.25rem"}, fontWeight: 600, lineHeight: 1.4, mb: 1.5}}>
+    <Typography variant="body1" sx={{fontSize: {xs: "1.125rem", sm: "1.25rem"}, fontWeight: 600, lineHeight: 1.4, textAlign: "center", mb: 1.5}}>
       {dismissCandidate ? "Tap the highlighted part." : "Tap the person to replace with the character above."}
     </Typography>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

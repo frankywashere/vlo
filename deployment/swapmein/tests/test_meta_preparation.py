@@ -52,6 +52,9 @@ class Cloud:
     def asset_exists(self, uri):
         return uri in self.assets
 
+    def signed_url(self, uri):
+        pytest.fail("Public preparation views must not sign private Meta artifacts")
+
 
 def record(object_id=1, frame=0, x=2, y=3):
     return f"<{frame}f>{object_id}<|box;x1={x};y1={y};x2={x+4};y2={y+4};w=20;h=15;c=0.9|><|mask;x=0;y=0;c=0.8;data=5,5,{PAYLOAD}|>"

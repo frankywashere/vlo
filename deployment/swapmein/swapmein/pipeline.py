@@ -282,6 +282,7 @@ class Pipeline:
                                 depth_uri = self.cloud.worker_output(depth, depth_run, "depth.mp4")
                         else:
                             raise PublicError("This job's depth provider is unavailable.", 503)
+                    provider_raw_masks_uri = masks_uri
                     masks = root / "masks.zip"
                     self.cloud.download(masks_uri, masks, 80 * 1024 * 1024)
                     if options.preparation_version >= 2:
@@ -289,6 +290,9 @@ class Pipeline:
                         resize_label_archive(masks, resized, metadata)
                         masks = resized
                         masks_uri = self.cloud.upload(self.settings.worker_bucket, prefix + "working-masks.zip", masks, "application/zip")
+                    if sam_provider == "meta" and not options.replace_all_people and metadata.get("scene_cuts"):
+                        masks, masks_uri = self.filter_meta_cut_residue(job, masks, masks_uri,
+                            metadata, targets, root, provider_raw_masks_uri=provider_raw_masks_uri)
                     raw_masks_uri = masks_uri
                     if not metadata.get("scene_cuts"):
                         from .tracking import log_track_diagnostics
@@ -600,6 +604,30 @@ class Pipeline:
                             "shutdown_tasks": list(getattr(self.cloud, "shutdown_tasks", []))})
                     return current
                 self.records.update("control/preparation.json", retain)
+
+    def filter_meta_cut_residue(self, job, masks, masks_uri, metadata, targets, root, *, provider_raw_masks_uri):
+        """Preserve raw Meta diagnostics; use a separate exclusion before matching.
+
+        Only normalize()'s detected RGB cuts enter this path. Private GPU and
+        replace-everyone jobs bypass it. Manual review subsequently reads the
+        same filtered archive, so its accepted absence cannot reintroduce tint.
+        """
+        from .mask_cut_boundary import sanitize_cut_boundary_masks
+        from .tracking import _metadata
+        filtered = Path(root) / ("cut-boundary-masks-" + uuid.uuid4().hex + ".zip")
+        report = sanitize_cut_boundary_masks(masks, filtered, metadata,
+            validated_cut_frames=_metadata(metadata)[4], targets=targets)
+        uri = masks_uri
+        if report["removed_pixels"]:
+            uri = self.cloud.upload(self.settings.worker_bucket,
+                preparation_prefix(job, "worker") + filtered.name, filtered, "application/zip")
+        report.update(input_uri=masks_uri, output_uri=uri)
+        self.update_job(job["id"], cut_boundary_raw_masks_uri=provider_raw_masks_uri,
+            cut_boundary_working_raw_masks_uri=masks_uri, cut_boundary_mask_report=report)
+        emit("cut_boundary_masks_checked", job_id=job["id"], policy_version=report["policy_version"],
+             removed_frames=len({item["frame"] for item in report["removed"]}),
+             removed_pixels=report["removed_pixels"], provider="meta", selected_people_only=True)
+        return (filtered, uri) if report["removed_pixels"] else (masks, masks_uri)
 
     def enter_meta_seed_review(self, job, normalized, metadata, targets, root, error):
         """Keep a failed automatic tap lookup editable before any video request.

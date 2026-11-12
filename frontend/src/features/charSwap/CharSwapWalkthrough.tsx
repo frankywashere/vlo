@@ -530,7 +530,7 @@ export function CharSwapWalkthrough({
                   variant="h4"
                   ref={headingRef}
                   tabIndex={-1}
-                  sx={{ outline: "none", fontSize: { xs: 28, md: 36 } }}
+                  sx={{ outline: "none", fontSize: step === "matches" ? { xs: 22, sm: 26 } : { xs: 28, md: 36 } }}
                 >
                   {waitingForCleanup ? "Cleaning up your images" : clipStep && clip
                     ? "Choose your moment."

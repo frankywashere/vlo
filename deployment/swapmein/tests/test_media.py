@@ -391,16 +391,21 @@ def test_watermark_also_works_when_retaining_provider_audio(tmp_path):
 
 
 @pytest.mark.parametrize("width,height", [(320,240), (1024,768), (1920,1080), (768,1344)])
-def test_domain_watermark_is_large_inset_and_uses_logo_accent(width, height):
+def test_domain_watermark_is_smaller_inset_and_uses_logo_accent(width, height):
     layer = watermark_layer(width, height)
     left, top, right, bottom = layer.getbbox()
-    assert width * .48 <= left <= width * .53
+    assert width * .57 <= left <= width * .61
+    assert width * .35 <= right - left <= width * .38
+    assert width * .043 <= bottom - top <= width * .052
     assert width * .95 <= right <= width * .97
     assert height * .94 <= bottom <= height * .97
     assert top > height * .70
     colors = np.asarray(layer)
-    assert np.any(np.all(colors == (255, 129, 119, 230), axis=2))
-    assert np.any(np.all(colors == (255, 255, 255, 230), axis=2))
+    assert colors[:, :, 3].max() == 230
+    cores = colors[colors[:, :, 3] == 230, :3].astype(np.int16)
+    # Standard premultiplied RGBA resizing can round a color channel by one.
+    assert np.any(np.max(np.abs(cores - (255, 129, 119)), axis=1) <= 2)
+    assert np.any(np.max(np.abs(cores - (255, 255, 255)), axis=1) <= 2)
 
 
 @pytest.mark.parametrize("source_format", ["PNG", "WEBP"])

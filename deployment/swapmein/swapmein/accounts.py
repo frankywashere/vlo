@@ -8,6 +8,7 @@ from google.oauth2 import id_token
 from .errors import PublicError
 from .security import digest
 from .job_settings import settings_used
+from .signed_urls import BoundedAuthRequest
 
 LIBRARY_SECONDS = 30 * 86400
 ACCOUNT_PROVIDERS = frozenset({"google.com", "password"})
@@ -27,7 +28,7 @@ def verify_account(token: str | None, project: str) -> dict:
     if not isinstance(token, str) or not 20 < len(token) < 10000:
         raise PublicError("Sign in to continue.", 401)
     try:
-        claims = id_token.verify_firebase_token(token, Request(), audience=project)
+        claims = id_token.verify_firebase_token(token, BoundedAuthRequest(), audience=project)
         uid = claims.get("sub")
         email = claims.get("email")
         if (claims.get("iss") != "https://securetoken.google.com/" + project

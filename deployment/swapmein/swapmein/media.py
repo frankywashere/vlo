@@ -475,7 +475,7 @@ def strip_audio(source: Path, output: Path):
 
 
 def watermark_layer(width: int, height: int) -> Image.Image:
-    """Large, inset domain wordmark matching the dark website logo accent."""
+    """Inset domain wordmark matching the dark website logo accent."""
     text = "recastfx.com"
     # Liberation Sans is Arial-compatible and installed in the gateway image.
     # The macOS path keeps local export proofs visually aligned with production.
@@ -504,7 +504,15 @@ def watermark_layer(width: int, height: int) -> Image.Image:
                                     ("recastfx", ".com", (255, 255, 255, 230))):
         draw.text((x + font.getlength(prefix), y), segment, font=font, fill=color,
                   stroke_width=stroke, stroke_fill=(0, 0, 0, 150))
-    return layer
+    # Scale the visible mark uniformly: integer font fitting otherwise changes
+    # its proportions at small sizes. Keep the exact existing visible insets.
+    left, top, right, bottom = layer.getbbox()
+    mark = layer.crop((left, top, right, bottom))
+    size = (max(1, round(mark.width * .8)), max(1, round(mark.height * .8)))
+    mark = mark.resize(size, Image.Resampling.BILINEAR)
+    result = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    result.alpha_composite(mark, (right - mark.width, bottom - mark.height))
+    return result
 
 
 @timed("finish")

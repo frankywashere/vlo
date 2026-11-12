@@ -69,16 +69,25 @@ class Records:
         self.client = client or storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
-    def read(self, path: str):
+    def read(self, path: str, *, deadline_seconds=None):
+        deadline = time.monotonic() + deadline_seconds if deadline_seconds is not None else None
+        def options():
+            if deadline is None:
+                return {}
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise PublicError("Your Library records took too long to respond. Tap Refresh to try again.",
+                                  503, code="library_read_timeout")
+            return {"timeout": remaining, "retry": None}
         for _ in range(4):
             blob = self.bucket.blob(path)
             try:
-                blob.reload()
+                blob.reload(**options())
             except NotFound:
                 return None, 0
             generation = int(blob.generation)
             try:
-                data = blob.download_as_bytes(if_generation_match=generation)
+                data = blob.download_as_bytes(if_generation_match=generation, **options())
             except (NotFound, PreconditionFailed):
                 # A progress update can replace the generation after reload.
                 # With versioning/soft-delete off, that old generation is gone;
@@ -86,6 +95,11 @@ class Records:
                 continue
             return json.loads(data), generation
         raise PublicError("This record is being updated. Try checking its status again.", 503)
+
+    def read_library(self, path: str):
+        # Listing never changes CAS semantics for generation, balances or task
+        # ownership. It merely bounds this read-only caller's remote waiting.
+        return self.read(path, deadline_seconds=10)
 
     def write(self, path: str, data: dict, generation: int):
         self.bucket.blob(path).upload_from_string(

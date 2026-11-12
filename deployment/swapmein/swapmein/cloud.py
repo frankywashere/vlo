@@ -20,12 +20,13 @@ from .capacity_bounds import HEAVY_CEILING
 from .errors import PublicError
 from .diagnostics import emit, timed, timed_stage, worker_failure_event
 from .security import validate_media_url
+from .signed_urls import AccessTokens, IamSigner, SignedUrls
+
+_access_tokens = AccessTokens()
 
 
 def access_token():
-    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    credentials.refresh(Request())
-    return credentials.token
+    return _access_tokens.get()
 
 
 def valid_spend_cap(body: dict, project_number: str):
@@ -57,6 +58,7 @@ class Cloud:
         self.shutdown_deadline = 0.0
         self.shutdown_tasks = []
         self.job_id = None
+        self.signed_urls = SignedUrls()
 
     @timed("enqueue", job_arg="job_id")
     def enqueue(self, kind: str, job_id: str, *, task_token: str | None = None, delay_seconds: int = 0):
@@ -132,10 +134,12 @@ class Cloud:
 
     def signed_url(self, uri: str, seconds: int = 3600):
         bucket, key = self.split_uri(uri)
-        return self.blob(bucket, key).generate_signed_url(
-            version="v4", expiration=timedelta(seconds=min(3600, seconds)), method="GET",
-            service_account_email=self.settings.gateway_service_account, access_token=access_token(),
-        )
+        seconds = min(3600, seconds)
+        def build():
+            return self.blob(bucket, key).generate_signed_url(
+                version="v4", expiration=timedelta(seconds=seconds), method="GET",
+                credentials=IamSigner(self.settings.gateway_service_account, self.http, access_token))
+        return self.signed_urls.get((uri, seconds), seconds, build)
 
     def signed_upload(self, uri: str, size: int):
         bucket, key = self.split_uri(uri)

@@ -34,6 +34,7 @@ import { GenerationCard } from "./GenerationCard";
 import { isGenerationRunning } from "../utils/libraryJobs";
 import { TARGET_COLORS } from "../limits";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import DeleteOutlineRounded from "@mui/icons-material/DeleteOutlineRounded";
 
 import { restoreRetryDraft } from "../services/jobRecovery";
 import type { JobRecovery, RetryDraft } from "../services/jobRecovery";
@@ -49,8 +50,11 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const [checkingRecovery, setCheckingRecovery] = useState(false);
   const [jobs, setJobs] = useState<AccountJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const initialLoadSucceeded = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
-  const refreshCount = useRef(0);
+  const refreshRequest = useRef<{controller: AbortController; promise: Promise<void>} | null>(null);
+  const refreshQueued = useRef(false);
   const latestRefresh = useRef(0);
   const savedReviewVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +67,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   const fullPageReview = reviewPage || sceneReview;
   const sceneReviewAvailable = sceneReview && Boolean(selected.source_preview_url && selected.tracking_segments?.length);
   const [visibilityPending, setVisibilityPending] = useState<string[]>([]);
+  const selectedRemovalPending = Boolean(selected && visibilityPending.includes(selected.id));
   const visibilityRequests = useRef(new Set<string>());
   const hiddenJobs = useRef(new Set<string>());
   const [key, setKey] = useState("");
@@ -92,73 +97,94 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     new Map<string, { job: AccountJob; savedAt: number }>(),
   );
   const controller = useRef<AbortController | null>(null);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(function refreshJobs(): Promise<void> {
+    if (refreshRequest.current) {
+      refreshQueued.current = true;
+      return refreshRequest.current.promise;
+    }
+    if (!mounted.current) return Promise.resolve();
     const reviewVersion = savedReviewVersion.current;
     const refreshVersion = ++latestRefresh.current;
-    refreshCount.current += 1;
+    const request = {controller: new AbortController(), promise: Promise.resolve()};
+    refreshRequest.current = request;
+    setLoading(!initialLoadSucceeded.current);
     setRefreshing(true);
-    try {
-      const received = await loadAccountJobs();
-      if (mounted.current && reviewVersion === savedReviewVersion.current && refreshVersion === latestRefresh.current) {
-        // Renew links well before their one-hour expiry without restarting a
-        // playing video on every status refresh.
-        const result = received.filter((job) => !hiddenJobs.current.has(job.id)).map((job) => {
-          const previous = mediaCache.current.get(job.id);
-          const next = { ...job };
-          const now = Date.now();
-          const reusable =
-            previous &&
-            now - previous.savedAt < 30 * 60 * 1000 &&
-            previous.job.tracking_revision === job.tracking_revision;
-          if (reusable) {
-            for (const field of [
-              "output_url",
-              "thumbnail_url",
-              "guide_url",
-              "reference_url",
-              "tracking_url",
-              "source_preview_url",
-              "comparison_url",
-            ] as const) {
-              const oldUrl = previous.job[field];
-              const newUrl = job[field];
-              if (
-                oldUrl &&
-                newUrl &&
-                oldUrl.split("?")[0] === newUrl.split("?")[0]
-              )
-                next[field] = oldUrl;
+    request.promise = (async () => {
+      try {
+        const received = await loadAccountJobs(request.controller.signal);
+        if (mounted.current && refreshRequest.current === request && reviewVersion === savedReviewVersion.current && refreshVersion === latestRefresh.current) {
+          // Renew links well before their one-hour expiry without restarting a
+          // playing video on every status refresh.
+          const result = received.filter((job) => !hiddenJobs.current.has(job.id)).map((job) => {
+            const previous = mediaCache.current.get(job.id);
+            const next = { ...job };
+            const now = Date.now();
+            const reusable =
+              previous &&
+              now - previous.savedAt < 30 * 60 * 1000 &&
+              previous.job.tracking_revision === job.tracking_revision;
+            if (reusable) {
+              for (const field of [
+                "output_url",
+                "thumbnail_url",
+                "guide_url",
+                "reference_url",
+                "tracking_url",
+                "source_preview_url",
+                "comparison_url",
+              ] as const) {
+                const oldUrl = previous.job[field];
+                const newUrl = job[field];
+                if (
+                  oldUrl &&
+                  newUrl &&
+                  oldUrl.split("?")[0] === newUrl.split("?")[0]
+                )
+                  next[field] = oldUrl;
+              }
+              if (next.reference_urls) next.reference_urls = next.reference_urls.map((url, index) => {
+                const previousUrl = previous.job.reference_urls?.[index];
+                return previousUrl && previousUrl.split("?")[0] === url.split("?")[0] ? previousUrl : url;
+              });
             }
-            if (next.reference_urls) next.reference_urls = next.reference_urls.map((url, index) => {
-              const previousUrl = previous.job.reference_urls?.[index];
-              return previousUrl && previousUrl.split("?")[0] === url.split("?")[0] ? previousUrl : url;
+            mediaCache.current.set(job.id, {
+              job: next,
+              savedAt: reusable ? previous.savedAt : now,
             });
-          }
-          mediaCache.current.set(job.id, {
-            job: next,
-            savedAt: reusable ? previous.savedAt : now,
+            return next;
           });
-          return next;
-        });
-        setJobs(result);
-        setSelected((current) =>
-          current
-            ? (result.find((item) => item.id === current.id) ?? current)
-            : null,
-        );
-        setError(null);
+          setJobs(result);
+          initialLoadSucceeded.current = true;
+          setHasLoaded(true);
+          setSelected((current) =>
+            current
+              ? (result.find((item) => item.id === current.id) ?? current)
+              : null,
+          );
+          setError(null);
+        }
+      } catch (cause) {
+        if (mounted.current && refreshRequest.current === request && !request.controller.signal.aborted
+            && reviewVersion === savedReviewVersion.current && refreshVersion === latestRefresh.current)
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "The library could not be loaded.",
+          );
+      } finally {
+        if (refreshRequest.current === request) {
+          refreshRequest.current = null;
+          if (mounted.current) {
+            setLoading(false);
+            setRefreshing(false);
+            // One follow-up covers any interval/focus events received in flight.
+            // Keep its promise separate so an action cannot await endless polling.
+            if (refreshQueued.current) { refreshQueued.current = false; void refreshJobs(); }
+          }
+        }
       }
-    } catch (cause) {
-      if (mounted.current && refreshVersion === latestRefresh.current)
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "The library could not be loaded.",
-        );
-    } finally {
-      refreshCount.current -= 1;
-      if (mounted.current) { setLoading(false); setRefreshing(refreshCount.current > 0); }
-    }
+    })();
+    return request.promise;
   }, []);
   useEffect(() => {
     mounted.current = true;
@@ -171,6 +197,10 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       mounted.current = false;
+      refreshQueued.current = false;
+      refreshRequest.current?.controller.abort();
+      refreshRequest.current = null;
+      latestRefresh.current += 1;
       globalThis.clearInterval(timer);
       window.removeEventListener("focus", refreshWhenVisible);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
@@ -202,7 +232,11 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
       setRecovery(current);
       if (current.action === "save") {
         const result = await retrySavingVideo(selected.id);
-        if (mounted.current) { setSelected({...selected, ...result}); await refresh(); }
+        if (mounted.current) {
+          savedReviewVersion.current += 1;
+          setJobs(current => current.map(job => job.id === selected.id ? {...job, ...result} : job));
+          setSelected({...selected, ...result}); await refresh();
+        }
       } else if (current.action === "retry" && onRetry) {
         const draft = await restoreRetryDraft(current, controller.current.signal);
         if (mounted.current) onRetry(draft);
@@ -213,7 +247,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   }
 
   function close() {
-    if (busy) return;
+    if (busy || selectedRemovalPending) return;
     setAutoCheck(false);
     setSelected(null);
     setReviewPage(false);
@@ -236,6 +270,8 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
             selected.generation_destination)
           : await action(selected.id, session.token, key, controller.current.signal, mode);
         if (mounted.current) {
+          savedReviewVersion.current += 1;
+          setJobs(current => current.map(job => job.id === selected.id ? {...job, ...result} : job));
           setSelected({ ...selected, ...result });
           setAutoCheck(result.status === "generating");
           await refresh();
@@ -276,7 +312,15 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
     try {
       await setJobHidden(job.id, hidden);
       if (!mounted.current) return;
-      if (hidden) { hiddenJobs.current.add(job.id); setSelected(null); }
+      savedReviewVersion.current += 1;
+      if (hidden) {
+        hiddenJobs.current.add(job.id);
+        setSelected(null);
+        setReviewPage(false);
+        setKey("");
+        setAutoCheck(false);
+        setTrackingErrorSegmentId(null);
+      }
       else hiddenJobs.current.delete(job.id);
       setJobs((current) => hidden ? current.filter((item) => item.id !== job.id)
         : [job, ...current.filter((item) => item.id !== job.id)].sort((a, b) => b.created_at - a.created_at));
@@ -402,7 +446,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                   duration={selected.duration ?? 0}
                   width={selected.width ?? 854}
                   height={selected.height ?? 480}
-                  busy={busy || selectedAccessBlocked}
+                  busy={busy || selectedRemovalPending || selectedAccessBlocked}
                   initialChoices={selected.tracking_choices}
                   requireExplicitChoices={selected.generation_destination === "google_h3" || selected.generation_destination === "paperspace_h3"}
                   metaSeedReview={selected.meta_seed_review}
@@ -459,7 +503,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           </Stack>
         </Box>
         <Stack direction="row" spacing={1} sx={{mt: sceneReview ? 0 : 3, p: fullPageReview ? 0 : 1, justifyContent: "flex-end", flexWrap: "wrap"}}>
-          {fullPageReview && !sceneReview && <Button disabled={busy} onClick={close}>Back to Library</Button>}
+          {fullPageReview && !sceneReview && <Button disabled={busy || selectedRemovalPending} onClick={close}>Back to Library</Button>}
           {recovery && (recovery.action === "save" || recovery.action === "retry" && onRetry) && (
             <Button variant="contained" disabled={busy || checkingRecovery || retryDisabled} onClick={() => void recoverJob()}>
               {recovery.action === "save" ? "Retry saving video" : recovery.source_url && recovery.reference_urls?.every(Boolean)
@@ -468,7 +512,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           )}
           {selected?.status === "generating" && (
             <Button
-              disabled={busy || selectedAccessBlocked}
+              disabled={busy || selectedRemovalPending || selectedAccessBlocked}
               onClick={() => void act(false)}
             >
               Refresh status
@@ -477,7 +521,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
           {selected?.status === "ready" && (
             <Button
               variant="contained"
-              disabled={busy || selectedAccessBlocked}
+              disabled={busy || selectedRemovalPending || selectedAccessBlocked}
               onClick={() => void act(true)}
             >
               {selected.easy_mode
@@ -489,8 +533,16 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
   </>);
   if (fullPageReview && selected) return (
     <Box component="main" sx={{maxWidth: 1120, mx: "auto", px: {xs: 2, md: 5}, py: 4}}>
-      <Button onClick={close} disabled={busy} sx={{mb: 2}}>Back to Library</Button>
-      <Typography component="h1" variant="h3" sx={{mb: 1}}>{selected.status === "tracking_review" ? "Check scene matches" : selected.status === "ready" ? "Review prepared clip" : "Your recast"}</Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} sx={{mb: 2}}>
+        <Button onClick={close} disabled={busy || selectedRemovalPending}>Back to Library</Button>
+        {!isGenerationRunning(selected) && <Button
+          onClick={() => void hide(selected, true)}
+          disabled={busy || selectedRemovalPending}
+          startIcon={selectedRemovalPending ? <CircularProgress size={16} color="inherit" /> : <DeleteOutlineRounded />}
+          sx={{color: "text.secondary", minHeight: 44}}
+        >{selectedRemovalPending ? "Removing from library" : "Remove from library"}</Button>}
+      </Stack>
+      <Typography component="h1" variant="h5" sx={{mb: 2, fontSize: {xs: 22, sm: 26}}}>{selected.status === "tracking_review" ? "Check scene matches" : selected.status === "ready" ? "Review prepared clip" : "Your recast"}</Typography>
       {details}
     </Box>
   );
@@ -538,7 +590,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
                   ? "Loading your videos"
                   : processingCount
                     ? `${processingCount} ${processingCount === 1 ? "video" : "videos"} in progress`
-                    : "All caught up"}
+                    : hasLoaded ? "All caught up" : "Library unavailable"}
               </Typography>
             </Stack>
           </Stack>
@@ -595,7 +647,7 @@ export function AccountLibrary({ onCreate, onRetry, retryDisabled = false }: Acc
         </Alert>
       )}
       {loading && <LinearProgress aria-label="Loading your library" />}
-      {!loading && !jobs.length && (
+      {hasLoaded && !loading && !jobs.length && (
         <Box
           sx={{
             p: 6,

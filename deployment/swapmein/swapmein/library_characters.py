@@ -63,11 +63,12 @@ def retain_characters(pipeline, job):
     return updated
 
 
-def character_view(record, cloud):
+def character_view(record, cloud, *, signer=None):
     """Signed URLs are generated per authorized response, never archived."""
     result = {}
+    sign = signer or cloud.signed_url
     if record.get("library_reference_uris"):
-        result["reference_urls"] = [cloud.signed_url(uri) for uri in record["library_reference_uris"]]
+        result["reference_urls"] = [sign(uri) for uri in record["library_reference_uris"]]
         result["reference_url"] = result["reference_urls"][0]
     targets = record.get("normalized_targets") or record.get("selection_targets") or record.get("setup", {}).get("targets")
     if not targets and record.get("setup", {}).get("reference_indexes"):
@@ -89,6 +90,6 @@ def character_view(record, cloud):
             frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
             uri = record.get("library_selection_thumbnail_uris", {}).get(str(frame))
             if uri:
-                item["thumbnail_url"] = cloud.signed_url(uri)
+                item["thumbnail_url"] = sign(uri)
             result["selection_targets"].append(item)
     return result

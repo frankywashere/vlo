@@ -268,8 +268,10 @@ def owned_job(job_id: str, authorization: str | None):
     return check_owner(job, owner), session
 
 
-def view(job: dict, *, review_thumbnails: bool = True):
+def view(job: dict, *, review_thumbnails: bool = True, signer=None):
     _, cloud, _ = services()
+    sign = signer or cloud.signed_url
+    temporary_media_available = not job.get("temporary_media_cleanup_started_at")
     from .self_hosted_jobs import is_self_hosted
     self_hosted = is_self_hosted(job)
     status = job["status"]
@@ -327,18 +329,17 @@ def view(job: dict, *, review_thumbnails: bool = True):
             anchor = target.get("anchor", {})
             frame = anchor.get("frame", round(anchor.get("time", 0) * 24))
             thumbnail = job.get("scene_thumbnail_uris", {}).get(str(frame))
-            if thumbnail and review_thumbnails:
-                public_target["thumbnail_url"] = cloud.signed_url(thumbnail)
+            if thumbnail and review_thumbnails and temporary_media_available:
+                public_target["thumbnail_url"] = sign(thumbnail)
             result["selection_targets"].append(public_target)
     if job.get("setup", {}).get("reference_indexes") is not None:
         result["selection_reference_indexes"] = job["setup"]["reference_indexes"]
     reference_uris = job.get("reference_uris") or ([job["reference_uri"]] if job.get("reference_uri") else [])
-    temporary_media_available = not job.get("temporary_media_cleanup_started_at")
     if reference_uris and temporary_media_available:
-        result["reference_urls"] = [cloud.signed_url(uri) for uri in reference_uris]
+        result["reference_urls"] = [sign(uri) for uri in reference_uris]
         result["reference_url"] = result["reference_urls"][0]
     if status == "completed" and job.get("library_expires_at", 0) > time.time():
-        result.update(character_view(job, cloud))
+        result.update(character_view(job, cloud, signer=sign))
     if "duration" in job:
         result["duration"] = job["duration"]
         if not credits_mode and not self_hosted:
@@ -366,7 +367,7 @@ def view(job: dict, *, review_thumbnails: bool = True):
             result[field] = None if field == "selected_label" and job[field] == 0 else job[field]
     for field, output in [("tracking_uri", "tracking_url"), ("guide_uri", "guide_url"), ("output_uri", "output_url"), ("thumbnail_uri", "thumbnail_url")]:
         if job.get(field) and (field in {"output_uri", "thumbnail_uri"} or temporary_media_available):
-            result[output] = cloud.signed_url(job[field])
+            result[output] = sign(job[field])
     if job.get("tracking_plan") and temporary_media_available:
         if (job.get('targeted_mask_review') or {}).get('pending'):
             result['review_action'] = 'recheck_masks'
@@ -387,10 +388,10 @@ def view(job: dict, *, review_thumbnails: bool = True):
             frame = str(math.floor(section["seek_time"] * 24 + 1e-7))
             uri = job.get("scene_thumbnail_uris", {}).get(frame)
             if uri and review_thumbnails:
-                preview["thumbnail_url"] = cloud.signed_url(uri)
+                preview["thumbnail_url"] = sign(uri)
             tracking_uri = job.get("scene_mask_thumbnail_uris", {}).get(frame)
             if tracking_uri and review_thumbnails:
-                preview["tracking_thumbnail_url"] = cloud.signed_url(tracking_uri)
+                preview["tracking_thumbnail_url"] = sign(tracking_uri)
             result["tracking_segments"].append(preview)
         if job.get("tracking_choices"):
             result["tracking_choices"] = job["tracking_choices"]
@@ -400,15 +401,15 @@ def view(job: dict, *, review_thumbnails: bool = True):
             if isinstance(segment_id, str) and segment_id in {section["id"] for section in job["tracking_plan"].get("segments", [])}:
                 result["tracking_error_segment_id"] = segment_id
     if job.get("comparison_uri") and job.get("library_expires_at", 0) > time.time():
-        result["comparison_url"] = cloud.signed_url(job["comparison_uri"])
+        result["comparison_url"] = sign(job["comparison_uri"])
     if job.get("comparison_status"):
         result["comparison_status"] = job["comparison_status"]
     if job.get("comparison_layout"):
         result["comparison_layout"] = job["comparison_layout"]
     if job.get("before_uri") and job.get("library_expires_at", 0) > time.time():
-        result["source_preview_url"] = cloud.signed_url(job["before_uri"])
+        result["source_preview_url"] = sign(job["before_uri"])
     elif job.get("normalized_uri") and temporary_media_available:
-        result["source_preview_url"] = cloud.signed_url(job["normalized_uri"])
+        result["source_preview_url"] = sign(job["normalized_uri"])
     if credits_mode and job.get("app_credits_charged") is not None:
         result["app_credits_charged"] = job["app_credits_charged"]
     if not credits_mode and job.get("actual_credits") is not None:
@@ -1791,55 +1792,79 @@ def account_job(job_id: str, token: str | None):
 
 @app.get("/api/account/jobs")
 def account_jobs(x_firebase_token: str | None = Header(default=None)):
+    started = time.monotonic()
     account = verify_account(x_firebase_token, settings.project)
     records, cloud, _ = services()
-    listing, _ = records.read(f"accounts/{account['account_id']}/index.json")
-    wallet, _ = records.read(f"accounts/{account['account_id']}/wallet.json")
+    from .library_loading import load_entries, parallel, reader
+    from .signed_urls import SignedUrls
     from .accounts import consumer_credit_usage
-    items = []
-    for job_id in (listing or {}).get("jobs", [])[:50]:
-        if not isinstance(job_id, str) or not ID_PATTERN.fullmatch(job_id):
-            continue
-        item, _ = records.read(index_path(account["account_id"], job_id))
-        if not item or item.get("hidden"):
-            continue
-        job, _ = records.read(f"jobs/{job_id}.json")
-        if job and job.get("account_id") == account["account_id"]:
-            job = refresh_stale_job(job)
-            if job.get("status") == "completed" and not item.get("output_uri"):
-                archive_completed(records, job)
-            public = view(job)
-        else:
-            public = {"id": job_id, "access_mode": item.get("access_mode", "api-key"),
-                      "settings_used": settings_used(item),
-                      "review_wait_seconds": item.get("review_wait_seconds", 0),
-                      "status": item.get("status", "failed"), "message": "Preparation records have expired."}
-            if item.get("selection_targets"):
-                public["selection_targets"] = item["selection_targets"]
-            if public["access_mode"] != "credits":
-                public["provider"] = item.get("provider", "reAPI")
-            if item.get("output_uri") and item.get("expires_at", 0) > time.time():
-                public.update(status="completed", output_url=cloud.signed_url(item["output_uri"]),
-                              message="Your saved video is ready.")
-                public.update(character_view(item, cloud))
-                if item.get("thumbnail_uri"):
-                    public["thumbnail_url"] = cloud.signed_url(item["thumbnail_uri"])
-                if item.get("before_uri"):
-                    public["source_preview_url"] = cloud.signed_url(item["before_uri"])
-                if item.get("comparison_uri"):
-                    public["comparison_url"] = cloud.signed_url(item["comparison_uri"])
-                for key in ("comparison_status", "comparison_layout"):
-                    if item.get(key):
-                        public[key] = item[key]
-            elif item.get("status") == "completed":
-                public.update(status="expired", message="The 30-day video retention period has ended.")
+    deadline, record_reads, item_count = started + 25, 0, 0
+    urls = SignedUrls()
+    def sign(uri):
+        return urls.get(uri, 3600, lambda: cloud.signed_url(uri))
+    try:
+        read = reader(records)
+        listing, wallet = parallel([f"accounts/{account['account_id']}/index.json",
+                                    f"accounts/{account['account_id']}/wallet.json"], lambda path: read(path)[0], deadline=deadline)
+        record_reads = 2
+        job_ids = (listing or {}).get("jobs", [])
+        if not isinstance(job_ids, list):
+            raise PublicError("Your Library index could not be read. Tap Refresh to try again.", 503)
+        entries, reads = load_entries(records, account["account_id"], job_ids, deadline=deadline)
+        record_reads += reads
+        # Reconciliation and archive repair retain their existing serial/CAS
+        # behavior. Only immutable record reads and response rendering fan out.
+        def prepare(entry):
+            job_id, item, job = entry
+            owned = job and job.get("account_id") == account["account_id"]
+            if owned:
+                job = refresh_stale_job(job)
+                if job.get("status") == "completed" and not item.get("output_uri"):
+                    archive_completed(records, job)
+            return job_id, item, job if owned else None
+        prepared = parallel(entries, prepare, deadline=deadline, maximum=1)
+        item_count = len(prepared)
+        def render(entry):
+            job_id, item, job = entry
+            if job:
+                public = view(job, signer=sign)
             else:
-                public.update(status="expired")
-        public.update(consumer_credit_usage(job if job and job.get("account_id") == account["account_id"] else item, wallet))
-        items.append({**public, "title": item.get("title", "Your clip"), "created_at": item.get("created_at"),
-                      "completed_at": public.get("completed_at") or item.get("completed_at"),
-                      "expires_at": item.get("expires_at") or job and job.get("library_expires_at")})
-    return {"jobs": items, "retention_days": 30, "limit": 50}
+                public = {"id": job_id, "access_mode": item.get("access_mode", "api-key"),
+                          "settings_used": settings_used(item),
+                          "review_wait_seconds": item.get("review_wait_seconds", 0),
+                          "status": item.get("status", "failed"), "message": "Preparation records have expired."}
+                if item.get("selection_targets"):
+                    public["selection_targets"] = item["selection_targets"]
+                if public["access_mode"] != "credits":
+                    public["provider"] = item.get("provider", "reAPI")
+                if item.get("output_uri") and item.get("expires_at", 0) > time.time():
+                    public.update(status="completed", output_url=sign(item["output_uri"]), message="Your saved video is ready.")
+                    public.update(character_view(item, cloud, signer=sign))
+                    for key, output in (("thumbnail_uri", "thumbnail_url"), ("before_uri", "source_preview_url"),
+                                        ("comparison_uri", "comparison_url")):
+                        if item.get(key):
+                            public[output] = sign(item[key])
+                    for key in ("comparison_status", "comparison_layout"):
+                        if item.get(key):
+                            public[key] = item[key]
+                elif item.get("status") == "completed":
+                    public.update(status="expired", message="The 30-day video retention period has ended.")
+                else:
+                    public.update(status="expired")
+            public.update(consumer_credit_usage(job or item, wallet))
+            return {**public, "title": item.get("title", "Your clip"), "created_at": item.get("created_at"),
+                    "completed_at": public.get("completed_at") or item.get("completed_at"),
+                    "expires_at": item.get("expires_at") or job and job.get("library_expires_at")}
+        items = parallel(prepared, render, deadline=deadline)
+        emit("account_library_loaded", item_count=item_count, record_reads=record_reads,
+             elapsed_seconds=round(time.monotonic() - started, 4), **urls.stats())
+        return {"jobs": items, "retention_days": 30, "limit": 50}
+    except Exception as error:
+        emit("account_library_failed", error=error, item_count=item_count, record_reads=record_reads,
+             elapsed_seconds=round(time.monotonic() - started, 4))
+        if isinstance(error, PublicError):
+            raise
+        raise PublicError("Your Library could not be loaded. Tap Refresh to try again.", 503, code="library_unavailable") from None
 
 
 def retry_assets(job, cloud):
