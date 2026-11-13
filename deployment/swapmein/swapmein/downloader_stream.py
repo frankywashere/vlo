@@ -7,25 +7,33 @@ from fastapi.responses import StreamingResponse
 
 from . import video_downloader
 from .errors import PublicError
+from .diagnostics import emit
 
 MEDIA_TYPE = "application/vnd.recastfx.download-stream"
 
 
 class DownloadStreamResponse(StreamingResponse):
     def __init__(self, records, account, url):
-        self.source = stream(records, account, url)
+        self.transfer = {"binary": False, "bytes": 0, "completed": False}
+        self.source = stream(records, account, url, self.transfer)
         super().__init__(self.source, media_type=MEDIA_TYPE,
                          headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     async def __call__(self, scope, receive, send):
+        async def tracked_send(message):
+            await send(message)
+            if message["type"] == "http.response.body" and self.transfer["binary"]:
+                self.transfer["bytes"] += len(message.get("body", b""))
+                self.transfer["completed"] = not message.get("more_body", False)
         try:
-            await super().__call__(scope, receive, send)
+            await super().__call__(scope, receive, tracked_send)
         finally:
             with anyio.CancelScope(shield=True):
                 await anyio.to_thread.run_sync(self.source.close)
+            emit("video_download_transfer_finished", bytes=self.transfer["bytes"], completed=self.transfer["completed"])
 
 
-def stream(records, account, url):
+def stream(records, account, url, transfer=None):
     queue = Queue(maxsize=8)
     cancel = Event()
     def publish(value):
@@ -64,6 +72,7 @@ def stream(records, account, url):
             else:
                 output, directory = value
                 yield (json.dumps({"event": "ready", "bytes": output.stat().st_size}) + "\n").encode()
+                if transfer is not None: transfer["binary"] = True
                 with output.open("rb") as handle:
                     while chunk := handle.read(256 * 1024):
                         yield chunk

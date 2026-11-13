@@ -150,3 +150,15 @@ def test_cancel_during_install_kills_child_and_removes_candidate(monkeypatch,tmp
     monkeypatch.setattr(runtime,'_rejected',{})
     with pytest.raises(PublicError):runtime.newer_runtime('2026.8.19',lambda stage:None,cancel)
     assert cancelled and not (tmp_path/'runtime').exists()
+
+
+def test_stream_transfer_log_counts_only_mp4_bytes(monkeypatch,tmp_path,capsys):
+    output=tmp_path/'video.mp4';output.write_bytes(b'binary\nvideo');cleaned=[]
+    def prepare(*a,progress,cancel):progress('checking');return output,tmp_path
+    monkeypatch.setattr(dl,'prepare',prepare);monkeypatch.setattr(dl,'cleanup',cleaned.append)
+    async def send(message):pass
+    async def receive():return {'type':'http.disconnect'}
+    asyncio.run(wire.DownloadStreamResponse(None,None,'https://youtu.be/id')({'type':'http','method':'POST','headers':[],'asgi':{'spec_version':'2.4'}},receive,send))
+    event=json.loads(capsys.readouterr().out)
+    assert event['event']=='video_download_transfer_finished' and event['bytes']==12 and event['completed'] is True
+    assert cleaned==[tmp_path]
