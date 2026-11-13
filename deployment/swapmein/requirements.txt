@@ -13,5 +13,5 @@ opencv-python-headless==4.13.0.92
 Pillow==12.3.0
 stripe==15.4.0
 cryptography==50.0.2
-yt-dlp[default]==2026.08.19
+yt-dlp[default]==2026.10.26
 meta-sam-parser==0.2.0
