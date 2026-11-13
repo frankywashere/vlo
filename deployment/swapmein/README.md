@@ -54,13 +54,16 @@ Restore the existing provider secret reference and enable credit generation in
 its separate test ledger. Use production generation pricing with test-only
 credit grants; keep checkout disabled and never copy production wallets.
 
-New Kling jobs on the isolated test deployment pin
-`kling_edit_prompt_variant=preserve_source_shots_v1`. That variant adds explicit
-source-camera, composition, cut-point and side/rear-view preservation to the
-existing prompt. Both the actual submitted prompt and variant are audited.
-Production jobs keep the original prompt unless that variant is deliberately
-rolled out later. Enabling the site submits no render by itself; the normal
-Easy Mode or reviewed submission controls still govern each paid request.
+New Kling jobs in production and the isolated test deployment pin
+`kling_edit_prompt_variant=preserve_source_shots_v1` when the upload is accepted.
+That promoted variant adds explicit source-camera, composition, cut-point and
+side/rear-view preservation to the existing prompt. Both the actual submitted
+prompt and variant are audited. Existing saved jobs and unversioned accepted
+upload tickets retain their original prompt; changing the deployment does not
+rewrite their settings. MiniMax prompts are unaffected. `TEST_SITE` remains
+false in production and controls preview isolation only, not this Kling recipe.
+Enabling the site submits no render by itself; the normal Easy Mode or reviewed
+submission controls still govern each paid request.
 
 ## Watermark rewards
 

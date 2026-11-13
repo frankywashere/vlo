@@ -241,8 +241,9 @@ def preparation_job_snapshot(defaults, options, *, is_admin=False, self_hosted=F
                         retry_missing_masks_with_sam=defaults["retry_missing_masks_with_sam"])
     if settings.preparation_only:
         snapshot.update(preparation_only=True, auto_generate=False)
-    from .preparation_only import isolated_test_site
-    if isolated_test_site(settings) and generation_model(options) == KLING:
+    # Pin the promoted recipe at acceptance; generation still reads only the
+    # saved job variant, so older jobs retain the wording they were prepared for.
+    if generation_model(options) == KLING:
         snapshot["kling_edit_prompt_variant"] = "preserve_source_shots_v1"
     return snapshot
 
@@ -1426,6 +1427,10 @@ def complete_upload(job_id: str, authorization: str | None = Header(default=None
         legacy_preparation = {} if "preparation_provider" in pinned_hosted else preparation_job_snapshot(
             {**defaults, "prompt_variant": prompt_variant}, options, self_hosted=self_hosted,
             is_admin=bool(staff_role(records, active_session)))
+        if "kling_edit_prompt_variant" not in pinned_hosted:
+            # An old accepted upload ticket must not silently adopt a new
+            # prompt while filling in legacy preparation-provider defaults.
+            legacy_preparation.pop("kling_edit_prompt_variant", None)
         job = {"id": job_id, "owner": owner, "status": "queued", "created_at": time.time(), "updated_at": time.time(),
                "message": "Your clip is queued for preparation.", "setup": manifest["setup"], "provider": manifest["provider"],
                "source_uri": manifest["source_uri"], "reference_uri": reference_uris[0], "reference_uris": reference_uris,
