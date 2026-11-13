@@ -250,7 +250,7 @@ def shared_cyan_guidance(mask_style, face_mesh, replace_all_people):
                else "Remove all overlay colors from the finished video."))
 
 
-def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False, generation_model: str = "minimax-h3", generation_resolution: str = "768P", reference_indexes: list[int] | None = None, preserve_shots: bool = False):
+def generation_payload(duration: int, image_url: str | list[str], video_url: str, enhanced_masking: bool = False, anchor: dict | None = None, mask_style: str = "cyan_overlay", *, audio_processing: bool = True, submit_without_audio: bool = False, replace_all_people: bool = False, targets: list[dict] | None = None, face_mesh: bool = False, prompt_variant: str = CURRENT, easy_mode: bool = False, generation_model: str = "minimax-h3", generation_resolution: str = "768P", reference_indexes: list[int] | None = None, preserve_shots: bool = False, source_looks: bool = False):
     if generation_model not in {"minimax-h3", "kling-4-0"}:
         raise PublicError("Choose a supported generation model.")
     if generation_model == "kling-4-0":
@@ -258,7 +258,7 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
             mask_style=mask_style, replace_all_people=replace_all_people, targets=targets,
             face_mesh=face_mesh, reference_indexes=reference_indexes,
             audio_processing=audio_processing, submit_without_audio=submit_without_audio,
-            preserve_shots=preserve_shots)
+            preserve_shots=preserve_shots, source_looks=source_looks)
     if generation_resolution not in {"768P", "2K"}:
         raise PublicError("Choose MiniMax 768P or 2K.")
     if isinstance(targets, list) and any(isinstance(target, dict) and target.get("guide_anchor_untrusted") for target in targets):
@@ -321,7 +321,7 @@ def generation_payload(duration: int, image_url: str | list[str], video_url: str
 
 def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mask_style="none",
                              replace_all_people=False, targets=None, face_mesh=False, reference_indexes=None,
-                             audio_processing=False, submit_without_audio=False, preserve_shots=False):
+                             audio_processing=False, submit_without_audio=False, preserve_shots=False, source_looks=False):
     """The reviewed body-tint edit recipe, with dynamic person assignments.
 
     Colors mark the person slot, not the reference's array index. An identity
@@ -381,11 +381,17 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
                         f"y={point['y'] * 100:.0f}% measured from the top left")
             identifier = f"the person {position}" if shared else f"the {color}-tinted person ({position})"
             lines.append(f"Replace {identifier} with the character in {references}, "
-                         "using their face, hair and clothing.")
+                         "using their face, hair and clothing"
+                         + (", wherever that source person appears in the same source outfit and look "
+                            "as at this selection timestamp." if source_looks else "."))
             if not shared:
                 lines.append(f"The {color} tint marks the source person assigned to {references}.")
             if len(group) > 1:
                 lines.append(angle_guidance(group, kling=True))
+            # This experiment uses clicked examples rather than detector-derived
+            # intervals. Keep scene evidence and mask preparation unchanged.
+            if source_looks:
+                continue
             for scene in target.get("scenes", []):
                 start, end = scene["start"], scene["end"]
                 if scene["absent"]:
@@ -408,7 +414,13 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
         if shared:
             lines.append("All selected people share cyan selection tint; it is not an identity color. "
                          "Use the stated positions and times to keep each reference assignment separate across cuts.")
-    lines.append("Apply these same replacements throughout every shot where those people appear. "
+    if source_looks and not replace_all_people:
+        lines.append("Treat each selection as a separate source appearance, even if two selections show the same actor. "
+                     "Match each source outfit and look to its assigned reference; the reference defines the final "
+                     "replacement appearance. The timestamps and coordinates identify examples, not replacement intervals.")
+    lines.append(("Apply these appearance-specific replacements throughout every shot where the corresponding source looks appear. "
+                  if source_looks and not replace_all_people else
+                  "Apply these same replacements throughout every shot where those people appear. ") +
                  "Keep their original actions, expressions, speaking turns and mouth movements, "
                  "and keep the other people, scene and camera shots unchanged. "
                  "These translucent colors identify the selected people only; "

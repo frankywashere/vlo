@@ -41,7 +41,7 @@ def test_staff_preview_retains_normal_credit_funding_and_pins_the_prompt(api, mo
     quote = gateway.check_generation_funding(records, setup, {'account_id': 'b'*64, 'access_mode': 'credits'})
     assert quote['credits'] == 420
     snapshot = gateway.preparation_job_snapshot(pipeline_settings(records), setup)
-    assert snapshot['kling_edit_prompt_variant'] == 'preserve_source_shots_v1'
+    assert snapshot['kling_edit_prompt_variant'] == 'source_looks_v1'
     assert not snapshot.get('preparation_only')
     assert not provider.submissions and not cloud.enqueued
     monkeypatch.setattr(gateway, 'settings', replace(gateway.settings, test_site=False))
@@ -137,6 +137,56 @@ def test_minimax_snapshot_and_payload_are_unaffected_by_kling_prompt_promotion(a
     assert 'kling_edit_prompt_variant' not in gateway.preparation_job_snapshot(pipeline_settings(records), setup)
     args = dict(duration=15, image_url='photo', video_url='guide', generation_model='minimax-h3')
     assert generation_payload(**args) == generation_payload(**args, preserve_shots=True)
+    assert generation_payload(**args) == generation_payload(**args, preserve_shots=True, source_looks=True)
+
+
+def test_source_looks_prompt_uses_selected_examples_and_leaves_media_unchanged():
+    targets = [
+        {'reference_index': 1, 'reference_indexes': [1, 2],
+         'anchor': {'x': .32, 'y': .44, 'time': 0},
+         'scenes': [{'start': 0, 'end': 6.58, 'absent': False,
+                     'anchor': {'x': .32, 'y': .44, 'time': 0}},
+                    {'start': 6.58, 'end': 15, 'absent': True}]},
+        {'reference_index': 0, 'anchor': {'x': .23, 'y': .45, 'time': 5.12},
+         'scenes': [{'start': 0, 'end': 15, 'absent': False,
+                     'anchor': {'x': .23, 'y': .45, 'time': 5.12},
+                     'guide_mask_suppressed_ranges': [{'start': 7, 'end': 8}]}]}]
+    args = dict(duration=15, image_url=['black', 'plum-front', 'plum-side'], video_url='exact-guide',
+                generation_model='kling-4-0', mask_style='identity_overlay_multi_20', targets=targets,
+                audio_processing=True, preserve_shots=True)
+    baseline = generation_payload(**args)
+    experiment = generation_payload(**args, source_looks=True)
+    assert {k: v for k, v in baseline.items() if k != 'prompt'} == {k: v for k, v in experiment.items() if k != 'prompt'}
+    prompt = experiment['prompt']
+    assert 'cyan-tinted person (at 0.00 seconds, x=32%, y=44%' in prompt
+    assert 'magenta-tinted person (at 5.12 seconds, x=23%, y=45%' in prompt
+    assert 'cyan tint marks the source person assigned to @Image2, @Image3' in prompt
+    assert 'magenta tint marks the source person assigned to @Image1' in prompt
+    assert 'same source outfit and look' in prompt and 'same actor' in prompt
+    assert 'examples, not replacement intervals' in prompt
+    assert 'Side and rear views remain side and rear views' in prompt
+    assert 'isolated vocals pitched up three semitones' in prompt
+    assert 'From 0.00 to 6.58' in baseline['prompt']
+    assert 'From ' not in prompt and 'that person is absent' not in prompt and 'is withheld' not in prompt
+
+
+@pytest.mark.parametrize('pinned_variant', ['source_looks_v1', 'preserve_source_shots_v1'])
+def test_saved_kling_prompt_is_honored_even_after_site_setting_changes(api, monkeypatch, pinned_variant):
+    client, records, _, provider = api
+    headers, owner = authenticated(api)
+    identifier = ready_job(records, owner)
+    job = records.data[f'jobs/{identifier}.json']
+    job.update(generation_model='kling-4-0', generation_resolution='720p', mask_style='identity_overlay_20',
+               kling_edit_prompt_variant=pinned_variant, identity_matching_completed=True,
+               prompt_variant='cloudflare_identity_v1')
+    job['setup'].update(generation_model='kling-4-0', generation_resolution='720p', enhanced_character_masking=True)
+    monkeypatch.setattr(gateway, 'settings', replace(gateway.settings, test_site=False, preparation_only=False))
+    for _ in range(2):
+        response = client.post(f'/api/jobs/{identifier}/generate', headers=headers, json={'approved': True})
+        assert response.status_code == 200, response.json()
+    assert len(provider.submissions) == 1
+    assert ('same source outfit and look' in provider.submissions[0]['prompt']) is (pinned_variant == 'source_looks_v1')
+    assert records.data[f'jobs/{identifier}.json']['generation_settings']['prompt_variant'] == pinned_variant
 
 
 def test_unversioned_legacy_upload_ticket_keeps_original_prompt_at_completion(api, monkeypatch):

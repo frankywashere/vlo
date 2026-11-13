@@ -244,7 +244,9 @@ def preparation_job_snapshot(defaults, options, *, is_admin=False, self_hosted=F
     # Pin the promoted recipe at acceptance; generation still reads only the
     # saved job variant, so older jobs retain the wording they were prepared for.
     if generation_model(options) == KLING:
-        snapshot["kling_edit_prompt_variant"] = "preserve_source_shots_v1"
+        from .preparation_only import isolated_test_site
+        snapshot["kling_edit_prompt_variant"] = ("source_looks_v1" if isolated_test_site(settings)
+                                                else "preserve_source_shots_v1")
     return snapshot
 
 
@@ -2148,7 +2150,9 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         **({"generation_model": KLING} if generation_model(job) == KLING else {}),
         **({"generation_resolution":"2K"} if generation_resolution(job) == "2K" else {}),
         **({"reference_indexes":options.reference_indexes} if options.reference_indexes is not None else {}),
-        **({"preserve_shots": True} if job.get("kling_edit_prompt_variant") == "preserve_source_shots_v1"
+        **({"preserve_shots": True} if job.get("kling_edit_prompt_variant") in {"preserve_source_shots_v1", "source_looks_v1"}
+           and generation_model(job) == KLING else {}),
+        **({"source_looks": True} if job.get("kling_edit_prompt_variant") == "source_looks_v1"
            and generation_model(job) == KLING else {}))
     credits_mode = active_session.get("access_mode") == "credits"
     if credits_mode:
@@ -2188,15 +2192,17 @@ def submit_generation(job_id: str, job: dict, active_session: dict, key: str):
         records.update(f"jobs/{job_id}.json", lambda current: {
             **claim_job(current, {"ready"}, "submitting"),
             "generation_settings": {"model": payload["model"], "resolution": payload["resolution"],
-                **({"prompt_variant": "preserve_source_shots_v1"}
-                   if job.get("kling_edit_prompt_variant") == "preserve_source_shots_v1" and generation_model(job) == KLING else {})}})
+                **({"prompt_variant": job["kling_edit_prompt_variant"]}
+                   if job.get("kling_edit_prompt_variant") in {"preserve_source_shots_v1", "source_looks_v1"}
+                   and generation_model(job) == KLING else {})}})
     except PublicError as error:
         if error.status_code == 409:
             current, _ = records.read(f"jobs/{job_id}.json")
             return view(current)
         raise
     emit("generation_prompt_selected", job_id=job_id,
-         prompt_variant=job.get("prompt_variant") or "current", prompt_characters=len(payload["prompt"]),
+         prompt_variant=(job.get("kling_edit_prompt_variant") if generation_model(job) == KLING
+                         else job.get("prompt_variant")) or "current", prompt_characters=len(payload["prompt"]),
          mask_style=job.get("mask_style", "none"), face_mesh=job.get("face_mesh", False),
          tracking_reviewed=job.get("tracking_reviewed", False))
     if credits_mode:

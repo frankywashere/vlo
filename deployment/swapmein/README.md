@@ -65,6 +65,18 @@ false in production and controls preview isolation only, not this Kling recipe.
 Enabling the site submits no render by itself; the normal Easy Mode or reviewed
 submission controls still govern each paid request.
 
+The isolated staff preview now pins `source_looks_v1` for new Kling uploads.
+It keeps the source-shot preservation, twenty-percent tint-to-reference mapping,
+clicked timestamps/coordinates, grouped reference photos and audio instructions.
+It omits detector-derived scene intervals from the generation prompt and scopes
+each selection to the same source outfit/look, including when two selections
+show the same actor in different costumes. These timestamps identify examples,
+not replacement intervals. This is a prompt experiment, not a new identity
+matching or mask-cleanup policy; preparation and scene assignments are unchanged.
+Production continues to pin `preserve_source_shots_v1`. Existing uploads/jobs
+on either site retain their saved variant; start a fresh preview upload to try
+the new wording. Deployment does not submit any paid generation.
+
 ## Watermark rewards
 
 Credit-funded accounts can opt into a lower-right RecastFX watermark at generation review.
