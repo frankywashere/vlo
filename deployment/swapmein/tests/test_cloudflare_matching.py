@@ -160,18 +160,18 @@ def test_five_references_use_multiple_batches_with_at_most_four_images(tmp_path,
     assert all(not scene["absent"] for target in result["targets"] for scene in target["scenes"])
 
 
-def test_selected_person_fragment_is_rechecked_where_visible_before_review(tmp_path, monkeypatch):
+def test_selected_person_fragment_uses_visible_checks_and_disjoint_aliases(tmp_path, monkeypatch):
     archive, metadata, targets, images = fixture(tmp_path, fragmented=True)
     stub_decoder(monkeypatch, images)
     observed = []
     install_api(monkeypatch, observed=observed)
-    with pytest.raises(PublicError, match="after identity rechecking") as caught:
-        matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
-                              credentials=CREDENTIALS, workdir=tmp_path)
-    assert caught.value.code == "cloudflare_identity_uncertain"
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    selected = next(item for item in result["assignments"] if item["target_id"] == "p0" and item["start_frame"] == 4)
+    assert selected["selected_label"] == 11
+    assert selected["selected_labels"] == [11, 30]
+    assert result["coverage"] == [24 * 12 * 2] * 8
     assert len(observed) == 4
-    assert any(len(kwargs["json"]["images"]) == 3 for _, kwargs in observed)
-    assert not (tmp_path / "identity-masks.zip").exists()
 
 
 def test_corrupt_sam_archive_keeps_tracking_error_instead_of_matcher_fallback_code(tmp_path, monkeypatch):
@@ -332,31 +332,46 @@ def test_single_shot_stable_anchor_needs_no_matching_request(tmp_path, monkeypat
     assert not result["assignments"][0]["absent"]
 
 
-def test_anchored_person_fragment_gets_focused_identity_calls_before_review(tmp_path, monkeypatch, capsys):
+def test_anchored_person_fragment_gets_focused_calls_and_disjoint_alias(tmp_path, monkeypatch, capsys):
     archive, metadata, targets, images = fixture(tmp_path, fragmented=True, people=1)
     metadata["scene_cuts"] = []
     stub_decoder(monkeypatch, images)
     observed = []
     install_api(monkeypatch, observed=observed)
-    with pytest.raises(PublicError, match="after identity rechecking"):
-        matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
-                              credentials=CREDENTIALS, workdir=tmp_path)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
     assert len(observed) == 2
+    assert result["assignments"][0]["selected_labels"] == [10, 30]
+    assert result["coverage"] == [24 * 12] * 8
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    rejected = next(item for item in events if item.get("outcome") == "unresolved_fragment")
-    assert rejected["candidate_label"] == 30
-    assert rejected["sample_frame"] in [6, 7]
-    assert not (tmp_path / "identity-masks.zip").exists()
+    checked = next(item for item in events if item.get("outcome") == "focused_observation")
+    assert checked["candidate_label"] == 30 and checked["target_id"] == "p0"
+    assert checked["question_id"] == "p0c0"
+    assert checked["sample_frame"] in [6, 7]
 
 
-def test_recorded_frame_648_uncertainty_is_review_not_provider_unavailability():
-    fragment = {"focused": True, "scene": 6, "label": 2, "view": {"frame": 648},
-                "shot": {"excluded_labels": set()}}
-    probabilities = {"different": .7581, "same": .0423, "uncertain": .1996}
-    with pytest.raises(PublicError) as error:
-        matching._resolve_focused_results([(fragment, ({"p0c0": probabilities}, 0, 0))], "offline")
-    assert error.value.code == "cloudflare_identity_uncertain"
-    assert fragment["shot"]["excluded_labels"] == set()
+def resolver_shot(scores_by_frame, *, present=None, locked=None, co_visible=()):
+    people = len(scores_by_frame[0])
+    columns = len(scores_by_frame[0][0])
+    candidates = [{"label": 30 + column, "box": (0, 0, 4, 4), "pixels": 16,
+        "anchor": {"x": .5, "y": .5, "time": 1}, "discarded_pixels": 0} for column in range(columns)]
+    views = []
+    for frame, scores in enumerate(scores_by_frame):
+        copied = [dict(candidate, **({"box": None, "anchor": None} if present is not None and not present[frame][column] else {}))
+                  for column, candidate in enumerate(candidates)]
+        views.append({"frame": frame, "scores": scores, "candidates": copied})
+    return {"scene": 0, "people": list(range(people)), "candidates": candidates,
+            "locked": locked or {}, "co_visible": set(co_visible), "used_views": views}
+
+
+def test_recorded_frame_648_below_shared_cutoff_is_unmatched_without_extra_veto(monkeypatch):
+    shot = resolver_shot([[[.0423]]])
+    matching._resolve_views(shot, "offline")
+    assert shot["selected_columns"] == {0: []}
+    monkeypatch.setattr(matching, "MINIMUM_SAME_SCORE", .04)
+    shot = resolver_shot([[[.0423]]])
+    matching._resolve_views(shot, "offline")
+    assert shot["selected_columns"] == {0: [0]}
 
 
 @pytest.mark.parametrize("bad_first_frame", ["wrong_person", "unmatched"])
@@ -492,7 +507,7 @@ def test_clear_different_brief_candidate_allows_verified_absence_and_keeps_confi
                                   credentials=CREDENTIALS, workdir=tmp_path)
     assert result["targets"][1]["scenes"][1]["absent"] is True
     assert result["targets"][0]["scenes"][1]["absent"] is False
-    assert result["diagnostics"]["requests"] == len(observed) == 4
+    assert result["diagnostics"]["requests"] == len(observed) == 3
     assert result["diagnostics"]["scene_evidence"][1]["excluded_labels"] == [30]
     assert result["diagnostics"]["scene_evidence"][1]["focused_checks"] == [{"label":30,"frame":4}]
     with zipfile.ZipFile(result["masks_path"]) as masks:
@@ -502,7 +517,7 @@ def test_clear_different_brief_candidate_allows_verified_absence_and_keeps_confi
 
 
 @pytest.mark.parametrize("same,different,uncertain", [(.01,.2,.79), (.0446,.9554,0), (.8,.2,0)])
-def test_brief_candidate_uncertain_or_selected_person_cannot_be_treated_as_absent(
+def test_brief_candidate_uses_shared_same_cutoff_regardless_of_different_score(
         tmp_path, monkeypatch, same, different, uncertain):
     archive, metadata, targets, images = fixture(tmp_path, second_absent=True)
     add_brief_candidate(archive, images)
@@ -519,10 +534,11 @@ def test_brief_candidate_uncertain_or_selected_person_cannot_be_treated_as_absen
             answers[key]={"probabilities":values}
         return Response({"result":{"answers":answers,"usage":{"input_tokens":800}}})
     monkeypatch.setattr(matching.requests,"post",post)
-    with pytest.raises(PublicError,match="after identity rechecking"):
-        matching.match_tracks(tmp_path / "original.mp4",archive,metadata,targets,
-                              credentials=CREDENTIALS,workdir=tmp_path)
-    assert not (tmp_path / "identity-masks.zip").exists()
+    result = matching.match_tracks(tmp_path / "original.mp4",archive,metadata,targets,
+                                   credentials=CREDENTIALS,workdir=tmp_path)
+    second = next(item for item in result["assignments"] if item["target_id"] == "p1" and item["start_frame"] == 4)
+    assert second["absent"] is (same < matching.MINIMUM_SAME_SCORE)
+    assert second["selected_labels"] == ([] if same < matching.MINIMUM_SAME_SCORE else [30])
 
 
 def test_focused_rechecks_are_included_in_request_limit_before_any_call(tmp_path, monkeypatch):
@@ -554,8 +570,111 @@ def test_id_missing_from_max_visible_sample_gets_actual_sighting_check(tmp_path,
     assert result["targets"][0]["scenes"][1]["absent"] is False
 
 
-def test_focused_different_result_cannot_override_positive_standard_observation():
-    shot = {"people": [0], "candidates": [{"label":30}], "excluded_labels":{30},
-            "used_views":[{"scores":[[.82]]}]}
-    with pytest.raises(PublicError, match="disagree with the focused"):
+def test_absent_crops_and_low_score_abstentions_do_not_outvote_positive_identity():
+    shot = resolver_shot([[[.82]], [[None]], [[.01]]], present=[[True], [False], [True]])
+    matching._resolve_views(shot, None)
+    assert shot["selected_columns"] == {0: [0]}
+
+
+def test_simultaneous_aliases_still_require_review():
+    shot = resolver_shot([[[.9, None]], [[None, .9]]], present=[[True, False], [False, True]],
+                         co_visible=[(30, 31)])
+    with pytest.raises(PublicError, match="compete"):
         matching._resolve_views(shot, None)
+
+
+def test_tied_contradictory_positive_identities_still_require_review():
+    shot = resolver_shot([[[.9], [.01]], [[.01], [.9]]])
+    with pytest.raises(PublicError, match="disagree"):
+        matching._resolve_views(shot, None)
+
+
+@pytest.mark.parametrize("focused", [False, True])
+@pytest.mark.parametrize("threshold,accepted", [(.0446, True), (.2269, True), (.23, False)])
+def test_recorded_woman_score_uses_runtime_shared_cutoff_for_every_view(
+        tmp_path, monkeypatch, focused, threshold, accepted):
+    archive, metadata, targets, images = fixture(tmp_path, second_absent=focused)
+    if focused:
+        add_brief_candidate(archive, images)
+    stub_decoder(monkeypatch, images)
+    observed = []
+    def post(url, **kwargs):
+        payload = kwargs["json"]
+        observed.append(payload)
+        refs = len({key.split("c")[0] for key in payload["questions"]})
+        answers = {}
+        for key in payload["questions"]:
+            person, candidate = (int(value) for value in key[1:].split("c"))
+            source = crop_identity(payload["images"][person])
+            subject = crop_identity(payload["images"][refs + candidate])
+            same = source == subject or (focused and source == 2 and subject >= 4)
+            score = .2269 if same and source == 2 else .82 if same else .01
+            answers[key] = {"probabilities": ({"same": .2269, "different": .6756, "uncertain": .0975}
+                if score == .2269 else {"same": score, "different": 1-score, "uncertain": 0})}
+        return Response({"result": {"answers": answers, "usage": {"input_tokens": 800}}})
+    monkeypatch.setattr(matching.requests, "post", post)
+    monkeypatch.setattr(matching, "MINIMUM_SAME_SCORE", threshold)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    second = next(item for item in result["assignments"] if item["target_id"] == "p1" and item["start_frame"] == 4)
+    assert second["absent"] is not accepted
+    assert result["diagnostics"]["threshold"] == threshold
+    assert observed
+
+
+def test_locked_identity_cannot_be_stolen_by_a_simultaneously_visible_id():
+    # Both a known ID and the alleged alias are visible at an unsampled frame.
+    shot = resolver_shot([[[1, None]], [[None, .9]]], present=[[True, False], [False, True]],
+                         locked={0: 30}, co_visible=[(30, 31)])
+    with pytest.raises(PublicError, match="compete"):
+        matching._resolve_views(shot, None)
+
+
+def test_focused_view_already_used_ordinary_is_only_requested_once(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path, second_absent=True)
+    add_brief_candidate(archive, images, frame=4)
+    stub_decoder(monkeypatch, images)
+    observed = []
+    install_api(monkeypatch, observed=observed)
+    matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                          credentials=CREDENTIALS, workdir=tmp_path)
+    serialized = [json.dumps(kwargs["json"], sort_keys=True) for _, kwargs in observed]
+    # Frames 4/5/6 may share appearance, but the brief-candidate image occurs in
+    # exactly one payload, even though frame 4 is both ordinary and focused.
+    assert sum(len(kwargs["json"]["images"]) == 4 for _, kwargs in observed) == 1
+
+
+def test_locked_original_id_stays_primary_when_only_its_alias_is_sampled(tmp_path, monkeypatch):
+    archive, metadata, targets, images = fixture(tmp_path, people=1)
+    metadata["scene_cuts"] = []
+    with zipfile.ZipFile(archive) as source:
+        frames = [np.array(Image.open(BytesIO(source.read(name)))) for name in sorted(source.namelist())]
+    for labels in frames[1:]:
+        labels[labels == 10] = 30
+    with zipfile.ZipFile(archive, "w") as output:
+        for index, labels in enumerate(frames):
+            data = BytesIO(); Image.fromarray(labels).save(data, "PNG")
+            output.writestr(f"labels/labels_{index:05d}.png", data.getvalue())
+    stub_decoder(monkeypatch, images)
+    observed = []
+    install_api(monkeypatch, observed=observed)
+    result = matching.match_tracks(tmp_path / "original.mp4", archive, metadata, targets,
+                                  credentials=CREDENTIALS, workdir=tmp_path)
+    assignment = result["assignments"][0]
+    assert assignment["selected_label"] == 10
+    assert assignment["selected_labels"] == [10, 30]
+    assert assignment["anchor"] == {key: targets[0]["anchor"][key] for key in ("x", "y", "time")}
+    assert result["coverage"] == [24 * 12] * 8
+    assert len(observed) == 2
+    assert 0 not in assignment["evidence_frames"]  # Anchor was not borrowed as an extra paid observation.
+
+
+def test_below_floor_visible_observations_still_request_available_third_view():
+    shot = resolver_shot([[[.01]], [[.02]], [[.9]]])
+    shot["views"] = list(shot["used_views"])
+    shot["used_views"] = shot["views"][:2]
+    assert matching._needs_recheck(shot) is True
+    assert shot["views"][2] not in shot["used_views"]
+    # This is work planning only. No inference or acceptance decision occurred.
+    assert shot["used_views"][0]["scores"] == [[.01]]
+    assert shot["used_views"][1]["scores"] == [[.02]]
