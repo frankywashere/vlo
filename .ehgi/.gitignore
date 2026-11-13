@@ -1,0 +1,3 @@
+memory/*
+!memory/engrams.yaml
+!memory/tensions.yaml
