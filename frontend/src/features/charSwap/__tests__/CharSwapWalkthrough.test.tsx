@@ -256,9 +256,18 @@ it("opens a waiting screen, permits Back without canceling, and advances when se
   store.assignReference("a",{...sample.reference,cleanup:{originalUrl:sample.reference.url,mode:"clean",pending:true}});
   store.visit("references");render(<CharSwapWalkthrough/>);const user=userEvent.setup();
   const next=()=>screen.getByRole("button",{name:"Continue to generate"});
+  vi.mocked(window.scrollTo).mockClear();
   expect(next()).toBeEnabled();await user.click(next());
-  expect(screen.getByRole("heading",{name:"Cleaning up your images"})).toBeVisible();
-  expect(screen.getByText("Character 1 of 1")).toBeVisible();
+  const waitingHeading=screen.getByRole("heading",{name:"Preparing your photos"});
+  expect(waitingHeading).toBeVisible();
+  expect(waitingHeading).toHaveFocus();
+  expect(window.scrollTo).toHaveBeenCalledOnce();
+  expect(window.scrollTo).toHaveBeenCalledWith({top:0,behavior:"instant"});
+  vi.mocked(window.scrollTo).mockClear();
+  act(()=>useCharSwapStore.getState().renameTarget("a","Person A updated"));
+  expect(waitingHeading).toHaveFocus();
+  expect(window.scrollTo).not.toHaveBeenCalled();
+  expect(screen.getByText("Photo 1 of 1")).toBeVisible();
   await user.click(screen.getByRole("button",{name:"Back to characters"}));
   expect(useCharSwapStore.getState().references[0].cleanup?.pending).toBe(true);
   expect(next()).toBeEnabled();await user.click(next());
@@ -272,7 +281,7 @@ it("requires an explicit Original choice after a cleanup failure before advancin
  render(<CharSwapWalkthrough/>);const user=userEvent.setup();
  await user.click(screen.getByRole("button",{name:"Continue to generate"}));
  expect(useCharSwapStore.getState().step).toBe("references");
- await user.click(screen.getByRole("button",{name:"Use Original"}));
+ await user.click(screen.getByRole("button",{name:"Use Original for Person A · Angle 1"}));
  await waitFor(()=>expect(useCharSwapStore.getState().step).toBe("review"));
 });
 

@@ -379,7 +379,7 @@ export function CharSwapWalkthrough({
   useEffect(() => {
     headingRef.current?.focus();
     window.scrollTo({ top: 0, behavior: "instant" });
-  }, [step]);
+  }, [step, waitingForCleanup]);
   useEffect(
     () => () => {
       sampleRequest.current += 1;
@@ -534,7 +534,7 @@ export function CharSwapWalkthrough({
                   tabIndex={-1}
                   sx={{ outline: "none", fontSize: step === "matches" ? { xs: 22, sm: 26 } : { xs: 28, md: 36 } }}
                 >
-                  {waitingForCleanup ? "Cleaning up your images" : clipStep && clip
+                  {waitingForCleanup ? "Preparing your photos" : clipStep && clip
                     ? "Choose your moment."
                     : step === "review" && !easyMode && !trackingReady ? "Prepare and check scenes" : STEP_INFO[step].title}
                 </Typography>
@@ -542,7 +542,7 @@ export function CharSwapWalkthrough({
                   color="text.secondary"
                   sx={{ mt: 0.75, fontSize: 15 }}
                 >
-                  {waitingForCleanup ? "Please wait. We’ll continue when your images are ready." : clipStep && clip
+                  {waitingForCleanup ? "We’ll continue automatically." : clipStep && clip
                     ? "Trim your clip. The estimate updates as you go."
                     : step === "review" && !easyMode && !trackingReady ? "Prepare your clip, then confirm your people in each scene before generating." : STEP_INFO[step].description}
                 </Typography>
