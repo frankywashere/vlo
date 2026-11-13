@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Box, Button, Container, LinearProgress, Stack, TextField, Typography } from "@mui/material";
 import { downloaderLimits, downloaderRequest, downloadVideoBlob } from "../services/videoDownloader";
-import type { DownloadProgress } from "../services/videoDownloader";
+import type { DownloadProgress, DownloadStage } from "../services/videoDownloader";
+
+const STAGES: Record<DownloadStage, string> = { preparing: "Preparing your MP4…", checking: "Checking for a downloader update…", updating: "Updating the downloader…", retrying: "Retrying your download…" };
 
 function downloadSize(bytes: number): string {
   return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${(bytes / 1_000).toFixed(0)} KB`;
@@ -12,6 +14,7 @@ export function VideoDownloaderPage() {
   const [maxDownloadMb, setMaxDownloadMb] = useState<number | null>(null);
   useEffect(() => { let active = true; void downloaderLimits().then(value => { if (active) setMaxDownloadMb(value.max_download_mb); }).catch(() => { if (active) setError("Download limits could not be loaded. Reload this page to try again."); }); return () => { active = false; }; }, []);
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<DownloadStage>("preparing");
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ url: string; file: File } | null>(null);
@@ -20,14 +23,15 @@ export function VideoDownloaderPage() {
   useEffect(() => () => { request.current?.abort(); if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }, []);
   async function download() {
     if (busy) return;
-    setBusy(true); setError(""); setProgress(null);
+    setBusy(true); setError(""); setProgress(null); setStage("preparing");
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = null; setResult(null);
     const controller = new AbortController();
     request.current = controller;
     try {
       const response = await downloaderRequest("/api/video-downloader", { url: url.trim() }, controller.signal);
-      const blob = await downloadVideoBlob(response, value => { if (!controller.signal.aborted) setProgress(value); }, controller.signal);
+      const blob = await downloadVideoBlob(response, value => { if (!controller.signal.aborted) setProgress(value); }, controller.signal,
+        value => { if (!controller.signal.aborted) setStage(value); });
       if (controller.signal.aborted) return;
       const file = new File([blob], "recastfx-download.mp4", { type: "video/mp4" });
       const local = URL.createObjectURL(file);
@@ -54,7 +58,7 @@ export function VideoDownloaderPage() {
       <Typography variant="body2" color="text.secondary">X, Instagram, YouTube, Vimeo, and TikTok. Public videos only, {maxDownloadMb !== null ? `up to ${maxDownloadMb} MB and 30 minutes` : "up to 30 minutes"}. Some sites may block downloads.</Typography>
       {busy && <Box role="status">
         <LinearProgress aria-label="Video download progress" variant={progress?.totalBytes ? "determinate" : "indeterminate"} value={progress?.totalBytes ? Math.min(100, progress.receivedBytes / progress.totalBytes * 100) : undefined} />
-        <Typography sx={{ mt: 1 }}>{progress ? progress.totalBytes ? `${downloadSize(progress.receivedBytes)} of ${downloadSize(progress.totalBytes)} downloaded` : `${downloadSize(progress.receivedBytes)} downloaded` : "Preparing your MP4…"}</Typography>
+        <Typography sx={{ mt: 1 }}>{progress ? progress.totalBytes ? `${downloadSize(progress.receivedBytes)} of ${downloadSize(progress.totalBytes)} downloaded` : `${downloadSize(progress.receivedBytes)} downloaded` : STAGES[stage]}</Typography>
         <Typography variant="body2" color="text.secondary">Keep this page open.</Typography>
       </Box>}
       {error && <Alert severity="error">{error}</Alert>}

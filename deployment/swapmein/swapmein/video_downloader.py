@@ -15,6 +15,7 @@ from .diagnostics import emit
 from .downloader_diagnostics import DiagnosticTail, failure
 from .downloader_media import compatible_video, workspace_bytes
 from . import youtube_session
+from . import downloader_runtime
 from .errors import PublicError
 from .security import digest
 
@@ -72,7 +73,7 @@ def acquire(records, account):
     def mutate(current):
         if (current or {}).get("expires", 0) > time.time():
             raise PublicError("A download is already running for your account. Please wait.", 429)
-        return {"token": token, "expires": time.time() + TIMEOUT + 60}
+        return {"token": token, "expires": time.time() + TIMEOUT * 2 + 120}
     records.update(key, mutate)
     return key, token
 
@@ -83,7 +84,7 @@ def release(records, key, token):
     records.update(key, mutate)
 
 
-def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB, cookie_file=None):
+def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB, cookie_file=None, *, runtime=None, cancel=None):
     """Run the network downloader outside the API process; kill its whole process group."""
     if type(max_download_mb) is not int or not 1 <= max_download_mb <= MAX_DOWNLOAD_MB:
         raise PublicError("Invalid download size limit.")
@@ -93,10 +94,12 @@ def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB, cookie_fil
     command = [sys.executable, "-m", "swapmein.video_downloader_worker", url, str(directory), str(max_download_mb)]
     if cookie_file is not None:
         command.append(str(cookie_file))
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    environment = {"env": {**os.environ, "PYTHONPATH": str(runtime) + os.pathsep + os.environ.get("PYTHONPATH", "")}} if runtime else {}
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, **environment)
     diagnostics = DiagnosticTail(process.stdout)
     try:
         while process.poll() is None:
+            downloader_runtime.cancelled(cancel)
             if time.monotonic() - started > TIMEOUT:
                 raise PublicError("Download timed out. Try a shorter video or another link.", 504, code="download_timeout")
             if workspace_bytes(directory) > max_work_bytes:
@@ -128,7 +131,43 @@ def download(url, directory, max_download_mb=DEFAULT_MAX_DOWNLOAD_MB, cookie_fil
             process.stdout.close()
 
 
-def prepare(records, account, url):
+def download_recovering(url, directory, maximum, cookies, progress=None, cancel=None):
+    progress = progress or (lambda stage: None)
+    previous, runtime = downloader_runtime.current()
+    def attempt(selected_runtime):
+        kwargs = {}
+        if selected_runtime is not None: kwargs["runtime"] = selected_runtime
+        if cancel is not None: kwargs["cancel"] = cancel
+        return download(url, directory, maximum, cookies, **kwargs) if cookies is not None else download(url, directory, maximum, **kwargs)
+    try:
+        return attempt(runtime)
+    except PublicError as original:
+        if urlsplit(url).hostname not in youtube_session.YOUTUBE_HOSTS or original.code not in downloader_runtime.ELIGIBLE:
+            raise
+        try:
+            candidate = downloader_runtime.newer_runtime(previous, progress, cancel)
+        except Exception:
+            downloader_runtime.cancelled(cancel)
+            emit("video_downloader_update_unavailable", previous_version=previous)
+            raise PublicError("The downloader update could not be installed. " + original.message,
+                              502, code="downloader_update_unavailable") from None
+        if candidate is None:
+            emit("video_downloader_already_current", version=previous)
+            raise
+        # Retain the cookie file; remove only this request's partial media.
+        for path in directory.iterdir():
+            if path.is_file() and path != cookies: path.unlink()
+        progress("retrying")
+        try:
+            result = attempt(candidate[1])
+        except BaseException:
+            downloader_runtime.rejected(candidate)
+            raise
+        downloader_runtime.accepted(candidate)
+        return result
+
+
+def prepare(records, account, url, *, progress=None, cancel=None):
     if not allowed(records, account):
         raise PublicError("Video downloader is currently available to admins only.", 403)
     validate_url(url)
@@ -151,7 +190,7 @@ def prepare(records, account, url):
         maximum = configuration(records)["max_download_mb"]
         emit("video_download_started", actor_id=digest(account["email"]), site=urlsplit(url).hostname, max_download_mb=maximum)
         with youtube_session.cookie_file(records, account, url, directory) as cookies:
-            output = download(url, directory, maximum, cookies) if cookies is not None else download(url, directory, maximum)
+            output = download_recovering(url, directory, maximum, cookies, progress, cancel)
         return output, directory
     except Exception as error:
         cleanup(directory)

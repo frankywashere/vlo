@@ -53,3 +53,19 @@ it("shows preparation then received and total sizes during a streamed transfer",
   expect(await screen.findByRole("link", { name: "Download video" })).toBeInTheDocument();
   expect(screen.getByText(/Ready on this device · 2.0 MB/)).toBeInTheDocument();
 });
+
+it("shows real update and retry stages before offering the completed file", async () => {
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  api.request.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }), { headers: { "Content-Type": "application/vnd.recastfx.download-stream" } }));
+  render(<VideoDownloaderPage />);
+  await screen.findByText(/up to 500 MB/);
+  fireEvent.change(screen.getByLabelText(/Video link/), { target: { value: "https://youtu.be/video" } });
+  fireEvent.click(screen.getByRole("button", { name: "Get video" }));
+  for (const [stage, text] of [["checking", "Checking for a downloader update…"], ["updating", "Updating the downloader…"], ["retrying", "Retrying your download…"]]) {
+    await act(async () => stream.enqueue(new TextEncoder().encode(JSON.stringify({ event: "status", stage }) + "\n")));
+    expect(await screen.findByRole("status")).toHaveTextContent(text);
+    expect(screen.queryByRole("link", { name: "Download video" })).not.toBeInTheDocument();
+  }
+  await act(async () => { stream.enqueue(new TextEncoder().encode('{"event":"ready","bytes":3}\nabc')); stream.close(); });
+  expect(await screen.findByRole("link", { name: "Download video" })).toBeInTheDocument();
+});

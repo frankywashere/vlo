@@ -757,9 +757,15 @@ def video_download_public_settings(x_firebase_token: str | None = Header(default
 
 
 @app.post("/api/video-downloader")
-def video_download(body: VideoDownloadRequest, x_firebase_token: str | None = Header(default=None)):
+def video_download(body: VideoDownloadRequest, x_firebase_token: str | None = Header(default=None), accept: str | None = Header(default=None)):
     account = verify_account(x_firebase_token, settings.project)
     records, _, _ = services()
+    from .downloader_stream import MEDIA_TYPE, DownloadStreamResponse
+    if accept == MEDIA_TYPE:
+        if not video_downloader.allowed(records, account):
+            raise PublicError("Video downloader is currently available to admins only.", 403)
+        video_downloader.validate_url(body.url)
+        return DownloadStreamResponse(records, account, body.url)
     output, directory = video_downloader.prepare(records, account, body.url)
     return TemporaryVideoResponse(output, directory)
 

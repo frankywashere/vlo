@@ -2,8 +2,55 @@ import { accountToken } from "./accountContext";
 
 export interface DownloaderSettings { revision: number; all_users: boolean; max_download_mb: number }
 export interface DownloadProgress { receivedBytes: number; totalBytes: number | null }
+export type DownloadStage = "preparing" | "checking" | "updating" | "retrying";
+const STREAM_TYPE = "application/vnd.recastfx.download-stream";
 
-export async function downloadVideoBlob(response: Response, onProgress: (progress: DownloadProgress) => void, signal?: AbortSignal): Promise<Blob> {
+async function preparedResponse(response: Response, onStage: (stage: DownloadStage) => void, signal?: AbortSignal): Promise<Response> {
+  if (!response.body) throw new Error("The download connection was interrupted. Please try again.");
+  const reader = response.body.getReader();
+  let pending = new Uint8Array(0);
+  try {
+    while (true) {
+      if (signal?.aborted) throw new DOMException("Download cancelled", "AbortError");
+      const next = await reader.read();
+      if (next.done) throw new Error("The download connection was interrupted. Please try again.");
+      const merged = new Uint8Array(pending.length + next.value.length);
+      merged.set(pending); merged.set(next.value, pending.length); pending = merged;
+      let newline: number;
+      while ((newline = pending.indexOf(10)) !== -1) {
+        if (newline > 4096) throw new Error("Invalid download status.");
+        const line = new TextDecoder().decode(pending.subarray(0, newline));
+        pending = pending.subarray(newline + 1);
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as { event?: unknown; stage?: unknown; bytes?: unknown; message?: unknown };
+        if (event.event === "error") throw new Error(typeof event.message === "string" ? event.message : "Download failed.");
+        if (event.event === "status" && ["preparing", "checking", "updating", "retrying"].includes(String(event.stage))) {
+          onStage(event.stage as DownloadStage);
+        } else if (event.event === "ready") {
+          const size = event.bytes;
+          if (typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0 || size > 750 * 1024 * 1024) throw new Error("Invalid download size.");
+          const first = pending;
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) { if (first.length) controller.enqueue(first); },
+            async pull(controller) {
+              try {
+                if (signal?.aborted) throw new DOMException("Download cancelled", "AbortError");
+                const value = await reader.read();
+                if (value.done) controller.close(); else controller.enqueue(value.value);
+              } catch (error) { controller.error(error); await reader.cancel().catch(() => undefined); }
+            },
+            async cancel() { await reader.cancel().catch(() => undefined); },
+          });
+          return new Response(body, { headers: { "X-Download-Size": String(size), "Content-Type": "video/mp4" } });
+        } else if (event.event !== "status") throw new Error("Invalid download status.");
+      }
+      if (pending.length > 4096) throw new Error("Invalid download status.");
+    }
+  } catch (error) { await reader.cancel().catch(() => undefined); throw error; }
+}
+
+export async function downloadVideoBlob(response: Response, onProgress: (progress: DownloadProgress) => void, signal?: AbortSignal, onStage: (stage: DownloadStage) => void = () => undefined): Promise<Blob> {
+  if (response.headers.get("Content-Type")?.startsWith(STREAM_TYPE)) response = await preparedResponse(response, onStage, signal);
   // Keep Content-Length unset on the server so large responses remain streamed.
   const advertised = Number(response.headers.get("X-Download-Size") ?? response.headers.get("Content-Length"));
   const totalBytes = Number.isSafeInteger(advertised) && advertised > 0 ? advertised : null;
@@ -47,7 +94,7 @@ export async function downloaderRequest(path: string, body?: unknown, signal?: A
   const response = await fetch(endpoint, {
     method: body === undefined ? "GET" : "POST",
     signal,
-    headers: { "X-Firebase-Token": token, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    headers: { "X-Firebase-Token": token, ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(path === "/api/video-downloader" ? { Accept: STREAM_TYPE } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok) {
