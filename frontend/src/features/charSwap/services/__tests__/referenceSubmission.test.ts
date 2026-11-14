@@ -66,10 +66,10 @@ it("uses Original immediately while cleanup continues and ignores unused pending
   expect(selected.references).toHaveLength(1);expect(selected.reference.url).toBe("blob:original");
 });
 
-it("submits a 30-second Kling choice and its displayed credit quote while forcing mesh off and masks on", async () => {
+it("submits a 15-second Kling choice and its displayed credit quote while forcing mesh off and masks on", async () => {
   const base = draft();
   const state = {...base, generationModel: "kling-4-0" as const, kling4Enabled: true,
-    clip: {...base.clip, duration: 40}, trim: [1, 31] as [number, number],
+    clip: {...base.clip, duration: 40}, trim: [1, 16] as [number, number],
     faceMesh: true, enhancedCharacterMasking: false, generationCreditQuote: 724};
   let setup: unknown;
   request.mockImplementation(async (input, init) => {
@@ -89,8 +89,8 @@ it("submits a 30-second Kling choice and its displayed credit quote while forcin
     throw new Error("Unexpected request");
   });
   await createLiveJob(state, "session", new AbortController().signal);
-  expect(setup).toMatchObject({generation_model: "kling-4-0", generation_credit_quote: 724, trim: [1, 31], face_mesh: false, enhanced_character_masking: true});
-  expect(() => validateLiveSetup({...state, generationModel: "minimax-h3"})).toThrow(/between 4 and 15/);
+  expect(setup).toMatchObject({generation_model: "kling-4-0", generation_credit_quote: 724, trim: [1, 16], face_mesh: false, enhanced_character_masking: true});
+  expect(() => validateLiveSetup({...state, trim: [1, 31]})).toThrow(/between 4 and 15/);
 });
 
 it("uploads six shared-group photos once with 2K and keeps two source people distinct",async()=>{

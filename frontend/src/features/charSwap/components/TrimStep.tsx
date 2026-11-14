@@ -45,9 +45,7 @@ export function TrimStep({
     // Explicit in-range timestamps express user intent. Don't silently replace
     // a requested 20 seconds with 15 when Kling access is unavailable/loading.
     if (value >= 0 && value <= clip.duration + 1e-6 && Math.round(requestedLength) > maxSeconds) {
-      setTrimError(kling4Enabled
-        ? "Choose up to 30 seconds. Your previous selection is unchanged."
-        : "Clips longer than 15 seconds require Kling 4.0, which is currently unavailable. Your previous selection is unchanged.");
+      setTrimError("Choose up to 15 seconds. Your previous selection is unchanged.");
       return;
     }
     setTrimError(null);

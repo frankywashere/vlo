@@ -62,25 +62,25 @@ def test_minimax_intake_pins_meta_without_public_secrets(api, monkeypatch, direc
     assert not provider.submissions
 
 
-def test_long_kling_pins_meta_masks_and_replicate_depth(api, monkeypatch):
+def test_kling_uses_pinned_meta_and_never_requires_replicate(api, monkeypatch):
     client, records, cloud, provider = api
     headers, _ = authenticated(api)
     meta_ready(monkeypatch)
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-test-token")
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
     records.data[PATH] = {"kling4_enabled": True, "sam_provider": "meta", "preparation_provider": "workers"}
-    result = client.post("/api/uploads", headers=headers, json=options(30))
+    result = client.post("/api/uploads", headers=headers, json=options(15))
     assert result.status_code == 201, result.text
     identifier = result.json()["id"]
     manifest = records.data[f"uploads/{identifier}/manifest.json"]
-    assert manifest["sam_provider"] == "meta" and manifest["preparation_provider"] == "replicate"
+    assert manifest["sam_provider"] == "meta" and manifest["preparation_provider"] == "workers"
     records.data[PATH] = {"kling4_enabled": False, "sam_provider": "workers", "preparation_provider": "workers"}
     result = client.post(f"/api/uploads/{identifier}/complete", headers=headers)
     assert result.status_code == 202, result.text
     job = records.data[f"jobs/{identifier}.json"]
     assert job["sam_provider"] == "meta" and job["meta_credential_version"].endswith("/versions/7")
-    assert list(job["setup"]["trim"]) == [0, 30]
-    assert job["face_mesh"] is False and job["depth_guidance"] is True
-    assert "replicate_credential_version" in job
+    assert list(job["setup"]["trim"]) == [0, 15]
+    assert job["face_mesh"] is False and job["depth_guidance"] is False
+    assert "replicate_credential_version" not in job
     assert not provider.submissions
 
 
@@ -110,69 +110,27 @@ def _multipart_create(client, headers, setup):
 
 
 @pytest.mark.parametrize("direct", [False, True])
-@pytest.mark.parametrize("admin_depth", [False, True])
-def test_meta_kling_pins_depth_independently_of_minimax_admin_setting(api, monkeypatch, direct, admin_depth):
+def test_meta_kling_ignores_admin_depth_true_and_unused_replicate_key(api, monkeypatch, direct):
     client, records, cloud, provider = api
     headers, _ = authenticated(api)
     meta_ready(monkeypatch)
-    records.data[PATH] = {"sam_provider": "meta", "preparation_provider": "workers", "depth_guidance": admin_depth,
+    records.data[PATH] = {"sam_provider": "meta", "preparation_provider": "replicate", "depth_guidance": True,
                           "kling4_enabled": True}
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-test-token")
-    requested = options(30)
+    monkeypatch.setattr("swapmein.replicate_preparation.replicate_credential_version",
+                        lambda: pytest.fail("Kling's pinned depth-off recipe must not load Replicate credentials"))
+    requested = options(15)
     if direct:
         ticket = client.post("/api/uploads", headers=headers, json=requested)
         assert ticket.status_code == 201, ticket.text
         manifest = records.data[f"uploads/{ticket.json()['id']}/manifest.json"]
-        assert manifest["generation_snapshot"]["depth_guidance"] is True
+        assert manifest["generation_snapshot"]["depth_guidance"] is False
         created = client.post(f"/api/uploads/{ticket.json()['id']}/complete", headers=headers)
     else:
         created = _multipart_create(client, headers, requested["setup"])
     assert created.status_code == 202, created.text
     job = records.data[f"jobs/{created.json()['id']}.json"]
     assert job["sam_provider"] == "meta" and job["generation_model"] == "kling-4-0"
-    assert job["depth_guidance"] is True and "replicate_credential_version" in job
-    assert job["preparation_provider"] == "replicate"
-    assert not provider.submissions
-
-
-@pytest.mark.parametrize("direct", [False, True])
-def test_kling_missing_depth_credentials_stops_before_upload_or_paid_work(api, monkeypatch, direct):
-    client, records, cloud, provider = api
-    headers, _ = authenticated(api)
-    meta_ready(monkeypatch)
-    records.data[PATH] = {"sam_provider": "meta", "preparation_provider": "workers",
-                          "depth_guidance": False, "kling4_enabled": True}
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
-    requested = options(15)
-    response = (client.post("/api/uploads", headers=headers, json=requested) if direct
-                else _multipart_create(client, headers, requested["setup"]))
-    assert response.status_code == 503, response.text
-    assert not cloud.upload_sizes and not cloud.enqueued and not provider.submissions
-    assert not any(path.startswith(("jobs/", "uploads/")) for path in records.data)
-
-
-def test_accepted_old_kling_upload_retains_depth_off_recipe(api, monkeypatch):
-    client, records, cloud, provider = api
-    headers, _ = authenticated(api)
-    meta_ready(monkeypatch)
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-test-token")
-    records.data[PATH] = {"sam_provider": "meta", "preparation_provider": "workers", "kling4_enabled": True}
-    ticket = client.post("/api/uploads", headers=headers, json=options(15))
-    assert ticket.status_code == 201, ticket.text
-    identifier = ticket.json()["id"]
-    manifest = records.data[f"uploads/{identifier}/manifest.json"]
-    # Reconstruct the previously accepted immutable ticket, before this policy.
-    for saved in (manifest, manifest["generation_snapshot"]):
-        saved.update(depth_guidance=False, preparation_provider="workers")
-        saved.pop("replicate_credential_version", None)
-        saved.pop("replicate_model_versions", None)
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "")
-    records.data[PATH].update(depth_guidance=True)
-    completed = client.post(f"/api/uploads/{identifier}/complete", headers=headers)
-    assert completed.status_code == 202, completed.text
-    job = records.data[f"jobs/{identifier}.json"]
-    assert job["depth_guidance"] is False and job["preparation_provider"] == "workers"
-    assert "replicate_credential_version" not in job
+    assert job["depth_guidance"] is False and "replicate_credential_version" not in job
     assert not provider.submissions
 
 

@@ -147,7 +147,7 @@ export function AdminPage() {
               setAdmin(current => current ? {...current, pipeline} : current);
               setMessage(`Kling 4.0 ${enabled ? "enabled" : "disabled"} for new submissions.`);
             })} />} label="Allow users to choose Kling 4.0" />
-            <Typography variant="body2" color="text.secondary">Shows the model choice and allows clips up to 30 seconds. Clips longer than 15 seconds require Kling. Kling always uses colored person masks with face mesh and depth off. Existing jobs keep their saved model and price.</Typography>
+            <Typography variant="body2" color="text.secondary">Shows the model choice. Both MiniMax and Kling allow clips up to 15 seconds. Kling always uses colored person masks with face mesh and depth off. Existing jobs keep their saved model and price.</Typography>
           </Box>
           <Box component="section" aria-label="Multi-person generation destination">
             <Typography fontWeight={600}>Multi-person generation destination</Typography>
@@ -209,7 +209,7 @@ export function AdminPage() {
                 disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.meta_api_key_configured && samProvider !== "meta")} />
             </RadioGroup>
           </FormControl>
-          <Typography variant="body2" color="text.secondary">For normal-route jobs, selects SAM masks and mask retries independently of depth. Meta prepares whole-body masks for selected people in MiniMax and Kling jobs, including 30-second Kling clips. Existing jobs keep their saved SAM provider.</Typography>
+          <Typography variant="body2" color="text.secondary">For normal-route jobs, selects SAM masks and mask retries independently of depth. Meta prepares whole-body masks for selected people in MiniMax and Kling jobs, for clips up to 15 seconds. Existing jobs keep their saved SAM provider.</Typography>
           <Typography variant="body2" color="text.secondary">Meta API key: {admin.pipeline?.meta_api_key_configured ? "Configured on the server" : "Not configured. Configure the server key before selecting Meta."}</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.preparation_provider === "replicate"}
             disabled={busy || !can("pipeline_settings") || (!admin.pipeline?.replicate_api_key_configured && admin.pipeline?.preparation_provider !== "replicate")}
@@ -288,10 +288,9 @@ export function AdminPage() {
               void run(async () => {
                 const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, depth_guidance: enabled});
                 setAdmin({...admin, pipeline});
-                setMessage(`MiniMax depth guidance ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved mode.`);
+                setMessage(`Depth guidance ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved mode.`);
               });
-            }} />} label="MiniMax: add depth to person masks" />
-          <Typography color="text.secondary">Kling uses its tested depth guide automatically, with face mesh off. This switch only changes MiniMax.</Typography>
+            }} />} label="Add depth to person masks" />
           <FormControlLabel control={<Switch checked={admin.pipeline?.retry_missing_masks_with_sam ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {
@@ -323,7 +322,7 @@ export function AdminPage() {
           <TextField label="Price per video second (USD)" type="number" disabled={useMargin} value={useMargin && estimate ? (estimate.credits / 100).toFixed(2) : rate} onChange={(event) => setRate(event.target.value)} inputProps={{min: 0.01, step: 0.01}} helperText={`${(useMargin ? estimate?.credits : Math.round(Number(rate) * 100)) || 0} credits per second`} />
           <TextField label="MiniMax 2K credits for 15 seconds" type="number" value={minimax2kCredits} onChange={event=>setMinimax2kCredits(event.target.value)} inputProps={{min:1,max:100000,step:1}} helperText="Separate 2K price. Standard 768p keeps the MiniMax price above."/>
           <TextField label="MiniMax sixth-photo surcharge (credits)" type="number" value={extraReferenceCredits} onChange={event=>setExtraReferenceCredits(event.target.value)} inputProps={{min:0,max:100000,step:1}} helperText="Flat addition once per render with six unique reference photos. No extra-photo charge for Kling."/>
-          <TextField label="Kling 4.0 credits for 15 seconds" type="number" value={klingCredits} onChange={event => setKlingCredits(event.target.value)} inputProps={{min: 1, max: 100000, step: 1}} helperText={`Separate from MiniMax and its margin calculator. ${Number(klingCredits) > 0 ? `${(Number(klingCredits) / 15).toFixed(2)} credits per second; ${Number(klingCredits) * 2} credits for 30 seconds.` : "Set a positive whole-credit price."}`} />
+          <TextField label="Kling 4.0 credits for 15 seconds" type="number" value={klingCredits} onChange={event => setKlingCredits(event.target.value)} inputProps={{min: 1, max: 100000, step: 1}} helperText={`Separate from MiniMax and its margin calculator. ${Number(klingCredits) > 0 ? `${(Number(klingCredits) / 15).toFixed(2)} credits per second; clips up to 15 seconds.` : "Set a positive whole-credit price."}`} />
           {packs.map((pack, index) => <Stack key={index} spacing={1} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
             <TextField label="Pack ID" value={pack.id} onChange={(event) => updatePack(index, { id: event.target.value })} />
             <TextField label="Pack name" value={pack.name} onChange={(event) => updatePack(index, { name: event.target.value })} />

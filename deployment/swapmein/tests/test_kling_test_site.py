@@ -155,10 +155,3 @@ def test_unversioned_legacy_upload_ticket_keeps_original_prompt_at_completion(ap
     assert completed.status_code == 202, completed.json()
     assert 'kling_edit_prompt_variant' not in records.data[f'jobs/{identifier}.json']
     assert not provider.submissions
-
-
-@pytest.fixture(autouse=True)
-def hosted_depth_credentials(monkeypatch):
-    # New Kling preparations require hosted depth. Individual outage tests
-    # may still clear this credential explicitly after fixture setup.
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-test-token")

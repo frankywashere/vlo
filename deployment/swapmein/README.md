@@ -154,7 +154,7 @@ packets after stripping, nonzero soundtrack trim, and restored audio; they do no
 
 ## Preparation and selection
 
-- MiniMax clips are 4–15 seconds; enabled Kling clips are 4–30 seconds, with a whole-second **duration**. Start/end positions and
+- MiniMax clips are 4–15 seconds; enabled Kling clips are 4–15 seconds, with a whole-second **duration**. Start/end positions and
   person timestamps may be fractional, for example 1.3–6.3 seconds.
 - New requests default to `preparation_version: 2`. Working video keeps its aspect
   ratio, caps its short side at 768 pixels, and does not upscale smaller picture
@@ -911,8 +911,9 @@ encoding duration, canvas dimensions and layout.
 ### Hosted model selection: MiniMax H3 and Kling 4.0
 
 `control/pipeline-settings.json.kling4_enabled` is off by default. When enabled,
-Create offers MiniMax or Kling through fifteen seconds and requires Kling for
-longer trims, up to thirty seconds. The backend independently validates model,
+Create offers MiniMax or Kling for new clips up to fifteen seconds. Saved older
+jobs retain their original trim; the provider adapter still supports historical
+Kling jobs up to thirty seconds. The backend independently validates model,
 duration and access at intake; Kling is reAPI-only. Explicit Kling selections
 bypass the optional Google/Paperspace CharacterSwap overrides. MiniMax 2K and
 multi-angle selections also use the hosted API: the private recipes do not support
@@ -920,20 +921,7 @@ those options. Single-photo MiniMax 768P retains those overrides and its existin
 fifteen-second limit. Disabling Kling blocks
 new tickets; already accepted uploads and jobs retain their saved model.
 
-New Kling jobs use the reviewed depth recipe: SAM still operates on original RGB,
-then hosted Depth Anything (`vits`, pinned Replicate version) supplies colored depth
-inside the selected masks. The CPU compositor blends 80% colored depth with each
-person's 20% selection tint, preserving RGB outside the masks. Face mesh stays off.
-Kling pins `depth_guidance: true` and `preparation_provider: replicate` independently
-of MiniMax's optional depth setting. The successful `preserve_source_shots_v1`
-prompt gains only the depth-description/color-removal wording; timed source-to-photo
-assignments remain authoritative because the underlying depth hues vary. The
-stronger facial-identity experiment is not promoted. Existing accepted jobs retain
-their saved depth/audio settings and guide style; manual review and rebuilds reuse
-those settings. New Kling preparation therefore requires the hosted depth credential,
-even when SAM uses Meta. No Google/Paperspace CharacterSwap route is changed.
-
-Admin → Audio
+Kling snapshots twenty-percent body masking, no mesh and no depth. Admin → Audio
 processing has independent MiniMax (`audio_processing`) and Kling
 (`kling_audio_processing`) switches; both default off. Each enables vocal
 isolation and a three-semitone pitch increase without changing timing, embedding
@@ -1103,3 +1091,8 @@ This shared step covers MiniMax and Kling with Meta SAM. Other SAM providers,
 replace-everyone and private CharacterSwap routes retain their existing behavior.
 Identity thresholds and subsequent component review are unchanged; this policy
 does not guarantee that the rest of a clip needs no review.
+
+
+### Kling depth rollback and 15-second intake limit (2026-11-14)
+
+New Kling jobs return to twenty-percent identity tints with depth and face mesh off, using the prior `preserve_source_shots_v1` prompt. The depth experiment is retained in git history, not the default pipeline. New direct and multipart submissions above fifteen seconds are rejected before uploads, preparation or provider requests; the trim UI, client validation and public config share the fifteen-second limit. This is a site intake policy, not a claim that Kling itself cannot render longer clips. Existing accepted jobs, Library media and provider adapter duration support retain their saved timelines; no clip is silently truncated. Independent Kling audio processing and original-soundtrack restoration remain unchanged.

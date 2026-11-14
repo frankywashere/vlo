@@ -25,6 +25,7 @@ def generation_model(data):
 
 
 def max_duration(model):
+    """Provider capacity for saved-job pricing; new intake is capped separately."""
     if model not in GENERATION_MODELS:
         raise PublicError("Choose a supported generation model.")
     return 30 if model == KLING else 15
@@ -35,31 +36,25 @@ def require_model_access(setup, defaults, provider, *, is_admin=False):
             and defaults.get("minimax_2k_enabled", True) is False and not is_admin):
         raise PublicError("MiniMax 2K is currently unavailable. Choose 768p to continue.",
                           409, code="minimax_2k_disabled")
+    if generation_model(setup) == KLING and round(setup.trim[1] - setup.trim[0], 6) > 15:
+        raise PublicError("Kling 4.0 currently supports clips up to 15 seconds. Shorten your selection before submitting.",
+                          409, code="kling_duration_limit")
     if generation_model(setup) == KLING:
         if not defaults.get("kling4_enabled", False):
             raise PublicError("Kling 4.0 is currently unavailable. Choose MiniMax for a clip up to 15 seconds.",
                               409, code="kling_disabled")
         if provider != "reAPI":
             raise PublicError("Kling 4.0 requires reAPI access.", 409, code="kling_provider_unavailable")
-        if round(setup.trim[1] - setup.trim[0], 6) > 15:
-            if defaults.get("sam_provider", defaults.get("preparation_provider")) == "meta":
-                from .meta_credentials import meta_key_ready
-                ready = meta_key_ready()
-            else:
-                from .preparation_credentials import replicate_key_ready
-                ready = replicate_key_ready()
-            if not ready:
-                raise PublicError("Longer Kling clips need a hosted SAM provider configured by an administrator.",
-                                  409, code="kling_preparation_unavailable")
+
 
 
 def generation_snapshot(setup, *, kling_audio_processing=False, sam_provider=None):
     model = generation_model(setup)
     snapshot = {"generation_model": model, "generation_resolution": generation_resolution(setup)}
     if model == KLING:
-        # Keep the reviewed person-only depth recipe and pin Admin audio processing at
+        # Keep the reviewed body-tint recipe and pin Admin audio processing at
         # intake. Export always restores the original, unshifted soundtrack.
-        snapshot.update(face_mesh=False, depth_guidance=True, preparation_provider="replicate",
+        snapshot.update(face_mesh=False, depth_guidance=False,
                         audio_processing=kling_audio_processing is True and not setup.submit_without_audio,
                         restore_original_audio=True, guide_style_version=2,
                         depth_overlay_opacity=.2, depth_identity_colors_version=1)

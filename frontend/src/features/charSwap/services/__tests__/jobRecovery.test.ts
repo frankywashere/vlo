@@ -29,7 +29,7 @@ describe("restoring failed setups", () => {
     useCharSwapStore.getState().reset();
     expect(useCharSwapStore.getState().retryNotice).toBeUndefined();
   });
-  it("preserves a saved Kling 20-second selection when browser metadata is fractionally shorter", async () => {
+  it("preserves a saved Kling 20-second selection but requires shortening before a new submission", async () => {
     const draft = await restoreRetryDraft({...recovery, trim: [0, 20], settings: {...recovery.settings, model: "kling-4-0"}}, new AbortController().signal);
     useCharSwapStore.getState().setKling4Enabled(true);
     useCharSwapStore.getState().restoreRetry(draft);
@@ -40,7 +40,7 @@ describe("restoring failed setups", () => {
     expect(restored.targets).toEqual(draft.targets);
     expect(restored.assignments).toEqual(draft.assignments);
     expect(restored.retryNeedsSource).toBe(false);
-    expect(getStepBlocker(restored, "trim")).toBeNull();
+    expect(getStepBlocker(restored, "trim")).toMatch(/15/);
   });
   it("does not silently shorten a saved selection or discard people when a retry upload is too short", async () => {
     const draft = await restoreRetryDraft({...recovery, trim: [0, 20], settings: {...recovery.settings, model: "kling-4-0"}}, new AbortController().signal);

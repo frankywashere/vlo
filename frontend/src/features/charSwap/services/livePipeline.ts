@@ -644,7 +644,7 @@ export async function getLiveConfig(
     preparation_only: value.preparation_only === true,
     kling4_enabled: value.kling4_enabled === true,
     minimax_2k_enabled:value.minimax_2k_enabled!==false,
-    max_duration_seconds: value.kling4_enabled === true ? 30 : 15,
+    max_duration_seconds: 15,
     live: value.live === true,
     available: value.available === true,
     provider: "reAPI",
@@ -717,11 +717,11 @@ export function validateLiveSetup(state: WalkthroughState) {
     start < 0 ||
     end > state.clip.duration + 1e-6 ||
     duration < 4 ||
-    duration > (state.generationModel === "kling-4-0" ? 30 : 15) ||
+    duration > 15 ||
     Math.abs(duration - Math.round(duration)) > 1e-6
   ) {
     throw new LivePipelineError(
-      `Choose a whole-number duration between 4 and ${state.generationModel === "kling-4-0" ? 30 : 15} seconds for the selected model.`,
+      "Choose a whole-number duration between 4 and 15 seconds for the selected model.",
     );
   }
   const references: WalkthroughState["references"] = [];

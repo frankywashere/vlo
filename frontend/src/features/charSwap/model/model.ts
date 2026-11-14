@@ -108,8 +108,8 @@ const STEPS: Step[] = [
 const MIN_CLIP_SECONDS = 1;
 const MAX_CLIP_SECONDS = 15;
 
-export function maximumClipSeconds(state: Pick<WalkthroughState, "kling4Enabled">): number {
-  return state.kling4Enabled ? 30 : MAX_CLIP_SECONDS;
+export function maximumClipSeconds(_state: Pick<WalkthroughState, "kling4Enabled">): number {
+  return MAX_CLIP_SECONDS;
 }
 
 export function generationModelLabel(model?: GenerationModel): string {

@@ -50,7 +50,7 @@ def test_kling_locks_mesh_and_depth_and_bypasses_private_override(api):
     assert response.status_code == 201
     manifest = records.data[f"uploads/{response.json()['id']}/manifest.json"]
     assert manifest['generation_model'] == KLING and manifest['face_mesh'] is False
-    assert manifest['depth_guidance'] is True and manifest['audio_processing'] is False
+    assert manifest['depth_guidance'] is False and manifest['audio_processing'] is False
     assert manifest['setup']['enhanced_character_masking'] is True
     assert manifest['restore_original_audio'] is True
     setup = {'generation_model':KLING,'targets':[{},{}]}
@@ -59,25 +59,25 @@ def test_kling_locks_mesh_and_depth_and_bypasses_private_override(api):
     assert generation_route_snapshot(setup,'google_h3')['multi_person_generation_route'] == 'google_h3'
 
 
-def test_long_kling_pins_replicate_and_survives_flag_change(api, monkeypatch):
+def test_kling_fifteen_second_ticket_pins_replicate_and_survives_flag_change(api, monkeypatch):
     client, records, cloud, provider = api
     headers, _ = authenticated(api)
-    records.data[PATH] = {'kling4_enabled':True,'preparation_provider':'workers'}
+    records.data[PATH] = {'kling4_enabled':True,'preparation_provider':'replicate'}
     monkeypatch.setenv('REPLICATE_API_TOKEN','')
-    response = client.post('/api/uploads', headers=headers, json=options(30))
-    assert response.status_code == 409 and response.json()['code'] == 'kling_preparation_unavailable'
+    response = client.post('/api/uploads', headers=headers, json=options(15))
+    assert response.status_code == 503
     assert not cloud.upload_sizes
     monkeypatch.setenv('REPLICATE_API_TOKEN','replicate-test-token')
-    response = client.post('/api/uploads', headers=headers, json=options(30))
+    response = client.post('/api/uploads', headers=headers, json=options(15))
     assert response.status_code == 201
     jobid = response.json()['id']
     manifest = records.data[f'uploads/{jobid}/manifest.json']
     assert manifest['preparation_provider'] == 'replicate'
-    records.data[PATH] = {'kling4_enabled':False,'preparation_provider':'workers','depth_guidance':True}
+    records.data[PATH] = {'kling4_enabled':False,'preparation_provider':'replicate','depth_guidance':True}
     assert client.post(f'/api/uploads/{jobid}/complete', headers=headers).status_code == 202
     job = records.data[f'jobs/{jobid}.json']
     assert job['generation_model'] == KLING and job['preparation_provider'] == 'replicate'
-    assert job['face_mesh'] is False and job['depth_guidance'] is True
+    assert job['face_mesh'] is False and job['depth_guidance'] is False
     assert not provider.submissions
 
 
@@ -86,7 +86,7 @@ def test_kling_audio_choice_is_pinned_at_ticket_acceptance(api,monkeypatch,enabl
     client,records,cloud,provider=api;headers,_=authenticated(api)
     monkeypatch.setenv('REPLICATE_API_TOKEN','replicate-test-token')
     records.data[PATH]={'kling4_enabled':True,'audio_processing':not enabled,'kling_audio_processing':enabled}
-    body=options(30);body['setup']['submit_without_audio']=silent
+    body=options(15);body['setup']['submit_without_audio']=silent
     response=client.post('/api/uploads',headers=headers,json=body)
     assert response.status_code==201,response.text
     jobid=response.json()['id'];manifest=records.data[f'uploads/{jobid}/manifest.json']
@@ -96,7 +96,7 @@ def test_kling_audio_choice_is_pinned_at_ticket_acceptance(api,monkeypatch,enabl
     assert client.post(f'/api/uploads/{jobid}/complete',headers=headers).status_code==202
     job=records.data[f'jobs/{jobid}.json']
     assert job['audio_processing'] is expected and job['restore_original_audio'] is True
-    assert job['face_mesh'] is False and job['depth_guidance'] is True
+    assert job['face_mesh'] is False and job['depth_guidance'] is False
     assert not provider.submissions
 
 
@@ -203,7 +203,7 @@ def test_kling_model_and_mesh_policy_survive_library_summary():
          'generation_settings':{'model':KLING,'resolution':'720p'}}
     summary=settings_used(job)
     assert summary['model']=='Kling 4.0' and summary['requested_resolution']=='720p'
-    assert summary['face_mesh'] is False and summary['depth_guidance'] is True
+    assert summary['face_mesh'] is False and summary['depth_guidance'] is False
 
 
 def test_credit_kling_cannot_omit_the_displayed_quote(api, monkeypatch):
@@ -255,10 +255,3 @@ def test_thirty_second_kling_uses_pinned_debit_once_and_refunds_known_failure(ap
     assert polled==[{'generation_model':KLING}]
     assert records.data[f'jobs/{jobid}.json']['status']=='finalizing'
     assert ('finish',jobid) in cloud.enqueued
-
-
-@pytest.fixture(autouse=True)
-def hosted_depth_credentials(monkeypatch):
-    # New Kling preparations require hosted depth. Individual outage tests
-    # may still clear this credential explicitly after fixture setup.
-    monkeypatch.setenv("REPLICATE_API_TOKEN", "replicate-test-token")

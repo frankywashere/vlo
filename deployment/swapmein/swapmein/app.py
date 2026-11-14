@@ -229,19 +229,15 @@ def preparation_job_snapshot(defaults, options, *, is_admin=False, self_hosted=F
     mesh = face_mesh_snapshot(defaults, options, is_admin=is_admin)
     tracking = (options.enhanced_character_masking or mesh["face_mesh"]
         or defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people)
-    kling = generation_model(options) == KLING
     actual_depth = (not self_hosted and options.enhanced_character_masking
-                    and (kling or defaults["depth_guidance"]))
-    # Kling's promoted recipe uses hosted depth independently of MiniMax's
-    # optional depth setting, without provisioning a local GPU for this step.
-    depth_provider = "replicate" if kling else defaults["preparation_provider"]
-    snapshot = preparation_snapshot(depth_provider,
+                    and defaults["depth_guidance"] and generation_model(options) != KLING)
+    snapshot = preparation_snapshot(defaults["preparation_provider"],
         enhanced_masking=not self_hosted and tracking,
         sam_provider=defaults.get("sam_provider", defaults["preparation_provider"]),
         depth_guidance=actual_depth)
     if not self_hosted:
         snapshot.update(**mesh, audio_processing=defaults["audio_processing"],
-                        depth_guidance=actual_depth if kling else defaults["depth_guidance"],
+                        depth_guidance=defaults["depth_guidance"],
                         retry_missing_masks_with_sam=defaults["retry_missing_masks_with_sam"])
     if settings.preparation_only:
         snapshot.update(preparation_only=True, auto_generate=False)
@@ -455,7 +451,7 @@ def config():
             "multi_characters": mesh.get("multi_characters", True),
             "kling4_enabled": mesh.get("kling4_enabled", False),
             "minimax_2k_enabled": mesh.get("minimax_2k_enabled", True),
-            "max_duration_seconds": 30 if mesh.get("kling4_enabled", False) else 15,
+            "max_duration_seconds": 15,
             "max_reference_images": 6,
             "face_mesh_options": {key: mesh.get(key, default) for key, default in (
                 ("face_mesh_enabled", True), ("face_mesh_masked_default", True), ("face_mesh_unmasked_default", False), ("face_mesh_user_control", False))},
@@ -1124,7 +1120,7 @@ async def create_job(clip: UploadFile = File(), reference: UploadFile = File(), 
     try:
         options = Setup.model_validate_json(setup)
     except ValidationError:
-        raise PublicError("Choose a whole-second section from 4–15 seconds for MiniMax or 4–30 seconds for Kling.") from None
+        raise PublicError("Choose a whole-second section from 4–15 seconds.") from None
     validate_reference_mapping(options, 1)
     defaults = pipeline_settings(records)
     enforce_character_limit(options, 1, defaults["multi_characters"])

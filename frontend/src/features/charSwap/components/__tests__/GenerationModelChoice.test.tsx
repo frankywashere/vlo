@@ -20,16 +20,16 @@ it("hides Kling until access is enabled and retains the original trim limit", ()
   expect(useCharSwapStore.getState().trim).toEqual([0, 15]);
 });
 
-it("forces Kling for long selections and cannot switch that selection to MiniMax", async () => {
+it("limits new Kling selections to fifteen seconds and blocks stale longer drafts", () => {
   useCharSwapStore.getState().setKling4Enabled(true);
+  useCharSwapStore.getState().setGenerationModel("kling-4-0");
   useCharSwapStore.getState().changeTrim([1, 31]);
+  expect(useCharSwapStore.getState().trim).toEqual([1, 16]);
+  useCharSwapStore.setState({trim: [1, 31]});
   render(<GenerationModelChoice />);
-  expect(screen.getByRole("radio", {name: /Kling/})).toBeChecked();
-  expect(screen.getByRole("radio", {name: /MiniMax/})).toBeDisabled();
-  useCharSwapStore.getState().setGenerationModel("minimax-h3");
-  expect(useCharSwapStore.getState().generationModel).toBe("kling-4-0");
-  expect(useCharSwapStore.getState().trim).toEqual([1, 31]);
-  expect(getStepBlocker(useCharSwapStore.getState(), "trim")).toBeNull();
+  expect(screen.getByText(/Shorten your clip to 15 seconds before submitting/)).toBeInTheDocument();
+  expect(screen.getByRole("radio", {name: /Kling/})).toBeDisabled();
+  expect(getStepBlocker(useCharSwapStore.getState(), "trim")).toMatch(/15/);
 });
 
 it("allows either model for short clips and locks Kling mesh off with masking on", async () => {

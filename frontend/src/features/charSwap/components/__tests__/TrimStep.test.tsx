@@ -142,20 +142,20 @@ describe("trim step", () => {
     const end = screen.getByRole("spinbutton", {name: "End (seconds)"});
     fireEvent.change(end, {target: {value: "20"}});
     fireEvent.blur(end);
-    expect(screen.getByRole("alert")).toHaveTextContent("Clips longer than 15 seconds require Kling 4.0");
+    expect(screen.getByRole("alert")).toHaveTextContent("Choose up to 15 seconds");
     expect(screen.getByRole("alert")).toHaveTextContent("Your previous selection is unchanged");
     expect(useCharSwapStore.getState()).toMatchObject({trim: before.trim, targets: before.targets, selectionVersion: before.selectionVersion});
     expect(screen.getByLabelText("Preview range")).toHaveTextContent("0,15");
   });
 
-  it("keeps the complete typed 20-second range and selects Kling when it becomes available", () => {
+  it("rejects a typed twenty-second range even when Kling is enabled", () => {
     useCharSwapStore.getState().setKling4Enabled(true);
     render(<TrimStep demo={null} />);
     const end = screen.getByRole("spinbutton", {name: "End (seconds)"});
     fireEvent.change(end, {target: {value: "20"}});
     fireEvent.blur(end);
-    expect(useCharSwapStore.getState()).toMatchObject({trim: [0, 20], generationModel: "kling-4-0", generationResolution: "720p", faceMesh: false});
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(useCharSwapStore.getState().trim).toEqual([0, 15]);
+    expect(screen.getByRole("alert")).toHaveTextContent("Choose up to 15 seconds");
   });
 
   it.each([
