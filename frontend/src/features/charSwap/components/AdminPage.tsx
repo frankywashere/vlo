@@ -288,9 +288,10 @@ export function AdminPage() {
               void run(async () => {
                 const pipeline = await savePipelineSettings({revision: admin.pipeline?.revision ?? 0, depth_guidance: enabled});
                 setAdmin({...admin, pipeline});
-                setMessage(`Depth guidance ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved mode.`);
+                setMessage(`MiniMax depth guidance ${enabled ? "enabled" : "disabled"} for new jobs. Existing jobs keep their saved mode.`);
               });
-            }} />} label="Add depth to person masks" />
+            }} />} label="MiniMax: add depth to person masks" />
+          <Typography color="text.secondary">Kling uses its tested depth guide automatically, with face mesh off. This switch only changes MiniMax.</Typography>
           <FormControlLabel control={<Switch checked={admin.pipeline?.retry_missing_masks_with_sam ?? false}
             disabled={busy || !can("pipeline_settings")}
             onChange={(event) => {

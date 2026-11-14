@@ -57,9 +57,9 @@ def generation_snapshot(setup, *, kling_audio_processing=False, sam_provider=Non
     model = generation_model(setup)
     snapshot = {"generation_model": model, "generation_resolution": generation_resolution(setup)}
     if model == KLING:
-        # Keep the reviewed body-tint recipe and pin Admin audio processing at
+        # Keep the reviewed person-only depth recipe and pin Admin audio processing at
         # intake. Export always restores the original, unshifted soundtrack.
-        snapshot.update(face_mesh=False, depth_guidance=False,
+        snapshot.update(face_mesh=False, depth_guidance=True, preparation_provider="replicate",
                         audio_processing=kling_audio_processing is True and not setup.submit_without_audio,
                         restore_original_audio=True, guide_style_version=2,
                         depth_overlay_opacity=.2, depth_identity_colors_version=1)

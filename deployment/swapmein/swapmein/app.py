@@ -229,15 +229,19 @@ def preparation_job_snapshot(defaults, options, *, is_admin=False, self_hosted=F
     mesh = face_mesh_snapshot(defaults, options, is_admin=is_admin)
     tracking = (options.enhanced_character_masking or mesh["face_mesh"]
         or defaults["prompt_variant"] == "cloudflare_identity_v1" and options.easy_mode and not options.replace_all_people)
+    kling = generation_model(options) == KLING
     actual_depth = (not self_hosted and options.enhanced_character_masking
-                    and defaults["depth_guidance"] and generation_model(options) != KLING)
-    snapshot = preparation_snapshot(defaults["preparation_provider"],
+                    and (kling or defaults["depth_guidance"]))
+    # Kling's promoted recipe uses hosted depth independently of MiniMax's
+    # optional depth setting, without provisioning a local GPU for this step.
+    depth_provider = "replicate" if kling else defaults["preparation_provider"]
+    snapshot = preparation_snapshot(depth_provider,
         enhanced_masking=not self_hosted and tracking,
         sam_provider=defaults.get("sam_provider", defaults["preparation_provider"]),
         depth_guidance=actual_depth)
     if not self_hosted:
         snapshot.update(**mesh, audio_processing=defaults["audio_processing"],
-                        depth_guidance=defaults["depth_guidance"],
+                        depth_guidance=actual_depth if kling else defaults["depth_guidance"],
                         retry_missing_masks_with_sam=defaults["retry_missing_masks_with_sam"])
     if settings.preparation_only:
         snapshot.update(preparation_only=True, auto_generate=False)

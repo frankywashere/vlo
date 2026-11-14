@@ -8,7 +8,7 @@ from .errors import PublicError
 from .diagnostics import emit, submission_event
 from .multi_tracking import TARGET_COLORS
 from .reference_groups import group_indexes, reference_words, kling_words, angle_guidance
-from .guide_style import SHARED_CYAN_STYLES
+from .guide_style import SHARED_CYAN_STYLES, SHARED_DEPTH_STYLES, IDENTITY_DEPTH_STYLES
 from .prompt_variants import CURRENT, FAVORITE_V2, STRUCTURED_V1, IDENTITY_COLORS_V1, IDENTITY_TINT_TRACKING_V1, CLOUDFLARE_IDENTITY_V1, SAME_CAMERA_SENTENCE, adapt_favorite_prompt, identity_colors_prompt, normalize_prompt_variant, structured_prompt
 
 BASE = "https://reapi.ai"
@@ -340,14 +340,20 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
     top_group = group_indexes({"reference_index": 0, "reference_indexes": reference_indexes}, len(images))
     if replace_all_people and (targets or set(top_group) != set(range(len(images)))):
         raise PublicError("Assign all shared reference photos to the replacement character.")
+    depth = mask_style in (SHARED_DEPTH_STYLES | IDENTITY_DEPTH_STYLES)
     if mask_style not in {"identity_overlay_20", "identity_overlay_multi_20",
-                          "cyan_overlay_20", "cyan_overlay_multi_20"}:
+                          "cyan_overlay_20", "cyan_overlay_multi_20"} and not depth:
         raise PublicError("Kling requires its prepared twenty-percent body-mask guide.", 409)
     if isinstance(targets, list) and any(isinstance(target, dict) and target.get("guide_anchor_untrusted") for target in targets):
         raise PublicError("Select a reliable source-person position before generating this guide.",
                           409, code="mask_quality_identity_unresolved")
-    shared = mask_style in SHARED_CYAN_STYLES
+    shared = mask_style in (SHARED_CYAN_STYLES | SHARED_DEPTH_STYLES)
     lines = ["Edit @Video1."]
+    if depth:
+        lines.append("Selected people are covered by colored depth imagery with their assigned cyan or magenta selection tint. "
+                     "The depth imagery describes shape and motion; reference images define final appearance. "
+                     "Underlying depth colors vary with distance and camera framing and can dominate the selection tint. "
+                     "Use the stated timestamps, source positions and reference assignments to identify each person, rather than depth hue alone.")
     if preserve_shots:
         lines.append("@Video1 controls the complete edit; reference images define replacement appearance only. "
                      "Preserve every original shot, cut point, camera position, camera movement, composition, "
@@ -406,13 +412,16 @@ def kling_generation_payload(duration, image_url, video_url, *, anchor=None, mas
                                  "This does not mean that performer is absent; use confirmed source identity "
                                  "and reliable positions, never another person's tint.")
         if shared:
-            lines.append("All selected people share cyan selection tint; it is not an identity color. "
-                         "Use the stated positions and times to keep each reference assignment separate across cuts.")
+            lines.append(("Selected people share a depth selection tint; it is not an identity color. " if depth else
+                          "All selected people share cyan selection tint; it is not an identity color. ")
+                         + "Use the stated positions and times to keep each reference assignment separate across cuts.")
     lines.append("Apply these same replacements throughout every shot where those people appear. "
                  "Keep their original actions, expressions, speaking turns and mouth movements, "
                  "and keep the other people, scene and camera shots unchanged. "
-                 "These translucent colors identify the selected people only; "
-                 "remove all guide tints completely from the finished video.")
+                 + ("The cyan and magenta tints identify the selected people only. "
+                    "Remove all depth colors and selection tints completely from the finished video." if depth else
+                    "These translucent colors identify the selected people only; "
+                    "remove all guide tints completely from the finished video."))
     if submit_without_audio:
         lines.append("@Video1 is silent visual guidance. Preserve its exact timing, mouth movements, "
                      "expressions and speaking turns without inventing dialogue. "

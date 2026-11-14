@@ -211,7 +211,7 @@ it.each([true, false])("switches depth provider independently with depth=%s and 
   const user = userEvent.setup();
   await renderExpandedAdmin();
   const toggle = screen.getByRole("switch", {name: "Use Replicate for depth"});
-  const depthToggle = screen.getByRole("switch", {name: "Add depth to person masks"});
+  const depthToggle = screen.getByRole("switch", {name: "MiniMax: add depth to person masks"});
   await user.click(toggle);
   await screen.findByText(/Replicate selected for depth processing of new jobs/);
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 3, preparation_provider: "replicate"});
@@ -440,7 +440,7 @@ it("defaults watermark rewards to 25 credits and saves the global hide setting",
 it("defaults depth guidance off and saves its experimental switch independently", async () => {
   const user = userEvent.setup();
   await renderExpandedAdmin();
-  const toggle = screen.getByRole("switch", {name: "Add depth to person masks"});
+  const toggle = screen.getByRole("switch", {name: "MiniMax: add depth to person masks"});
   expect(toggle).not.toBeChecked();
   await user.click(toggle);
   await waitFor(() => expect(toggle).toBeChecked());
@@ -512,7 +512,7 @@ it("defaults to Cloudflare matching and saves each alternate version without cha
   await userEvent.click(screen.getByRole("radio", {name: "Favorite prompt across modes"}));
   await waitFor(() => expect(screen.getByRole("radio", {name: "Favorite prompt across modes"})).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 7, prompt_variant: "favorite_v2"});
-  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "MiniMax: add depth to person masks"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Enable face mesh"})).not.toBeChecked();
   expect(screen.getByLabelText("Pack name")).toHaveValue("Unsaved pack name");
   await userEvent.click(screen.getByRole("radio", {name: "Structured prompt with same-camera guidance"}));
@@ -524,7 +524,7 @@ it("defaults to Cloudflare matching and saves each alternate version without cha
   await userEvent.click(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"}));
   await waitFor(() => expect(screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"})).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 10, prompt_variant: "identity_tint_tracking_v1"});
-  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "MiniMax: add depth to person masks"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Enable face mesh"})).not.toBeChecked();
   expect(screen.getByLabelText("Pack name")).toHaveValue("Unsaved pack name");
 });
@@ -570,7 +570,7 @@ it("saves the Cloudflare prompt option with a revision while preserving manual-m
   await waitFor(() => expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked());
   expect(api.pipeline).toHaveBeenLastCalledWith({revision: 11, prompt_variant: "cloudflare_identity_v1"});
   expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
-  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).not.toBeChecked();
+  expect(screen.getByRole("switch", {name: "MiniMax: add depth to person masks"})).not.toBeChecked();
   expect(screen.getByRole("switch", {name: "Enable face mesh"})).toBeChecked();
 });
 
@@ -632,7 +632,7 @@ it.each([undefined, true, false])("requires matching-failure review and removes 
   expect(api.pipeline).not.toHaveBeenCalled();
   expect(screen.getByRole("radio", {name: "Cloudflare character matching"})).toBeChecked();
   expect(screen.getByRole("switch", {name: "Enable MiniMax audio processing"})).toBeChecked();
-  expect(screen.getByRole("switch", {name: "Add depth to person masks"})).toBeChecked();
+  expect(screen.getByRole("switch", {name: "MiniMax: add depth to person masks"})).toBeChecked();
   const explicitOption5 = screen.getByRole("radio", {name: "Structured with Easy Mode tint tracking"});
   await userEvent.click(explicitOption5);
   await waitFor(() => expect(explicitOption5).toBeChecked());

@@ -1,0 +1,119 @@
+{
+  "prompt": "Edit @Video1. Selected people are covered by colored depth imagery with their assigned cyan or magenta selection tint. The depth imagery describes shape and motion; reference images define final appearance. Underlying depth colors vary with distance and camera framing and can dominate the selection tint. Use the stated timestamps, source positions and reference assignments to identify each person, rather than depth hue alone. @Video1 controls the complete edit; reference images define replacement appearance only. Preserve every original shot, cut point, camera position, camera movement, composition, framing and head orientation exactly. Side and rear views remain side and rear views, with the same amount of each face visible as in @Video1. Replace the cyan-tinted person (at 0.00 seconds, x=17%, y=38% measured from the top left) with the character in @Image1, using their face, hair and clothing. The cyan tint marks the source person assigned to @Image1. From 0.00 to 4.50 seconds identify that person at 0.00 seconds, x=17%, y=38%. From 4.50 to 9.33 seconds that person is absent; do not replace anyone with @Image1 in that interval. From 9.33 to 15.83 seconds identify that person at 10.96 seconds, x=26%, y=49%. From 15.83 to 22.00 seconds identify that person at 17.38 seconds, x=19%, y=51%. Replace the magenta-tinted person (at 0.00 seconds, x=75%, y=49% measured from the top left) with the character in @Image2, using their face, hair and clothing. The magenta tint marks the source person assigned to @Image2. From 0.00 to 4.50 seconds identify that person at 0.00 seconds, x=75%, y=49%. From 4.50 to 9.33 seconds identify that person at 8.08 seconds, x=80%, y=71%. From 9.33 to 15.83 seconds identify that person at 10.96 seconds, x=66%, y=62%. From 15.83 to 22.00 seconds identify that person at 20.42 seconds, x=70%, y=73%. Apply these same replacements throughout every shot where those people appear. Keep their original actions, expressions, speaking turns and mouth movements, and keep the other people, scene and camera shots unchanged. The cyan and magenta tints identify the selected people only. Remove all depth colors and selection tints completely from the finished video. The embedded audio in @Video1 contains isolated vocals pitched up three semitones without changing their timing. Use them as timing guidance for the original visible speakers' mouth movements and speaking turns; do not add or reassign dialogue. The original unshifted full soundtrack will be restored after generation.",
+  "targets": [
+    {
+      "anchor": {
+        "x": 0.1738980638442474,
+        "y": 0.37517614565131613,
+        "time": 0.0,
+        "frame": 0,
+        "selection_frame_verified": true,
+        "requested_time": 0.0,
+        "frame_time": 0.87,
+        "frame_match_error": 2.775
+      },
+      "reference_index": 0,
+      "scenes": [
+        {
+          "start": 0.0,
+          "end": 4.5,
+          "absent": false,
+          "anchor": {
+            "x": 0.1738980638442474,
+            "y": 0.37517614565131613,
+            "time": 0.0
+          },
+          "coordinate_fallback": false
+        },
+        {
+          "start": 4.5,
+          "end": 9.333333333333334,
+          "absent": true,
+          "anchor": null,
+          "coordinate_fallback": false
+        },
+        {
+          "start": 9.333333333333334,
+          "end": 15.833333333333334,
+          "absent": false,
+          "anchor": {
+            "x": 0.2604625550660793,
+            "y": 0.4919590643274854,
+            "time": 10.958333333333334
+          },
+          "coordinate_fallback": false
+        },
+        {
+          "start": 15.833333333333334,
+          "end": 22.0,
+          "absent": false,
+          "anchor": {
+            "x": 0.18887665198237885,
+            "y": 0.5051169590643275,
+            "time": 17.375
+          },
+          "coordinate_fallback": false
+        }
+      ]
+    },
+    {
+      "anchor": {
+        "x": 0.7527290005207082,
+        "y": 0.49061495969787505,
+        "time": 0.0,
+        "frame": 0,
+        "selection_frame_verified": true,
+        "requested_time": 0.0,
+        "frame_time": 0.87,
+        "frame_match_error": 2.775
+      },
+      "reference_index": 1,
+      "scenes": [
+        {
+          "start": 0.0,
+          "end": 4.5,
+          "absent": false,
+          "anchor": {
+            "x": 0.7527290005207082,
+            "y": 0.49061495969787505,
+            "time": 0.0
+          },
+          "coordinate_fallback": false
+        },
+        {
+          "start": 4.5,
+          "end": 9.333333333333334,
+          "absent": false,
+          "anchor": {
+            "x": 0.7979074889867841,
+            "y": 0.7141812865497076,
+            "time": 8.083333333333334
+          },
+          "coordinate_fallback": false
+        },
+        {
+          "start": 9.333333333333334,
+          "end": 15.833333333333334,
+          "absent": false,
+          "anchor": {
+            "x": 0.664647577092511,
+            "y": 0.6206140350877193,
+            "time": 10.958333333333334
+          },
+          "coordinate_fallback": false
+        },
+        {
+          "start": 15.833333333333334,
+          "end": 22.0,
+          "absent": false,
+          "anchor": {
+            "x": 0.704295154185022,
+            "y": 0.7288011695906432,
+            "time": 20.416666666666668
+          },
+          "coordinate_fallback": false
+        }
+      ]
+    }
+  ]
+}

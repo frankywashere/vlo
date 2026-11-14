@@ -920,7 +920,20 @@ those options. Single-photo MiniMax 768P retains those overrides and its existin
 fifteen-second limit. Disabling Kling blocks
 new tickets; already accepted uploads and jobs retain their saved model.
 
-Kling snapshots twenty-percent body masking, no mesh and no depth. Admin → Audio
+New Kling jobs use the reviewed depth recipe: SAM still operates on original RGB,
+then hosted Depth Anything (`vits`, pinned Replicate version) supplies colored depth
+inside the selected masks. The CPU compositor blends 80% colored depth with each
+person's 20% selection tint, preserving RGB outside the masks. Face mesh stays off.
+Kling pins `depth_guidance: true` and `preparation_provider: replicate` independently
+of MiniMax's optional depth setting. The successful `preserve_source_shots_v1`
+prompt gains only the depth-description/color-removal wording; timed source-to-photo
+assignments remain authoritative because the underlying depth hues vary. The
+stronger facial-identity experiment is not promoted. Existing accepted jobs retain
+their saved depth/audio settings and guide style; manual review and rebuilds reuse
+those settings. New Kling preparation therefore requires the hosted depth credential,
+even when SAM uses Meta. No Google/Paperspace CharacterSwap route is changed.
+
+Admin → Audio
 processing has independent MiniMax (`audio_processing`) and Kling
 (`kling_audio_processing`) switches; both default off. Each enables vocal
 isolation and a three-semitone pitch increase without changing timing, embedding
