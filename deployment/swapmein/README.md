@@ -16,6 +16,23 @@ traffic and Firebase bundle before reporting a rollout complete. The older
 [pipeline overview](../../docs/charswap-walkthrough.md) contains historical proofs;
 use the contracts below for these changes.
 
+## Initial Meta selection tolerance and recovery
+
+The one-frame Meta person lookup accepts an exact mask hit first. A narrowly
+missed tap may snap to the nearest actual mask pixel only when exactly one
+returned person mask is within eight pixels at a 480-pixel short-side scale.
+Multiple nearby masks, overlapping exact hits and distant taps still require
+source reselection. This reuses the image response; it adds no paid lookup.
+The manifest records the original and accepted seed pixels and snap distance.
+The accepted point is also projected into downstream source identity matching;
+the original upload selections remain unchanged for audit.
+
+If lookup still cannot resolve a selection, only unresolved targets enter the
+source-reselection walkthrough. Valid targets and reference assignments are
+retained, and repeated corrections merge by target ID. Recovery does not
+authorize a render. This applies to Meta preparation for both hosted generation
+models; private CharacterSwap routes and non-Meta SAM providers are unchanged.
+
 ## One-day guide inspection
 
 Completed website jobs preserve a private, byte-verified copy of the actual

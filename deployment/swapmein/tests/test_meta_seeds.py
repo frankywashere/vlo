@@ -240,3 +240,120 @@ def test_generated_seeds_match_real_adapter_object_prompt_contract(source, tmp_p
     prompt = _prompt(checked, 10, 8)
     assert prompt.startswith("<0f>1<|box;x1=1;y1=1;x2=3;y2=6;w=10;h=8|>")
     assert "<|point;x=2;y=2;w=10;h=8|>" in prompt and "person" not in prompt
+
+
+def large_metadata(width=636, height=480):
+    return {"width": width, "height": height, "frames": 8, "duration": 8 / 24,
+            "anchor": {"frame": 0}, "scene_cuts": []}
+
+
+def large_person(identity, box, width=636, height=480):
+    mask = np.zeros((height, width), np.uint8)
+    x1, y1, x2, y2 = box
+    mask[y1:y2, x1:x2] = 1
+    return {"id": identity, "mask": mask}
+
+
+def test_six_pixel_miss_uses_same_image_response_and_real_fullperson_geometry(source, tmp_path):
+    data = large_metadata()
+    adapter = Adapter([large_person("cap", (363, 253, 500, 400))])
+    selected = target(x=357 / 636, y=252 / 480)
+    result = prepare_meta_masks(adapter, tmp_path, source, data, data, [selected], lambda: 60)
+    seed = adapter.videos[0]["seeds"][0]
+    assert len(adapter.images) == len(adapter.videos) == 1
+    assert seed["points"][0] == [363, 253]
+    assert seed["box"] == [363, 253, 499, 399]
+    assert all(adapter.masks[0]["mask"][y, x] for x, y in seed["points"])
+    entry = result["seed_manifest"]["targets"][0]
+    assert entry["selection_point"] == [357, 252] and entry["seed_point"] == [363, 253]
+    assert entry["snap_distance_pixels"] == pytest.approx(37 ** .5)
+    assert entry["snapped_anchor"] == {"x": 363.5 / 636, "y": 253.5 / 480, "frame": 0, "time": 0}
+    assert selected["anchor"]["x"] == 357 / 636  # Browser selection is immutable.
+
+
+def test_exact_membership_wins_over_another_nearby_person(source, tmp_path):
+    data = large_metadata()
+    adapter = Adapter([large_person("selected", (100, 100, 200, 300)),
+                       large_person("nearby", (204, 100, 300, 300))])
+    result = prepare_meta_masks(adapter, tmp_path, source, data, data,
+                                [target(x=199 / 636, y=150 / 480)], lambda: 60)
+    entry = result["seed_manifest"]["targets"][0]
+    assert entry["image_object_id"] == "selected" and entry["snap_distance_pixels"] == 0
+    assert "snapped_anchor" not in entry
+
+
+@pytest.mark.parametrize("second_start", [161, 162])
+def test_two_nearby_masks_remain_ambiguous_even_when_distances_differ(source, tmp_path, second_start):
+    data = large_metadata()
+    adapter = Adapter([large_person("left", (100, 100, 152, 300)),
+                       large_person("right", (second_start, 100, 220, 300))])
+    with pytest.raises(PublicError) as failure:
+        prepare_meta_masks(adapter, tmp_path, source, data, data,
+                           [target(x=155 / 636, y=150 / 480)], lambda: 60)
+    assert failure.value.code == "meta_seed_ambiguous" and not adapter.videos
+
+
+def test_distant_mask_is_not_selected_as_nearest_person(source, tmp_path):
+    data = large_metadata()
+    adapter = Adapter([large_person("cap", (363, 253, 500, 400))])
+    with pytest.raises(PublicError) as failure:
+        prepare_meta_masks(adapter, tmp_path, source, data, data,
+                           [target(x=350 / 636, y=252 / 480)], lambda: 60)
+    assert failure.value.code == "meta_seed_not_found" and not adapter.videos
+
+
+@pytest.mark.parametrize("scale,gap,accepted", [(1, 8, True), (1, 9, False), (.5, 4, True), (.5, 5, False)])
+def test_snap_tolerance_scales_with_working_canvas(source, tmp_path, scale, gap, accepted):
+    width, height = int(636 * scale), int(480 * scale)
+    data = large_metadata(width, height)
+    left, top = int(362 * scale), int(252 * scale)
+    adapter = Adapter([large_person("cap", (left, top, int(500 * scale), int(400 * scale)), width, height)])
+    selected = target(x=(left - gap) / width, y=top / height)
+    if accepted:
+        result = prepare_meta_masks(adapter, tmp_path, source, data, data, [selected], lambda: 60)
+        assert result["seed_manifest"]["selection_snap_radius_pixels"] == 8 * scale
+    else:
+        with pytest.raises(PublicError) as failure:
+            prepare_meta_masks(adapter, tmp_path, source, data, data, [selected], lambda: 60)
+        assert failure.value.code == "meta_seed_not_found" and not adapter.videos
+
+
+def test_snap_does_not_assign_an_already_used_mask_to_another_target(source, tmp_path):
+    data = large_metadata()
+    adapter = Adapter([large_person("cap", (363, 253, 500, 400))])
+    with pytest.raises(PublicError) as failure:
+        prepare_meta_masks(adapter, tmp_path, source, data, data,
+                           [target(x=400 / 636, y=300 / 480),
+                            target("b", x=357 / 636, y=252 / 480, label=2)], lambda: 60)
+    assert failure.value.code == "meta_seed_ambiguous" and not adapter.videos
+    assert failure.value.unresolved_target_ids == ["a", "b"]
+    assert failure.value.seed_manifest["targets"] == []
+
+
+def test_partial_failure_keeps_valid_seed_evidence_and_identifies_only_failed_target(source, tmp_path):
+    data = large_metadata()
+    adapter = Adapter([large_person("valid", (100, 100, 200, 300))])
+    with pytest.raises(PublicError) as failure:
+        prepare_meta_masks(adapter, tmp_path, source, data, data,
+                           [target(x=150 / 636, y=150 / 480),
+                            target("b", x=.8, y=.8, frame=1, label=2)], lambda: 60)
+    assert failure.value.unresolved_target_ids == ["b"]
+    assert [entry["target_id"] for entry in failure.value.seed_manifest["targets"]] == ["a"]
+    assert len(adapter.images) == 2 and not adapter.videos
+
+
+def test_snapped_request_replays_stably_and_records_selection_policy(source, tmp_path):
+    data = large_metadata()
+    masks = [large_person("cap", (363, 253, 500, 400))]
+    selected = target(x=357 / 636, y=252 / 480)
+    first, replay = Adapter(masks), Adapter(masks)
+    original = prepare_meta_masks(first, tmp_path, source, data, data, [selected], lambda: 60)
+    states = {first.images[0][0]: {"budget_family": "primary", "estimated_cost_usd": .0025},
+              first.videos[0]["operation"]: {"budget_family": "primary", "estimated_cost_usd": .01}}
+    with_saved_budget(replay, states)
+    result = prepare_meta_masks(replay, tmp_path, source, data, data, [selected], lambda: 60)
+    assert first.images[0][0] == replay.images[0][0]
+    assert first.videos[0]["operation"] == replay.videos[0]["operation"]
+    assert first.videos[0]["seeds"] == replay.videos[0]["seeds"]
+    assert result["seed_manifest"]["selection_policy"] == "nearby_mask_pixels_v1"
+    assert result["seed_manifest"]["expected_api_cost_usd"] == original["seed_manifest"]["expected_api_cost_usd"]

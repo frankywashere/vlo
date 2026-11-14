@@ -22,6 +22,37 @@ IMAGE_USD = Decimal("0.0025")
 VIDEO_FRAME_USD = Decimal("0.0002")
 SAM_REQUEST_BUDGET_USD = Decimal("0.16")
 SEED_VERSION = "person_image_fullbody_v1"
+SELECTION_POLICY = "nearby_mask_pixels_v1"
+
+
+def _selection_candidates(people, point, width, height):
+    """A narrow miss can use one nearby person; never jump across the frame.
+
+    Exact mask membership stays authoritative, including overlapping-mask
+    ambiguity. The tolerance is eight pixels on a 480-pixel short side and
+    scales down with the working canvas. More than one nearby mask is still
+    ambiguous rather than a contest between close people.
+    """
+    x, y = point
+    inside = [(identity, mask, point, 0.0) for identity, mask in people if mask[y, x]]
+    if inside:
+        return inside
+    radius = 8 * min(width, height) / 480
+    reach = math.ceil(radius)
+    left, right = max(0, x - reach), min(width, x + reach + 1)
+    top, bottom = max(0, y - reach), min(height, y + reach + 1)
+    nearby = []
+    for identity, mask in people:
+        yy, xx = np.nonzero(mask[top:bottom, left:right])
+        if not len(xx):
+            continue
+        xx, yy = xx + left, yy + top
+        squared = (xx - x) ** 2 + (yy - y) ** 2
+        nearest = int(np.argmin(squared))
+        if int(squared[nearest]) <= radius * radius:
+            seed_point = (int(xx[nearest]), int(yy[nearest]))
+            nearby.append((identity, mask, seed_point, math.sqrt(int(squared[nearest]))))
+    return nearby
 
 
 def _invalid(message="The saved person selections are invalid."):
@@ -268,7 +299,8 @@ def build_meta_seeds(adapter, root, sam_input, sam_metadata, targets, remaining,
         usages.append(response.get("usage", {}))
         used = {}
         for selection in (item for item in selections if item["frame"] == frame):
-            candidates = [(identity, mask) for identity, mask in people if mask[selection["y"], selection["x"]]]
+            point = (selection["x"], selection["y"])
+            candidates = _selection_candidates(people, point, width, height)
             if len(candidates) != 1 or candidates[0][0] in used:
                 ambiguous = len(candidates) > 1 or (bool(candidates) and candidates[0][0] in used)
                 if not allow_unmatched:
@@ -283,17 +315,24 @@ def build_meta_seeds(adapter, root, sam_input, sam_metadata, targets, remaining,
                         seeds = [seed for seed in seeds if (seed["frame"], seed["label"]) != (frame, prior["label"])]
                         entries = [entry for entry in entries if entry["target_id"] != prior["target_id"]]
                 continue
-            identity, mask = candidates[0]
+            identity, mask, seed_point, snap_distance = candidates[0]
             used[identity] = selection
-            box, points = _geometry(mask, (selection["x"], selection["y"]))
+            box, points = _geometry(mask, seed_point)
             seed = {"label": selection["label"], "frame": frame, "box": box, "points": points}
             seeds.append(seed)
             entries.append({**seed, "target_id": selection["target_id"], "image_object_id": identity,
-                            "seed_operation": operation, "mask_pixels": int(mask.sum())})
+                            "seed_operation": operation, "mask_pixels": int(mask.sum()),
+                            "selection_point": list(point), "seed_point": list(seed_point),
+                            "snap_distance_pixels": snap_distance,
+                            **({"snapped_anchor": {"x": (seed_point[0] + .5) / width,
+                                 "y": (seed_point[1] + .5) / height, "frame": frame, "time": frame / 24}}
+                               if snap_distance else {})})
     return seeds, {"version": SEED_VERSION, "source_sha256": source_sha, "source_identity": source_identity,
                    "width": width, "height": height, "image_frames": selected_frames,
                    "targets": entries, "unresolved_target_ids": sorted(set(unresolved)),
-                   "ambiguous_target_ids": sorted(set(ambiguous_ids)), "image_usage": usages}
+                   "ambiguous_target_ids": sorted(set(ambiguous_ids)), "image_usage": usages,
+                   "selection_policy": SELECTION_POLICY,
+                   "selection_snap_radius_pixels": 8 * min(width, height) / 480}
 
 
 def prepare_meta_masks(adapter, root, sam_input, sam_metadata, metadata, targets, remaining, *, replace_all_people=False):
@@ -312,9 +351,20 @@ def prepare_meta_masks(adapter, root, sam_input, sam_metadata, metadata, targets
         seeds = None
         manifest = {"version": SEED_VERSION, "mode": "all_people", "image_frames": [], "targets": [], "image_usage": []}
     else:
-        seeds, manifest = build_meta_seeds(adapter, root, sam_input, sam_metadata, targets, remaining)
+        seeds, manifest = build_meta_seeds(adapter, root, sam_input, sam_metadata, targets, remaining,
+                                          allow_unmatched=True)
+        if manifest["unresolved_target_ids"]:
+            error = _unresolved(ambiguous=bool(manifest["ambiguous_target_ids"]))
+            error.unresolved_target_ids = manifest["unresolved_target_ids"]
+            error.seed_manifest = manifest
+            raise error
     identity = {"version": SEED_VERSION, "source_identity": source_identity,
                 "selected_anchors": selections, "concept": "person" if replace_all_people else None}
+    # Keep exact-hit operation IDs stable so their paid responses remain
+    # replayable. Snapped prompts get their own identity and may never replace
+    # an existing video's request fingerprint under an old operation name.
+    if not replace_all_people and any(entry["snap_distance_pixels"] for entry in manifest["targets"]):
+        identity.update(selection_policy=SELECTION_POLICY, selected_seeds=seeds)
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
     expected = _primary_budget(adapter, image_operations, frames, video_operation="sam_primary_" + digest)
     result = adapter.segment_video("sam_primary_" + digest, sam_input, sam_metadata, seeds, remaining,

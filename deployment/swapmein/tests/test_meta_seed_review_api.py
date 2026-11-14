@@ -8,6 +8,7 @@ import swapmein.app as gateway
 from swapmein.scene_selection import analyze
 from swapmein.storage import preparation_leases
 from swapmein.errors import PublicError
+from swapmein.pipeline import Pipeline
 from test_api import api, authenticated, ready_job  # noqa: F401
 
 
@@ -58,6 +59,82 @@ def test_corrected_initial_seeds_queue_one_preparation_with_no_automatic_generat
         {"id": "other", "anchor": {"x": .75, "y": .5, "time": 3.5, "frame": 84}}]
     second = client.post(path, headers=headers, json=payload)
     assert second.status_code == 202 and len(queued) == 1 and not provider.submissions
+
+
+def test_partial_meta_seed_recovery_keeps_valid_target_and_accepted_snap(api, monkeypatch, tmp_path):
+    _, records, cloud, provider, _, identifier, _ = seed_review(api)
+    path = f"jobs/{identifier}.json"
+    job = records.data[path]
+    people = deepcopy(job["normalized_targets"])
+    original_setup = deepcopy(job["setup"])
+    metadata = deepcopy(job["tracking_metadata"])
+    metadata["scene_cuts"] = [2]
+    error = PublicError("Select clearly", 409, code="meta_seed_not_found")
+    error.unresolved_target_ids = ["other"]
+    # The valid target narrowly missed its mask and was accepted at this
+    # nearby interior point. That accepted anchor must survive another retry.
+    accepted = {"x": .21, "y": .31, "time": 1.0, "frame": 24}
+    error.seed_manifest = {"targets": [{"target_id": "caller", "selection_point": [5, 7],
+        "seed_point": [6, 8], "snap_distance_pixels": 1.414, "snapped_anchor": accepted}]}
+    pipeline = Pipeline(gateway.settings, records, cloud)
+    monkeypatch.setattr(cloud, "upload", lambda bucket, key, *_: f"gs://{bucket}/{key}")
+    monkeypatch.setattr(pipeline, "save_scene_thumbnails", lambda *_: None)
+    pipeline.enter_meta_seed_review(job, tmp_path / "source.mp4", metadata, people, tmp_path, error)
+    saved = records.data[path]
+    assert [target["id"] for target in saved["tracking_plan"]["targets"]] == ["other"]
+    assert [part["target_id"] for part in saved["tracking_plan"]["segments"]] == ["other"]
+    assert saved["tracking_plan"]["segments"][0]["reference_index"] == 1
+    assert [target["id"] for target in saved["normalized_targets"]] == ["caller", "other"]
+    assert saved["normalized_targets"][0]["anchor"] == accepted
+    assert saved["tracking_metadata"]["anchor"] == accepted
+    assert saved["meta_seed_overrides"] == [{"id": "caller", "anchor": accepted}]
+    assert saved["tracking_choices"] == []
+    assert saved["setup"] == original_setup
+    assert not cloud.enqueued and not provider.submissions
+
+
+@pytest.mark.parametrize("unresolved", [None, [], ["unknown"]])
+def test_legacy_or_incomplete_seed_failure_does_not_drop_targets(api, monkeypatch, tmp_path, unresolved):
+    _, records, cloud, _, _, identifier, _ = seed_review(api)
+    job = records.data[f"jobs/{identifier}.json"]
+    error = PublicError("Select clearly", 409, code="meta_seed_not_found")
+    if unresolved is not None:
+        error.unresolved_target_ids = unresolved
+    pipeline = Pipeline(gateway.settings, records, cloud)
+    monkeypatch.setattr(cloud, "upload", lambda bucket, key, *_: f"gs://{bucket}/{key}")
+    monkeypatch.setattr(pipeline, "save_scene_thumbnails", lambda *_: None)
+    pipeline.enter_meta_seed_review(job, tmp_path / "source.mp4", deepcopy(job["tracking_metadata"]),
+                                   deepcopy(job["normalized_targets"]), tmp_path, error)
+    saved = records.data[f"jobs/{identifier}.json"]
+    assert [target["id"] for target in saved["tracking_plan"]["targets"]] == ["caller", "other"]
+
+
+def test_repeated_partial_recovery_merges_overrides_and_rejects_extra_valid_target_choice(api):
+    client, records, cloud, provider, headers, identifier, _ = seed_review(api)
+    path = f"jobs/{identifier}.json"
+    job = records.data[path]
+    people = deepcopy(job["normalized_targets"])
+    retained = {"id": "other", "anchor": {"x": .85, "y": .45, "time": 1., "frame": 24}}
+    job.update(tracking_plan=analyze(job["tracking_metadata"], [people[0]]),
+               meta_seed_overrides=[retained], meta_seed_review_target_ids=["caller"])
+    original = deepcopy(job)
+    part = job["tracking_plan"]["segments"][0]
+    correction = {"segment_id": part["id"], "absent": False,
+                  "anchor": {"x": .3, "y": .6, "time": 2.}}
+    # A stale client cannot resubmit a retained person's point through a
+    # one-target review and overwrite the already accepted selection.
+    bad = client.post(f"/api/jobs/{identifier}/tracking-review", headers=headers,
+        json={"revision": 1, "choices": [correction, {**correction, "segment_id": "scene-000-t1"}]})
+    assert bad.status_code == 400 and records.data[path] == original
+    good = client.post(f"/api/jobs/{identifier}/tracking-review", headers=headers,
+        json={"revision": 1, "choices": [correction], "generate_after_review": True})
+    assert good.status_code == 202, good.text
+    saved = records.data[path]
+    assert {item["id"]: item["anchor"] for item in saved["meta_seed_overrides"]} == {
+        "other": retained["anchor"], "caller": {"x": .3, "y": .6, "time": 2., "frame": 48}}
+    assert saved["meta_seed_review_target_ids"] == []
+    assert not saved["auto_generate"] and saved["generation_after_review_revision"] is None
+    assert cloud.enqueued == [("prepare", identifier)] and not provider.submissions
 
 
 @pytest.mark.parametrize("failure", ["stale", "absent", "wrong-provider"])
