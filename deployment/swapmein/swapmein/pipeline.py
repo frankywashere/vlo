@@ -222,8 +222,9 @@ class Pipeline:
                         finally:
                             adapter.http.close()
                         masks_uri = prepared["masks_uri"]
+                        job, targets = self.apply_meta_seed_snaps(job, metadata, targets, prepared.get("seed_manifest"))
                         self.update_job(job_id, meta_seed_manifest=prepared.get("seed_manifest"),
-                            meta_seed_review=False, meta_seed_error=None)
+                            meta_seed_review=False, meta_seed_error=None, meta_seed_review_target_ids=[])
                         emit("sam_input_prepared", job_id=job_id, width=sam_metadata["width"],
                              height=sam_metadata["height"], frames=sam_metadata["frames"], fps=24,
                              source="normalized_rgb", sam_provider="meta")
@@ -637,18 +638,52 @@ class Pipeline:
              removed_pixels=report["removed_pixels"], provider="meta", selected_people_only=True)
         return (filtered, uri) if report["removed_pixels"] else (masks, masks_uri)
 
+    def apply_meta_seed_snaps(self, job, metadata, targets, manifest):
+        """Use accepted mask pixels for later identity anchors, not just SAM prompts."""
+        entries = (manifest or {}).get("targets", [])
+        accepted = {entry["target_id"]: entry["snapped_anchor"] for entry in entries
+                    if entry.get("snapped_anchor")}
+        if not accepted:
+            return job, targets
+        people = targets or [{"id": "person", "anchor": metadata["anchor"]}]
+        updated = [{**target, "anchor": {**target["anchor"], **accepted[target["id"]]}}
+                   if target["id"] in accepted else target for target in people]
+        metadata["anchor"] = updated[0]["anchor"]
+        if targets:
+            metadata["targets"] = updated
+        corrections = {item["id"]: item for item in job.get("meta_seed_overrides", [])}
+        corrections.update({target["id"]: {"id": target["id"], "anchor": target["anchor"]}
+                            for target in updated if target["id"] in accepted})
+        audit = [{"target_id": entry["target_id"], "selection_point": entry.get("selection_point"),
+                  "seed_point": entry.get("seed_point"), "snap_distance_pixels": entry.get("snap_distance_pixels"),
+                  "accepted_anchor": entry["snapped_anchor"]} for entry in entries if entry.get("snapped_anchor")]
+        saved_audit = {item["target_id"]: item for item in job.get("meta_seed_snap_report", [])}
+        saved_audit.update({item["target_id"]: item for item in audit})
+        saved = self.update_job(job["id"], normalized_targets=updated if targets else [],
+            meta_seed_overrides=list(corrections.values()), meta_seed_snap_report=list(saved_audit.values()),
+            **({"target_styles": updated} if len(updated) > 1 else {}))
+        emit("meta_seed_taps_snapped", job_id=job["id"], target_ids=sorted(accepted),
+             snap_distances_pixels=[item["snap_distance_pixels"] for item in audit])
+        return saved, updated if targets else targets
+
     def enter_meta_seed_review(self, job, normalized, metadata, targets, root, error):
         """Keep a failed automatic tap lookup editable before any video request.
 
-        This source-only plan deliberately spans the entire trim once per
-        character. It corrects initial selections; the next preparation detects
+        This source-only plan spans the entire trim once per unresolved
+        character. It retains valid selections; the next preparation detects
         the real cuts again and still performs normal scene/identity validation.
         """
         from .scene_selection import analyze
+        job, targets = self.apply_meta_seed_snaps(job, metadata, targets, getattr(error, "seed_manifest", None))
         people = targets or [{"id": "person", "name": job["setup"].get("target_name", "Person 1"),
                              "reference_index": 0, "anchor": metadata["anchor"]}]
+        unresolved = set(getattr(error, "unresolved_target_ids", []) or [])
+        known = {target["id"] for target in people}
+        # Legacy/corrupt errors without a complete unresolved set keep the
+        # established all-target recovery rather than silently dropping anyone.
+        pending = [target for target in people if target["id"] in unresolved] if unresolved and unresolved <= known else people
         review_metadata = {**metadata, "scene_cuts": [], "targets": people}
-        plan = analyze(review_metadata, people)
+        plan = analyze(review_metadata, pending)
         uri = self.cloud.upload(self.settings.app_bucket,
             preparation_prefix(job, "app") + f"seed-review-{uuid.uuid4().hex}.mp4", normalized, "video/mp4")
         self.save_scene_thumbnails(job["id"], normalized, root, plan, job)
@@ -657,11 +692,13 @@ class Pipeline:
             tracking_metadata=review_metadata, tracking_revision=job.get("tracking_revision", 0) + 1,
             tracking_reviewed=False, tracking_performed=False, review_required=True,
             normalized_targets=people, mask_style="none", meta_seed_review=True,
+            meta_seed_review_target_ids=[target["id"] for target in pending],
             tracking_choices=[],
             meta_seed_error=error.code, tracking_review_error=False, tracking_error_segment_id=None,
-            message="We could not identify a full person at an initial tap. Select each character clearly in the video, then build their masks. Your uploads are saved; no generation was submitted.")
+            message="Select the character shown again so we can build their person mask. Your other selections and uploads are saved; no generation was submitted.")
         emit("meta_seed_review_required", job_id=job["id"], public_code=error.code,
-             target_count=len(people), video_submission_started=False)
+             target_count=len(pending), retained_target_count=len(people) - len(pending),
+             target_ids=[target["id"] for target in pending], video_submission_started=False)
 
     def prepare_easy_selection(self, job, options, masks, masks_uri, metadata, targets, root, remaining):
         """Explicit Option 5 selection; failed identity matching requires review."""

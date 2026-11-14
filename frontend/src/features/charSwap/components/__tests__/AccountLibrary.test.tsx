@@ -131,6 +131,40 @@ describe("private account library", () => {
     expect(generateLiveJob).not.toHaveBeenCalled();
   });
 
+  it("keeps a retained character out of partial Meta recovery and uses the failed character's photo", async () => {
+    const targets = [
+      {id: "retained", name: "Person 1", reference_index: 1, anchor: {x: .2, y: .5, time: 0}},
+      {id: "failed", name: "Person 2", reference_index: 0, anchor: {x: .8, y: .5, time: 1}},
+    ];
+    const saved = {...job, status: "tracking_review" as const, access_mode: "credits" as const,
+      meta_seed_review: true, mask_style: "none" as const,
+      source_preview_url: "https://storage.googleapis.com/source.mp4", duration: 4,
+      tracking_revision: 2, tracking_choices: [], selection_targets: targets,
+      reference_urls: ["https://storage.googleapis.com/failed-photo.jpg", "https://storage.googleapis.com/retained-photo.jpg"],
+      tracking_segments: [{id: "failed-seed", target_id: "failed", start: 0, end: 4,
+        start_frame: 0, end_frame: 96, seek_time: 1, needs_review: true, reason: "unmatched_anchor"}]};
+    vi.mocked(loadAccountJobs).mockResolvedValueOnce([saved]).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(resumeAccountJob).mockResolvedValue({token: "partial-seed-session", expires_at: 9999999999});
+    vi.mocked(resolveLiveTracking).mockResolvedValue({id: saved.id, status: "queued"});
+    const user = userEvent.setup();
+    render(<AccountLibrary onCreate={vi.fn()} />);
+    await user.click(await screen.findByRole("button", {name: "Check scene matches"}));
+    expect(screen.getByAltText("Replacement for Person 2")).toHaveAttribute("src", saved.reference_urls[0]);
+    expect(screen.queryByAltText("Replacement for Person 1")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", {name: "Scene review position"})).toHaveTextContent("Frame 1 of 1");
+    const submit = screen.getByRole("button", {name: "Build person masks"});
+    expect(submit).toBeDisabled();
+    const video = screen.getByRole("region").querySelector("video")!;
+    Object.defineProperty(video, "readyState", {configurable: true, value: 2});
+    fireEvent.loadedMetadata(video); fireEvent.seeked(video);
+    fireEvent.keyDown(screen.getByRole("button", {name: "Select the person in this frame"}), {key: "Enter"});
+    await user.click(submit);
+    await waitFor(() => expect(resolveLiveTracking).toHaveBeenCalledWith(saved.id, "partial-seed-session", 2,
+      [{segment_id: "failed-seed", absent: false, anchor: {x: .5, y: .5, time: 24.5 / 24}}],
+      expect.any(AbortSignal), {enabled: false, key: undefined, generateAfterReview: false}));
+    expect(generateLiveJob).not.toHaveBeenCalled();
+  });
+
   it("saves a skipped supplemental fragment without starting generation from Library", async () => {
     const saved = {...job, status: "tracking_review" as const, access_mode: "credits" as const,
       review_action: "recheck_masks" as const, mask_style: "cyan_overlay_multi_20" as const,

@@ -1639,8 +1639,14 @@ def apply_tracking_review(job_id: str, review: TrackingReview,
                     if (current.get("tracking_revision") != review.revision
                             or current.get("meta_seed_claim") != task_token or current.get("status") != "matching"):
                         raise PublicError(invalid, 409, code="tracking_review_invalid")
+                    # A partial recovery can only replace its requested IDs.
+                    # Retain corrections accepted on previous recovery rounds
+                    # (and accepted near-mask snaps) for every other character.
+                    merged = {item["id"]: item for item in current.get("meta_seed_overrides", [])}
+                    merged.update({item["id"]: item for item in overrides})
                     return {**current, "status": "queued", "meta_seed_claim": None,
-                        "meta_seed_overrides": overrides, "meta_seed_review": False,
+                        "meta_seed_overrides": list(merged.values()), "meta_seed_review": False,
+                        "meta_seed_review_target_ids": [],
                         "meta_seed_artifact_token": task_token,
                         "tracking_applied_revision": review.revision, "tracking_task_token": task_token,
                         "tracking_choices": choices, "tracking_review_error": False,

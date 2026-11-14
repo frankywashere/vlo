@@ -308,6 +308,31 @@ describe("character-first one-frame scene review", () => {
     expect(screen.queryByText("Not present")).not.toBeInTheDocument();
   });
 
+  it.each([0, 1])("recovers only unresolved target %s and keeps its reference binding", async (failedIndex) => {
+    const props = multi();
+    const failed = props.targets[failedIndex];
+    const valid = props.targets[1 - failedIndex];
+    const section = {...props.segments[0], id: `seed-${failed.id}`, target_id: failed.id,
+      scene_index: 0, reason: "unmatched_anchor"};
+    // References deliberately arrive in a different order from the targets.
+    // A saved choice from a retained target must never be posted as a correction.
+    render(<SceneTrackingReview {...props} segments={[section]} metaSeedReview
+      references={[...props.references].reverse()} initialChoices={[
+        {segment_id: `retained-${valid.id}`, absent: false, anchor: {x: .1, y: .2, time: .5}},
+      ]} />);
+    expect(screen.getByAltText(`Replacement for ${failed.name}`)).toHaveAttribute("src", props.references[failedIndex].asset.url);
+    expect(screen.queryByAltText(`Replacement for ${valid.name}`)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("region")).toHaveLength(1);
+    expect(screen.getByRole("status", {name: "Scene review position"})).toHaveTextContent("Frame 1 of 1");
+    expect(screen.queryByRole("button", {name: "Next"})).not.toBeInTheDocument();
+    const submit = screen.getByRole("button", {name: "Build person masks"});
+    expect(submit).toBeDisabled();
+    select(); fireEvent.click(submit);
+    await waitFor(() => expect(props.onApply).toHaveBeenCalledWith([
+      {segment_id: section.id, absent: false, anchor: {x: .5, y: .5, time: reviewFrameTime(36)}},
+    ]));
+  });
+
   it("dismisses only supplemental fragments and submits mask rechecks without promising generation", async () => {
     const props = properties();
     const segments = props.segments.map(section => ({...section, focus_box: [.1, .2, .3, .4] as [number, number, number, number]}));
